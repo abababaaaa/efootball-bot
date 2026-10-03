@@ -357,8 +357,10 @@
 
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                                 <TextBlock Text="GitHub 仓库" Foreground="{DynamicResource TextSecondary}" FontSize="12.5" Width="80" VerticalAlignment="Center"/>
-                                <TextBox x:Name="TxtUpdateRepo" Width="200" Padding="8,4" FontSize="12.5"
-                                         Text="owner/efootball-bot"/>
+                                <TextBlock x:Name="TxtUpdateRepo" Text="abababaaaa/efootball-bot"
+                                           Foreground="{DynamicResource AccentGlow}" FontSize="12.5" VerticalAlignment="Center"
+                                           Cursor="Hand" ToolTip="打开仓库主页"
+                                           MouseLeftButtonUp="TxtUpdateRepo_MouseLeftButtonUp"/>
                             </StackPanel>
 
                             <CheckBox x:Name="ChkCheckOnStartup" Content="启动时自动检查更新" IsChecked="True" Margin="0,4,0,0"/>

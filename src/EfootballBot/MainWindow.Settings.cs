@@ -71,7 +71,7 @@ public partial class MainWindow
 
         // 自动更新
         TxtCurrentVersion.Text = "v" + Updater.CurrentVersion;
-        TxtUpdateRepo.Text = _cfg.Update.Repository;
+        TxtUpdateRepo.Text = Updater.DefaultRepository;
         ChkCheckOnStartup.IsChecked = _cfg.Update.CheckOnStartup;
         ChkIncludePrerelease.IsChecked = _cfg.Update.IncludePrerelease;
     }
@@ -152,8 +152,7 @@ public partial class MainWindow
         // 文件日志配置变更 → 重新初始化
         FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles);
 
-        // 自动更新
-        _cfg.Update.Repository = TxtUpdateRepo.Text?.Trim() ?? "";
+        // 自动更新（仓库地址已硬编码，不持久化）
         _cfg.Update.CheckOnStartup = ChkCheckOnStartup.IsChecked == true;
         _cfg.Update.IncludePrerelease = ChkIncludePrerelease.IsChecked == true;
 
@@ -171,7 +170,7 @@ public partial class MainWindow
         TxtUpdateStatus.Text = "正在检查…";
         try
         {
-            var result = await Task.Run(() => Updater.CheckAsync(_cfg.Update.Repository, _cfg.Update.IncludePrerelease));
+            var result = await Task.Run(() => Updater.CheckAsync(includePrerelease: _cfg.Update.IncludePrerelease));
             TxtUpdateStatus.Text = result.Message;
             BtnApplyUpdate.IsEnabled = result.IsAvailable;
             _pendingUpdate = result.Info;
@@ -184,6 +183,19 @@ public partial class MainWindow
         {
             BtnCheckUpdate.IsEnabled = true;
         }
+    }
+
+    private void TxtUpdateRepo_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
+    {
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = $"https://github.com/{Updater.DefaultRepository}",
+                UseShellExecute = true
+            });
+        }
+        catch { /* 忽略 */ }
     }
 
     private async void BtnApplyUpdate_Click(object sender, RoutedEventArgs e)
@@ -229,10 +241,10 @@ public partial class MainWindow
     /// <summary>启动时自动检查（异步，不阻塞）。</summary>
     public async Task AutoCheckUpdateOnStartupAsync()
     {
-        if (!_cfg.Update.CheckOnStartup || string.IsNullOrWhiteSpace(_cfg.Update.Repository)) return;
+        if (!_cfg.Update.CheckOnStartup) return;
         try
         {
-            var result = await Task.Run(() => Updater.CheckAsync(_cfg.Update.Repository, _cfg.Update.IncludePrerelease));
+            var result = await Task.Run(() => Updater.CheckAsync(includePrerelease: _cfg.Update.IncludePrerelease));
             if (result.IsAvailable && result.Info is not null)
             {
                 _pendingUpdate = result.Info;

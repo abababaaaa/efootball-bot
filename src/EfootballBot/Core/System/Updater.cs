@@ -10,6 +10,8 @@ namespace EfootballBot.Core.System;
 /// <summary>GitHub Releases 自动更新。</summary>
 public static class Updater
 {
+    /// <summary>固定仓库地址（owner/repo），无需用户手动填写。</summary>
+    public const string DefaultRepository = "abababaaaa/efootball-bot";
     /// <summary>GitHub Release API 的简化模型。</summary>
     private record GhRelease(
         string Tag_Name,
@@ -30,8 +32,9 @@ public static class Updater
         new Version(typeof(Updater).Assembly.GetName().Version?.ToString(3) ?? "0.0.0");
 
     /// <summary>从 GitHub Releases API 检查最新版本。</summary>
-    public static async Task<UpdateResult> CheckAsync(string repository, bool includePrerelease = false)
+    public static async Task<UpdateResult> CheckAsync(string? repository = null, bool includePrerelease = false)
     {
+        repository ??= DefaultRepository;
         if (string.IsNullOrWhiteSpace(repository) || !repository.Contains('/'))
             return UpdateResult.Error("未配置 GitHub 仓库地址（格式：owner/repo）");
 
