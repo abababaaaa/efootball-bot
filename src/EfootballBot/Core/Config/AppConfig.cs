@@ -129,6 +129,9 @@ public sealed class UpdateConfig
 
     /// <summary>使用 pre-release tag。</summary>
     public bool IncludePrerelease { get; set; } = false;
+
+    /// <summary>发现新版本后自动下载并安装（无需手动点立即更新）。</summary>
+    public bool AutoDownloadInstall { get; set; } = false;
 }
 
 public sealed class ScreenCalibration

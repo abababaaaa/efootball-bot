@@ -74,6 +74,7 @@ public partial class MainWindow
         TxtUpdateRepo.Text = Updater.DefaultRepository;
         ChkCheckOnStartup.IsChecked = _cfg.Update.CheckOnStartup;
         ChkIncludePrerelease.IsChecked = _cfg.Update.IncludePrerelease;
+        ChkAutoDownloadInstall.IsChecked = _cfg.Update.AutoDownloadInstall;
     }
 
     private void SaveUiToConfig()
@@ -155,6 +156,7 @@ public partial class MainWindow
         // 自动更新（仓库地址已硬编码，不持久化）
         _cfg.Update.CheckOnStartup = ChkCheckOnStartup.IsChecked == true;
         _cfg.Update.IncludePrerelease = ChkIncludePrerelease.IsChecked == true;
+        _cfg.Update.AutoDownloadInstall = ChkAutoDownloadInstall.IsChecked == true;
 
         _cfg.Save();
     }
@@ -277,9 +279,15 @@ public partial class MainWindow
                     TxtUpdateStatus.Text = $"发现新版本 v{result.Info.Version}";
                     BtnApplyUpdate.IsEnabled = true;
                     ShowChangelog(result.Info.Body);
-                    // 显示顶部醒目横幅
                     ShowUpdateBanner(result.Info);
-                    AppendLog($"自动更新：发现 v{result.Info.Version}，点击顶部横幅「立即更新」。", LogLevel.Info);
+                    AppendLog($"自动更新：发现 v{result.Info.Version}。", LogLevel.Info);
+
+                    // 如果勾选了「自动下载安装」，直接开始下载替换
+                    if (_cfg.Update.AutoDownloadInstall)
+                    {
+                        AppendLog("已开启自动下载安装，正在下载…", LogLevel.Info);
+                        BtnApplyUpdate_Click(this, new RoutedEventArgs());
+                    }
                 });
             }
         }
