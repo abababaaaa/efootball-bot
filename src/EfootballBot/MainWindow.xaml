@@ -28,6 +28,9 @@
                         <TextBlock Text="eFootball" FontSize="19" FontWeight="Bold"/>
                         <TextBlock Text="挂机助手 · 手柄后台版" FontSize="11"
                                    Foreground="{DynamicResource TextMuted}" Margin="0,3,0,0"/>
+                        <TextBlock Text="by Dabao#1392" FontSize="10.5"
+                                   Foreground="{DynamicResource AccentGlow}" Margin="0,4,0,0"
+                                   Opacity="0.85"/>
                     </StackPanel>
 
                     <!-- 游戏模块 -->
@@ -368,6 +371,25 @@
                                 <Button x:Name="BtnOpenLogFolder" Content="打开日志文件夹" Style="{StaticResource GhostBtn}" Padding="14,5" Click="BtnOpenLogFolder_Click"/>
                                 <TextBlock Text="所有改动自动保存" Foreground="{DynamicResource TextMuted}" FontSize="11" VerticalAlignment="Center" Margin="12,0,0,0"/>
                             </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== 声明 ===== -->
+                    <Border Style="{StaticResource Card}" Margin="0,14,0,0">
+                        <StackPanel>
+                            <TextBlock Text="声明" Style="{StaticResource H2}" Margin="0,0,0,8"/>
+
+                            <TextBlock Text="分辨率建议" FontWeight="SemiBold" FontSize="12.5" Foreground="{DynamicResource TextPrimary}"/>
+                            <TextBlock Text="理论支持全分辨率，但强烈建议游戏以「窗口化 720p」运行。分辨率过高会导致后台捕获与 OCR 卡顿，影响挂机稳定性。"
+                                       TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,10"/>
+
+                            <TextBlock Text="封号风险" FontWeight="SemiBold" FontSize="12.5" Foreground="{DynamicResource TextPrimary}"/>
+                            <TextBlock Text="本软件仅供学习交流与个人使用。使用自动化工具存在被官方封号的风险，一切后果由使用者自行承担，与作者无关。自愿使用，风险自担。"
+                                       TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,10"/>
+
+                            <TextBlock Text="版权与分发" FontWeight="SemiBold" FontSize="12.5" Foreground="{DynamicResource TextPrimary}"/>
+                            <TextBlock Text="本软件无偿免费，禁止二次售卖、付费分发，禁止篡改或移除作者信息后重新发布。转载请注明作者 Dabao#1392。"
+                                       TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,4"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
