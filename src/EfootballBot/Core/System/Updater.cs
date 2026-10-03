@@ -42,14 +42,15 @@ public static class Updater
     private static string? GithubToken => Environment.GetEnvironmentVariable("GITHUB_TOKEN");
 
     /// <summary>从 GitHub Releases API 检查最新版本（带 30 分钟缓存）。</summary>
-    public static async Task<UpdateResult> CheckAsync(string? repository = null, bool includePrerelease = false)
+    /// <param name="force">true 时跳过缓存（手动检查时用）。</param>
+    public static async Task<UpdateResult> CheckAsync(string? repository = null, bool includePrerelease = false, bool force = false)
     {
         repository ??= DefaultRepository;
         if (string.IsNullOrWhiteSpace(repository) || !repository.Contains('/'))
             return UpdateResult.Error("未配置 GitHub 仓库地址（格式：owner/repo）");
 
         string key = $"{repository}|{includePrerelease}";
-        if (_cachedResult is not null && _cacheKey == key && DateTime.Now - _cacheTime < CacheTtl)
+        if (!force && _cachedResult is not null && _cacheKey == key && DateTime.Now - _cacheTime < CacheTtl)
             return _cachedResult;
 
         try
@@ -112,57 +113,62 @@ public static class Updater
         return r;
     }
 
-    /// <summary>下载并应用更新——下载 zip 到临时目录，解压到 exe 同级，然后启动 updater 脚本替换 exe。</summary>
+    /// <summary>下载并应用更新——下载 zip 到唯一临时目录，解压，启动 bat 脚本替换 exe 后重启。</summary>
     public static async Task<UpdateResult> DownloadAndApplyAsync(UpdateInfo info,
         IProgress<(long Bytes, long Total)>? progress = null)
     {
         try
         {
-            string tempDir = Path.Combine(Path.GetTempPath(), "EfootballBotUpdate");
+            // 每次用唯一临时目录（Guid），避免和上次残留文件冲突
+            string tempDir = Path.Combine(Path.GetTempPath(), "EfootballBotUpdate", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(tempDir);
             string zipPath = Path.Combine(tempDir, "update.zip");
 
+            // 下载
             using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("EfootballBot");
             using var resp = await http.GetAsync(info.DownloadUrl, HttpCompletionOption.ResponseHeadersRead);
             resp.EnsureSuccessStatusCode();
             using var stream = await resp.Content.ReadAsStreamAsync();
-            using var file = File.Create(zipPath);
-
-            long total = info.TotalBytes;
-            long read = 0;
-            var buffer = new byte[81920];
-            int n;
-            progress?.Report((0, total));
-            while ((n = await stream.ReadAsync(buffer)) > 0)
+            using (var file = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
-                await file.WriteAsync(buffer.AsMemory(0, n));
-                read += n;
-                progress?.Report((read, total));
-            }
+                long total = info.TotalBytes;
+                long read = 0;
+                var buffer = new byte[81920];
+                int n;
+                progress?.Report((0, total));
+                while ((n = await stream.ReadAsync(buffer)) > 0)
+                {
+                    await file.WriteAsync(buffer.AsMemory(0, n));
+                    read += n;
+                    progress?.Report((read, total));
+                }
+            } // using 结束自动释放文件句柄
 
             // 解压
             string extractDir = Path.Combine(tempDir, "extracted");
-            if (Directory.Exists(extractDir)) Directory.Delete(extractDir, true);
             ZipFile.ExtractToDirectory(zipPath, extractDir);
+            // 解压后删除 zip，释放文件句柄
+            try { File.Delete(zipPath); } catch { }
 
-            // 生成替换脚本（exe 运行时无法覆盖自身）
+            // 生成批处理脚本（比 PowerShell 更兼容，无执行策略问题）
+            // 脚本逻辑：等 2 秒（让当前进程退出）→ 复制新文件 → 启动新 exe → 清理临时目录
             string exeDir = Path.GetDirectoryName(Environment.ProcessPath!)!;
-            string scriptPath = Path.Combine(tempDir, "update.ps1");
-            string script = $@"
-$ErrorActionPreference = 'Stop'
-Start-Sleep -Seconds 2
-Copy-Item -Path '{extractDir}\*' -Destination '{exeDir}' -Recurse -Force
-Remove-Item -Path '{tempDir}' -Recurse -Force
-Start-Process '{Environment.ProcessPath}'
+            string batPath = Path.Combine(tempDir, "update.bat");
+            string bat = $@"@echo off
+chcp 65001 >nul
+timeout /t 2 /nobreak >nul
+xcopy /E /I /Y /Q ""{extractDir}\*"" ""{exeDir}""
+start """" ""{Environment.ProcessPath}""
+rmdir /S /Q ""{tempDir}""
 ";
-            File.WriteAllText(scriptPath, script);
+            File.WriteAllText(batPath, bat);
 
-            // 启动脚本（在独立进程里，等当前进程退出后替换）
+            // 启动脚本（独立进程，等当前进程退出后执行替换）
             Process.Start(new ProcessStartInfo
             {
-                FileName = "powershell.exe",
-                Arguments = $"-NoProfile -ExecutionPolicy Bypass -File \"{scriptPath}\"",
+                FileName = "cmd.exe",
+                Arguments = $"/c \"\"{batPath}\"\"",
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
             });

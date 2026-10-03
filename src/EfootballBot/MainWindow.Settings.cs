@@ -171,7 +171,7 @@ public partial class MainWindow
         ChangelogBox.Visibility = Visibility.Collapsed;
         try
         {
-            var result = await Task.Run(() => Updater.CheckAsync(includePrerelease: _cfg.Update.IncludePrerelease));
+            var result = await Task.Run(() => Updater.CheckAsync(includePrerelease: _cfg.Update.IncludePrerelease, force: true));
             TxtUpdateStatus.Text = result.Message;
             BtnApplyUpdate.IsEnabled = result.IsAvailable;
             _pendingUpdate = result.Info;
@@ -213,6 +213,13 @@ public partial class MainWindow
             });
         }
         catch { /* 忽略 */ }
+    }
+
+    private void BtnBannerUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        // 先跳转到更新面板，再执行更新
+        NavigateTo(NavMode.Update);
+        BtnApplyUpdate_Click(sender, e);
     }
 
     private async void BtnApplyUpdate_Click(object sender, RoutedEventArgs e)

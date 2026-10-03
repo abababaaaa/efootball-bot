@@ -125,7 +125,7 @@
                     </StackPanel>
                     <Button Grid.Column="1" x:Name="BtnBannerUpdate" Content="立即更新" Padding="16,5"
                             Background="White" Foreground="#2d7a4f" FontWeight="SemiBold" BorderThickness="0"
-                            Click="BtnApplyUpdate_Click"/>
+                            Click="BtnBannerUpdate_Click"/>
                 </Grid>
             </Border>
 
