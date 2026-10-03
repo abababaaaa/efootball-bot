@@ -168,6 +168,7 @@ public partial class MainWindow
         SaveUiToConfig();
         BtnCheckUpdate.IsEnabled = false;
         TxtUpdateStatus.Text = "正在检查…";
+        ChangelogBox.Visibility = Visibility.Collapsed;
         try
         {
             var result = await Task.Run(() => Updater.CheckAsync(includePrerelease: _cfg.Update.IncludePrerelease));
@@ -175,9 +176,14 @@ public partial class MainWindow
             BtnApplyUpdate.IsEnabled = result.IsAvailable;
             _pendingUpdate = result.Info;
             if (result.IsAvailable && result.Info is not null)
+            {
                 ShowUpdateBanner(result.Info);
+                ShowChangelog(result.Info.Body);
+            }
             else
+            {
                 HideUpdateBanner();
+            }
         }
         catch (Exception ex)
         {
@@ -187,6 +193,13 @@ public partial class MainWindow
         {
             BtnCheckUpdate.IsEnabled = true;
         }
+    }
+
+    private void ShowChangelog(string? body)
+    {
+        if (string.IsNullOrWhiteSpace(body)) return;
+        TxtChangelog.Text = body.Trim();
+        ChangelogBox.Visibility = Visibility.Visible;
     }
 
     private void TxtUpdateRepo_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
@@ -256,6 +269,7 @@ public partial class MainWindow
                 {
                     TxtUpdateStatus.Text = $"发现新版本 v{result.Info.Version}";
                     BtnApplyUpdate.IsEnabled = true;
+                    ShowChangelog(result.Info.Body);
                     // 显示顶部醒目横幅
                     ShowUpdateBanner(result.Info);
                     AppendLog($"自动更新：发现 v{result.Info.Version}，点击顶部横幅「立即更新」。", LogLevel.Info);

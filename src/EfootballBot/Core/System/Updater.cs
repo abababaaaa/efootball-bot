@@ -18,6 +18,7 @@ public static class Updater
         string? Name,
         bool Prerelease,
         DateTime Published_at,
+        string? Body,
         List<GhAsset> Assets
     );
 
@@ -91,7 +92,7 @@ public static class Updater
             if (asset is null)
                 return UpdateResult.Error($"Release v{remoteVer} 没有 .zip 资产");
 
-            return Cache(UpdateResult.Available(remoteVer, latest.Name ?? latest.Tag_Name, asset.Browser_Download_Url, asset.Size), key);
+            return Cache(UpdateResult.Available(remoteVer, latest.Name ?? latest.Tag_Name, asset.Browser_Download_Url, asset.Size, latest.Body), key);
         }
         catch (HttpRequestException ex)
         {
@@ -175,7 +176,7 @@ Start-Process '{Environment.ProcessPath}'
     }
 }
 
-public record UpdateInfo(Version Version, string Name, string DownloadUrl, long TotalBytes);
+public record UpdateInfo(Version Version, string Name, string DownloadUrl, long TotalBytes, string? Body);
 
 public class UpdateResult
 {
@@ -187,8 +188,8 @@ public class UpdateResult
     public UpdateInfo? Info { get; init; }
 
     public static UpdateResult AlreadyLatest(string msg) => new() { UpToDate = true, Message = msg };
-    public static UpdateResult Available(Version v, string name, string url, long size)
-        => new() { IsAvailable = true, Info = new(v, name, url, size), Message = $"发现新版本 v{v}" };
+    public static UpdateResult Available(Version v, string name, string url, long size, string? body)
+        => new() { IsAvailable = true, Info = new(v, name, url, size, body), Message = $"发现新版本 v{v}" };
     public static UpdateResult Error(string msg) => new() { IsError = true, Message = msg };
     public static UpdateResult Success(string msg) => new() { Applied = true, Message = msg };
 }

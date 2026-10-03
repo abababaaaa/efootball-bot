@@ -405,6 +405,17 @@
 
                             <ProgressBar x:Name="PbUpdate" Height="6" Margin="0,10,0,0" Visibility="Collapsed"/>
                             <TextBlock x:Name="TxtUpdateStatus" Text="" Foreground="{DynamicResource TextSecondary}" FontSize="11" Margin="0,6,0,0"/>
+
+                            <Border Margin="0,14,0,0" Background="{DynamicResource Surface2}" CornerRadius="6" Padding="10" Visibility="Collapsed" x:Name="ChangelogBox">
+                                <StackPanel>
+                                    <TextBlock Text="更新日志" Foreground="{DynamicResource AccentGlow}" FontSize="12" FontWeight="Bold" Margin="0,0,0,6"/>
+                                    <TextBox x:Name="TxtChangelog" IsReadOnly="True" TextWrapping="Wrap" AcceptsReturn="True"
+                                             VerticalScrollBarVisibility="Auto" MaxHeight="200"
+                                             Background="Transparent" BorderThickness="0" Padding="0"
+                                             Foreground="{DynamicResource TextPrimary}" FontSize="12"
+                                             Cursor="Arrow"/>
+                                </StackPanel>
+                            </Border>
                         </StackPanel>
                     </Border>
                 </StackPanel>
