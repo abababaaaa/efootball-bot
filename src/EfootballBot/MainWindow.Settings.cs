@@ -174,6 +174,10 @@ public partial class MainWindow
             TxtUpdateStatus.Text = result.Message;
             BtnApplyUpdate.IsEnabled = result.IsAvailable;
             _pendingUpdate = result.Info;
+            if (result.IsAvailable && result.Info is not null)
+                ShowUpdateBanner(result.Info);
+            else
+                HideUpdateBanner();
         }
         catch (Exception ex)
         {
@@ -252,10 +256,26 @@ public partial class MainWindow
                 {
                     TxtUpdateStatus.Text = $"发现新版本 v{result.Info.Version}";
                     BtnApplyUpdate.IsEnabled = true;
-                    AppendLog($"自动更新：发现 v{result.Info.Version}，请在设置面板点击「立即更新」。", LogLevel.Info);
+                    // 显示顶部醒目横幅
+                    ShowUpdateBanner(result.Info);
+                    AppendLog($"自动更新：发现 v{result.Info.Version}，点击顶部横幅「立即更新」。", LogLevel.Info);
                 });
             }
         }
         catch { /* 启动时自动检查失败不打扰用户 */ }
+    }
+
+    /// <summary>显示顶部更新提醒横幅。</summary>
+    private void ShowUpdateBanner(UpdateInfo info)
+    {
+        TxtUpdateBannerTitle.Text = $"发现新版本 v{info.Version}";
+        TxtUpdateBannerDesc.Text = $"当前 v{Updater.CurrentVersion} → v{info.Version}，点击右侧立即更新";
+        UpdateBanner.Visibility = Visibility.Visible;
+    }
+
+    /// <summary>隐藏更新横幅。</summary>
+    private void HideUpdateBanner()
+    {
+        UpdateBanner.Visibility = Visibility.Collapsed;
     }
 }

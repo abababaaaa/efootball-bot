@@ -21,8 +21,8 @@ namespace EfootballBot;
 
 public partial class MainWindow
 {
-    // 左栏导航模式：游戏模块 / 设置 / 日志历史
-    private enum NavMode { Game, Settings, LogViewer }
+    // 左栏导航模式：游戏模块 / 设置 / 更新 / 日志历史
+    private enum NavMode { Game, Settings, Update, LogViewer }
     private NavMode _currentNav = NavMode.Game;
 
     private void RbModule_Checked(object sender, RoutedEventArgs e)
@@ -162,6 +162,7 @@ public partial class MainWindow
 
         bool isGame = mode == NavMode.Game;
         bool isSettings = mode == NavMode.Settings;
+        bool isUpdate = mode == NavMode.Update;
         bool isLog = mode == NavMode.LogViewer;
 
         // 游戏模块面板
@@ -171,13 +172,16 @@ public partial class MainWindow
         // 设置面板
         SettingsPanel.Visibility = isSettings ? Visibility.Visible : Visibility.Collapsed;
 
+        // 更新面板
+        UpdatePanel.Visibility = isUpdate ? Visibility.Visible : Visibility.Collapsed;
+
         // 日志查看器
         LogViewerPanel.Visibility = isLog ? Visibility.Visible : Visibility.Collapsed;
 
         // 底部实时日志卡：仅在游戏模块显示
         LogCard.Visibility = isGame && _cfg.ShowRuntimeLog ? Visibility.Visible : Visibility.Collapsed;
 
-        // Tab 分段栏（Grid.Row="0"）：设置/日志模式时隐藏
+        // Tab 分段栏：仅游戏模式显示
         IntlTabsBar.Visibility = isGame && !IsCnSelected ? Visibility.Visible : Visibility.Collapsed;
         if (CnTabsBar != null) CnTabsBar.Visibility = isGame && IsCnSelected ? Visibility.Visible : Visibility.Collapsed;
 
@@ -189,6 +193,12 @@ public partial class MainWindow
     {
         SaveUiToConfig();
         NavigateTo(NavMode.Settings);
+    }
+
+    private void BtnUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        SaveUiToConfig();
+        NavigateTo(NavMode.Update);
     }
 
     private void BtnLogViewer_Click(object sender, RoutedEventArgs e)

@@ -31,21 +31,45 @@ public static class Updater
     public static Version CurrentVersion { get; } =
         new Version(typeof(Updater).Assembly.GetName().Version?.ToString(3) ?? "0.0.0");
 
-    /// <summary>从 GitHub Releases API 检查最新版本。</summary>
+    // ---- 缓存：避免频繁调用 GitHub API 触发 60次/小时 限流 ----
+    private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(30);
+    private static UpdateResult? _cachedResult;
+    private static DateTime _cacheTime = DateTime.MinValue;
+    private static string? _cacheKey; // 区分不同 includePrerelease
+
+    /// <summary>可选 GitHub Token（从环境变量 GITHUB_TOKEN 读取），用于提高 API 限流上限。</summary>
+    private static string? GithubToken => Environment.GetEnvironmentVariable("GITHUB_TOKEN");
+
+    /// <summary>从 GitHub Releases API 检查最新版本（带 30 分钟缓存）。</summary>
     public static async Task<UpdateResult> CheckAsync(string? repository = null, bool includePrerelease = false)
     {
         repository ??= DefaultRepository;
         if (string.IsNullOrWhiteSpace(repository) || !repository.Contains('/'))
             return UpdateResult.Error("未配置 GitHub 仓库地址（格式：owner/repo）");
 
+        string key = $"{repository}|{includePrerelease}";
+        if (_cachedResult is not null && _cacheKey == key && DateTime.Now - _cacheTime < CacheTtl)
+            return _cachedResult;
+
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
-            // 默认排除 pre-release
             var url = $"https://api.github.com/repos/{repository}/releases";
             http.DefaultRequestHeaders.UserAgent.ParseAdd("EfootballBot");
+            if (!string.IsNullOrWhiteSpace(GithubToken))
+                http.DefaultRequestHeaders.Authorization =
+                    new global::System.Net.Http.Headers.AuthenticationHeaderValue("token", GithubToken);
 
-            var releases = await http.GetFromJsonAsync<List<GhRelease>>(url,
+            using var resp = await http.GetAsync(url);
+            if ((int)resp.StatusCode == 403 || (int)resp.StatusCode == 429)
+            {
+                // 限流：返回缓存（如果有）或友好提示
+                if (_cachedResult is not null && _cacheKey == key) return _cachedResult;
+                return UpdateResult.Error("GitHub API 限流，请稍后再试（匿名 60 次/小时）");
+            }
+            resp.EnsureSuccessStatusCode();
+
+            var releases = await resp.Content.ReadFromJsonAsync<List<GhRelease>>(
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
 
             var latest = (releases ?? new())
@@ -60,14 +84,14 @@ public static class Updater
                 return UpdateResult.Error($"无法解析版本号：{latest.Tag_Name}");
 
             if (remoteVer <= CurrentVersion)
-                return UpdateResult.AlreadyLatest($"已是最新版本 v{CurrentVersion}");
+                return Cache(UpdateResult.AlreadyLatest($"已是最新版本 v{CurrentVersion}"), key);
 
             var asset = latest.Assets.FirstOrDefault(a =>
                 a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
             if (asset is null)
                 return UpdateResult.Error($"Release v{remoteVer} 没有 .zip 资产");
 
-            return UpdateResult.Available(remoteVer, latest.Name ?? latest.Tag_Name, asset.Browser_Download_Url, asset.Size);
+            return Cache(UpdateResult.Available(remoteVer, latest.Name ?? latest.Tag_Name, asset.Browser_Download_Url, asset.Size), key);
         }
         catch (HttpRequestException ex)
         {
@@ -77,6 +101,14 @@ public static class Updater
         {
             return UpdateResult.Error($"检查失败：{ex.Message}");
         }
+    }
+
+    private static UpdateResult Cache(UpdateResult r, string key)
+    {
+        _cachedResult = r;
+        _cacheKey = key;
+        _cacheTime = DateTime.Now;
+        return r;
     }
 
     /// <summary>下载并应用更新——下载 zip 到临时目录，解压到 exe 同级，然后启动 updater 脚本替换 exe。</summary>

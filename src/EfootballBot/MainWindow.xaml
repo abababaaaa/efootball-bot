@@ -56,6 +56,10 @@
                             Style="{StaticResource GhostBtn}"
                             HorizontalAlignment="Left" Margin="2,4,0,0"
                             Padding="14,5" FontSize="12.5" Click="BtnSettings_Click"/>
+                    <Button x:Name="BtnUpdate" Content="更新"
+                            Style="{StaticResource GhostBtn}"
+                            HorizontalAlignment="Left" Margin="2,4,0,0"
+                            Padding="14,5" FontSize="12.5" Click="BtnUpdate_Click"/>
                     <Button x:Name="BtnLogViewer" Content="日志历史"
                             Style="{StaticResource GhostBtn}"
                             HorizontalAlignment="Left" Margin="2,4,0,0"
@@ -99,12 +103,34 @@
         <Grid Grid.Column="1" Margin="18,16">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
 
+            <!-- 更新提醒横幅（有新版本时显示） -->
+            <Border x:Name="UpdateBanner" Grid.Row="0" Visibility="Collapsed"
+                    Background="#2d7a4f" CornerRadius="6" Padding="14,10" Margin="0,0,0,12">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                        <TextBlock Text="🎉" FontSize="18" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                        <StackPanel>
+                            <TextBlock x:Name="TxtUpdateBannerTitle" Text="发现新版本" FontWeight="SemiBold" Foreground="White" FontSize="13"/>
+                            <TextBlock x:Name="TxtUpdateBannerDesc" Text="" Foreground="#e0e0e0" FontSize="11.5" Margin="0,1,0,0"/>
+                        </StackPanel>
+                    </StackPanel>
+                    <Button Grid.Column="1" x:Name="BtnBannerUpdate" Content="立即更新" Padding="16,5"
+                            Background="White" Foreground="#2d7a4f" FontWeight="SemiBold" BorderThickness="0"
+                            Click="BtnApplyUpdate_Click"/>
+                </Grid>
+            </Border>
+
             <!-- 国际服功能分段（国服时隐藏） -->
-            <StackPanel x:Name="IntlTabsBar" Grid.Row="0" Orientation="Horizontal" Margin="1,0,0,12">
+            <StackPanel x:Name="IntlTabsBar" Grid.Row="1" Orientation="Horizontal" Margin="1,0,0,12">
                 <RadioButton x:Name="TabLeague" Content="我的联赛" Style="{StaticResource SegTab}"
                              IsChecked="True" Checked="IntlTab_Checked"/>
                 <RadioButton x:Name="TabWeekly" Content="周活动" Style="{StaticResource SegTab}"
@@ -112,13 +138,13 @@
             </StackPanel>
 
             <!-- 国服功能分段（国服时可见） -->
-            <StackPanel x:Name="CnTabsBar" Grid.Row="0" Orientation="Horizontal" Margin="1,0,0,12" Visibility="Collapsed">
+            <StackPanel x:Name="CnTabsBar" Grid.Row="1" Orientation="Horizontal" Margin="1,0,0,12" Visibility="Collapsed">
                 <RadioButton x:Name="TabCnTour" Content="巡回赛" Style="{StaticResource SegTab}"
                              IsChecked="True"/>
             </StackPanel>
 
             <!-- ===== 国际服功能卡（三 Pane 叠放） ===== -->
-            <Border x:Name="PanelIntl" Grid.Row="1" Style="{StaticResource Card}" Margin="0">
+            <Border x:Name="PanelIntl" Grid.Row="2" Style="{StaticResource Card}" Margin="0">
                 <Grid>
                     <!-- 我的联赛 -->
                     <Grid x:Name="PaneLeague">
@@ -203,7 +229,7 @@
             </Border>
 
             <!-- ===== 国服面板 ===== -->
-            <Border x:Name="PanelCn" Grid.Row="1" Style="{StaticResource Card}" Margin="0" Visibility="Collapsed">
+            <Border x:Name="PanelCn" Grid.Row="2" Style="{StaticResource Card}" Margin="0" Visibility="Collapsed">
                 <StackPanel>
                     <!-- 巡回赛功能 -->
                     <Grid>
@@ -249,7 +275,7 @@
             </Border>
 
             <!-- ===== 设置面板 ===== -->
-            <ScrollViewer x:Name="SettingsPanel" Grid.Row="1" Visibility="Collapsed"
+            <ScrollViewer x:Name="SettingsPanel" Grid.Row="2" Visibility="Collapsed"
                           VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
                 <StackPanel>
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12">
@@ -344,9 +370,14 @@
                             </StackPanel>
                         </StackPanel>
                     </Border>
+                </StackPanel>
+            </ScrollViewer>
 
-                    <!-- ===== 自动更新 ===== -->
-                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+            <!-- ===== 自动更新面板（独立） ===== -->
+            <ScrollViewer x:Name="UpdatePanel" Grid.Row="2" Visibility="Collapsed"
+                          VerticalScrollBarVisibility="Auto">
+                <StackPanel Margin="0,0,12,0">
+                    <Border Style="{StaticResource Card}">
                         <StackPanel>
                             <TextBlock Text="自动更新" Style="{StaticResource H2}" Margin="0,0,0,8"/>
 
@@ -380,7 +411,7 @@
             </ScrollViewer>
 
             <!-- ===== 历史日志查看器 ===== -->
-            <Border x:Name="LogViewerPanel" Grid.Row="1" Style="{StaticResource Card}" Margin="0" Visibility="Collapsed">
+            <Border x:Name="LogViewerPanel" Grid.Row="2" Style="{StaticResource Card}" Margin="0" Visibility="Collapsed">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
@@ -422,7 +453,7 @@
             </Border>
 
             <!-- ===== 日志卡（两套面板共用） ===== -->
-            <Border x:Name="LogCard" Style="{StaticResource Card}" Grid.Row="2" Margin="0,12,0,0" Height="248">
+            <Border x:Name="LogCard" Style="{StaticResource Card}" Grid.Row="3" Margin="0,12,0,0" Height="248">
                 <Grid>
                     <Grid.RowDefinitions>
                         <RowDefinition Height="Auto"/>
