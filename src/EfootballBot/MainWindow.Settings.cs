@@ -1,0 +1,249 @@
+using System.ComponentModel;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using System.Windows.Media.Imaging;
+using System.Windows.Threading;
+using EfootballBot.Core.Bot;
+using EfootballBot.Core.Capture;
+using EfootballBot.Core.Config;
+using EfootballBot.Core.Input;
+using EfootballBot.Core.System;
+using EfootballBot.Core.Logging;
+using EfootballBot.Core.UI;
+using EfootballBot.Core.Vision;
+
+namespace EfootballBot;
+
+public partial class MainWindow
+{
+    // ---------------- 配置 ----------------
+
+    private void LoadConfigToUi()
+    {
+        ChkOnlyKey.IsChecked = _cfg.MyLeague.OnlyKeyMatches;
+        ChkBuy4x.IsChecked = _cfg.MyLeague.Buy4xExp;
+        ChkBuyCond.IsChecked = _cfg.MyLeague.BuyExcellentCondition;
+        ChkBuyMgr.IsChecked = _cfg.MyLeague.BuyManagerBoost;
+        TxtTarget.Text = _cfg.MyLeague.TargetMatches.ToString();
+        TxtCnDailyLoop.Text = _cfg.Cn.DailyLoopLimit.ToString();
+        foreach (ComboBoxItem item in CmbDifficulty.Items)
+            if ((string)item.Content == _cfg.MyLeague.Difficulty) { CmbDifficulty.SelectedItem = item; break; }
+        foreach (ComboBoxItem item in CmbWeeklyDiff.Items)
+            if ((string)item.Content == _cfg.Weekly.Difficulty) { CmbWeeklyDiff.SelectedItem = item; break; }
+
+        // 设置面板
+        ChkAutoClose.IsChecked = _cfg.AutoCloseWhenDone;
+        ChkMinimizeTray.IsChecked = false;
+        ChkPeriodicGc.IsChecked = _cfg.PeriodicGc;
+        ChkAutoWindowize.IsChecked = _cfg.AutoWindowizeOnStart;
+
+        // OCR 频率
+        int[] ocrMsValues = { 500, 900, 1500, 2500, 5000 };
+        for (int i = 0; i < ocrMsValues.Length; i++)
+            if (_cfg.Timing.OcrIntervalMs == ocrMsValues[i]) { CmbOcrInterval.SelectedIndex = i; break; }
+
+        // 预览间隔
+        int[] previewMsValues = { 150, 300, 500, 1000, 2000 };
+        for (int i = 0; i < previewMsValues.Length; i++)
+            if (_cfg.PreviewIntervalMs == previewMsValues[i]) { CmbPreviewInterval.SelectedIndex = i; break; }
+
+        // 日志设置
+        ChkFileLog.IsChecked = _cfg.FileLogEnabled;
+        TxtMaxLogFiles.Text = _cfg.MaxLogFiles.ToString();
+        string[] levelOptions = { "Info", "Warn", "Error", "Debug" };
+        for (int i = 0; i < levelOptions.Length; i++)
+            if (_cfg.FileLogLevel.Equals(levelOptions[i], StringComparison.OrdinalIgnoreCase)) { CmbFileLogLevel.SelectedIndex = i; break; }
+
+        ChkShowRuntimeLog.IsChecked = _cfg.ShowRuntimeLog;
+
+        // 热键配置 → UI
+        ChkHotkeyEnabled.IsChecked = _cfg.Hotkey.Enabled;
+        ChkHotkeyCtrl.IsChecked = (_cfg.Hotkey.Modifiers & 2) != 0;
+        ChkHotkeyShift.IsChecked = (_cfg.Hotkey.Modifiers & 4) != 0;
+        ChkHotkeyAlt.IsChecked = (_cfg.Hotkey.Modifiers & 1) != 0;
+        ChkHotkeyWin.IsChecked = (_cfg.Hotkey.Modifiers & 8) != 0;
+        TxtHotkey.Text = _cfg.Hotkey.DisplayString().Split('+').LastOrDefault() ?? "?";
+
+        // 自动更新
+        TxtCurrentVersion.Text = "v" + Updater.CurrentVersion;
+        TxtUpdateRepo.Text = _cfg.Update.Repository;
+        ChkCheckOnStartup.IsChecked = _cfg.Update.CheckOnStartup;
+        ChkIncludePrerelease.IsChecked = _cfg.Update.IncludePrerelease;
+    }
+
+    private void SaveUiToConfig()
+    {
+        _cfg.MyLeague.OnlyKeyMatches = ChkOnlyKey.IsChecked == true;
+        _cfg.MyLeague.Buy4xExp = ChkBuy4x.IsChecked == true;
+        _cfg.MyLeague.BuyExcellentCondition = ChkBuyCond.IsChecked == true;
+        _cfg.MyLeague.BuyManagerBoost = ChkBuyMgr.IsChecked == true;
+        if (int.TryParse(TxtTarget.Text, out int t) && t >= 0)
+            _cfg.MyLeague.TargetMatches = t;
+        if (int.TryParse(TxtCnDailyLoop.Text, out int cdl) && cdl >= 0)
+            _cfg.Cn.DailyLoopLimit = cdl;
+        if (CmbDifficulty.SelectedItem is ComboBoxItem d)
+            _cfg.MyLeague.Difficulty = (string)d.Content;
+        if (CmbWeeklyDiff.SelectedItem is ComboBoxItem wd)
+            _cfg.Weekly.Difficulty = (string)wd.Content;
+
+        // 设置面板
+        _cfg.AutoCloseWhenDone = ChkAutoClose.IsChecked == true;
+        _cfg.PeriodicGc = ChkPeriodicGc.IsChecked == true;
+        _cfg.AutoWindowizeOnStart = ChkAutoWindowize.IsChecked == true;
+
+        if (CmbOcrInterval.SelectedIndex >= 0)
+        {
+            int[] ocrMs = { 500, 900, 1500, 2500, 5000 };
+            _cfg.Timing.OcrIntervalMs = ocrMs[CmbOcrInterval.SelectedIndex];
+        }
+        if (CmbPreviewInterval.SelectedIndex >= 0)
+        {
+            int[] pvMs = { 150, 300, 500, 1000, 2000 };
+            _cfg.PreviewIntervalMs = pvMs[CmbPreviewInterval.SelectedIndex];
+            _previewTimer.Interval = TimeSpan.FromMilliseconds(_cfg.PreviewIntervalMs);
+        }
+
+        _cfg.FileLogEnabled = ChkFileLog.IsChecked == true;
+        if (int.TryParse(TxtMaxLogFiles.Text, out int mf) && mf >= 1 && mf <= 50)
+            _cfg.MaxLogFiles = mf;
+        if (CmbFileLogLevel.SelectedItem is ComboBoxItem li)
+            _cfg.FileLogLevel = (string)li.Content;
+
+        _cfg.ShowRuntimeLog = ChkShowRuntimeLog.IsChecked == true;
+        // 实时生效：如果当前在游戏模块，直接切换 LogCard 可见性
+        if (_currentNav == NavMode.Game)
+            LogCard.Visibility = _cfg.ShowRuntimeLog ? Visibility.Visible : Visibility.Collapsed;
+
+        // 热键 UI → 配置
+        _cfg.Hotkey.Enabled = ChkHotkeyEnabled.IsChecked == true;
+        int mods = 0;
+        if (ChkHotkeyAlt.IsChecked == true) mods |= 1;
+        if (ChkHotkeyCtrl.IsChecked == true) mods |= 2;
+        if (ChkHotkeyShift.IsChecked == true) mods |= 4;
+        if (ChkHotkeyWin.IsChecked == true) mods |= 8;
+        _cfg.Hotkey.Modifiers = mods;
+        // VirtualKey 在按键捕获时已经直接更新到 _cfg.Hotkey.VirtualKey，这里不需额外处理
+
+        // 如果引擎正在运行，尝试重新注册热键（新配置）
+        if (_engine is { IsRunning: true } && _cfg.Hotkey.Enabled)
+        {
+            try
+            {
+                if (!_hotkey.Register(_cfg.Hotkey))
+                    AppendLog("热键注册失败（可能被其他程序占用），已跳过。", LogLevel.Warn);
+            }
+            catch (Exception ex)
+            {
+                AppendLog($"热键注册异常：{ex.Message}", LogLevel.Warn);
+            }
+        }
+        else if (_engine?.IsRunning != true)
+        {
+            // 未运行时先注销（等启动时再注册）
+            _hotkey.Unregister();
+        }
+        RefreshHotkeyUi();
+
+        // 文件日志配置变更 → 重新初始化
+        FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles);
+
+        // 自动更新
+        _cfg.Update.Repository = TxtUpdateRepo.Text?.Trim() ?? "";
+        _cfg.Update.CheckOnStartup = ChkCheckOnStartup.IsChecked == true;
+        _cfg.Update.IncludePrerelease = ChkIncludePrerelease.IsChecked == true;
+
+        _cfg.Save();
+    }
+
+    // ================= 自动更新事件 =================
+
+    private UpdateInfo? _pendingUpdate;
+
+    private async void BtnCheckUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        SaveUiToConfig();
+        BtnCheckUpdate.IsEnabled = false;
+        TxtUpdateStatus.Text = "正在检查…";
+        try
+        {
+            var result = await Task.Run(() => Updater.CheckAsync(_cfg.Update.Repository, _cfg.Update.IncludePrerelease));
+            TxtUpdateStatus.Text = result.Message;
+            BtnApplyUpdate.IsEnabled = result.IsAvailable;
+            _pendingUpdate = result.Info;
+        }
+        catch (Exception ex)
+        {
+            TxtUpdateStatus.Text = $"检查失败：{ex.Message}";
+        }
+        finally
+        {
+            BtnCheckUpdate.IsEnabled = true;
+        }
+    }
+
+    private async void BtnApplyUpdate_Click(object sender, RoutedEventArgs e)
+    {
+        if (_pendingUpdate is null) return;
+        BtnCheckUpdate.IsEnabled = false;
+        BtnApplyUpdate.IsEnabled = false;
+        PbUpdate.Visibility = Visibility.Visible;
+        PbUpdate.Value = 0;
+        TxtUpdateStatus.Text = $"下载 v{_pendingUpdate.Version}…";
+
+        var progress = new Progress<(long Bytes, long Total)>(p =>
+        {
+            if (p.Total > 0) PbUpdate.Maximum = p.Total;
+            PbUpdate.Value = p.Bytes;
+            TxtUpdateStatus.Text = $"下载中 {p.Bytes / 1024} KB / {p.Total / 1024} KB";
+        });
+
+        try
+        {
+            var result = await Task.Run(() => Updater.DownloadAndApplyAsync(_pendingUpdate, progress));
+            TxtUpdateStatus.Text = result.Message;
+            if (result.Applied)
+            {
+                AppendLog("更新已下载，启动时自动替换后重启。", LogLevel.Success);
+                // 给用户 2 秒看到状态，然后退出当前进程让 PowerShell 脚本接管
+                await Task.Delay(2000);
+                Application.Current.Shutdown();
+            }
+        }
+        catch (Exception ex)
+        {
+            TxtUpdateStatus.Text = $"更新失败：{ex.Message}";
+        }
+        finally
+        {
+            PbUpdate.Visibility = Visibility.Collapsed;
+            BtnCheckUpdate.IsEnabled = true;
+            BtnApplyUpdate.IsEnabled = _pendingUpdate is not null;
+        }
+    }
+
+    /// <summary>启动时自动检查（异步，不阻塞）。</summary>
+    public async Task AutoCheckUpdateOnStartupAsync()
+    {
+        if (!_cfg.Update.CheckOnStartup || string.IsNullOrWhiteSpace(_cfg.Update.Repository)) return;
+        try
+        {
+            var result = await Task.Run(() => Updater.CheckAsync(_cfg.Update.Repository, _cfg.Update.IncludePrerelease));
+            if (result.IsAvailable && result.Info is not null)
+            {
+                _pendingUpdate = result.Info;
+                Dispatcher.Invoke(() =>
+                {
+                    TxtUpdateStatus.Text = $"发现新版本 v{result.Info.Version}";
+                    BtnApplyUpdate.IsEnabled = true;
+                    AppendLog($"自动更新：发现 v{result.Info.Version}，请在设置面板点击「立即更新」。", LogLevel.Info);
+                });
+            }
+        }
+        catch { /* 启动时自动检查失败不打扰用户 */ }
+    }
+}

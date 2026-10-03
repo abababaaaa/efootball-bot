@@ -1,0 +1,27 @@
+bin/
+obj/
+publish/
+.vs/
+
+# User files
+*.user
+*.suo
+
+# Logs & runtime
+*.log
+dump/
+debug_frames/
+
+# Reference materials & docs (keep .github/)
+_reference/
+docs/
+.trae/
+
+# Test scripts & junk
+*.reg
+*.zip
+dump_*.png
+dump_crop*.png
+test_*.ps1
+find_*.ps1
+startup-backup-*
