@@ -2,7 +2,9 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <TargetFramework>net10.0-windows10.0.19041.0</TargetFramework>
+    <!-- 默认只构建 net10；需要验证 net11 GA 就绪性时加 -p:BuildNet11=true（需 .NET 11 SDK） -->
+    <TargetFrameworks Condition="'$(BuildNet11)' != 'true'">net10.0-windows10.0.19041.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(BuildNet11)' == 'true'">net10.0-windows10.0.19041.0;net11.0-windows10.0.19041.0</TargetFrameworks>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -11,7 +13,7 @@
     <RootNamespace>EfootballBot</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <Version>1.0.4</Version>
+    <Version>1.1.0</Version>
     <Product>eFootball 挂机助手</Product>
     <Company>EfootballBot</Company>
     <InvariantGlobalization>false</InvariantGlobalization>
@@ -27,6 +29,17 @@
   <ItemGroup>
     <!-- 自带原生 vigemclient.dll（x64），用于与 ViGEmBus 驱动通信 -->
     <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.256" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 内置 ViGEmBus 1.22.0 官方三架构安装器（离线安装，Advanced Installer 打包） -->
+    <EmbeddedResource Include="..\..\assets\ViGEmBusSetup.exe">
+      <LogicalName>EfootballBot.ViGEmBusSetup.exe</LogicalName>
+    </EmbeddedResource>
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="EfootballBot.Tests" />
   </ItemGroup>
 
 </Project>

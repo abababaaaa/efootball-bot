@@ -45,6 +45,30 @@ public partial class App : Application
                 Shutdown();
             };
         }
+        else if (args.Length > 0 && args[0] == "--optimize-github")
+        {
+            // 提权离线执行 GitHub 直连优化（由 --optimize-github --report <path> 调用），结果写文件后退出。
+            Startup += (_, _) =>
+            {
+                try
+                {
+                    string report = args.Length > 2 && args[1] == "--report" ? args[2] : "";
+                    string result = GitHostsOptimizer.Optimize();
+                    if (!string.IsNullOrEmpty(report))
+                        File.WriteAllText(report, result);
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        if (args.Length > 2 && args[1] == "--report")
+                            File.WriteAllText(args[2], "优化失败：" + ex.Message);
+                    }
+                    catch { }
+                }
+                Shutdown();
+            };
+        }
         else
             Startup += (_, _) => StartGui();
     }

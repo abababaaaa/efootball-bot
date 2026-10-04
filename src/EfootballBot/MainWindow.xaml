@@ -95,8 +95,9 @@
                         </StackPanel>
                         <Button x:Name="BtnRecheck" Content="重新检测" Style="{StaticResource GhostBtn}"
                                 HorizontalAlignment="Left" Margin="2,10,0,0" Click="BtnRecheck_Click"/>
-                        <Button x:Name="BtnInstallVigem" Content="安装 ViGEmBus 驱动" Style="{StaticResource GhostBtn}"
-                                HorizontalAlignment="Left" Margin="2,4,0,0" Click="BtnInstallVigem_Click"/>
+                        <Button x:Name="BtnInstallVigem" Content="安装内置驱动" Style="{StaticResource GhostBtn}"
+                                HorizontalAlignment="Left" Margin="2,4,0,0" Click="BtnInstallVigem_Click"
+                                ToolTip="使用内置安装包离线安装 ViGEmBus 驱动（需管理员授权，无需联网）"/>
                     </StackPanel>
                 </StackPanel>
             </DockPanel>
@@ -161,11 +162,11 @@
                                          VerticalAlignment="Center" Margin="0,0,9,1"/>
                                 <TextBlock Text="我的联赛" FontSize="16" FontWeight="Bold"/>
                             </StackPanel>
-                            <TextBlock Text="自动进出我的联赛，AI 代打，可只踢关键比赛（4 倍经验）"
+                            <TextBlock Text="自动进出我的联赛，AI 代打，可自动购买联赛道具"
                                        Foreground="{DynamicResource TextSecondary}" FontSize="12"
                                        TextWrapping="Wrap" Margin="0,8,0,0"/>
                             <StackPanel Margin="0,14,0,0">
-                                <CheckBox x:Name="ChkOnlyKey" Content="只踢关键比赛（普通比赛弃权）" IsChecked="False"/>
+                                <CheckBox x:Name="ChkOnlyKey" Content="只踢关键比赛（未实现）" IsChecked="False" IsEnabled="False"/>
                                 <CheckBox x:Name="ChkBuy4x" Content="自动购买 4 倍经验道具" IsChecked="False"/>
                                 <CheckBox x:Name="ChkBuyCond" Content="自动购买杰出状态道具" IsChecked="False"/>
                                 <CheckBox x:Name="ChkBuyMgr" Content="自动购买教练强化道具" IsChecked="False"/>
@@ -351,6 +352,26 @@
 
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                         <StackPanel>
+                            <TextBlock Text="挂机节奏" Style="{StaticResource H2}" Margin="0,0,0,6"/>
+                            <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
+                                       Text="比赛中挂机轻按 A、赛后结算弹窗确认的随机间隔。越小点得越勤，越大越像真人偶尔操作；必须立即响应的按钮不受此设置影响。"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <TextBlock Text="最小" VerticalAlignment="Center" FontSize="12.5" Foreground="{DynamicResource TextSecondary}"/>
+                                <TextBox x:Name="TxtIdleMin" Width="64" Margin="8,0,0,0" Text="1"
+                                         TextChanged="IdleTap_TextChanged"/>
+                                <TextBlock Text="秒" VerticalAlignment="Center" FontSize="12.5" Foreground="{DynamicResource TextSecondary}" Margin="8,0,0,0"/>
+                                <TextBlock Text="最大" VerticalAlignment="Center" FontSize="12.5" Foreground="{DynamicResource TextSecondary}" Margin="20,0,0,0"/>
+                                <TextBox x:Name="TxtIdleMax" Width="64" Margin="8,0,0,0" Text="4"
+                                         TextChanged="IdleTap_TextChanged"/>
+                                <TextBlock Text="秒" VerticalAlignment="Center" FontSize="12.5" Foreground="{DynamicResource TextSecondary}" Margin="8,0,0,0"/>
+                            </StackPanel>
+                            <TextBlock x:Name="TxtIdleError" Foreground="{DynamicResource Danger}" FontSize="11.5"
+                                       Margin="0,8,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                        <StackPanel>
                             <TextBlock Text="日志" Style="{StaticResource H2}" Margin="0,0,0,8"/>
                             <CheckBox x:Name="ChkFileLog" Content="启用文件日志（写入 logs\ 目录）" IsChecked="True"/>
                             <CheckBox x:Name="ChkShowRuntimeLog" Content="显示底部运行日志卡" IsChecked="True" Margin="0,6,0,0"/>
@@ -405,7 +426,7 @@
 
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                                 <TextBlock Text="当前版本" Foreground="{DynamicResource TextSecondary}" FontSize="12.5" Width="80" VerticalAlignment="Center"/>
-                                <TextBlock x:Name="TxtCurrentVersion" Text="v0.9.0" Foreground="{DynamicResource AccentGlow}" FontSize="12.5" VerticalAlignment="Center"/>
+                                <TextBlock x:Name="TxtCurrentVersion" Text="v1.1.0" Foreground="{DynamicResource AccentGlow}" FontSize="12.5" VerticalAlignment="Center"/>
                             </StackPanel>
 
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
@@ -421,8 +442,8 @@
                             <CheckBox x:Name="ChkAutoDownloadInstall" Content="发现更新后自动下载安装" IsChecked="False"/>
 
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                <Button x:Name="BtnCheckUpdate" Content="检查更新" Padding="14,5" Click="BtnCheckUpdate_Click"/>
-                                <Button x:Name="BtnApplyUpdate" Content="立即更新" Padding="14,5" Margin="10,0,0,0"
+                                <Button x:Name="BtnCheckUpdate" Content="检查更新" Style="{StaticResource GhostBtn}" Padding="14,5" Click="BtnCheckUpdate_Click"/>
+                                <Button x:Name="BtnApplyUpdate" Content="立即更新" Style="{StaticResource PrimaryBtn}" Padding="14,5" Margin="10,0,0,0"
                                         IsEnabled="False" Click="BtnApplyUpdate_Click"/>
                             </StackPanel>
 
@@ -439,6 +460,22 @@
                                              Cursor="Arrow"/>
                                 </StackPanel>
                             </Border>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== 网络优化（GitHub 直连） ===== -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <Ellipse Width="8" Height="8" Fill="#FF4FA8E0" VerticalAlignment="Center" Margin="0,0,9,1"/>
+                                <TextBlock Text="网络优化" FontSize="16" FontWeight="Bold"/>
+                            </StackPanel>
+                            <TextBlock Text="若 GitHub 无法直连导致检查更新或下载失败，可一键将 GitHub 域名指向测速最快的 IP（修改 hosts）。"
+                                       Foreground="{DynamicResource TextSecondary}" FontSize="12" TextWrapping="Wrap" Margin="0,8,0,0"/>
+                            <Button x:Name="BtnOptimizeGitHub" Content="一键优化 GitHub 直连" Style="{StaticResource PrimaryBtn}"
+                                    HorizontalAlignment="Left" Margin="0,14,0,0" Click="BtnOptimizeGitHub_Click"/>
+                            <ProgressBar x:Name="PbGitHub" Height="6" Margin="0,12,0,0" Visibility="Collapsed"/>
+                            <TextBlock x:Name="TxtGitHubStatus" Text="" Foreground="{DynamicResource TextSecondary}" FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>

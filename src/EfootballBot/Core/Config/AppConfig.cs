@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -19,7 +20,63 @@ public sealed class TimingConfig
     public int HumanJitterMs { get; set; } = 90;    // 随机人为抖动
     // 非必须立即的连点（比赛中挂机按 A、赛后弹窗确认）使用闭区间随机等待，降低行为机械感
     public int IdleTapMinMs { get; set; } = 1000;
-    public int IdleTapMaxMs { get; set; } = 10000;
+    public int IdleTapMaxMs { get; set; } = 4000;
+
+    /// <summary>
+    /// 解析秒数文本（支持小数）为毫秒并校验范围。
+    /// 规则：0.2s ≤ min ≤ max ≤ 30s。先转毫秒整数再比较，规避 0.2 等二进制浮点边界误差。
+    /// </summary>
+    public static bool TryParseSeconds(
+        string? minText, string? maxText,
+        out int minMs, out int maxMs, out string error)
+    {
+        minMs = 0;
+        maxMs = 0;
+        error = "";
+
+        if (!double.TryParse(minText, NumberStyles.Float, CultureInfo.InvariantCulture, out double minSec) ||
+            !double.TryParse(maxText, NumberStyles.Float, CultureInfo.InvariantCulture, out double maxSec))
+        {
+            error = "请输入有效数字";
+            return false;
+        }
+
+        int minRaw = (int)Math.Round(minSec * 1000);
+        int maxRaw = (int)Math.Round(maxSec * 1000);
+
+        if (minRaw < 200)
+        {
+            error = "最小不能小于 0.2 秒";
+            return false;
+        }
+        if (maxRaw > 30000)
+        {
+            error = "最大不能大于 30 秒";
+            return false;
+        }
+        if (minRaw > maxRaw)
+        {
+            error = "最小不能大于最大";
+            return false;
+        }
+
+        minMs = minRaw;
+        maxMs = maxRaw;
+        return true;
+    }
+
+    /// <summary>
+    /// 一次性迁移：旧版出厂默认 1~10s（此前无 UI，普通用户配置必为此值）收紧为 1~4s。
+    /// 任何非旧默认对的值（用户手改过 json）保持不动。
+    /// </summary>
+    public void MigrateIdleTapDefaults()
+    {
+        if (IdleTapMinMs == 1000 && IdleTapMaxMs == 10000)
+        {
+            IdleTapMinMs = 1000;
+            IdleTapMaxMs = 4000;
+        }
+    }
 }
 
 public sealed class MyLeagueConfig
@@ -197,7 +254,11 @@ public sealed class AppConfig
         try
         {
             if (File.Exists(ConfigPath))
-                return JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(ConfigPath), JsonOpts) ?? new AppConfig();
+            {
+                var cfg = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(ConfigPath), JsonOpts) ?? new AppConfig();
+                cfg.Timing.MigrateIdleTapDefaults();
+                return cfg;
+            }
         }
         catch { /* 配置损坏时回退默认 */ }
         return new AppConfig();

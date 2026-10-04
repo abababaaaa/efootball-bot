@@ -148,10 +148,37 @@ public partial class MainWindow
 
     private void BtnRecheck_Click(object sender, RoutedEventArgs e) => RunEnvChecks();
 
-    private void BtnInstallVigem_Click(object sender, RoutedEventArgs e)
+    private async void BtnInstallVigem_Click(object sender, RoutedEventArgs e)
     {
-        Process.Start(new ProcessStartInfo("https://github.com/nefarius/ViGEmBus/releases") { UseShellExecute = true });
-        AppendLog("已打开 ViGEmBus 下载页：下载并运行 ViGEmBusSetup_x64.msi，装完重启本程序。", LogLevel.Info);
+        BtnInstallVigem.IsEnabled = false;
+        BtnInstallVigem.Content = "正在安装…";
+        try
+        {
+            var installer = new DriverInstaller(msg => AppendLog(msg, LogLevel.Info));
+            DriverSetupResult result = await installer.InstallAsync();
+
+            LogLevel level = result.Kind switch
+            {
+                DriverSetupResultKind.Installed or DriverSetupResultKind.AlreadyPresent when result.DriverReady
+                    => LogLevel.Success,
+                DriverSetupResultKind.RebootRequired => LogLevel.Warn,
+                DriverSetupResultKind.UserCancelled or DriverSetupResultKind.Timeout => LogLevel.Warn,
+                DriverSetupResultKind.Failed => LogLevel.Error,
+                _ => LogLevel.Warn,
+            };
+
+            AppendLog(result.Message, level);
+            RunEnvChecks();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"驱动安装异常：{ex}", LogLevel.Error);
+        }
+        finally
+        {
+            BtnInstallVigem.Content = "安装内置驱动";
+            BtnInstallVigem.IsEnabled = true;
+        }
     }
 
     // ---------------- 左栏导航切换 ----------------

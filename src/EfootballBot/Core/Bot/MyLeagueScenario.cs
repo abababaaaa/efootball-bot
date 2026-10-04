@@ -194,13 +194,15 @@ public sealed class MyLeagueScenario : ScenarioBase
     }
 
     /// <summary>
-    /// 联赛主页右摇杆向右翻页查看「使用的物品」：
-    /// 若"没有正在使用的物品"，前往「兑换积分」购买经验卡等道具。
-    /// 导航：默认焦点在"前往比赛" → Down → Right → 右侧面板"兑换积分"。
+    /// 联赛主页右摇杆向右翻页查看「使用的物品」，逐项判定哪个道具已生效：
+    /// 经验→4x 在用；状态→杰出在用；强化→主教练强化在用。
+    /// 全部启用项都在用才跳过；否则前往「兑换积分」购买缺的部分。
     /// </summary>
     private async Task BuyItemsIfNeededAsync()
     {
-        bool buyEnabled = M.Buy4xExp || M.BuyExcellentCondition || M.BuyManagerBoost;
+        bool need4x = M.Buy4xExp, needCond = M.BuyExcellentCondition, needMgr = M.BuyManagerBoost;
+        if (!need4x && !needCond && !needMgr)
+            return;
 
         // 1. 右摇杆向右翻页到"使用的物品"页
         Log("检查物品栏：右摇杆向右翻页查看「使用的物品」…", LogLevel.Info);
@@ -217,32 +219,41 @@ public sealed class MyLeagueScenario : ScenarioBase
             o = await E.ObserveAsync(Ct);
         }
 
+        // 2. 逐项判定使用中
         bool noItem = o.Ocr.Contains("没有正在使用");
-        if (!noItem && (o.Ocr.Contains("经验") || o.Ocr.Contains("强化") || o.Ocr.Contains("状态")))
-        {
-            Log("物品栏已有生效中的道具，跳过购买", LogLevel.Debug);
-            return;
-        }
+        bool exp4xInUse = !noItem && o.Ocr.Contains("经验");
+        bool condInUse  = !noItem && o.Ocr.Contains("状态");
+        bool mgrInUse   = !noItem && o.Ocr.Contains("强化");
+
+        if (noItem)
+            Log("物品栏为空：没有正在使用的物品", LogLevel.Info);
+        else
+            Log($"物品栏：4x经验[{(exp4xInUse ? "在用" : "缺")}] 杰出状态[{(condInUse ? "在用" : "缺")}] 教练强化[{(mgrInUse ? "在用" : "缺")}]", LogLevel.Info);
+
         if (!noItem && !inUsePage)
         {
             Log("未能确认物品栏状态，跳过购买（不影响刷级）", LogLevel.Warn);
             return;
         }
-        if (!buyEnabled)
+
+        bool skip4x = !need4x || exp4xInUse;
+        bool skipCond = !needCond || condInUse;
+        bool skipMgr = !needMgr || mgrInUse;
+        if (skip4x && skipCond && skipMgr)
         {
-            Log("物品栏为空，但未勾选任何自动购买项，跳过购买", LogLevel.Info);
+            Log("所有启用的道具均在使用中，跳过购买", LogLevel.Debug);
             return;
         }
 
-        Log("没有正在使用的物品，前往「兑换积分」购买…", LogLevel.Info);
+        Log("存在缺失道具，前往「兑换积分」购买…", LogLevel.Info);
 
-        // 2. 右摇杆翻回第一页
+        // 3. 右摇杆翻回第一页
         await E.Pad.RsFlick(PadDir.Left);
         await E.Pad.Wait(1000, Ct);
         await E.Pad.RsFlick(PadDir.Left);
         await E.Pad.Wait(1200, Ct);
 
-        // 3. Down→Right 进入右侧面板的"兑换积分"→ A
+        // 4. Down→Right 进入右侧面板的"兑换积分"→ A
         Log("导航：Down → Right → 「兑换积分」→ A", LogLevel.Info);
         await E.Pad.Dpad(PadDir.Down);
         await E.Pad.Wait(350, Ct);
@@ -251,11 +262,15 @@ public sealed class MyLeagueScenario : ScenarioBase
         await E.Pad.Confirm();
         await E.Pad.Wait(2500, Ct);
 
-        await ContinuePurchaseFromShopAsync();
+        await ContinuePurchaseFromShopAsync(skip4x, skipCond, skipMgr);
     }
 
-    /// <summary>积分商店内页：Right Tab → Down×5 → 验证焦点 → 判定使用中 → A 弹结果弹窗确认。</summary>
-    private async Task ContinuePurchaseFromShopAsync()
+    /// <summary>
+    /// 积分商店内页：Right Tab → 「我的联赛物品」，按列表从上到下的顺序逐项购买。
+    /// 列表行号（从顶部焦点行 0=状态普通+ 起）：杰出状态=2，经验值4x=5，主教练强化=12。
+    /// 每项流程：行内「使用中」判定 → A → 弹窗分支（使用中/资金不足/确认购买 Up+A）。
+    /// </summary>
+    private async Task ContinuePurchaseFromShopAsync(bool skip4x = false, bool skipCond = false, bool skipMgr = false)
     {
         // 1. Right 选中「我的联赛物品」Tab → A
         Log("商店：Right → 「我的联赛物品」→ A", LogLevel.Info);
@@ -264,113 +279,103 @@ public sealed class MyLeagueScenario : ScenarioBase
         await E.Pad.Confirm();
         await E.Pad.Wait(2500, Ct);
 
-        // 2. Down×5 → 经验值4x（Tab 切换后第一行=状态普通+，往下 5 行到经验值4x）
-        Log("物品列表：Down×5 → 经验值4x", LogLevel.Info);
-        for (int i = 0; i < 5; i++)
+        // 2. 按列表顺序（上→下）逐项处理：行号从顶部焦点行起算
+        var items = new (int Row, string Name, bool Skip)[]
         {
-            await E.Pad.Dpad(PadDir.Down);
-            await E.Pad.Wait(400, Ct);
-        }
-        await E.Pad.Wait(400, Ct);
+            (2,  "杰出状态",   skipCond),
+            (5,  "经验值4x",   skip4x),
+            (12, "主教练强化", skipMgr),
+        };
 
-        // 3. 验证焦点：OCR 找"经验值4x"或"Exp."，确保真到了目标行
-        var posChk = await E.ObserveAsync(Ct);
-        var posWords = string.Join("|", posChk.Ocr.Words.Where(w => !string.IsNullOrWhiteSpace(w.Text)).Take(12).Select(w => w.Text));
-        Log($"Down×5 后位置验证 OCR：{posWords}", LogLevel.Debug);
-        bool onExp4x = posChk.Ocr.Contains("经验值4x") || posChk.Ocr.Contains("4x")
-                       || posChk.Ocr.Contains("exp4x") || posChk.Ocr.Contains("Exp");
-        if (!onExp4x)
+        int curRow = 0;
+        foreach (var (row, name, skip) in items)
         {
-            // OCR 漏识，再 Down×2 做兜底（可能列表多了一行）
-            Log("位置验证未识别经验值4x，再 Down×2 兜底", LogLevel.Warn);
-            await E.Pad.Dpad(PadDir.Down);
-            await E.Pad.Wait(400, Ct);
-            await E.Pad.Dpad(PadDir.Down);
-            await E.Pad.Wait(400, Ct);
-        }
+            if (Ct.IsCancellationRequested) return;
+            if (skip) continue;
 
-        // 4. 判断经验值4x 是否在使用中：OCR 3 次重试 + 弹窗二次确认
-        bool inUse = false;
-        var popupAfter = posChk;
-        for (int retry = 0; retry < 3 && !inUse; retry++)
-        {
-            var o = await E.ObserveAsync(Ct);
-            var texts = string.Join("|", o.Ocr.Words.Where(w => !string.IsNullOrWhiteSpace(w.Text)).Take(20).Select(w => w.Text));
-            Log($"使用中检测 (retry {retry + 1}/3)：OCR={texts}", LogLevel.Debug);
-            if (o.Ocr.Contains("使用中") || o.Ocr.Contains("物品使用中"))
+            // 移动到目标行（只向下，顺序保证 row 递增）
+            int downs = row - curRow;
+            if (downs > 0)
             {
-                inUse = true;
-                break;
+                Log($"物品列表：Down×{downs} → {name}", LogLevel.Info);
+                for (int i = 0; i < downs; i++)
+                {
+                    await E.Pad.Dpad(PadDir.Down);
+                    await E.Pad.Wait(400, Ct);
+                }
+                curRow = row;
             }
-            await E.Pad.Wait(300, Ct);
-        }
+            await E.Pad.Wait(400, Ct);
 
-        if (inUse)
-        {
-            Log("经验值4x 已在使用中，B×2 回联赛主页", LogLevel.Success);
-            await E.Pad.Back();
-            await E.Pad.Wait(1200, Ct);
-            await E.Pad.Back();
-            await E.Pad.Wait(1500, Ct);
-            return;  // 主循环会回到联赛主页并重新走 BackToHome+Enter+弹窗清扫
-        }
+            // 行内「使用中」检测（2 次重试）
+            bool inUse = false;
+            for (int retry = 0; retry < 2 && !inUse; retry++)
+            {
+                var o = await E.ObserveAsync(Ct);
+                var texts = string.Join("|", o.Ocr.Words.Where(w => !string.IsNullOrWhiteSpace(w.Text)).Take(20).Select(w => w.Text));
+                Log($"{name} 使用中检测 (retry {retry + 1}/2)：OCR={texts}", LogLevel.Debug);
+                if (o.Ocr.Contains("使用中"))
+                    inUse = true;
+                else
+                    await E.Pad.Wait(300, Ct);
+            }
+            if (inUse)
+            {
+                Log($"{name} 已在使用中，跳过", LogLevel.Info);
+                continue;
+            }
 
-        // 5. OCR 也没识别使用中，A 让游戏弹结果弹窗做最终确认
-        //    （游戏一定会弹：使用中 → OK 弹窗 / 可购买 → 确认购买弹窗 / 没钱 → 资金不足弹窗）
-        Log("A 选中经验值4x，等待游戏结果弹窗", LogLevel.Info);
-        await E.Pad.Confirm();
-        await E.Pad.Wait(2000, Ct);
-
-        var popup = await E.ObserveAsync(Ct);
-        var popupText = string.Join("|", popup.Ocr.Words.Where(w => !string.IsNullOrWhiteSpace(w.Text)).Take(25).Select(w => w.Text));
-        Log($"游戏结果弹窗原文：{popupText}", LogLevel.Debug);
-
-        // 5a. 游戏弹"物品使用中"（OCR 3 次漏了但游戏知道）
-        if (popup.Ocr.Contains("使用中") || popup.Ocr.Contains("物品使用中"))
-        {
-            Log("游戏弹窗确认物品使用中（OCR 轮次未捕到），OK 关闭后 B×2 回主页", LogLevel.Success);
+            // A 让游戏弹结果弹窗做最终确认
+            Log($"A 选中{name}，等待游戏结果弹窗", LogLevel.Info);
             await E.Pad.Confirm();
-            await E.Pad.Wait(800, Ct);
-            await E.Pad.Back();
-            await E.Pad.Wait(1200, Ct);
-            await E.Pad.Back();
-            await E.Pad.Wait(1500, Ct);
-            return;  // 主循环接管
-        }
+            await E.Pad.Wait(2000, Ct);
 
-        // 5b. 资金/积分不足
-        if (popup.Ocr.Contains("资金不足") || popup.Ocr.Contains("积分不足")
-            || popup.Ocr.Contains("不够") || popup.Ocr.Contains("insufficient"))
-        {
-            Log($"资金不足，无法购买经验值4x。弹窗：{popupText}", LogLevel.Warn);
-            await E.Pad.Back();
-            await E.Pad.Wait(1200, Ct);
-            await E.Pad.Back();
-            await E.Pad.Wait(1500, Ct);
-            return;  // 主循环接管
-        }
+            var popup = await E.ObserveAsync(Ct);
+            var popupText = string.Join("|", popup.Ocr.Words.Where(w => !string.IsNullOrWhiteSpace(w.Text)).Take(25).Select(w => w.Text));
+            Log($"{name} 弹窗原文：{popupText}", LogLevel.Debug);
 
-        // 5c. 确认购买弹窗
-        Log("确认购买弹窗：Up → A", LogLevel.Info);
-        await E.Pad.Dpad(PadDir.Up);
-        await E.Pad.Wait(500, Ct);
-        await E.Pad.Confirm();
-        await E.Pad.Wait(2000, Ct);
-        E.Stats.RewardsClaimed++;
-        Log("道具购买完成", LogLevel.Success);
+            // 弹窗分支 a：使用中（行内 OCR 漏了但游戏知道）
+            if (popup.Ocr.Contains("使用中"))
+            {
+                Log($"{name} 弹窗确认使用中，A 关闭，继续下一项", LogLevel.Info);
+                await E.Pad.Confirm();
+                await E.Pad.Wait(1200, Ct);
+                continue;
+            }
 
-        // 6. 购买后结果弹窗循环 A 清掉（最多 3 次）
-        for (int p = 0; p < 3; p++)
-        {
-            var after = await E.ObserveAsync(Ct);
-            if (!after.Ocr.Contains("物品使用中") && !after.Ocr.Contains("已使用")
-                && !after.Ocr.Contains("OK") && !after.Ocr.Contains("确定"))
-                break;
+            // 弹窗分支 b：资金/积分不足 → 后面的更买不起，直接结束购买回主页
+            if (popup.Ocr.Contains("资金不足") || popup.Ocr.Contains("积分不足") || popup.Ocr.Contains("不够"))
+            {
+                Log($"{name} 资金不足，结束本次购买。弹窗：{popupText}", LogLevel.Warn);
+                await E.Pad.Back();
+                await E.Pad.Wait(1200, Ct);
+                await E.Pad.Back();
+                await E.Pad.Wait(1500, Ct);
+                return;  // 主循环接管
+            }
+
+            // 弹窗分支 c：确认购买 → Up → A
+            Log($"{name} 确认购买弹窗：Up → A", LogLevel.Info);
+            await E.Pad.Dpad(PadDir.Up);
+            await E.Pad.Wait(500, Ct);
             await E.Pad.Confirm();
-            await E.Pad.Wait(1200, Ct);
+            await E.Pad.Wait(2000, Ct);
+            E.Stats.RewardsClaimed++;
+            Log($"{name} 购买完成", LogLevel.Success);
+
+            // 购买后结果弹窗循环 A 清掉（最多 3 次）
+            for (int p = 0; p < 3; p++)
+            {
+                var after = await E.ObserveAsync(Ct);
+                if (!after.Ocr.Contains("使用中") && !after.Ocr.Contains("已使用")
+                    && !after.Ocr.Contains("确定") && !after.Ocr.Words.Any(w => w.Text.Trim() == "OK"))
+                    break;
+                await E.Pad.Confirm();
+                await E.Pad.Wait(1200, Ct);
+            }
         }
 
-        // 7. B 连退回联赛主页（主循环会重新走 BackToHome+Enter+弹窗清扫）
+        // 3. 全部处理完，B 连退回联赛主页（主循环会重新走 BackToHome+Enter+弹窗清扫）
         for (int i = 0; i < 3; i++)
         {
             var back = await E.ObserveAsync(Ct);

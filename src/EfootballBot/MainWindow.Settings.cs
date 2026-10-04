@@ -52,6 +52,12 @@ public partial class MainWindow
         for (int i = 0; i < previewMsValues.Length; i++)
             if (_cfg.PreviewIntervalMs == previewMsValues[i]) { CmbPreviewInterval.SelectedIndex = i; break; }
 
+        // 挂机节奏：加载期间屏蔽 TextChanged，避免逐框赋值的中间态触发校验/保存
+        _loadingConfig = true;
+        TxtIdleMin.Text = FormatIdleSeconds(_cfg.Timing.IdleTapMinMs);
+        TxtIdleMax.Text = FormatIdleSeconds(_cfg.Timing.IdleTapMaxMs);
+        _loadingConfig = false;
+
         // 日志设置
         ChkFileLog.IsChecked = _cfg.FileLogEnabled;
         TxtMaxLogFiles.Text = _cfg.MaxLogFiles.ToString();
@@ -109,6 +115,9 @@ public partial class MainWindow
             _previewTimer.Interval = TimeSpan.FromMilliseconds(_cfg.PreviewIntervalMs);
         }
 
+        // 挂机节奏兜底（导航离开/点开始时）：成功随末尾统一保存，失败保留旧值
+        ApplyIdleTap(persist: false);
+
         _cfg.FileLogEnabled = ChkFileLog.IsChecked == true;
         if (int.TryParse(TxtMaxLogFiles.Text, out int mf) && mf >= 1 && mf <= 50)
             _cfg.MaxLogFiles = mf;
@@ -159,6 +168,47 @@ public partial class MainWindow
         _cfg.Update.AutoDownloadInstall = ChkAutoDownloadInstall.IsChecked == true;
 
         _cfg.Save();
+    }
+
+    // ---------------- 挂机节奏 ----------------
+
+    private bool _loadingConfig;
+
+    /// <summary>毫秒转秒文本并去掉多余尾零：1000→"1"，500→"0.5"。</summary>
+    private static string FormatIdleSeconds(int ms) =>
+        (ms / 1000.0).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+
+    private void IdleTap_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        // InitializeComponent 按 XAML 顺序建控件，TxtIdleError 在两个输入框之后；
+        // 框架给 Text 赋默认值触发本事件时它可能尚未创建。加载赋值阶段由 _loadingConfig 屏蔽。
+        if (TxtIdleError is null || _loadingConfig) return;
+        ApplyIdleTap(persist: true);
+    }
+
+    /// <summary>
+    /// 校验并应用挂机节奏。成功：写入配置、清除红框/错误；失败：红框+错误提示、保留旧值。
+    /// persist=true（TextChanged）时立即保存；false（SaveUiToConfig）时交给调用方统一保存。
+    /// </summary>
+    private bool ApplyIdleTap(bool persist)
+    {
+        if (TimingConfig.TryParseSeconds(TxtIdleMin.Text, TxtIdleMax.Text,
+                out int minMs, out int maxMs, out string error))
+        {
+            _cfg.Timing.IdleTapMinMs = minMs;
+            _cfg.Timing.IdleTapMaxMs = maxMs;
+            TxtIdleError.Visibility = Visibility.Collapsed;
+            TxtIdleMin.ClearValue(Control.BorderBrushProperty);
+            TxtIdleMax.ClearValue(Control.BorderBrushProperty);
+            if (persist) _cfg.Save();
+            return true;
+        }
+
+        TxtIdleError.Text = error;
+        TxtIdleError.Visibility = Visibility.Visible;
+        TxtIdleMin.BorderBrush = (System.Windows.Media.Brush)FindResource("Danger");
+        TxtIdleMax.BorderBrush = (System.Windows.Media.Brush)FindResource("Danger");
+        return false;
     }
 
     // ================= 自动更新事件 =================
@@ -261,6 +311,62 @@ public partial class MainWindow
             PbUpdate.Visibility = Visibility.Collapsed;
             BtnCheckUpdate.IsEnabled = true;
             BtnApplyUpdate.IsEnabled = _pendingUpdate is not null;
+        }
+    }
+
+    private async void BtnOptimizeGitHub_Click(object sender, RoutedEventArgs e)
+    {
+        BtnOptimizeGitHub.IsEnabled = false;
+        PbGitHub.Visibility = Visibility.Visible;
+        PbGitHub.IsIndeterminate = true;
+        TxtGitHubStatus.Text = "正在优化 GitHub 直连（测速约 10~30 秒）…";
+
+        try
+        {
+            if (!GitHostsOptimizer.IsAdministrator())
+            {
+                // 非管理员：UAC 提权重新运行自身离线执行，结果写临时文件后读回
+                TxtGitHubStatus.Text = "需要管理员权限，请在弹出的授权窗口确认…";
+                string report = Path.Combine(Path.GetTempPath(), $"ghopt_{Guid.NewGuid():N}.txt");
+                Process.Start(new ProcessStartInfo
+                {
+                    FileName = Environment.ProcessPath!,
+                    Arguments = $"--optimize-github --report \"{report}\"",
+                    Verb = "runas",
+                    UseShellExecute = true,
+                });
+
+                var sw = Stopwatch.StartNew();
+                while (sw.Elapsed.TotalSeconds < 120 && !File.Exists(report))
+                    await Task.Delay(500);
+
+                if (File.Exists(report))
+                {
+                    TxtGitHubStatus.Text = File.ReadAllText(report);
+                    AppendLog("GitHub 直连优化完成（管理员进程）。", LogLevel.Success);
+                }
+                else
+                {
+                    TxtGitHubStatus.Text = "优化未完成：可能已取消授权或超时。";
+                }
+                try { File.Delete(report); } catch { }
+            }
+            else
+            {
+                string result = await Task.Run(GitHostsOptimizer.Optimize);
+                TxtGitHubStatus.Text = result;
+                AppendLog("GitHub 直连优化完成。", LogLevel.Success);
+            }
+        }
+        catch (Exception ex)
+        {
+            TxtGitHubStatus.Text = $"优化失败：{ex.Message}";
+        }
+        finally
+        {
+            PbGitHub.Visibility = Visibility.Collapsed;
+            PbGitHub.IsIndeterminate = false;
+            BtnOptimizeGitHub.IsEnabled = true;
         }
     }
 
