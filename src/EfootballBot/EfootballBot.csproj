@@ -2,8 +2,9 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
-    <!-- 默认只构建 net10；需要验证 net11 GA 就绪性时加 -p:BuildNet11=true（需 .NET 11 SDK） -->
-    <TargetFrameworks Condition="'$(BuildNet11)' != 'true'">net10.0-windows10.0.19041.0</TargetFrameworks>
+    <!-- 默认只构建 net10（单数 TargetFramework，dotnet publish 无需 -f）；
+         需要验证 net11 GA 就绪性时加 -p:BuildNet11=true（需 .NET 11 SDK，切换为复数 TargetFrameworks） -->
+    <TargetFramework Condition="'$(BuildNet11)' != 'true'">net10.0-windows10.0.19041.0</TargetFramework>
     <TargetFrameworks Condition="'$(BuildNet11)' == 'true'">net10.0-windows10.0.19041.0;net11.0-windows10.0.19041.0</TargetFrameworks>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
