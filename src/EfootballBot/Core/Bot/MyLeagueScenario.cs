@@ -69,8 +69,11 @@ public sealed class MyLeagueScenario : ScenarioBase
                         }
                         else if (hasOk)
                         {
-                            // OK 弹窗默认焦点在 OK 上，直接 A（不能走 PressButtonAsync 子串匹配，会误点 Fukuoka）
-                            await E.Pad.Confirm();
+                            // OK 按钮可能不在默认焦点上，走 PressButtonAsync 精确匹配（避免误点 Fukuoka）
+                            if (!await E.PressButtonAsync(new[] { "ok" }, Ct, exactMatch: true))
+                            {
+                                await E.Pad.Confirm();
+                            }
                         }
                         else if (!await E.PressButtonAsync(new[] { "确定", "确认", "下一步" }, Ct))
                         {

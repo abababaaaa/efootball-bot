@@ -58,14 +58,17 @@ public abstract class ScenarioBase
     /// </summary>
     protected async Task<bool> HandleUnknownAsync(Observation o)
     {
-        // 明确的确认弹窗（下一步 / OK / 确定 / 确认）：直接按 A，不按 B
+        // 明确的确认弹窗（下一步 / OK / 确定 / 确认）：走 PressButtonAsync 移动焦点后点击，不按 B
         if (o.Is(GameScreen.Dialog)
             || o.Ocr.Contains("下一步") || o.Ocr.Contains("ok")
             || o.Ocr.Contains("确定") || o.Ocr.Contains("确认"))
         {
-            Log("未识别画面中发现确认按钮，直接按 A 继续", LogLevel.Debug);
-            await E.Pad.Confirm();
-            await E.Pad.Wait(700, Ct);
+            Log("未识别画面中发现确认按钮，识别并点击", LogLevel.Debug);
+            if (!await E.PressButtonAsync(new[] { "下一步", "ok", "确定", "确认", "next" }, Ct))
+            {
+                await E.Pad.Confirm();
+                await E.Pad.Wait(700, Ct);
+            }
             _safeUnknown = 0;
             return false;
         }
@@ -143,10 +146,13 @@ public abstract class ScenarioBase
                     await E.Pad.Wait(900, Ct);
                     break;
                 case GameScreen.Dialog:
-                    // 弹窗默认焦点通常在「OK/确定」上，直接按 A；失败再走指针移动兜底
-                    Log("处理确认弹窗，直接按 A", LogLevel.Debug);
-                    await E.Pad.Confirm();
-                    await E.Pad.Wait(700, Ct);
+                    // 确认弹窗：走 PressButtonAsync（OK/确定 可能不在默认焦点上，需移动后点击）
+                    Log("处理确认弹窗（识别按钮→移动焦点→点击）", LogLevel.Debug);
+                    if (!await E.PressButtonAsync(new[] { "ok", "确定", "确认", "下一步", "yes" }, Ct))
+                    {
+                        await E.Pad.Confirm();
+                        await E.Pad.Wait(700, Ct);
+                    }
                     break;
                 case GameScreen.Disconnected:
                     await E.HandlePopupsAsync(o, Ct);
@@ -448,9 +454,9 @@ public abstract class ScenarioBase
     }
 
     /// <summary>
-    /// 赛后结算 / 奖励 → 逐个按 A 返回。
-    /// 检测到「下一步 / OK / 确定 / 确认」立即按 A（短等待，不用 1~4s 随机），
-    /// 确保赛后结算页和联赛积分弹窗能被快速清掉。
+    /// 赛后结算 / 奖励 → 逐个点击返回。
+    /// 检测到「下一步 / OK / 确定 / 确认」时走 PressButtonAsync（识别按钮→若不在默认焦点则移动→点击），
+    /// 避免按钮非默认焦点时直接按 A 无效。无按钮的画面（加载等）直接按 A 继续。
     /// </summary>
     protected async Task PostMatchSequenceAsync()
     {
@@ -458,20 +464,22 @@ public abstract class ScenarioBase
         var deadline = DateTime.Now.AddSeconds(180);
         int stable = 0;
         GameScreen? last = null;
+        string[] confirmBtns = { "下一步", "ok", "确定", "确认", "skip", "跳过" };
         while (DateTime.Now < deadline)
         {
             Ct.ThrowIfCancellationRequested();
             var o = await E.ObserveAsync(Ct);
 
-            // 优先：检测到明确的确认按钮 → 立即按 A（赛后结算「下一步」、积分弹窗「OK」等）
-            var btn = o.Ocr.FindFirst("下一步") ?? o.Ocr.FindFirst("ok")
-                      ?? o.Ocr.FindFirst("确定") ?? o.Ocr.FindFirst("确认");
-            if (btn is not null)
+            // 有明确确认按钮：走 PressButtonAsync（自动处理焦点移动）
+            bool hasBtn = confirmBtns.Any(kw => o.Ocr.Contains(kw));
+            if (hasBtn)
             {
-                Log($"赛后结算：检测到「{btn.Text}」，立即确认", LogLevel.Info);
                 stable = 0;
-                await E.Pad.Confirm();
-                await E.Pad.Wait(700, Ct);
+                if (!await E.PressButtonAsync(confirmBtns, Ct))
+                {
+                    await E.Pad.Confirm();
+                    await E.Pad.Wait(700, Ct);
+                }
                 continue;
             }
 
@@ -903,7 +911,7 @@ public abstract class ScenarioBase
 
     // ================= 通用按钮高光/确认（活动详情/弹窗） =================
 
-    private const double GlowThreshold = 0.18;
+    private const double GlowThreshold = 0.12;
 
     /// <summary>
     /// 通用确认规则：屏幕上有「确定」优先点确定，否则有「进入」点进入。
@@ -977,13 +985,16 @@ public abstract class ScenarioBase
 
     private static double ButtonGlow(Observation o, OcrWord w)
     {
-        // 按钮比文字宽：以文字中心构造按钮外框区域
-        double bw = Math.Max(w.W * 7, 0.34);
+        // 按钮比文字宽：以文字中心构造大尺寸按钮区域（含发光边框）
+        double rw = Math.Clamp(w.W * 8, 0.20, 0.42);
+        double rh = Math.Clamp(w.H * 4, 0.08, 0.16);
         var region = new NormRect(
-            Math.Max(0, w.CenterX - bw / 2), Math.Max(0, w.Y - w.H * 1.4),
-            Math.Min(1, bw), w.H * 3.4);
-        double white = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.White, region);
+            Math.Clamp(w.CenterX - rw / 2, 0, 1 - rw),
+            Math.Clamp(w.CenterY - rh / 2, 0, 1 - rh), rw, rh);
+        // eFootball 聚焦按钮边框为青色/蓝色/亮白，三色并检
+        double blue = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Blue, region);
+        double cyan = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Cyan, region);
         double bright = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Bright, region);
-        return Math.Max(white, bright * 0.8);
+        return Math.Max(blue, Math.Max(cyan, bright * 0.8));
     }
 }

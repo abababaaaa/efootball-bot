@@ -381,13 +381,16 @@ public sealed class BotEngine : IDisposable
             // 关键比赛弹窗：OK 按钮在右下角，需先 Up 把焦点移过去
             if (o.Ocr.Contains("关键比赛") || o.Ocr.Contains("keymatch"))
             {
-                LogInternal("关键比赛确认弹窗：方向上 → A", LogLevel.Info);
+                LogInternal("关键比赛确认弹窗：方向上 → 点击 OK", LogLevel.Info);
                 await Pad.Dpad(PadDir.Up);
                 await Task.Delay(500, ct);
             }
-            // 普通弹窗 OK/确定 默认就是焦点，直接按 A
-            await Pad.Confirm();
-            await Task.Delay(700, ct);
+            // 普通弹窗：OK/确定 可能不在默认焦点，走 PressButtonAsync 识别→移动→点击
+            if (!await PressButtonAsync(new[] { "ok", "确定", "确认", "下一步", "yes" }, ct))
+            {
+                await Pad.Confirm();
+                await Task.Delay(700, ct);
+            }
             return true;
         }
         return false;
@@ -424,13 +427,45 @@ public sealed class BotEngine : IDisposable
     }
 
     /// <summary>
-    /// 指针感知点击：找到目标按钮（OK/下一步/确定），检测其是否蓝底高亮（指针已在上面），
-    /// 不在则按方向键朝它移动指针，到位后按 A。返回是否成功点击。
+    /// 按钮区域尺寸：根据文字大小自适应，确保覆盖整个按钮（含发光边框）。
+    /// eFootball 按钮文字只占按钮中心一小部分，边框发光在文字外围，区域太小会漏检焦点。
     /// </summary>
-    public async Task<bool> PressButtonAsync(string[] targetKeywords, CancellationToken ct, int maxMoves = 8)
+    private static NormRect ButtonRegion(OcrWord w)
     {
-        // 弹窗里常见可聚焦按钮词（用于定位“当前指针在哪”）
+        double rw = Math.Clamp(w.W * 8, 0.20, 0.42);
+        double rh = Math.Clamp(w.H * 4, 0.08, 0.16);
+        double x = Math.Clamp(w.CenterX - rw / 2, 0, 1 - rw);
+        double y = Math.Clamp(w.CenterY - rh / 2, 0, 1 - rh);
+        return new NormRect(x, y, rw, rh);
+    }
+
+    /// <summary>
+    /// 检测按钮焦点发光度：eFootball 聚焦按钮边框为青色/蓝色/亮白，
+    /// 需同时检查 Blue | Cyan | Bright 三色滤镜，单用 Blue 会漏检青色焦点。
+    /// </summary>
+    private static double ButtonGlow(FrameData frame, OcrWord w)
+    {
+        var r = ButtonRegion(w);
+        double blue = FrameAnalyzer.ColorRatio(frame, HsvFilter.Blue, r);
+        double cyan = FrameAnalyzer.ColorRatio(frame, HsvFilter.Cyan, r);
+        double bright = FrameAnalyzer.ColorRatio(frame, HsvFilter.Bright, r);
+        return Math.Max(blue, Math.Max(cyan, bright * 0.8));
+    }
+
+    /// <summary>
+    /// 指针感知点击：找到目标按钮（OK/下一步/确定），检测其是否高亮（指针已在上面），
+    /// 不在则按方向键朝它移动指针，到位后按 A。返回是否成功点击。
+    /// 焦点检测使用蓝+青+亮多色滤镜，兼容 eFootball 各种按钮高亮风格。
+    /// exactMatch=true 时用精确词匹配（避免 "ok" 误匹配 "Fukuoka" 等队名）。
+    /// </summary>
+    public async Task<bool> PressButtonAsync(string[] targetKeywords, CancellationToken ct, int maxMoves = 8, bool exactMatch = false)
+    {
+        // 弹窗里常见可聚焦按钮词（用于定位"当前指针在哪"）
         string[] allButtons = { "ok", "确定", "确认", "取消", "下一步", "跳过", "返回", "是", "否", "yes", "no", "cancel", "skip", "next", "back" };
+        // 目标按钮被判定为已聚焦的发光度阈值
+        const double TargetFocused = 0.12;
+        // 找到当前焦点的发光度阈值（低于此值认为没检测到焦点）
+        const double FocusFound = 0.06;
 
         for (int move = 0; move < maxMoves; move++)
         {
@@ -440,73 +475,90 @@ public sealed class BotEngine : IDisposable
             OcrWord? target = null;
             foreach (var kw in targetKeywords)
             {
-                target = o.Ocr.FindFirst(kw);
+                if (exactMatch)
+                    target = o.Ocr.MergedWords.FirstOrDefault(w =>
+                        OcrText.Norm(w.Text).Equals(kw, StringComparison.OrdinalIgnoreCase));
+                else
+                    target = o.Ocr.FindFirst(kw);
                 if (target is not null) break;
             }
             if (target is null) return false; // 目标都不在屏幕上
 
-            // 目标按钮区域蓝底占比（蓝底 = 指针停留的按钮）
-            var tRegion = new NormRect(
-                Math.Max(0, target.X - 0.06), Math.Max(0, target.Y - target.H),
-                Math.Min(1, target.W + 0.12), target.H * 3.0);
-            double tBlue = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Blue, tRegion);
+            double tGlow = ButtonGlow(o.Frame, target);
 
-            if (tBlue > 0.30)
+            // 目标按钮已聚焦：直接按 A
+            if (tGlow >= TargetFocused)
             {
-                LogInternal($"指针已在「{target.Text}」上（blue={tBlue:F2}），按 A", LogLevel.Debug);
+                LogInternal($"指针已在「{target.Text}」上（glow={tGlow:F2}），按 A", LogLevel.Debug);
                 await Pad.Confirm();
                 await Task.Delay(600, ct);
                 return true;
             }
 
-            // 找当前指针所在按钮：候选按钮中蓝底最高者
+            // 找当前焦点按钮：所有候选按钮中发光度最高者
             OcrWord? focus = null;
-            double focusBlue = 0;
+            double focusGlow = 0;
             foreach (var kw in allButtons)
             {
                 foreach (var w in o.Ocr.FindAll(kw))
                 {
-                    var region = new NormRect(
-                        Math.Max(0, w.X - 0.06), Math.Max(0, w.Y - w.H),
-                        Math.Min(1, w.W + 0.12), w.H * 3.0);
-                    double blue = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Blue, region);
-                    if (blue > focusBlue) { focusBlue = blue; focus = w; }
+                    double g = ButtonGlow(o.Frame, w);
+                    if (g > focusGlow) { focusGlow = g; focus = w; }
                 }
             }
 
-            if (focus is null || focusBlue < 0.15)
+            if (focus is not null && focusGlow >= FocusFound && focus != target)
             {
-                // 找不到蓝色焦点：弹窗主按钮（OK/下一步/确定）默认就是焦点，直接按 A。
-                // 只有第 0 轮尝试按一次 → 移动指针，之后都直接按 A 兜底，避免反复 Right 把焦点移走。
-                if (move >= 1)
+                // 找到当前焦点：朝目标按钮移动
+                double dx = target.CenterX - focus.CenterX;
+                double dy = target.CenterY - focus.CenterY;
+                LogInternal($"移动指针：「{focus.Text}」→「{target.Text}」 dx={dx:F2} dy={dy:F2}", LogLevel.Debug);
+
+                if (Math.Abs(dx) < 0.05 && Math.Abs(dy) < 0.06)
                 {
-                    LogInternal($"未定位到指针，直接按 A 确认「{target.Text}」", LogLevel.Debug);
+                    // 位置已对准但发光不足：直接按 A 尝试
                     await Pad.Confirm();
                     await Task.Delay(600, ct);
                     return true;
                 }
-                LogInternal($"未定位到指针，按 → 尝试聚焦「{target.Text}」", LogLevel.Debug);
-                await Pad.Dpad(PadDir.Right);
+                if (Math.Abs(dx) > Math.Abs(dy))
+                    await Pad.Dpad(dx > 0 ? PadDir.Right : PadDir.Left);
+                else
+                    await Pad.Dpad(dy > 0 ? PadDir.Down : PadDir.Up);
                 await Task.Delay(400, ct);
                 continue;
             }
 
-            double dx = target.CenterX - focus.CenterX;
-            double dy = target.CenterY - focus.CenterY;
-            LogInternal($"移动指针：「{focus.Text}」→「{target.Text}」 dx={dx:F2} dy={dy:F2}", LogLevel.Debug);
-
-            if (Math.Abs(dx) < 0.05 && Math.Abs(dy) < 0.06)
+            // 没检测到任何高亮焦点：先盲按 A（焦点可能已在目标上但发光检测漏了），
+            // 若无效再按目标按钮位置做一次方向试探
+            if (move == 0)
             {
-                // 已对准但蓝底不足：直接按 A 尝试
+                LogInternal($"未检测到焦点，先盲按 A 尝试「{target.Text}」", LogLevel.Debug);
                 await Pad.Confirm();
                 await Task.Delay(600, ct);
-                return true;
+                // 重新观察：若目标按钮消失说明按 A 成功
+                var o2 = await ObserveAsync(ct);
+                bool stillThere = exactMatch
+                    ? targetKeywords.Any(kw => o2.Ocr.MergedWords.Any(w =>
+                          OcrText.Norm(w.Text).Equals(kw, StringComparison.OrdinalIgnoreCase)))
+                    : targetKeywords.Any(kw => o2.Ocr.FindFirst(kw) is not null);
+                if (!stillThere) return true;
+                // 按钮还在：说明 A 没点中，根据目标位置试探移动方向
+                double tx = target.CenterX, ty = target.CenterY;
+                LogInternal($"盲按 A 未生效，按目标位置试探移动（x={tx:F2} y={ty:F2}）", LogLevel.Debug);
+                if (ty > 0.6) await Pad.Dpad(PadDir.Down);        // 按钮在下方 → 往下
+                else if (ty < 0.4) await Pad.Dpad(PadDir.Up);     // 按钮在上方 → 往上
+                else if (tx > 0.6) await Pad.Dpad(PadDir.Right);  // 按钮在右方 → 往右
+                else await Pad.Dpad(PadDir.Left);                 // 按钮在左方 → 往左
+                await Task.Delay(400, ct);
+                continue;
             }
-            if (Math.Abs(dx) > Math.Abs(dy))
-                await Pad.Dpad(dx > 0 ? PadDir.Right : PadDir.Left);
-            else
-                await Pad.Dpad(dy > 0 ? PadDir.Down : PadDir.Up);
-            await Task.Delay(450, ct);
+
+            // 后续轮次：仍无焦点，直接按 A 兜底
+            LogInternal($"仍未检测到焦点，直接按 A 兜底「{target.Text}」", LogLevel.Debug);
+            await Pad.Confirm();
+            await Task.Delay(600, ct);
+            return true;
         }
         return false;
     }
@@ -535,14 +587,17 @@ public sealed class BotEngine : IDisposable
     {
         _unknownStreak++;
 
-        // 优先：发现「下一步 / OK / 确定 / 确认」→ 直接按 A（弹窗主按钮默认为焦点）
+        // 优先：发现「下一步 / OK / 确定 / 确认」→ 走 PressButtonAsync（识别→移动→点击）
         var next = o.Ocr.FindFirst("下一步") ?? o.Ocr.FindFirst("ok")
                    ?? o.Ocr.FindFirst("确定") ?? o.Ocr.FindFirst("确认") ?? o.Ocr.FindFirst("next");
         if (next is not null)
         {
-            LogInternal($"未识别画面，但发现「{next.Text}」，直接按 A", LogLevel.Warn);
-            await Pad.Confirm();
-            await Task.Delay(700, ct);
+            LogInternal($"未识别画面，但发现「{next.Text}」，识别并点击", LogLevel.Warn);
+            if (!await PressButtonAsync(new[] { "下一步", "ok", "确定", "确认", "next" }, ct))
+            {
+                await Pad.Confirm();
+                await Task.Delay(700, ct);
+            }
             return;
         }
 
