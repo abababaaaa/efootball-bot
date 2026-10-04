@@ -58,12 +58,13 @@ public abstract class ScenarioBase
     /// </summary>
     protected async Task<bool> HandleUnknownAsync(Observation o)
     {
-        // 明确的确认弹窗（下一步 / OK / 确定 / 确认）：走 PressButtonAsync 移动焦点后点击，不按 B
+        // 物品已过期弹窗 / 明确的确认弹窗（下一步 / OK / 确定 / 确认）：立刻确认，不按 B
         if (o.Is(GameScreen.Dialog)
             || o.Ocr.Contains("下一步") || o.Ocr.Contains("ok")
-            || o.Ocr.Contains("确定") || o.Ocr.Contains("确认"))
+            || o.Ocr.Contains("确定") || o.Ocr.Contains("确认")
+            || o.Ocr.Contains("过期") || o.Ocr.ContainsJoined("过期"))
         {
-            Log("未识别画面中发现确认按钮，识别并点击", LogLevel.Debug);
+            Log("未识别画面中发现确认弹窗，立即识别并点击", LogLevel.Debug);
             if (!await E.PressButtonAsync(new[] { "下一步", "ok", "确定", "确认", "next" }, Ct))
             {
                 await E.Pad.Confirm();
@@ -658,7 +659,10 @@ public abstract class ScenarioBase
     private static bool HasModalPopup(Observation o)
         => o.Ocr.Contains("确定")
            || o.Ocr.Contains("获得的活动积分")
-           || o.Ocr.Contains("物品已送到收件箱");
+           || o.Ocr.Contains("物品已送到收件箱")
+           || o.Ocr.Contains("过期")
+           || o.Ocr.ContainsJoined("过期")
+           || o.Ocr.Contains("获取新物品");
 
     /// <summary>巡回/我的联赛主页强特征词（赛前画面不会有）。</summary>
     private static bool HasTourHomeMarker(Observation o)

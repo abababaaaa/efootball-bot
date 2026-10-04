@@ -597,14 +597,20 @@ public sealed class ScreenClassifier
         return (best.Key, best.Value.Score, best.Value.Ev);
     }
 
-    /// <summary>是否为赛后奖励弹窗（积分弹窗 / 收件箱通知 / 联赛积分），这些弹窗只出现在巡回赛主页之上。</summary>
+    /// <summary>
+    /// 是否为赛后奖励 / 通知弹窗（积分弹窗 / 收件箱 / 联赛积分 / 物品已过期）。
+    /// 纯 OCR 文字判定，不依赖图像（弹窗外观可能变化）。
+    /// 「过期」兼容「物品已过期」（中间隔字，整词 Contains 会漏），同时查 JoinedText 防逐字拆开。
+    /// </summary>
     private static bool HasRewardPopup(OcrResult ocr)
         => ocr.Contains("获得的活动积分")
            || ocr.Contains("距离下个奖励")
            || ocr.Contains("物品已送到收件箱")
            || ocr.Contains("送到收件箱")
            || ocr.Contains("收到我的联赛积分")
-           || ocr.Contains("物品过期");
+           || ocr.Contains("过期")
+           || ocr.ContainsJoined("过期")
+           || ocr.Contains("获取新物品");
 
     /// <summary>
     /// 是否为「使用固定智能辅助设置的活动」模态弹窗（标题常被 OCR 逐字拆开，

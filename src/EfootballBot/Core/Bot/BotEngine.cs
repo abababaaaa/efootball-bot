@@ -46,6 +46,7 @@ public sealed class BotEngine : IDisposable
     private bool _minimizedGame;
     private DateTime _gcLastRun = DateTime.Now;
     private int _unknownStreak;
+    private bool _inputVerified;
 
     public event Action<string, LogLevel>? Log;
     public event Action<BotStats>? StatsChanged;
@@ -102,6 +103,11 @@ public sealed class BotEngine : IDisposable
             catch (OperationCanceledException)
             {
                 LogInternal("已停止。", LogLevel.Info);
+            }
+            catch (InputNotRespondingException ex)
+            {
+                Stats.LastError = ex.Message;
+                LogInternal(ex.Message, LogLevel.Error);
             }
             catch (Exception ex)
             {
@@ -200,6 +206,7 @@ public sealed class BotEngine : IDisposable
         try { Pad360.ResetAll(); } catch { }
         _frame = null;
         _lastObs = null;
+        _inputVerified = false;
         // 还原挂机开始时自动窗口化的游戏窗口
         if (_savedWinState is not null && _window is not null)
         {
@@ -571,7 +578,11 @@ public sealed class BotEngine : IDisposable
         {
             ct.ThrowIfCancellationRequested();
             var o = await ObserveAsync(ct);
-            if (o.Is(GameScreen.Home)) return;
+            if (o.Is(GameScreen.Home))
+            {
+                await VerifyInputOnHomeAsync(ct);
+                return;
+            }
             if (o.Is(GameScreen.Disconnected) || o.Is(GameScreen.Dialog))
             {
                 await HandlePopupsAsync(o, ct);
@@ -582,10 +593,61 @@ public sealed class BotEngine : IDisposable
         }
     }
 
+    /// <summary>
+    /// 主页输入活性自检：按↓后中心磁贴区签名应立即变化；两次无变化判定输入链路已死。
+    /// 每个会话只检一次，通过后按↑归位焦点（后续导航仍从原磁贴出发）。
+    /// 不预检时，睡眠唤醒后 Steam 输入层卡死会导致盲按整条导航并在 20s 后抛超时堆栈。
+    /// </summary>
+    private async Task VerifyInputOnHomeAsync(CancellationToken ct)
+    {
+        if (_inputVerified || _window is null) return;
+        var f0 = LatestFrame;
+        if (f0 is null) return; // 能判 Home 必有帧；无帧时不阻断挂机
+
+        var wf = GameWindow.GetWindowFrame(_window.Handle);
+        (double OffX, double OffY, double CliW, double CliH) geo = (wf.OffX, wf.OffY, wf.CliW, wf.CliH);
+
+        for (int attempt = 1; attempt <= 2; attempt++)
+        {
+            var before = InputLivenessProbe.Signature(f0, geo);
+            await Pad.Dpad(PadDir.Down);
+            // 约 450ms 内每 150ms 比对一次（含 Dpad 点按自身的按下/抬起间隔）
+            for (int i = 0; i < 3; i++)
+            {
+                await Task.Delay(150, ct);
+                var f = LatestFrame;
+                if (f is not null && InputLivenessProbe.Mad(before, InputLivenessProbe.Signature(f, geo))
+                        >= InputLivenessProbe.MoveMadMin)
+                {
+                    _inputVerified = true;
+                    LogInternal($"手柄输入自检通过（第 {attempt} 次方向键画面有响应）", LogLevel.Info);
+                    await Pad.Dpad(PadDir.Up);
+                    return;
+                }
+            }
+            f0 = LatestFrame ?? f0; // 第二次尝试用最新帧重定基线
+            LogInternal($"手柄输入自检第 {attempt} 次方向键无画面响应…", LogLevel.Warn);
+        }
+
+        throw new InputNotRespondingException();
+    }
+
     /// <summary>卡死恢复：优先找“下一步/确定/确认”按 A；否则按 B；连续失败回主页。</summary>
     public async Task RecoverAsync(Observation o, CancellationToken ct)
     {
         _unknownStreak++;
+
+        // 物品已过期弹窗：唯一按钮 OK 默认聚焦，OCR 可能漏识按钮文字，直接按 A 立刻确认
+        if (o.Ocr.Contains("过期") || o.Ocr.ContainsJoined("过期") || o.Ocr.Contains("获取新物品"))
+        {
+            LogInternal("检测到「物品已过期」弹窗，立即确认", LogLevel.Warn);
+            if (!await PressButtonAsync(new[] { "ok", "确定", "确认" }, ct))
+            {
+                await Pad.Confirm();
+                await Task.Delay(700, ct);
+            }
+            return;
+        }
 
         // 优先：发现「下一步 / OK / 确定 / 确认」→ 走 PressButtonAsync（识别→移动→点击）
         var next = o.Ocr.FindFirst("下一步") ?? o.Ocr.FindFirst("ok")

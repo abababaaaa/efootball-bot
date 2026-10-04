@@ -55,7 +55,9 @@ public sealed class MyLeagueScenario : ScenarioBase
                             return t.Equals("OK", StringComparison.OrdinalIgnoreCase)
                                    || t.Equals("okay", StringComparison.OrdinalIgnoreCase);
                         });
-                        bool hasPopup = isKeyMatch || hasOk
+                        bool hasExpired = p.Ocr.Contains("过期") || p.Ocr.ContainsJoined("过期")
+                                          || p.Ocr.Contains("获取新物品");
+                        bool hasPopup = isKeyMatch || hasOk || hasExpired
                                         || p.Ocr.Contains("实时更新")
                                         || p.Ocr.Contains("下一步")
                                         || p.Ocr.Contains("确定") || p.Ocr.Contains("物品");
@@ -66,6 +68,15 @@ public sealed class MyLeagueScenario : ScenarioBase
                             await E.Pad.Dpad(PadDir.Up);
                             await E.Pad.Wait(400, Ct);
                             await E.Pad.Confirm();
+                        }
+                        else if (hasExpired)
+                        {
+                            // 「物品已过期」弹窗只有一个 OK 且默认聚焦，立刻按 A
+                            Log("物品已过期弹窗，立即确认", LogLevel.Info);
+                            if (!await E.PressButtonAsync(new[] { "ok" }, Ct, exactMatch: true))
+                            {
+                                await E.Pad.Confirm();
+                            }
                         }
                         else if (hasOk)
                         {
@@ -197,6 +208,21 @@ public sealed class MyLeagueScenario : ScenarioBase
     }
 
     /// <summary>
+    /// 判断是否已翻到「使用的物品」全屏页。粉色标题 OCR 经常识别失败，不能只靠标题词：
+    /// ① 标题「使用的物品」/空列表「没有正在使用」命中；
+    /// ② 物品名出现在屏幕左半部（词左缘 x&lt;0.50）——全屏页物品名从 x≈0.05 开始，
+    ///    而主页右侧预览栏的物品名在 x&gt;0.65，天然区分翻页是否成功。
+    /// </summary>
+    private static bool IsInUseItemsPage(OcrResult ocr)
+    {
+        if (ocr.Contains("使用的物品") || ocr.Contains("没有正在使用")) return true;
+        return ocr.MergedWords.Any(w => w.X < 0.50 &&
+            (OcrText.Norm(w.Text).Contains("经验值")
+             || OcrText.Norm(w.Text).Contains("主教练强化")
+             || OcrText.Norm(w.Text).Contains("杰出")));
+    }
+
+    /// <summary>
     /// 联赛主页右摇杆向右翻页查看「使用的物品」，逐项判定哪个道具已生效：
     /// 经验→4x 在用；状态→杰出在用；强化→主教练强化在用。
     /// 全部启用项都在用才跳过；否则前往「兑换积分」购买缺的部分。
@@ -214,12 +240,13 @@ public sealed class MyLeagueScenario : ScenarioBase
         var o = await E.ObserveAsync(Ct);
         o = await PassThroughAsync(o);
 
-        bool inUsePage = o.Ocr.Contains("使用的物品") || o.Ocr.Contains("没有正在使用");
+        bool inUsePage = IsInUseItemsPage(o.Ocr);
         if (!inUsePage)
         {
             await E.Pad.RsFlick(PadDir.Right);
             await E.Pad.Wait(1400, Ct);
             o = await E.ObserveAsync(Ct);
+            inUsePage = IsInUseItemsPage(o.Ocr);
         }
 
         // 2. 逐项判定使用中
