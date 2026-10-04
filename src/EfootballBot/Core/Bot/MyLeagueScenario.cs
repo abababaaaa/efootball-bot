@@ -48,9 +48,16 @@ public sealed class MyLeagueScenario : ScenarioBase
                         var p = await E.ObserveAsync(Ct);
                         p = await PassThroughAsync(p);
                         bool isKeyMatch = p.Ocr.Contains("关键比赛");
-                        bool hasPopup = isKeyMatch
+                        // 「OK」必须独立成词（精确匹配），否则赛程卡上的 "Fukuoka" 会子串命中导致误判
+                        bool hasOk = p.Ocr.Words.Any(w =>
+                        {
+                            string t = OcrText.Norm(w.Text);
+                            return t.Equals("OK", StringComparison.OrdinalIgnoreCase)
+                                   || t.Equals("okay", StringComparison.OrdinalIgnoreCase);
+                        });
+                        bool hasPopup = isKeyMatch || hasOk
                                         || p.Ocr.Contains("实时更新")
-                                        || p.Ocr.Contains("下一步") || p.Ocr.Contains("OK")
+                                        || p.Ocr.Contains("下一步")
                                         || p.Ocr.Contains("确定") || p.Ocr.Contains("物品");
                         if (!hasPopup) break;
                         Log($"联赛主页弹窗（第{popup + 1}轮）：{(isKeyMatch ? "关键比赛" : "其他")}", LogLevel.Info);
@@ -60,7 +67,12 @@ public sealed class MyLeagueScenario : ScenarioBase
                             await E.Pad.Wait(400, Ct);
                             await E.Pad.Confirm();
                         }
-                        else if (!await E.PressButtonAsync(new[] { "ok", "确定", "确认", "下一步", "yes" }, Ct))
+                        else if (hasOk)
+                        {
+                            // OK 弹窗默认焦点在 OK 上，直接 A（不能走 PressButtonAsync 子串匹配，会误点 Fukuoka）
+                            await E.Pad.Confirm();
+                        }
+                        else if (!await E.PressButtonAsync(new[] { "确定", "确认", "下一步" }, Ct))
                         {
                             await E.Pad.Confirm();
                         }

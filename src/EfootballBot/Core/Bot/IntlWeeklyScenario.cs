@@ -504,7 +504,7 @@ public sealed class IntlWeeklyScenario : ScenarioBase
             Log($"赛事等级不是「{target}」，展开下拉选择", LogLevel.Info);
             await E.Pad.Confirm();
             await E.Pad.Wait(1300, Ct);
-            if (!await E.SelectMenuByTextAsync(new[] { target }, Ct, 8))
+            if (!await SelectDifficultyAsync(target))
             {
                 Log($"下拉列表中未定位到「{target}」，B 取消保持原值", LogLevel.Warn);
                 await E.Pad.Back();
@@ -535,6 +535,45 @@ public sealed class IntlWeeklyScenario : ScenarioBase
             await E.Pad.Wait(1500, Ct);
         }
         Log("活动设置完成", LogLevel.Info);
+    }
+
+    /// <summary>
+    /// 难度下拉专用选择：只认蓝色焦点高亮行（A 确认的是焦点行）。
+    /// 黄色标记是「当前保存值」，不是焦点，绝不能按它判断（误选巨星的根因）。
+    /// </summary>
+    private async Task<bool> SelectDifficultyAsync(string target)
+    {
+        for (int i = 0; i < 8; i++)
+        {
+            Ct.ThrowIfCancellationRequested();
+            var o = await E.ObserveAsync(Ct);
+            var w = o.Ocr.Words.FirstOrDefault(x =>
+                OcrText.Norm(x.Text).Equals(target, StringComparison.OrdinalIgnoreCase))
+                ?? o.Ocr.MergedWords.FirstOrDefault(x =>
+                OcrText.Norm(x.Text).Contains(target, StringComparison.OrdinalIgnoreCase));
+            if (w is null)
+            {
+                // 目标还没滚到可视区，继续 Down
+                await E.Pad.Dpad(PadDir.Down);
+                await E.Pad.Wait(350, Ct);
+                continue;
+            }
+            // 焦点行 = 蓝色高亮。测目标词所在行的蓝底占比。
+            var row = new NormRect(
+                Math.Max(0, w.X - 0.06), Math.Max(0, w.Y - w.H * 0.5),
+                Math.Min(1, w.W + 0.30), w.H * 2.2);
+            double blue = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Blue, row);
+            if (blue > 0.20)
+            {
+                Log($"难度「{target}」焦点已就位（blue={blue:F2}），按 A", LogLevel.Info);
+                await E.Pad.Confirm();
+                return true;
+            }
+            Log($"难度「{target}」已见但非焦点行（blue={blue:F2}），继续 Down", LogLevel.Debug);
+            await E.Pad.Dpad(PadDir.Down);
+            await E.Pad.Wait(350, Ct);
+        }
+        return false;
     }
 
     /// <summary>确保开关行值为 开/关；A 切换后复测，最多 3 次，跳页则 B 退回。</summary>
