@@ -538,11 +538,24 @@ public sealed class ScreenClassifier
             && !isWeeklyHub)
         {
             // 比赛结束画面特征：比分牌（如 1-0）+ 球员评分列表 + 左侧「下一步」大按钮
-            bool hasScore = ocr.Words.Any(w => Regex.IsMatch(w.Text, @"^\d+-\d+$"));
+            // 比分 OCR 常被拆成「0」「-」「30」三个词，需同时检查单词与全文拼接
+            bool hasScore = ocr.Words.Any(w => Regex.IsMatch(w.Text, @"^\d+-\d+$"))
+                            || Regex.IsMatch(ocr.JoinedText, @"\d{1,2}[-~:：]\d{1,2}");
             bool hasPlayerRatings = ocr.Words.Count(w => Regex.IsMatch(w.Text, @"^\d+\.\d$")) >= 3;
-            bool postMatchScreen = hasScore && hasPlayerRatings;
-            
-            if (!postMatchScreen)
+            // 备选信号：左侧「下一步」按钮（x<0.35）+ 任意评分（赛后结算页独有组合）
+            bool hasNextLeft = ocr.Words.Any(w =>
+                OcrText.Norm(w.Text) == "下一步" && w.CenterX < 0.35);
+            bool postMatchScreen = (hasScore && hasPlayerRatings)
+                                   || (hasNextLeft && hasPlayerRatings)
+                                   || (hasScore && hasNextLeft);
+
+            if (postMatchScreen)
+            {
+                // 赛后结算页：若 OCR 没认出「球员评价」等 Result 关键词，强制按 Result 处理
+                if (!scores.ContainsKey(GameScreen.Result))
+                    return (GameScreen.Result, 4, new List<string> { "postmatch-shape" });
+            }
+            else
             {
                 double wBtn = FrameAnalyzer.ButtonWhiteRatio(frame, new NormRect(0.02, 0.28, 0.26, 0.42));
                 double bBtn = FrameAnalyzer.ButtonBlueRatio(frame, new NormRect(0.84, 0.89, 0.15, 0.07));
@@ -584,12 +597,14 @@ public sealed class ScreenClassifier
         return (best.Key, best.Value.Score, best.Value.Ev);
     }
 
-    /// <summary>是否为赛后奖励弹窗（积分弹窗 / 收件箱通知），这些弹窗只出现在巡回赛主页之上。</summary>
+    /// <summary>是否为赛后奖励弹窗（积分弹窗 / 收件箱通知 / 联赛积分），这些弹窗只出现在巡回赛主页之上。</summary>
     private static bool HasRewardPopup(OcrResult ocr)
         => ocr.Contains("获得的活动积分")
            || ocr.Contains("距离下个奖励")
            || ocr.Contains("物品已送到收件箱")
-           || ocr.Contains("送到收件箱");
+           || ocr.Contains("送到收件箱")
+           || ocr.Contains("收到我的联赛积分")
+           || ocr.Contains("物品过期");
 
     /// <summary>
     /// 是否为「使用固定智能辅助设置的活动」模态弹窗（标题常被 OCR 逐字拆开，

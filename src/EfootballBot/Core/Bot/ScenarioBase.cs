@@ -58,12 +58,14 @@ public abstract class ScenarioBase
     /// </summary>
     protected async Task<bool> HandleUnknownAsync(Observation o)
     {
-        // 明确的确认弹窗：按 A，不按 B
+        // 明确的确认弹窗（下一步 / OK / 确定 / 确认）：直接按 A，不按 B
         if (o.Is(GameScreen.Dialog)
-            || o.Ocr.Contains("确定") || o.Ocr.Contains("确认") || o.Ocr.Contains("下一步"))
+            || o.Ocr.Contains("下一步") || o.Ocr.Contains("ok")
+            || o.Ocr.Contains("确定") || o.Ocr.Contains("确认"))
         {
-            Log("未识别画面中发现确认按钮，按 A 继续", LogLevel.Debug);
-            await TryConfirmOrEnterAsync(o);
+            Log("未识别画面中发现确认按钮，直接按 A 继续", LogLevel.Debug);
+            await E.Pad.Confirm();
+            await E.Pad.Wait(700, Ct);
             _safeUnknown = 0;
             return false;
         }
@@ -141,12 +143,10 @@ public abstract class ScenarioBase
                     await E.Pad.Wait(900, Ct);
                     break;
                 case GameScreen.Dialog:
-                    Log("处理确认弹窗（指针移动到 OK/确定 再点）", LogLevel.Debug);
-                    if (!await E.PressButtonAsync(new[] { "ok", "确定", "确认", "下一步", "yes" }, Ct))
-                    {
-                        await E.Pad.Confirm();
-                        await E.Pad.Wait(900, Ct);
-                    }
+                    // 弹窗默认焦点通常在「OK/确定」上，直接按 A；失败再走指针移动兜底
+                    Log("处理确认弹窗，直接按 A", LogLevel.Debug);
+                    await E.Pad.Confirm();
+                    await E.Pad.Wait(700, Ct);
                     break;
                 case GameScreen.Disconnected:
                     await E.HandlePopupsAsync(o, Ct);
@@ -447,7 +447,11 @@ public abstract class ScenarioBase
         return true;
     }
 
-    /// <summary>赛后结算 / 奖励 → 逐个按 A 返回。弹窗会停住等人确认，间隔 1~10s 随机。</summary>
+    /// <summary>
+    /// 赛后结算 / 奖励 → 逐个按 A 返回。
+    /// 检测到「下一步 / OK / 确定 / 确认」立即按 A（短等待，不用 1~4s 随机），
+    /// 确保赛后结算页和联赛积分弹窗能被快速清掉。
+    /// </summary>
     protected async Task PostMatchSequenceAsync()
     {
         Log("处理赛后结算与奖励…", LogLevel.Info);
@@ -458,12 +462,25 @@ public abstract class ScenarioBase
         {
             Ct.ThrowIfCancellationRequested();
             var o = await E.ObserveAsync(Ct);
+
+            // 优先：检测到明确的确认按钮 → 立即按 A（赛后结算「下一步」、积分弹窗「OK」等）
+            var btn = o.Ocr.FindFirst("下一步") ?? o.Ocr.FindFirst("ok")
+                      ?? o.Ocr.FindFirst("确定") ?? o.Ocr.FindFirst("确认");
+            if (btn is not null)
+            {
+                Log($"赛后结算：检测到「{btn.Text}」，立即确认", LogLevel.Info);
+                stable = 0;
+                await E.Pad.Confirm();
+                await E.Pad.Wait(700, Ct);
+                continue;
+            }
+
             if (o.Screen is GameScreen.Result or GameScreen.Rewards or GameScreen.FullTime
                 or GameScreen.Dialog or GameScreen.Loading)
             {
                 stable = 0;
                 await E.Pad.Confirm();
-                await E.Pad.HumanWait(Cfg.Timing.IdleTapMinMs, Cfg.Timing.IdleTapMaxMs, Ct);
+                await E.Pad.Wait(700, Ct);
                 continue;
             }
             if (last == o.Screen) stable++;
@@ -471,7 +488,7 @@ public abstract class ScenarioBase
             last = o.Screen;
             if (stable >= 3) break;
             await E.Pad.Confirm();
-            await E.Pad.HumanWait(Cfg.Timing.IdleTapMinMs, Cfg.Timing.IdleTapMaxMs, Ct);
+            await E.Pad.Wait(700, Ct);
         }
     }
 

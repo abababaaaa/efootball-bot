@@ -378,17 +378,16 @@ public sealed class BotEngine : IDisposable
         }
         if (o.Is(GameScreen.Dialog))
         {
-            // 关键比赛弹窗：先按方向键上，再移动指针点击 OK
+            // 关键比赛弹窗：OK 按钮在右下角，需先 Up 把焦点移过去
             if (o.Ocr.Contains("关键比赛") || o.Ocr.Contains("keymatch"))
             {
-                LogInternal("关键比赛确认弹窗：方向上 → OK", LogLevel.Info);
+                LogInternal("关键比赛确认弹窗：方向上 → A", LogLevel.Info);
                 await Pad.Dpad(PadDir.Up);
                 await Task.Delay(500, ct);
             }
-            if (await PressButtonAsync(new[] { "ok", "确定", "确认", "下一步", "yes" }, ct))
-                return true;
+            // 普通弹窗 OK/确定 默认就是焦点，直接按 A
             await Pad.Confirm();
-            await Task.Delay(800, ct);
+            await Task.Delay(700, ct);
             return true;
         }
         return false;
@@ -477,7 +476,15 @@ public sealed class BotEngine : IDisposable
 
             if (focus is null || focusBlue < 0.15)
             {
-                // 找不到指针位置：尝试按方向键右/下让指针落到按钮上
+                // 找不到蓝色焦点：弹窗主按钮（OK/下一步/确定）默认就是焦点，直接按 A。
+                // 只有第 0 轮尝试按一次 → 移动指针，之后都直接按 A 兜底，避免反复 Right 把焦点移走。
+                if (move >= 1)
+                {
+                    LogInternal($"未定位到指针，直接按 A 确认「{target.Text}」", LogLevel.Debug);
+                    await Pad.Confirm();
+                    await Task.Delay(600, ct);
+                    return true;
+                }
                 LogInternal($"未定位到指针，按 → 尝试聚焦「{target.Text}」", LogLevel.Debug);
                 await Pad.Dpad(PadDir.Right);
                 await Task.Delay(400, ct);
@@ -528,17 +535,14 @@ public sealed class BotEngine : IDisposable
     {
         _unknownStreak++;
 
-        // 优先：右下角“下一步”/屏幕中间“确定/确认” → 指针移动到按钮上再按 A
-        var next = o.Ocr.FindFirst("下一步") ?? o.Ocr.FindFirst("确定")
-                   ?? o.Ocr.FindFirst("确认") ?? o.Ocr.FindFirst("ok") ?? o.Ocr.FindFirst("next");
+        // 优先：发现「下一步 / OK / 确定 / 确认」→ 直接按 A（弹窗主按钮默认为焦点）
+        var next = o.Ocr.FindFirst("下一步") ?? o.Ocr.FindFirst("ok")
+                   ?? o.Ocr.FindFirst("确定") ?? o.Ocr.FindFirst("确认") ?? o.Ocr.FindFirst("next");
         if (next is not null)
         {
-            LogInternal($"未识别画面，但发现「{next.Text}」，移动指针点击…", LogLevel.Warn);
-            if (await PressButtonAsync(new[] { "下一步", "确定", "确认", "ok", "next" }, ct))
-                return;
-            // 指针点击失败：保底盲按 A
+            LogInternal($"未识别画面，但发现「{next.Text}」，直接按 A", LogLevel.Warn);
             await Pad.Confirm();
-            await Task.Delay(1500, ct);
+            await Task.Delay(700, ct);
             return;
         }
 
