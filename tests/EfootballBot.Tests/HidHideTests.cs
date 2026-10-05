@@ -150,6 +150,25 @@ public class HidHideTests
     // ---------- Job DTO 往返 ----------
 
     [Fact]
+    public void HidHideConfig_MigrateDefaults_FlipsLegacyOff_OnlyWhenNeverApplied()
+    {
+        // 旧出厂：Enabled=false / HidePhysical=false / 从未应用（黑名单空）→ 迁移翻成默认开
+        var legacy = new EfootballBot.Core.Config.HidHideConfig
+        { Enabled = false, HidePhysicalGamepad = false };
+        legacy.MigrateDefaults();
+        Assert.True(legacy.Enabled);
+        Assert.True(legacy.HidePhysicalGamepad);
+
+        // 已成功应用过（黑名单非空）：用户手动关闭后不再迁移，尊重选择
+        var userOff = new EfootballBot.Core.Config.HidHideConfig
+        { Enabled = false, HidePhysicalGamepad = false };
+        userOff.AppliedBlacklist.Add(@"HID\VID_045E&PID_028E\3&5D59EC1&0&0000");
+        userOff.MigrateDefaults();
+        Assert.False(userOff.Enabled);
+        Assert.False(userOff.HidePhysicalGamepad);
+    }
+
+    [Fact]
     public void HidHideJobDto_JsonRoundTrip()
     {
         var dto = new HidHideConfigJob.HidHideJobDto

@@ -32,7 +32,7 @@ public static class WorkerProgram
 
         // 初始化文件日志（Worker 独立进程，需自己初始化）
         var cfg = AppConfig.Load();
-        FileLogger.Instance.Initialize(cfg.FileLogEnabled, cfg.FileLogLevel, cfg.MaxLogFiles);
+        FileLogger.Instance.Initialize(cfg.FileLogEnabled, cfg.FileLogLevel, cfg.MaxLogFiles, cfg.LogRetentionDays);
 
         if (console)
         {

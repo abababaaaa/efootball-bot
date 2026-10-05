@@ -62,7 +62,7 @@ public partial class MainWindow : Window
         LoadConfigToUi();
 
         // 初始化文件日志（早于 BotEngine 创建，否则第一条日志会丢失）
-        FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles);
+        FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles, _cfg.LogRetentionDays);
 
         // 启动后自动检查更新（不阻塞 UI）
         _ = AutoCheckUpdateOnStartupAsync();

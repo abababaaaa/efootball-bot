@@ -60,6 +60,7 @@ public partial class MainWindow
         // 日志设置
         ChkFileLog.IsChecked = _cfg.FileLogEnabled;
         TxtMaxLogFiles.Text = _cfg.MaxLogFiles.ToString();
+        TxtLogRetentionDays.Text = _cfg.LogRetentionDays.ToString();
         string[] levelOptions = { "Info", "Warn", "Error", "Debug" };
         for (int i = 0; i < levelOptions.Length; i++)
             if (_cfg.FileLogLevel.Equals(levelOptions[i], StringComparison.OrdinalIgnoreCase)) { CmbFileLogLevel.SelectedIndex = i; break; }
@@ -80,6 +81,13 @@ public partial class MainWindow
         ChkCheckOnStartup.IsChecked = _cfg.Update.CheckOnStartup;
         ChkIncludePrerelease.IsChecked = _cfg.Update.IncludePrerelease;
         ChkAutoDownloadInstall.IsChecked = _cfg.Update.AutoDownloadInstall;
+
+        // 手柄隔离（赋值会触发 Changed：加载期间必须屏蔽，否则每次启动误弹一次提权配置）
+        _loadingConfig = true;
+        ChkHidHideEnabled.IsChecked = _cfg.HidHide.Enabled;
+        ChkHidePhysical.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
+        _loadingConfig = false;
+        _ = RefreshHidHidePanelAsync();
     }
 
     private void SaveUiToConfig()
@@ -119,6 +127,8 @@ public partial class MainWindow
         _cfg.FileLogEnabled = ChkFileLog.IsChecked == true;
         if (int.TryParse(TxtMaxLogFiles.Text, out int mf) && mf >= 1 && mf <= 50)
             _cfg.MaxLogFiles = mf;
+        if (int.TryParse(TxtLogRetentionDays.Text, out int rd) && rd >= 1 && rd <= 365)
+            _cfg.LogRetentionDays = rd;
         if (CmbFileLogLevel.SelectedItem is ComboBoxItem li)
             _cfg.FileLogLevel = (string)li.Content;
 
@@ -158,12 +168,15 @@ public partial class MainWindow
         RefreshHotkeyUi();
 
         // 文件日志配置变更 → 重新初始化
-        FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles);
+        FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles, _cfg.LogRetentionDays);
 
         // 自动更新（仓库地址已硬编码，不持久化）
         _cfg.Update.CheckOnStartup = ChkCheckOnStartup.IsChecked == true;
         _cfg.Update.IncludePrerelease = ChkIncludePrerelease.IsChecked == true;
         _cfg.Update.AutoDownloadInstall = ChkAutoDownloadInstall.IsChecked == true;
+
+        // 手柄隔离（Enabled/GameImagePath/AppliedBlacklist 由开关提权动作维护，此处只同步复选框）
+        _cfg.HidHide.HidePhysicalGamepad = ChkHidePhysical.IsChecked == true;
 
         _cfg.Save();
     }
@@ -410,5 +423,183 @@ public partial class MainWindow
     private void HideUpdateBanner()
     {
         UpdateBanner.Visibility = Visibility.Collapsed;
+    }
+
+    // ================= 手柄隔离（HidHide） =================
+
+    private bool _hidHideBusy;
+
+    private void ChkHidePhysical_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingConfig) return;
+        _cfg.HidHide.HidePhysicalGamepad = ChkHidePhysical.IsChecked == true;
+        _cfg.Save();
+        // 不立即弹 UAC：下次启动挂机时由计划任务 sync 静默生效；需要立即生效可关再开主开关
+        if (_cfg.HidHide.Enabled && TxtHidHideStatus is not null)
+            TxtHidHideStatus.Text = ChkHidePhysical.IsChecked == true
+                ? "真实手柄将在下次启动挂机时一并隐藏"
+                : "真实手柄隐藏将在下次启动挂机时关闭";
+    }
+
+    /// <summary>查询 HidHide 状态并刷新开关下方状态行；默认开启且未就绪时自动触发一次提权配置。</summary>
+    private async Task RefreshHidHidePanelAsync(bool autoSetup = true)
+    {
+        var status = await Task.Run(HidHideManager.QueryStatus);
+        bool needSetup = false;
+        await Dispatcher.InvokeAsync(() =>
+        {
+            if (!status.DriverInstalled)
+            {
+                TxtHidHideStatus.Text = _cfg.HidHide.Enabled
+                    ? "待配置：驱动未安装，开启开关时自动下载安装"
+                    : "驱动未安装";
+                needSetup = _cfg.HidHide.Enabled;
+            }
+            else if (status.Error is not null)
+            {
+                TxtHidHideStatus.Text = $"服务未就绪：{status.Error}";
+                needSetup = _cfg.HidHide.Enabled; // 服务停止/未激活，setup 会拉起
+            }
+            else if (_cfg.HidHide.Enabled)
+            {
+                // 设备离线（未挂机）时不打扰：Active 且已有快照即视为已配置，变化由计划任务 sync 兜底
+                bool onlineUnhidden = status.VigemInstanceCount > 0 && !status.VigemHidden;
+                TxtHidHideStatus.Text = (!status.Active || onlineUnhidden)
+                    ? "待配置：尚未对当前虚拟手柄生效"
+                    : "已开启：虚拟手柄仅游戏内可见";
+                needSetup = !status.Active || onlineUnhidden;
+            }
+            else
+            {
+                TxtHidHideStatus.Text = "已关闭：虚拟手柄对所有应用可见";
+            }
+        });
+
+        if (autoSetup && needSetup && !_hidHideBusy)
+            _ = SetHidHideEnabledAsync(true, automatic: true);
+    }
+
+    /// <summary>提权执行 job 并轮询结果文件（setup 含驱动下载，超时放宽到 5 分钟）。</summary>
+    private async Task<HidHideConfigJob.HidHideResultDto?> RunHidHideJobAsync(HidHideConfigJob.HidHideJobDto job)
+    {
+        string jobPath = Path.Combine(Path.GetTempPath(), $"hidhide_{Guid.NewGuid():N}.json");
+        File.WriteAllText(jobPath, System.Text.Json.JsonSerializer.Serialize(job));
+
+        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = Environment.ProcessPath!,
+            Arguments = $"--hidhide-config \"{jobPath}\"",
+            Verb = "runas",
+            UseShellExecute = true,
+        });
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        while (sw.Elapsed.TotalSeconds < 300)
+        {
+            try
+            {
+                var text = await File.ReadAllTextAsync(jobPath);
+                if (text.Contains("\"Success\"") || text.Contains("\"success\""))
+                    break;
+            }
+            catch { /* 文件被占用：子进程正在写 */ }
+            await Task.Delay(500);
+        }
+
+        try
+        {
+            var result = System.Text.Json.JsonSerializer.Deserialize<HidHideConfigJob.HidHideResultDto>(
+                await File.ReadAllTextAsync(jobPath));
+            return result;
+        }
+        catch
+        {
+            return null; // 取消授权 / 超时 / 文件异常
+        }
+        finally
+        {
+            try { File.Delete(jobPath); } catch { }
+        }
+    }
+
+    /// <summary>主开关切换：on=自动装驱动+配置（setup），off=解除（clear）。</summary>
+    private async Task SetHidHideEnabledAsync(bool on, bool automatic)
+    {
+        if (_hidHideBusy) return;
+        _hidHideBusy = true;
+        ChkHidHideEnabled.IsEnabled = false;
+        try
+        {
+            TxtHidHideStatus.Text = on
+                ? (automatic ? "首次启用正在自动配置，请在授权窗口点「是」…" : "正在开启手柄隔离，请在授权窗口点「是」…")
+                : "正在关闭手柄隔离，请在授权窗口点「是」…";
+
+            var job = new HidHideConfigJob.HidHideJobDto
+            {
+                Mode = on ? "setup" : "clear",
+                HideVigem = true,
+                HidePhysical = _cfg.HidHide.HidePhysicalGamepad,
+                GameImagePath = _cfg.HidHide.GameImagePath,
+            };
+
+            HidHideConfigJob.HidHideResultDto? result;
+            try
+            {
+                result = await RunHidHideJobAsync(job);
+            }
+            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
+            {
+                result = null; // 用户拒绝 UAC
+            }
+
+            if (result is null)
+            {
+                // 授权被拒/超时：开关回退到实际状态，意图保留在配置中，下次启动自动重试
+                _loadingConfig = true;
+                ChkHidHideEnabled.IsChecked = !on ? true : _cfg.HidHide.Enabled;
+                _loadingConfig = false;
+                TxtHidHideStatus.Text = "需要管理员授权才能切换，下次启动应用时重试";
+                return;
+            }
+
+            if (result.Success)
+            {
+                _cfg.HidHide.Enabled = on;
+                if (on)
+                {
+                    if (!string.IsNullOrWhiteSpace(result.ResolvedGameImagePath))
+                        _cfg.HidHide.GameImagePath = result.ResolvedGameImagePath;
+                    // job 只返回本次新增条目，快照须合并（幂等重跑新增为 0 时不能清空，否则 clear 无法回滚）
+                    _cfg.HidHide.AppliedBlacklist =
+                        HidHideManager.MergeInto(_cfg.HidHide.AppliedBlacklist, result.AppliedBlacklist);
+                }
+                _cfg.Save();
+                AppendLog(on
+                    ? (result.AppliedBlacklist.Count > 0
+                        ? $"手柄隔离已开启（黑名单托管 {result.AppliedBlacklist.Count} 项）。"
+                        : "手柄隔离已开启，配置已生效。")
+                    : "手柄隔离已关闭，虚拟手柄恢复全局可见。", LogLevel.Info);
+                TxtHidHideStatus.Text = result.Message;
+            }
+            else
+            {
+                _loadingConfig = true;
+                ChkHidHideEnabled.IsChecked = !on;
+                _loadingConfig = false;
+                TxtHidHideStatus.Text = $"配置失败：{result.Error}";
+            }
+        }
+        finally
+        {
+            ChkHidHideEnabled.IsEnabled = true;
+            _hidHideBusy = false;
+        }
+    }
+
+    private void ChkHidHideEnabled_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingConfig) return;
+        bool on = ChkHidHideEnabled.IsChecked == true;
+        _ = SetHidHideEnabledAsync(on, automatic: false);
     }
 }

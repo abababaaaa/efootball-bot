@@ -121,54 +121,113 @@ public static class HidHideManager
 
     // ---------- 写操作（提权上下文调用）----------
 
+    /// <summary>国服/国际服游戏进程名（白名单解析用）。</summary>
+    private static readonly string[] GameProcessNames = { "eFootballOnline", "eFootball" };
+
     /// <summary>
-    /// 应用隔离：白名单并入游戏完整镜像路径；黑名单并入当前 ViGEm 实例（hideVigem）
-    /// 与物理手柄实例（hidePhysical）。只追加、不删除已有条目（旧 ViGEm 实例路径残留无害）。
-    /// 返回本次实际新增的黑名单条目（GUI 快照存配置，供解除隔离时精确回滚）。
+    /// 解析当前运行中游戏的完整镜像路径（白名单条目）。两个进程名都找不到返回 null。
     /// </summary>
-    public static (bool Success, string Error, List<string> AppliedBlacklist) ApplyIsolation(
-        bool hideVigem, bool hidePhysical, string gameImagePath)
+    public static string? ResolveGameImagePath()
+    {
+        foreach (var name in GameProcessNames)
+        {
+            try
+            {
+                var procs = global::System.Diagnostics.Process.GetProcessesByName(name);
+                foreach (var p in procs)
+                {
+                    try
+                    {
+                        string? path = p.MainModule?.FileName;
+                        if (!string.IsNullOrWhiteSpace(path)) return path;
+                    }
+                    finally { p.Dispose(); }
+                }
+            }
+            catch { /* 权限不足或进程退出，试下一个 */ }
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 枚举 ViGEm 虚拟手柄实例；设备当前不在线（用户没在挂机）时临时创建一个，
+    /// 枚举完即断开。实例路径真机实测跨连接稳定（同机同序列），且黑名单持久化，
+    /// 故配置时不要求挂机正在运行。
+    /// </summary>
+    private static List<string> FindViGEmInstancesWithProbe()
+    {
+        var vigem = HidDeviceEnumerator.FindViGEmInstances();
+        if (vigem.Count > 0) return vigem;
+
+        VirtualGamepad360? probe = null;
+        try
+        {
+            probe = new VirtualGamepad360();
+            probe.Connect();
+            for (int i = 0; i < 10; i++)
+            {
+                vigem = HidDeviceEnumerator.FindViGEmInstances();
+                if (vigem.Count > 0) return vigem;
+                Thread.Sleep(300);
+            }
+        }
+        catch { /* ViGEmBus 未装等情况：返回空，由调用方报错 */ }
+        finally
+        {
+            try { probe?.Dispose(); } catch { }
+        }
+        return vigem;
+    }
+
+    /// <summary>
+    /// 应用隔离：白名单并入游戏完整镜像路径（未传则自动从运行中的游戏进程解析）；
+    /// 黑名单并入当前 ViGEm 实例（hideVigem，设备不在线时临时创建探测）
+    /// 与物理手柄实例（hidePhysical）。只追加、不删除已有条目（旧实例路径残留无害）。
+    /// 返回本次确认由本功能托管的黑名单条目全量（ViGEm/物理当前实例，去重）：
+    /// GUI/sync 合并入配置快照，供解除隔离时精确回滚（ViGEm 另按前缀兜底清理）。
+    /// </summary>
+    public static (bool Success, string Error, List<string> AppliedBlacklist, string ResolvedGameImagePath) ApplyIsolation(
+        bool hideVigem, bool hidePhysical, string? gameImagePath)
     {
         try
         {
             var wl = HidHideIoctl.GetMultiString(HidHideIoctl.IoctlGetWhitelist);
             var bl = HidHideIoctl.GetMultiString(HidHideIoctl.IoctlGetBlacklist);
 
-            var toAddBl = new List<string>();
+            var managed = new List<string>();
             if (hideVigem)
             {
-                var vigem = HidDeviceEnumerator.FindViGEmInstances();
+                var vigem = FindViGEmInstancesWithProbe();
                 if (vigem.Count == 0)
-                    return (false, "未枚举到 ViGEm 虚拟手柄设备（请先连接虚拟手柄或启动一次挂机）", new());
-                foreach (var v in vigem)
-                    if (!bl.Contains(v, StringComparer.OrdinalIgnoreCase)) toAddBl.Add(v);
+                    return (false, "未枚举到 ViGEm 虚拟手柄设备（请确认 ViGEmBus 驱动已安装）", new(), gameImagePath ?? "");
+                managed.AddRange(vigem);
             }
             if (hidePhysical)
-            {
-                var physical = HidDeviceEnumerator.FindPhysicalGamepadInstances();
-                foreach (var p in physical)
-                    if (!bl.Contains(p, StringComparer.OrdinalIgnoreCase)) toAddBl.Add(p);
-            }
+                managed.AddRange(HidDeviceEnumerator.FindPhysicalGamepadInstances());
 
-            var newWl = string.IsNullOrWhiteSpace(gameImagePath)
+            // 白名单路径：显式传入优先；否则尝试从运行中的游戏进程快照
+            string? resolved = string.IsNullOrWhiteSpace(gameImagePath)
+                ? ResolveGameImagePath()
+                : gameImagePath;
+
+            var newWl = string.IsNullOrWhiteSpace(resolved)
                 ? wl.ToList()
-                : MergeInto(wl, new[] { gameImagePath });
-            var newBl = MergeInto(bl, toAddBl);
+                : MergeInto(wl, new[] { resolved! });
+            var newBl = MergeInto(bl, managed);
 
             HidHideIoctl.SetMultiString(HidHideIoctl.IoctlSetWhitelist, newWl);
             HidHideIoctl.SetMultiString(HidHideIoctl.IoctlSetBlacklist, newBl);
             HidHideIoctl.SetActive(true);
-            return (true, "", toAddBl);
+            return (true, "", managed.Distinct(StringComparer.OrdinalIgnoreCase).ToList(), resolved ?? "");
         }
         catch (Exception ex)
         {
-            return (false, ex.Message, new());
+            return (false, ex.Message, new(), gameImagePath ?? "");
         }
     }
 
     /// <summary>
-    /// 解除隔离：黑名单移除全部 ViGEm 前缀条目 + 快照条目；白名单移除游戏路径。
-    /// 用户主动操作，UAC 一次可接受。
+    /// 解除隔离：黑名单移除全部 ViGEm 前缀条目 + 快照条目；白名单移除游戏路径；Active 关闭。
     /// </summary>
     public static (bool Success, string Error) ClearIsolation(
         IReadOnlyList<string> appliedBlacklist, string gameImagePath)
@@ -186,6 +245,7 @@ public static class HidHideManager
                 HidHideIoctl.SetMultiString(HidHideIoctl.IoctlSetWhitelist,
                     RemoveAll(wl, new[] { gameImagePath }));
             }
+            HidHideIoctl.SetActive(false);
             return (true, "");
         }
         catch (Exception ex)

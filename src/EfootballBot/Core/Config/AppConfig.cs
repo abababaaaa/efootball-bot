@@ -203,17 +203,31 @@ public sealed class UpdateConfig
 /// <summary>手柄隔离（HidHide）配置。驱动侧持久化到注册表，此处仅存 UI 快照与回滚清单。</summary>
 public sealed class HidHideConfig
 {
-    /// <summary>已应用隔离（虚拟手柄已加入黑名单）。</summary>
-    public bool Enabled { get; set; }
+    /// <summary>已应用隔离（虚拟手柄已加入黑名单）。默认开启：首次由提权子进程自动完成配置。</summary>
+    public bool Enabled { get; set; } = true;
 
-    /// <summary>同时隐藏真实手柄（默认关；开启期间 HID 层应用看不到真实手柄）。</summary>
-    public bool HidePhysicalGamepad { get; set; }
+    /// <summary>同时隐藏真实手柄（默认开；开启期间 HID 层应用看不到真实手柄，可随时关闭）。</summary>
+    public bool HidePhysicalGamepad { get; set; } = true;
 
     /// <summary>白名单游戏的完整镜像路径快照（应用隔离时快照，游戏未运行时无法更新）。</summary>
     public string GameImagePath { get; set; } = "";
 
     /// <summary>本次隔离实际加入的黑名单条目快照（解除隔离时精确回滚）。</summary>
     public List<string> AppliedBlacklist { get; set; } = new();
+
+    /// <summary>
+    /// 老默认迁移：从未成功应用过隔离（AppliedBlacklist 为空，即旧出厂 Enabled=false 配置）
+    /// → 翻成新默认（隔离开 + 真实手柄隐藏开）。成功应用/解除过一次后不再干预，尊重用户选择。
+    /// 只改内存，首次 Save 时落盘（同 TimingConfig 迁移模式）。
+    /// </summary>
+    public void MigrateDefaults()
+    {
+        if (AppliedBlacklist.Count == 0)
+        {
+            Enabled = true;
+            HidePhysicalGamepad = true;
+        }
+    }
 }
 
 public sealed class ScreenCalibration
@@ -249,6 +263,8 @@ public sealed class AppConfig
     // —— 设置面板：日志 ——
     public bool FileLogEnabled { get; set; } = true;
     public int MaxLogFiles { get; set; } = 10;
+    /// <summary>日志保留天数：启动时删除超过该天数的旧日志。</summary>
+    public int LogRetentionDays { get; set; } = 7;
     public string FileLogLevel { get; set; } = "Debug";
 
     // —— UI 偏好 ——
@@ -285,6 +301,7 @@ public sealed class AppConfig
             {
                 var cfg = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(ConfigPath), JsonOpts) ?? new AppConfig();
                 cfg.Timing.MigrateIdleTapDefaults();
+                cfg.HidHide.MigrateDefaults();
                 return cfg;
             }
         }

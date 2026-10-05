@@ -102,15 +102,15 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>把当前热键配置同步到三个模块面板的提示和预览文本。</summary>
+    /// <summary>把当前热键配置同步到三个模块面板的提示和预览文本（前缀文字 XAML 中已有，只赋值）。</summary>
     private void RefreshHotkeyUi()
     {
         string label = _cfg.Hotkey.Enabled
-            ? $"停止热键：{_cfg.Hotkey.DisplayString()}"
-            : "停止热键：已禁用";
+            ? _cfg.Hotkey.DisplayString()
+            : "已禁用";
         TxtLeagueHotkey.Text = label;
         TxtWeeklyHotkey.Text = label;
         TxtCnHotkey.Text = label;
-        TxtHotkeyPreview.Text = $"当前热键：{_cfg.Hotkey.DisplayString()}";
+        TxtHotkeyPreview.Text = label;
     }
 }

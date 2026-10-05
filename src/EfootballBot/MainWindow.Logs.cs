@@ -39,7 +39,7 @@ public partial class MainWindow
             },
         };
         LogList.Items.Add(tb);
-        while (LogList.Items.Count > 500) LogList.Items.RemoveAt(0);
+        while (LogList.Items.Count > 300) LogList.Items.RemoveAt(0);
         LogList.ScrollIntoView(tb);
     }
 
@@ -71,7 +71,9 @@ public partial class MainWindow
                 LogFileContent.Items.Clear();
                 return;
             }
-            var files = Directory.GetFiles(FileLogger.LogDir, "*.log")
+            var files = new[] { "*.yml", "*.log", "*.txt" }
+                .SelectMany(p => Directory.GetFiles(FileLogger.LogDir, p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
                 .Select(f => new FileInfo(f))
                 .OrderByDescending(f => f.CreationTime)
                 .ToList();
@@ -137,21 +139,35 @@ public partial class MainWindow
             var brushError = (Brush)FindResource("Danger");
             var brushOk = (Brush)FindResource("AccentGlow");
 
-            foreach (var line in lines)
+            // YAML 日志行：- {time: "...", level: "INFO", msg: "..."}
+            var yamlLine = new System.Text.RegularExpressions.Regex(
+                @"^- \{time: ""(?<t>.*?)"", level: ""(?<l>.*?)"", msg: ""(?<m>.*)""\}\s*$");
+            int shown = 0;
+            foreach (var raw in lines)
             {
+                string line = raw;
+                string level = "";
+                var m = yamlLine.Match(raw);
+                if (m.Success)
+                {
+                    level = m.Groups["l"].Value;
+                    string msg = m.Groups["m"].Value.Replace("\\\"", "\"").Replace("\\\\", "\\");
+                    line = $"[{m.Groups["t"].Value}] [{level}] {msg}";
+                }
                 Brush b = brushInfo;
-                if (line.Contains("[ERROR]")) b = brushError;
-                else if (line.Contains("[WARN]")) b = brushWarn;
-                else if (line.Contains("[OK]")) b = brushOk;
+                if (line.Contains("[ERROR]") || level == "ERROR") b = brushError;
+                else if (line.Contains("[WARN]") || level == "WARN") b = brushWarn;
+                else if (line.Contains("[OK]") || level == "OK") b = brushOk;
                 LogFileContent.Items.Add(new TextBlock
                 {
                     Text = line,
                     Foreground = b,
                     TextWrapping = TextWrapping.NoWrap,
                 });
+                shown++;
             }
 
-            LogFileStatus.Text = $"{path} | {lines.Length} 行";
+            LogFileStatus.Text = $"{path} | {shown} 条日志";
         }
         catch (Exception ex)
         {

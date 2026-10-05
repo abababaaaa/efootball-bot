@@ -28,86 +28,85 @@ public static partial class HidHideInstaller
 
     private static string? GithubToken => Environment.GetEnvironmentVariable("GITHUB_TOKEN");
 
-    /// <summary>下载并静默安装最新版 HidHide。失败时打开官方 Release 页（浏览器手动路径）。</summary>
-    public static async Task<(bool Ok, string Message)> DownloadAndInstallAsync(
-        IProgress<string>? progress = null)
+    /// <summary>查询最新正式版 x64 安装器下载 URL。失败返回 null（out 带错误文案）。</summary>
+    public static async Task<(string? Url, string Error)> QueryLatestSetupUrlAsync()
     {
-        string? msiPath = null;
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
+        http.DefaultRequestHeaders.UserAgent.ParseAdd("EfootballBot");
+        if (!string.IsNullOrWhiteSpace(GithubToken))
+            http.DefaultRequestHeaders.Authorization = new
+                global::System.Net.Http.Headers.AuthenticationHeaderValue("token", GithubToken);
+
+        using var resp = await http.GetAsync(ReleasesApi);
+        if ((int)resp.StatusCode is 403 or 429)
+            return (null, "GitHub API 限流，请稍后再试或配置 GITHUB_TOKEN 环境变量");
+        resp.EnsureSuccessStatusCode();
+
+        var releases = await resp.Content.ReadFromJsonAsync<List<GhRelease>>(
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        var asset = (releases ?? new())
+            .Where(r => !r.Prerelease)
+            .SelectMany(r => r.Assets)
+            .FirstOrDefault(a => IsHidHideSetupAsset(a.Name));
+        return asset is null
+            ? (null, "官方 Release 未找到 x64 安装器资产，请手动下载安装")
+            : (asset.Browser_Download_Url, "");
+    }
+
+    /// <summary>
+    /// 下载安装器并静默安装。调用方应已具备管理员权限（--hidhide-config 提权子进程）。
+    /// 不开浏览器、不弹 UAC（高权限下 Burn bundle /quiet 直接执行）。
+    /// </summary>
+    public static async Task<(bool Ok, string Message)> InstallElevatedAsync(IProgress<string>? progress = null)
+    {
+        string? setupPath = null;
         try
         {
-            // 1. 查最新 Release（有 GITHUB_TOKEN 则认证请求）
             progress?.Report("正在查询 Nefarius/HidHide 最新版本…");
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(20) };
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("EfootballBot");
-            if (!string.IsNullOrWhiteSpace(GithubToken))
-                http.DefaultRequestHeaders.Authorization = new
-                    global::System.Net.Http.Headers.AuthenticationHeaderValue("token", GithubToken);
+            var (url, err) = await QueryLatestSetupUrlAsync();
+            if (url is null) return (false, err);
 
-            using var resp = await http.GetAsync(ReleasesApi);
-            if ((int)resp.StatusCode is 403 or 429)
-                return (false, "GitHub API 限流，请稍后再试或配置 GITHUB_TOKEN 环境变量");
-            resp.EnsureSuccessStatusCode();
-
-            var releases = await resp.Content.ReadFromJsonAsync<List<GhRelease>>(
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-            var asset = (releases ?? new())
-                .Where(r => !r.Prerelease)
-                .SelectMany(r => r.Assets)
-                .FirstOrDefault(a => IsHidHideSetupAsset(a.Name));
-            if (asset is null)
-                return (false, "官方 Release 未找到 x64 安装器资产，请手动下载安装");
-
-            // 2. 下载到唯一临时路径（来源 URL 固定为官方 Release，best-effort 校验：非空 + 合理大小）
-            progress?.Report($"下载 {asset.Name}…");
-            string tempPath = Path.Combine(Path.GetTempPath(), $"HidHideSetup_{Guid.NewGuid():N}.exe");
-            using (var dl = await http.GetAsync(asset.Browser_Download_Url, HttpCompletionOption.ResponseHeadersRead))
+            progress?.Report("下载 HidHide 安装器…");
+            setupPath = Path.Combine(Path.GetTempPath(), $"HidHideSetup_{Guid.NewGuid():N}.exe");
+            using (var http = new HttpClient { Timeout = TimeSpan.FromMinutes(5) })
             {
+                http.DefaultRequestHeaders.UserAgent.ParseAdd("EfootballBot");
+                using var dl = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
                 dl.EnsureSuccessStatusCode();
                 await using var src = await dl.Content.ReadAsStreamAsync();
-                await using var file = new FileStream(tempPath, FileMode.Create, FileAccess.Write, FileShare.None);
+                await using var file = new FileStream(setupPath, FileMode.Create, FileAccess.Write, FileShare.None);
                 await src.CopyToAsync(file);
             }
-            msiPath = tempPath;
-            if (new FileInfo(tempPath).Length < 1024 * 1024)
+            if (new FileInfo(setupPath).Length < 1024 * 1024)
                 throw new InvalidDataException("下载的安装器异常（小于 1MB），已中止");
 
-            // 3. 静默安装（Burn bundle manifest 要求管理员 → 自动触发 UAC）
-            progress?.Report("启动安装器，请在 UAC 窗口确认…");
+            progress?.Report("静默安装 HidHide…");
             using var proc = Process.Start(new ProcessStartInfo
             {
-                FileName = tempPath,
+                FileName = setupPath,
                 Arguments = "/quiet /norestart",
-                UseShellExecute = true,
+                UseShellExecute = false, // 已是高权限进程，直接创建不再弹 UAC
             }) ?? throw new InvalidOperationException("安装器启动失败");
             await proc.WaitForExitAsync();
+            if (proc.ExitCode != 0)
+                return (false, $"安装器退出码 {proc.ExitCode}");
 
-            // 4. 轮询驱动服务就绪（≤15s；安装器退出后驱动注册可能滞后）
-            progress?.Report("等待驱动服务就绪…");
-            for (int i = 0; i < 15; i++)
+            // 轮询驱动服务就绪（≤20s；安装器退出后驱动注册可能滞后）
+            for (int i = 0; i < 20; i++)
             {
                 if (HidHideManager.IsDriverInstalled())
                     return (true, "HidHide 驱动安装成功");
                 await Task.Delay(1000);
             }
-            return (false, "安装器已执行但未检测到驱动服务，请重启应用或重启电脑后重试");
+            return (false, "安装器已执行但未检测到驱动服务，请重启电脑后重试");
         }
         catch (Exception ex)
         {
-            // 失败回退：打开官方 Release 页手动安装
-            try
-            {
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = "https://github.com/Nefarius/HidHide/releases/latest",
-                    UseShellExecute = true,
-                });
-            }
-            catch { }
-            return (false, $"自动安装失败（{ex.Message}）。已打开官方下载页，请手动安装后重试。");
+            return (false, $"自动安装失败：{ex.Message}");
         }
         finally
         {
-            if (msiPath is not null) { try { File.Delete(msiPath); } catch { } }
+            if (setupPath is not null) { try { File.Delete(setupPath); } catch { } }
         }
     }
 }

@@ -5,9 +5,9 @@ using EfootballBot.Core.Bot;
 namespace EfootballBot.Core.Logging;
 
 /// <summary>
-/// 单例文件日志写入器。启动时创建 logs\bot-YYYYMMDD-HHmmss.log，
-/// 接收 BotEngine.Log 事件写入（含 Debug 级），UI 实时日志仍保持跳过 Debug。
-/// 旧日志在启动时按 MaxLogFiles 清理。
+/// 单例文件日志写入器。启动时创建 logs\bot-YYYYMMDD-HHmmss-PID.yml（YAML / UTF-8 带 BOM，
+/// 记事本可直接双击打开），接收 BotEngine.Log 事件写入（含 Debug 级），UI 实时日志仍保持跳过 Debug。
+/// 旧日志在启动时按「保留天数 + 保留数量」双重条件清理（兼容清理历史 .log/.txt）。
 /// </summary>
 public sealed class FileLogger : IDisposable
 {
@@ -33,7 +33,8 @@ public sealed class FileLogger : IDisposable
     /// <param name="enabled">是否启用文件日志</param>
     /// <param name="minLevel">最低写入级别，低于此级别的跳过</param>
     /// <param name="maxFiles">保留的最大日志文件数（按创建时间倒序）</param>
-    public void Initialize(bool enabled, string minLevel, int maxFiles)
+    /// <param name="retentionDays">保留天数，早于该天数的日志一律删除</param>
+    public void Initialize(bool enabled, string minLevel, int maxFiles, int retentionDays)
     {
         _enabled = enabled;
         _minLevel = ParseLevel(minLevel);
@@ -52,14 +53,16 @@ public sealed class FileLogger : IDisposable
         }
 
         Directory.CreateDirectory(LogDir);
-        CleanupOldLogs(maxFiles);
+        CleanupOldLogs(maxFiles, retentionDays);
 
         // 文件名带 PID：GUI 与 Worker 子进程同秒启动时不会撞同名文件
-        string filename = $"bot-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}.log";
+        string filename = $"bot-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}.yml";
         CurrentLogPath = Path.Combine(LogDir, filename);
         try
         {
-            _writer = new StreamWriter(CurrentLogPath, append: false, encoding: Encoding.UTF8)
+            // UTF-8 带 BOM：任何版本的记事本双击打开中文都不乱码
+            _writer = new StreamWriter(CurrentLogPath, append: false,
+                    encoding: new UTF8Encoding(encoderShouldEmitUTF8Identifier: true))
             {
                 AutoFlush = true
             };
@@ -76,7 +79,12 @@ public sealed class FileLogger : IDisposable
         {
             try
             {
-                _writer.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INFO]   === 日志会话开始：{filename} ===");
+                _writer.WriteLine("# eFootball 挂机助手运行日志（YAML / UTF-8，记事本可直接打开）");
+                _writer.WriteLine($"session: \"{filename}\"");
+                _writer.WriteLine($"pid: {Environment.ProcessId}");
+                _writer.WriteLine($"started: \"{DateTime.Now:yyyy-MM-dd HH:mm:ss}\"");
+                _writer.WriteLine("logs:");
+                WriteYamlLine(LogLevel.Info, $"=== 日志会话开始：{filename} ===");
                 _writer.Flush();
             }
             catch { }
@@ -99,23 +107,28 @@ public sealed class FileLogger : IDisposable
             fullMsg = fullMsg[11..].TrimStart();
         }
 
-        string levelTag = level switch
-        {
-            LogLevel.Debug => "[DEBUG] ",
-            LogLevel.Info => "[INFO]  ",
-            LogLevel.Warn => "[WARN]  ",
-            LogLevel.Error => "[ERROR] ",
-            LogLevel.Success => "[OK]    ",
-            _ => "[?????] ",
-        };
-
-        string line = $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {levelTag}{fullMsg}";
-
         lock (_lock)
         {
-            try { _writer.WriteLine(line); }
+            try { WriteYamlLine(level, fullMsg); }
             catch { /* 磁盘满/句柄关闭等异常静默 */ }
         }
+    }
+
+    private void WriteYamlLine(LogLevel level, string msg)
+    {
+        string levelTag = level switch
+        {
+            LogLevel.Debug => "DEBUG",
+            LogLevel.Info => "INFO",
+            LogLevel.Warn => "WARN",
+            LogLevel.Error => "ERROR",
+            LogLevel.Success => "OK",
+            _ => "?????",
+        };
+        // flow mapping，一行一条；msg 做 YAML 双引号转义
+        string escaped = msg.Replace("\\", "\\\\").Replace("\"", "\\\"")
+                            .Replace("\r", " ").Replace("\n", " ");
+        _writer?.WriteLine($"- {{time: \"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\", level: \"{levelTag}\", msg: \"{escaped}\"}}");
     }
 
     private static LogLevel ParseLevel(string name) => name?.Trim().ToLowerInvariant() switch
@@ -127,19 +140,41 @@ public sealed class FileLogger : IDisposable
         _ => LogLevel.Debug,
     };
 
-    private static void CleanupOldLogs(int maxFiles)
+    /// <summary>
+    /// 双重清理：早于 retentionDays 的删除；其余按创建时间倒序只保留 maxFiles 个。
+    /// 同时清理新版 .yml 与历史 .txt/.log。
+    /// </summary>
+    private static void CleanupOldLogs(int maxFiles, int retentionDays)
     {
         try
         {
             if (!Directory.Exists(LogDir)) return;
-            var files = Directory.GetFiles(LogDir, "*.log")
+
+            var files = new[] { "*.yml", "*.txt", "*.log" }
+                .SelectMany(p => Directory.GetFiles(LogDir, p))
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                // 只清理本程序产生的 bot- 日志，绝不动 logs 目录里的其他文件
+                .Where(p => Path.GetFileName(p).StartsWith("bot-", StringComparison.OrdinalIgnoreCase))
                 .Select(f => new FileInfo(f))
                 .OrderByDescending(f => f.CreationTime)
-                .Skip(Math.Max(0, maxFiles))
                 .ToList();
+
+            DateTime cutoff = DateTime.Now.AddDays(-Math.Max(1, retentionDays));
+
+            // 超期的直接删；未超期的按数量上限保留最新的 maxFiles 个
+            var fresh = new List<FileInfo>();
             foreach (var f in files)
             {
-                try { f.Delete(); } catch { }
+                bool expired = f.CreationTime < cutoff;
+                bool overflow = fresh.Count >= Math.Max(1, maxFiles);
+                if (expired || overflow)
+                {
+                    try { f.Delete(); } catch { }
+                }
+                else
+                {
+                    fresh.Add(f);
+                }
             }
         }
         catch { /* 目录不存在/权限问题等静默 */ }
