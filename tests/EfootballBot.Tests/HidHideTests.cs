@@ -182,4 +182,15 @@ public class HidHideTests
         Assert.Equal("需要管理员权限", back.Error);
         Assert.Single(back.AppliedBlacklist);
     }
+
+    // ---------- 安装器资产名匹配 ----------
+
+    [Theory]
+    [InlineData("HidHide_1.5.230_x64.exe", true)]
+    [InlineData("HidHide_2.0.100_x64.exe", true)]
+    [InlineData("HidHideCLI_1.5.230_x64.exe", false)] // CLI 不匹配（名字前缀紧贴版本号）
+    [InlineData("HidHide_1.5.230_x86.exe", false)]
+    [InlineData("Source_code.zip", false)]
+    public void IsHidHideSetupAsset_MatchesByPattern(string name, bool expected)
+        => Assert.Equal(expected, HidHideInstaller.IsHidHideSetupAsset(name));
 }
