@@ -53,4 +53,31 @@ public class HidHideTests
         Assert.Empty(HidHideIoctl.MultiStringToList(Array.Empty<byte>()));
         Assert.Empty(HidHideIoctl.MultiStringToList(new byte[] { 0, 0, 0, 0 }));
     }
+
+    // ---------- 实例路径纯函数 ----------
+
+    [Theory]
+    [InlineData(@"HID\VID_045E&PID_028E\6&2DF92C3&0&0000", true)]
+    [InlineData(@"hid\vid_045e&pid_028e&mi_00\7&2df92c3&0&0000", true)] // 大小写不敏感
+    [InlineData(@"HID\VID_045E&PID_02EA\6&2DF92C3&0&0000", false)]      // 真实微软手柄 HID 接口
+    [InlineData(@"HID\VID_1532&PID_0900\6&abcd", false)]                // Razer 等第三方
+    [InlineData(@"USB\VID_045E&PID_028E\6&2DF92C3", false)]             // USB 枚举器非 HID 前缀
+    public void IsViGEmInstance_MatchesByPrefix(string path, bool expected)
+        => Assert.Equal(expected, HidDeviceEnumerator.IsViGEmInstance(path));
+
+    [Fact]
+    public void InterfacePathToInstancePath_ConvertsStandardPath()
+    {
+        var ifPath = @"\\?\hid#vid_045e&pid_028e&mi_00#7&2df92c3&0&0000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
+        Assert.Equal(@"hid\vid_045e&pid_028e&mi_00\7&2df92c3&0&0000",
+            HidDeviceEnumerator.InterfacePathToInstancePath(ifPath));
+    }
+
+    [Fact]
+    public void InterfacePathToInstancePath_DecodesPercentEscapes()
+    {
+        var ifPath = @"\\?\hid#vid_045e&pid_028e#7%262df92c3%260%260000#{4d1e55b2-f16f-11cf-88cb-001111000030}";
+        Assert.Equal(@"hid\vid_045e&pid_028e\7&2df92c3&0&0000",
+            HidDeviceEnumerator.InterfacePathToInstancePath(ifPath));
+    }
 }
