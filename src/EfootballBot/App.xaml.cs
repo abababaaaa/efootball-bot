@@ -93,6 +93,32 @@ public partial class App : Application
                 Shutdown();
             };
         }
+        else if (args.Length > 0 && args[0] == "--hidhide-config")
+        {
+            // 提权配置模式：--hidhide-config <job文件路径> 或 --hidhide-config sync（计划任务）。
+            // 应用 HidHide 白/黑名单后立即退出，无窗口、无单实例 Mutex、无日志初始化。
+            Startup += (_, _) =>
+            {
+                try
+                {
+                    string arg = args.Length > 1 ? args[1] : "sync";
+                    int exit = EfootballBot.Core.Input.HidHideConfigJob.Run(arg);
+                    Environment.ExitCode = exit;
+                }
+                catch (Exception ex)
+                {
+                    try
+                    {
+                        File.WriteAllText(
+                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                                "EfootballBot", "hidhide-config-error.log"),
+                            $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ex}");
+                    }
+                    catch { }
+                }
+                Shutdown();
+            };
+        }
         else
             Startup += (_, _) => StartGui();
     }

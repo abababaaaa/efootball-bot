@@ -146,4 +146,40 @@ public class HidHideTests
         Assert.Equal(@"C:\Games\eFootball.exe", back.HidHide.GameImagePath);
         Assert.Single(back.HidHide.AppliedBlacklist);
     }
+
+    // ---------- Job DTO 往返 ----------
+
+    [Fact]
+    public void HidHideJobDto_JsonRoundTrip()
+    {
+        var dto = new HidHideConfigJob.HidHideJobDto
+        {
+            Mode = "apply",
+            HideVigem = true,
+            HidePhysical = false,
+            GameImagePath = @"C:\Games\eFootball.exe",
+        };
+        string json = System.Text.Json.JsonSerializer.Serialize(dto);
+        var back = System.Text.Json.JsonSerializer.Deserialize<HidHideConfigJob.HidHideJobDto>(json);
+        Assert.Equal("apply", back!.Mode);
+        Assert.True(back.HideVigem);
+        Assert.Equal(dto.GameImagePath, back.GameImagePath);
+    }
+
+    [Fact]
+    public void HidHideResultDto_JsonRoundTrip()
+    {
+        var dto = new HidHideConfigJob.HidHideResultDto
+        {
+            Success = false,
+            Error = "需要管理员权限",
+            AppliedBlacklist = new List<string> { @"HID\VID_045E&PID_028E\X" },
+            Message = "",
+        };
+        string json = System.Text.Json.JsonSerializer.Serialize(dto);
+        var back = System.Text.Json.JsonSerializer.Deserialize<HidHideConfigJob.HidHideResultDto>(json);
+        Assert.False(back!.Success);
+        Assert.Equal("需要管理员权限", back.Error);
+        Assert.Single(back.AppliedBlacklist);
+    }
 }
