@@ -31,6 +31,32 @@ public static class HidHideManager
         catch { return false; }
     }
 
+    /// <summary>
+    /// HidHide 服务为 DEMAND_START，重启电脑后不会自启，控制设备打不开（Win32 错误 2）。
+    /// 在提权上下文（--hidhide-config 子进程 / 计划任务）中调用：服务已存在且停止则启动。
+    /// 已运行或启动失败均静默返回（后续 IOCTL 会给出真实错误）。
+    /// </summary>
+    public static void EnsureServiceStarted()
+    {
+        try
+        {
+            using var h = HidHideIoctl.OpenControlDevice();
+            return; // 设备可打开 = 服务已在运行
+        }
+        catch (global::System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 2)
+        {
+            try
+            {
+                using var p = Process.Start(new ProcessStartInfo("sc.exe", "start HidHide")
+                { CreateNoWindow = true, UseShellExecute = false });
+                p?.WaitForExit(15000);
+                Thread.Sleep(300); // 等控制设备对象创建
+            }
+            catch { /* 启动失败由后续 IOCTL 报错 */ }
+        }
+        catch { }
+    }
+
     /// <summary>查询当前隔离状态（GUI 徽标用）。任何失败都降级为带 Error 的状态，不抛。</summary>
     public static HidHideStatus QueryStatus()
     {
@@ -46,6 +72,11 @@ public static class HidHideManager
             return new HidHideStatus(true, active,
                 vigem.Count > 0 && vigem.All(v => bl.Contains(v, StringComparer.OrdinalIgnoreCase)),
                 vigem.Count, wl, bl, null);
+        }
+        catch (global::System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 2)
+        {
+            return new HidHideStatus(true, false, false, 0, new(), new(),
+                "HidHide 驱动服务未启动（重启电脑后需重新应用隔离或启动一次挂机来拉起）");
         }
         catch (Exception ex)
         {

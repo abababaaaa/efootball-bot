@@ -45,6 +45,8 @@ public static class HidHideConfigJob
             var job = JsonSerializer.Deserialize<HidHideJobDto>(File.ReadAllText(jobPath))
                 ?? throw new InvalidDataException("job 文件内容无效");
 
+            HidHideManager.EnsureServiceStarted(); // DEMAND_START 服务重启后未加载时先拉起
+
             if (job.Mode == "clear")
             {
                 var (ok, err) = HidHideManager.ClearIsolation(
@@ -100,6 +102,7 @@ public static class HidHideConfigJob
         // 计划任务上下文：读配置静默重写黑名单（只追加，幂等）
         try
         {
+            HidHideManager.EnsureServiceStarted(); // 重启电脑后 DEMAND_START 服务未加载时先拉起
             var cfg = EfootballBot.Core.Config.AppConfig.Load().HidHide;
             if (!cfg.Enabled) return 0;
 
