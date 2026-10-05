@@ -80,4 +80,50 @@ public class HidHideTests
         Assert.Equal(@"hid\vid_045e&pid_028e\7&2df92c3&0&0000",
             HidDeviceEnumerator.InterfacePathToInstancePath(ifPath));
     }
+
+    // ---------- 黑/白名单合并纯函数 ----------
+
+    [Fact]
+    public void MergeInto_AddsNewItems_CaseInsensitive()
+    {
+        var existing = new List<string> { @"C:\Old\app.exe" };
+        var merged = HidHideManager.MergeInto(existing, new[] { @"c:\new\efootball.exe" });
+        Assert.Equal(2, merged.Count);
+        Assert.Contains(@"C:\Old\app.exe", merged);
+        // 不区分大小写去重：再次合并同路径不同大小写不产生重复
+        var again = HidHideManager.MergeInto(merged, new[] { @"C:\NEW\EFOOTBALL.EXE" });
+        Assert.Equal(2, again.Count);
+    }
+
+    [Fact]
+    public void RemoveAll_RemovesCaseInsensitive_KeepsOthers()
+    {
+        var existing = new List<string>
+        {
+            @"HID\VID_045E&PID_028E\6&2DF92C3&0&0000",
+            @"HID\VID_1532&PID_0900\6&abcd", // 用户已有条目，必须保留
+            @"C:\Games\eFootball.exe",
+        };
+        var result = HidHideManager.RemoveAll(existing, new[]
+        {
+            @"hid\vid_045e&pid_028e\6&2df92c3&0&0000", // 大小写不同也要删掉
+            @"C:\Games\eFootball.exe",
+        });
+        Assert.Single(result);
+        Assert.Equal(@"HID\VID_1532&PID_0900\6&abcd", result[0]);
+    }
+
+    [Fact]
+    public void IsolateVigemPrefixEntries_Splits()
+    {
+        var bl = new List<string>
+        {
+            @"HID\VID_045E&PID_028E\6&2DF92C3&0&0000",
+            @"HID\VID_045E&PID_028E\9&OLDINSTANCE",
+            @"HID\VID_1532&PID_0900\6&abcd",
+        };
+        var (keep, vigemEntries) = HidHideManager.SplitByVigemPrefix(bl);
+        Assert.Single(keep);
+        Assert.Equal(2, vigemEntries.Count);
+    }
 }
