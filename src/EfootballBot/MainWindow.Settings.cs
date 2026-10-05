@@ -40,7 +40,6 @@ public partial class MainWindow
         ChkAutoClose.IsChecked = _cfg.AutoCloseWhenDone;
         ChkMinimizeTray.IsChecked = false;
         ChkPeriodicGc.IsChecked = _cfg.PeriodicGc;
-        ChkAutoWindowize.IsChecked = _cfg.AutoWindowizeOnStart;
 
         // OCR 频率
         int[] ocrMsValues = { 500, 900, 1500, 2500, 5000 };
@@ -101,7 +100,6 @@ public partial class MainWindow
         // 设置面板
         _cfg.AutoCloseWhenDone = ChkAutoClose.IsChecked == true;
         _cfg.PeriodicGc = ChkPeriodicGc.IsChecked == true;
-        _cfg.AutoWindowizeOnStart = ChkAutoWindowize.IsChecked == true;
 
         if (CmbOcrInterval.SelectedIndex >= 0)
         {
@@ -140,7 +138,7 @@ public partial class MainWindow
         // VirtualKey 在按键捕获时已经直接更新到 _cfg.Hotkey.VirtualKey，这里不需额外处理
 
         // 如果引擎正在运行，尝试重新注册热键（新配置）
-        if (_engine is { IsRunning: true } && _cfg.Hotkey.Enabled)
+        if (_workerHost is { IsRunning: true } && _cfg.Hotkey.Enabled)
         {
             try
             {
@@ -152,7 +150,7 @@ public partial class MainWindow
                 AppendLog($"热键注册异常：{ex.Message}", LogLevel.Warn);
             }
         }
-        else if (_engine?.IsRunning != true)
+        else if (_workerHost?.IsRunning != true)
         {
             // 未运行时先注销（等启动时再注册）
             _hotkey.Unregister();

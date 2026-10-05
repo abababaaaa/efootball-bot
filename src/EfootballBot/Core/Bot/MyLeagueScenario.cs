@@ -31,14 +31,15 @@ public sealed class MyLeagueScenario : ScenarioBase
             }
 
             var o = await E.ObserveAsync(Ct);
-            o = await PassThroughAsync(o);
+            o = await E.Overlay.PassThroughAsync(o, Ct);
 
             switch (o.Screen)
             {
                 case GameScreen.Home:
                 case GameScreen.MatchHub:
-                    await E.EnterMyLeagueAsync(Ct);
-                    continue;
+                    // 目标编排式导航：声明目标页，由 PageGraph BFS 寻路执行按键序列
+                    await E.GoToAsync(nameof(GameScreen.MyLeagueHome), null, Ct);
+                    break;
 
                 case GameScreen.MyLeagueHome:
                     // 顺序严格：① 清扫弹窗（关键比赛=Up→A / 其他=A） ② 购买经验卡 ③ A 前往比赛
@@ -46,7 +47,7 @@ public sealed class MyLeagueScenario : ScenarioBase
                     {
                         Ct.ThrowIfCancellationRequested();
                         var p = await E.ObserveAsync(Ct);
-                        p = await PassThroughAsync(p);
+                        p = await E.Overlay.PassThroughAsync(p, Ct);
                         bool isKeyMatch = p.Ocr.Contains("关键比赛");
                         // 「OK」必须独立成词（精确匹配），否则赛程卡上的 "Fukuoka" 会子串命中导致误判
                         bool hasOk = p.Ocr.Words.Any(w =>
@@ -94,7 +95,7 @@ public sealed class MyLeagueScenario : ScenarioBase
                     }
 
                     await BuyItemsIfNeededAsync();
-                    await EnterNextMatchAsync();
+                    if (!await EnterNextMatchAsync()) return;
                     break;
 
                 case GameScreen.Schedule:
@@ -102,6 +103,7 @@ public sealed class MyLeagueScenario : ScenarioBase
                     break;
 
                 case GameScreen.PreMatch:
+                case GameScreen.DifficultySelect:
                 case GameScreen.KeyMatchBadge:
                     Log("检测到赛前画面，直接继续本场", LogLevel.Info);
                     await FinishOneAsync(key: true, forfeit: false);
@@ -145,18 +147,56 @@ public sealed class MyLeagueScenario : ScenarioBase
                     if (++guard > 5)
                     {
                         guard = 0;
-                        await E.EnterMyLeagueAsync(Ct);
+                        await E.GoToAsync(nameof(GameScreen.MyLeagueHome), null, Ct);
                     }
                     break;
             }
         }
     }
 
-    private async Task EnterNextMatchAsync()
+    private int _enterMatchFailures;
+
+    /// <summary>
+    /// 焦点归位到左上「前往比赛」卡：Left×2 → Up×2（各 250ms，到边界后多按无效，幂等）。
+    /// 商店 B×3 返回主页后焦点停在「兑换积分」卡上（真机截图白框证实），
+    /// 任何从主页出发的 A 导航前都必须先归位，否则盲按 A 会重复进商店。
+    /// </summary>
+    private async Task ResetFocusToGoToMatchAsync()
+    {
+        for (int i = 0; i < 2; i++) { await E.Pad.Dpad(PadDir.Left); await E.Pad.Wait(250, Ct); }
+        for (int i = 0; i < 2; i++) { await E.Pad.Dpad(PadDir.Up); await E.Pad.Wait(250, Ct); }
+    }
+
+    /// <summary>
+    /// 前往下一场比赛：先归位焦点再按 A；按 A 后验证落点，
+    /// 误入商店则 B 退出并计数，连续 2 次归位失效直接停止（返回 false）。
+    /// </summary>
+    private async Task<bool> EnterNextMatchAsync()
     {
         Log("我的联赛主页：前往下一场比赛", LogLevel.Info);
+        await ResetFocusToGoToMatchAsync();
         await E.Pad.Confirm();
         await E.Pad.Wait(3000, Ct);
+
+        var o = await E.ObserveAsync(Ct);
+        bool inShop = IsExchangeShop(o);
+        if (!inShop)
+        {
+            _enterMatchFailures = 0;
+            return true;
+        }
+
+        _enterMatchFailures++;
+        Log($"前往比赛误入商店（第 {_enterMatchFailures} 次），B 退出", LogLevel.Warn);
+        await E.Pad.Back();
+        await E.Pad.Wait(1500, Ct);
+        if (_enterMatchFailures >= 2)
+        {
+            E.Stats.LastError = "连续 2 次按 A 后仍进入商店，焦点归位失效";
+            Log("连续 2 次按 A 后仍进入商店，焦点归位失效，已停止。请手动检查游戏画面", LogLevel.Error);
+            return false;
+        }
+        return true;
     }
 
     private async Task HandleScheduleAsync(Observation o)
@@ -222,6 +262,15 @@ public sealed class MyLeagueScenario : ScenarioBase
              || OcrText.Norm(w.Text).Contains("杰出")));
     }
 
+    /// <summary>画面 OCR 指纹：所有原始词按阅读序拼接（截断 160 字），用于判定翻页后画面是否真的变化。</summary>
+    private static string OcrFingerprint(OcrResult ocr)
+    {
+        var s = string.Concat(ocr.Words
+            .OrderBy(w => w.Y).ThenBy(w => w.X)
+            .Select(w => OcrText.Norm(w.Text)));
+        return s.Length <= 160 ? s : s[..160];
+    }
+
     /// <summary>
     /// 联赛主页右摇杆向右翻页查看「使用的物品」，逐项判定哪个道具已生效：
     /// 经验→4x 在用；状态→杰出在用；强化→主教练强化在用。
@@ -233,42 +282,78 @@ public sealed class MyLeagueScenario : ScenarioBase
         if (!need4x && !needCond && !needMgr)
             return;
 
-        // 1. 右摇杆向右翻页到"使用的物品"页
+        // 1. 右摇杆向右「翻到为止」：主页横向面板页数/顺序因账号而异，
+        //    「使用的物品」可能在第 3 页之后，写死 1~2 次会停在赛程/数据页。
+        //    终止条件：命中物品页 / 翻回主页（看到「前往比赛」）/ 连续两页指纹不变（到头）/ 最多 5 次。
         Log("检查物品栏：右摇杆向右翻页查看「使用的物品」…", LogLevel.Info);
         await E.Pad.RsFlick(PadDir.Right);
         await E.Pad.Wait(1400, Ct);
         var o = await E.ObserveAsync(Ct);
-        o = await PassThroughAsync(o);
+        o = await E.Overlay.PassThroughAsync(o, Ct);
 
         bool inUsePage = IsInUseItemsPage(o.Ocr);
-        if (!inUsePage)
+        int flips = 1;
+        string prevFp = OcrFingerprint(o.Ocr);
+        const int maxFlips = 5;
+        while (!inUsePage && flips < maxFlips)
         {
+            // 翻完一圈回主页（第 1 次就回主页多半是首次翻动未生效，不算）
+            if (flips >= 2 && o.Ocr.Contains("前往比赛"))
+            {
+                Log("翻页已绕回主页，未找到「使用的物品」面板", LogLevel.Info);
+                break;
+            }
             await E.Pad.RsFlick(PadDir.Right);
             await E.Pad.Wait(1400, Ct);
             o = await E.ObserveAsync(Ct);
+            o = await E.Overlay.PassThroughAsync(o, Ct);
+            flips++;
             inUsePage = IsInUseItemsPage(o.Ocr);
+            string fp = OcrFingerprint(o.Ocr);
+            if (!inUsePage && fp == prevFp)
+            {
+                Log($"右翻第 {flips} 次后画面无变化，横向面板已到头", LogLevel.Info);
+                break;
+            }
+            prevFp = fp;
         }
+        if (inUsePage)
+            Log($"第 {flips} 次翻页到达「使用的物品」面板", LogLevel.Debug);
 
         // 2. 逐项判定使用中
         bool noItem = o.Ocr.Contains("没有正在使用");
-        bool exp4xInUse = !noItem && o.Ocr.Contains("经验");
-        bool condInUse  = !noItem && o.Ocr.Contains("状态");
-        bool mgrInUse   = !noItem && o.Ocr.Contains("强化");
-
-        if (noItem)
-            Log("物品栏为空：没有正在使用的物品", LogLevel.Info);
-        else
-            Log($"物品栏：4x经验[{(exp4xInUse ? "在用" : "缺")}] 杰出状态[{(condInUse ? "在用" : "缺")}] 教练强化[{(mgrInUse ? "在用" : "缺")}]", LogLevel.Info);
-
-        if (!noItem && !inUsePage)
+        bool exp4xInUse, condInUse, mgrInUse;
+        if (inUsePage)
         {
-            Log("未能确认物品栏状态，跳过购买（不影响刷级）", LogLevel.Warn);
-            return;
+            exp4xInUse = !noItem && o.Ocr.Contains("经验");
+            condInUse  = !noItem && o.Ocr.Contains("状态");
+            mgrInUse   = !noItem && o.Ocr.Contains("强化");
+
+            if (noItem)
+                Log("物品栏为空：没有正在使用的物品", LogLevel.Info);
+            else
+                Log($"物品栏：4x经验[{(exp4xInUse ? "在用" : "缺")}] 杰出状态[{(condInUse ? "在用" : "缺")}] 教练强化[{(mgrInUse ? "在用" : "缺")}]", LogLevel.Info);
+        }
+        else
+        {
+            // 没确认翻到「使用的物品」页（空列表/粉色标题 OCR 极易失败，主页文字还会误命中
+            // 「经验/状态/强化」）：此时 OCR 的在用/缺失判定全部不可信，不能跳过——
+            // 改去商店逐行核对：商店行内有「使用中」检测 + 游戏购买确认弹窗双保险，不会重复购买
+            Log("未能确认「使用的物品」页面（空列表/标题 OCR 失败），改为前往商店逐行核对", LogLevel.Warn);
+            exp4xInUse = condInUse = mgrInUse = false;
         }
 
         bool skip4x = !need4x || exp4xInUse;
         bool skipCond = !needCond || condInUse;
         bool skipMgr = !needMgr || mgrInUse;
+
+        // 无论是否需要购买，都先按翻过去的次数左翻回主页（面板是轮播，Left×flips 必回主页）
+        for (int i = 0; i < flips; i++)
+        {
+            await E.Pad.RsFlick(PadDir.Left);
+            await E.Pad.Wait(i == 0 ? 1000 : 900, Ct);
+        }
+
         if (skip4x && skipCond && skipMgr)
         {
             Log("所有启用的道具均在使用中，跳过购买", LogLevel.Debug);
@@ -277,22 +362,107 @@ public sealed class MyLeagueScenario : ScenarioBase
 
         Log("存在缺失道具，前往「兑换积分」购买…", LogLevel.Info);
 
-        // 3. 右摇杆翻回第一页
-        await E.Pad.RsFlick(PadDir.Left);
-        await E.Pad.Wait(1000, Ct);
-        await E.Pad.RsFlick(PadDir.Left);
-        await E.Pad.Wait(1200, Ct);
-
-        // 4. Down→Right 进入右侧面板的"兑换积分"→ A
-        Log("导航：Down → Right → 「兑换积分」→ A", LogLevel.Info);
-        await E.Pad.Dpad(PadDir.Down);
-        await E.Pad.Wait(350, Ct);
-        await E.Pad.Dpad(PadDir.Right);
-        await E.Pad.Wait(900, Ct);
-        await E.Pad.Confirm();
-        await E.Pad.Wait(2500, Ct);
+        // 3.（已翻回主页）固定 Down→Right，再按光标实际落点进入：
+        //    右列三张卡竖向排列 = 兑换积分(上)/赛季纪录(中)/建议(下)，
+        //    Down→Right 后焦点可能落在兑换积分或赛季纪录（不同分辨率/时序不一致），
+        //    用焦点卡整卡变白的特征判定落点，在赛季纪录则 Up 一次、在建议则 Up 两次。
+        if (!await EnterExchangeShopAsync())
+        {
+            Log("进入兑换积分商店失败，本轮跳过购买", LogLevel.Warn);
+            return;
+        }
 
         await ContinuePurchaseFromShopAsync(skip4x, skipCond, skipMgr);
+    }
+
+    /// <summary>是否已在积分商店内页（分类器 + OCR 关键词双判定）。</summary>
+    private static bool IsExchangeShop(Observation o)
+        => o.Is(GameScreen.Shop) || o.Is(GameScreen.ShopConfirm)
+           || o.Ocr.Contains("租借") || o.Ocr.Contains("获得各种物品")
+           || o.Ocr.Contains("联赛物品") || o.Ocr.Contains("选择要兑换");
+
+    /// <summary>
+    /// 智能进入「兑换积分」：高光闭环导航（每按一键都重判高光实际位置），
+    /// 连续 2 帧高光停在「兑换积分」才按 A；进错则 B 退，整轮最多重试 1 次。
+    /// </summary>
+    private async Task<bool> EnterExchangeShopAsync()
+    {
+        for (int round = 0; round < 2; round++)
+        {
+            Log(round == 0
+                ? "智能导航：闭环移动高光到「兑换积分」…"
+                : "第 2 次尝试：重新归位后闭环移动高光到「兑换积分」…", LogLevel.Info);
+
+            if (await MoveFocusToExchangeAsync())
+            {
+                await E.Pad.Confirm();
+                await E.Pad.Wait(2500, Ct);
+                var after = await E.ObserveAsync(Ct);
+                if (IsExchangeShop(after))
+                {
+                    Log("已进入积分商店", LogLevel.Info);
+                    return true;
+                }
+                Log("按 A 后未进入积分商店，B 退出后重试", LogLevel.Warn);
+                await E.Pad.Back();
+                await E.Pad.Wait(1500, Ct);
+            }
+            else
+            {
+                Log("高光未能到达「兑换积分」，重新归位后重试", LogLevel.Warn);
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// 我的联赛主页焦点导航图（真机实测槽位与方向边）。
+    /// 铁律（用户实测）：左列上下移动不可靠——i 按 ↓ 会直接跳到底部「赛事信息」。
+    /// 光标一旦离开第一排（前往比赛/i），必须第一时间 → 进右列，再在右列内比 y 决定 ↑/↓。
+    /// 故图中不声明任何左列内部垂直边（go↓schedule 除外，它是进入左列的入口）。
+    /// </summary>
+    private static FocusGraph BuildLeagueHomeGraph() => new FocusGraph()
+        .AddSlot("go",       0.147, 0.265, "前往比赛")
+        .AddSlot("info",     0.310, 0.270, "i")
+        .AddSlot("schedule", 0.185, 0.515, "赛程表")
+        .AddSlot("exchange", 0.505, 0.420, "兑换积分")
+        .AddSlot("season",   0.505, 0.610, "赛季纪录")
+        .AddSlot("advice",   0.505, 0.800, "建议")
+        .AddSlot("eventinfo", 0.185, 0.800, "赛事信息")
+        .MarkPhotoSlot("schedule")
+        // 第一排：前往比赛 ↔ i
+        .AddEdge("go", PadDir.Right, "info")
+        .AddEdge("info", PadDir.Left, "go")
+        // 离开第一排的唯一左列落点：赛程表（随后立即 Right 进右列）
+        .AddEdge("go", PadDir.Down, "schedule")
+        // i 按 ↓ 真机实测直跳底部赛事信息（不是赛程表！），之后同样立即 Right 进右列
+        .AddEdge("info", PadDir.Down, "eventinfo")
+        // 左列 → 右列（脱离第一排后第一时间向右）
+        .AddEdge("schedule", PadDir.Right, "exchange")
+        .AddEdge("eventinfo", PadDir.Right, "advice")
+        // 右列内部：纯垂直移动（可靠），兑换积分 ↑ 赛季纪录 ↓ 建议
+        .AddEdge("exchange", PadDir.Down, "season")
+        .AddEdge("season", PadDir.Up, "exchange")
+        .AddEdge("season", PadDir.Down, "advice")
+        .AddEdge("advice", PadDir.Up, "season")
+        // 回程（买完道具回前往比赛开赛）
+        .AddEdge("schedule", PadDir.Up, "go")
+        .AddEdge("exchange", PadDir.Left, "schedule");
+
+    /// <summary>
+    /// 闭环移动焦点到「兑换积分」：归位起步后交给通用 FocusWalker——
+    /// 声明式焦点图 BFS 寻路（go↓赛程表→兑换积分，不走 i 死边），
+    /// 150ms 判稳追踪（高光扫到目标立即接住），死边自动摘除重算，丢失归位一次，
+    /// 连续 2 帧确认高光停在目标卡才返回 true（用户硬要求：高光最后停在兑换积分才点）。
+    /// </summary>
+    private async Task<bool> MoveFocusToExchangeAsync()
+    {
+        await ResetFocusToGoToMatchAsync();
+        var walker = new FocusWalker(E, BuildLeagueHomeGraph(), Ct, (m, lv) => Log(m, lv))
+        {
+            RecoverAsync = ResetFocusToGoToMatchAsync,
+        };
+        return await walker.GotoAsync("exchange");
     }
 
     /// <summary>

@@ -1,4 +1,4 @@
-<Window x:Class="EfootballBot.MainWindow"
+﻿<Window x:Class="EfootballBot.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="eFootball 挂机助手（手柄后台版）" Height="720" Width="1180"

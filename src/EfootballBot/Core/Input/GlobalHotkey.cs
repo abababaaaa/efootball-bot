@@ -36,7 +36,7 @@ public sealed class GlobalHotkey : IDisposable
     private HotkeyConfig? _config;
 
     /// <summary>热键触发事件。</summary>
-    public event Action? Triggered;
+    public event global::System.Action? Triggered;
 
     /// <summary>当前是否已注册。</summary>
     public bool IsRegistered { get; private set; }

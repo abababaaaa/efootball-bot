@@ -18,7 +18,7 @@ public sealed record FrameData(byte[] Bgra, int Width, int Height, long Timestam
 /// <summary>
 /// 基于 Windows Graphics Capture 的窗口捕获器：窗口被遮挡 / 位于后台也能持续拿到画面。
 /// </summary>
-public sealed class WindowCapture : IDisposable
+public sealed class WindowCapture : ICaptureProvider
 {
     private readonly object _gate = new();
     private nint _hwnd;
@@ -30,6 +30,8 @@ public sealed class WindowCapture : IDisposable
     private SizeInt32 _size;
     private FrameData? _latest;
     private long _lastProduceTick;
+    private GpuVideoScaler? _gpuScaler;
+    private bool _gpuFailed;          // 本捕获会话 GPU 缩放不可用后静默回退 CPU
     private bool _running;
     private DateTime _lastFrameAt = DateTime.MinValue;
     private int _frameErrorCount;
@@ -59,10 +61,11 @@ public sealed class WindowCapture : IDisposable
     }
 
     /// <summary>
-    /// 采样分辨率上限：高≤720，等比缩放。全屏 3440×1440 → 1720×720（DWM 拷贝量降 4 倍）。
-    /// 所有 ROI 检测均为归一化坐标+占比判定，降采样不影响识别；窗口化 1280×720 本来就不超上限。
+    /// 输出帧分辨率上限：高≤720，等比缩放。全屏 3440×1440 → 1720×720（帧数据量降 4 倍）。
+    /// 所有 ROI 检测均为归一化坐标+占比判定，降采样不影响识别。
+    /// 注意：此缩放只能在 CPU 侧做——WGC 帧池尺寸小于内容尺寸时是「裁切左上角」而非缩放。
     /// </summary>
-    private static SizeInt32 CapSize(int width, int height)
+    internal static SizeInt32 CapSize(int width, int height)
     {
         width = Math.Max(2, width); height = Math.Max(2, height);
         if (height <= 720) return new SizeInt32 { Width = width, Height = height };
@@ -71,15 +74,52 @@ public sealed class WindowCapture : IDisposable
         return new SizeInt32 { Width = w, Height = 720 };
     }
 
+    private static SizeInt32 ClampSize(int width, int height)
+        => new() { Width = Math.Max(2, width), Height = Math.Max(2, height) };
+
+    /// <summary>CPU 侧最近邻等比降采样到高≤720；未超上限时原样返回（不复制）。</summary>
+    internal static byte[] DownscaleIfNeeded(byte[] src, int sw, int sh, out int dw, out int dh)
+    {
+        var t = CapSize(sw, sh);
+        dw = t.Width; dh = t.Height;
+        if (dw == sw && dh == sh) return src;
+        return NearestSample(src, sw, sh, dw, dh);
+    }
+
+    /// <summary>最近邻重采样（BGRA）：目标像素按比例映射回源像素，保留完整画面不裁切。</summary>
+    internal static byte[] NearestSample(byte[] src, int sw, int sh, int dw, int dh)
+    {
+        var dst = new byte[dw * dh * 4];
+        for (int y = 0; y < dh; y++)
+        {
+            int srow = (y * sh / dh) * sw * 4;
+            int drow = y * dw * 4;
+            for (int x = 0; x < dw; x++)
+            {
+                int si = srow + (x * sw / dw) * 4;
+                int di = drow + x * 4;
+                dst[di] = src[si];
+                dst[di + 1] = src[si + 1];
+                dst[di + 2] = src[si + 2];
+                dst[di + 3] = src[si + 3];
+            }
+        }
+        return dst;
+    }
+
     public void Start(nint hwnd, int width, int height)
     {
         lock (_gate)
         {
             if (_running) return;
             _hwnd = hwnd;
-            _size = CapSize(width, height);
-            if (_size.Width != width || _size.Height != height)
-                Step($"[捕获] 降采样：{width}×{height} → {_size.Width}×{_size.Height}（降低 DWM 拷贝开销）");
+            // 帧池必须按内容原始尺寸建：WGC 小帧池会裁切左上角而不是缩放
+            // （超宽全屏 3440×1440 建 1720×720 池只能拿到左上 1/4 画面）。
+            // 降采样在取帧后于 CPU 侧做，输出帧仍为高≤720。
+            _size = ClampSize(width, height);
+            var capped = CapSize(width, height);
+            if (capped.Width != _size.Width || capped.Height != _size.Height)
+                Step($"[捕获] 原始 {_size.Width}×{_size.Height}：全尺寸采集，输出降采样到 {capped.Width}×{capped.Height}");
 
             Step("① 创建 D3D11 设备");
             CreateDevice();
@@ -110,20 +150,6 @@ public sealed class WindowCapture : IDisposable
             {
                 Marshal.Release(interop);
             }
-        }
-    }
-
-    public void Resize(int width, int height)
-    {
-        lock (_gate)
-        {
-            if (!_running || _pool is null) return;
-            var capped = CapSize(width, height);
-            // 幂等：引擎按客户区原始尺寸调用，封顶后尺寸与当前一致时不重建
-            if (capped.Width == _size.Width && capped.Height == _size.Height) return;
-            _size = capped;
-            ReleaseHeldFrames();
-            _pool.Recreate(_winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, _size);
         }
     }
 
@@ -205,16 +231,35 @@ public sealed class WindowCapture : IDisposable
             frame = sender.TryGetNextFrame();
             if (frame is null) return;
 
-            if (frame.ContentSize.Width != _size.Width || frame.ContentSize.Height != _size.Height)
+            // 帧池必须与内容原始尺寸严格一致（小了裁切、大了拉伸/黑边）。
+            // 尺寸变化（窗口化↔全屏）时按新内容尺寸整套重建；降采样在取帧后做。
+            var content = ClampSize(frame.ContentSize.Width, frame.ContentSize.Height);
+            if (content.Width != _size.Width || content.Height != _size.Height)
             {
-                Step($"[捕获] 帧尺寸变化/缩放不支持：{_size.Width}×{_size.Height} → {frame.ContentSize.Width}×{frame.ContentSize.Height}");
+                Exception? recreateError = null;
                 lock (_gate)
                 {
-                    _size = frame.ContentSize;
-                    ReleaseHeldFrames();
-                    _pool?.Recreate(_winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, _size);
+                    if (_running && _pool is not null && _winrtDevice is not null &&
+                        (content.Width != _size.Width || content.Height != _size.Height))
+                    {
+                        Step($"[捕获] 帧尺寸变化：重建帧池 {_size.Width}×{_size.Height} → " +
+                             $"{content.Width}×{content.Height}");
+                        _size = content;
+                        ReleaseHeldFrames();
+                        try
+                        {
+                            _pool.Recreate(_winrtDevice, DirectXPixelFormat.B8G8R8A8UIntNormalized, 2, _size);
+                        }
+                        catch (Exception ex)
+                        {
+                            recreateError = ex;
+                            _running = false; // 帧池已坏，等引擎 WaitForFreshFrameAsync 整套重建
+                        }
+                    }
                 }
-                return;
+                if (recreateError is not null)
+                    CaptureClosed?.Invoke(this, $"重建帧池失败：{recreateError.Message}");
+                return; // 尺寸过渡帧不产出画面
             }
 
             // 背压节流：未到间隔时压住帧（池满→DWM 停产），由 _throttleTimer 周期释放。
@@ -240,10 +285,35 @@ public sealed class WindowCapture : IDisposable
             _lastProduceTick = tick;
             ReleaseHeldFrames(); // 到点：顺带释放（定时器可能已提前释放，幂等）
 
-            using var bitmap = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface, BitmapAlphaMode.Premultiplied)
-                .AsTask().GetAwaiter().GetResult();
-            var data = ToBgraArray(bitmap, out int w, out int h);
-            _latest = new FrameData(data, w, h, tick);
+            // 取帧：高分辨率时优先走 GPU 硬件缩放（显卡内缩到高≤720 再回读，免全尺寸 CPU 拷贝）；
+            // GPU 不可用或源本就≤720p 时回退原 CPU 路径（SoftwareBitmap + 最近邻）。
+            byte[] data = null!;
+            int ow = 0, oh = 0;
+            bool gpuDone = false;
+            var cap = CapSize(_size.Width, _size.Height);
+            if (!_gpuFailed && (cap.Width != _size.Width || cap.Height != _size.Height))
+            {
+                try
+                {
+                    _gpuScaler ??= new GpuVideoScaler(_d3dDevicePtr, Step);
+                    data = _gpuScaler.ScaleToBgra(frame.Surface, _size.Width, _size.Height, out ow, out oh);
+                    gpuDone = true;
+                }
+                catch (Exception gex)
+                {
+                    _gpuFailed = true;
+                    Step($"[捕获] GPU 硬件缩放不可用，本捕获会话回退 CPU 缩放：{gex.Message}");
+                }
+            }
+            if (!gpuDone)
+            {
+                using var bitmap = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface, BitmapAlphaMode.Premultiplied)
+                    .AsTask().GetAwaiter().GetResult();
+                var full = ToBgraArray(bitmap, out int w, out int h);
+                // CPU 侧降采样（高≤720）：下游 OCR/ROI 只接触小图，全尺寸数组随本次 GC 释放
+                data = DownscaleIfNeeded(full, w, h, out ow, out oh);
+            }
+            _latest = new FrameData(data, ow, oh, tick);
             _lastFrameAt = DateTime.Now;
             FrameUpdated?.Invoke(this, EventArgs.Empty);
         }
@@ -289,6 +359,9 @@ public sealed class WindowCapture : IDisposable
             _throttleTimer = null;
             _throttleTimerPeriod = 0;
             ReleaseHeldFrames();
+            try { _gpuScaler?.Dispose(); } catch { }
+            _gpuScaler = null;
+            _gpuFailed = false;
             try { _session?.Dispose(); } catch { }
             try { _pool?.Dispose(); } catch { }
             _session = null;

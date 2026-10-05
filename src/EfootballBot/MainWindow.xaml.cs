@@ -12,22 +12,21 @@ using EfootballBot.Core.Bot;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Input;
-using EfootballBot.Core.System;
 using EfootballBot.Core.Logging;
+using EfootballBot.Core.System;
 using EfootballBot.Core.UI;
 using EfootballBot.Core.Vision;
+using EfootballBot.Ipc;
 
 namespace EfootballBot;
 
 public partial class MainWindow : Window
 {
     private readonly AppConfig _cfg;
-    private BotEngine? _engine;
+    private WorkerHost? _workerHost;
     private readonly GlobalHotkey _hotkey = new();
     private readonly DispatcherTimer _previewTimer;
     private readonly DispatcherTimer _statsTimer;
-    private WriteableBitmap? _wb;
-    private byte[]? _previewBuf;
     private bool _previewOn;
     private bool _starting;
     private string _pendingTheme = ThemeManager.Dark;
@@ -100,21 +99,46 @@ public partial class MainWindow : Window
 
     private bool IsCnSelected => RbCn.IsChecked == true;
 
-    // ---------------- BotEngine ----------------
+    // ---------------- WorkerHost ----------------
 
-    private BotEngine GetOrCreateEngine()
+    private WorkerHost GetOrCreateWorkerHost()
     {
-        if (_engine is not null) return _engine;
-        _engine = new BotEngine(_cfg);
-        _engine.Log += (msg, lv) => Dispatcher.BeginInvoke(() => AppendLog(msg, lv));
-        // 文件日志：Debug 级也写（UI AppendLog 跳过 Debug，但这里不跳过）
-        _engine.Log += (msg, lv) => FileLogger.Instance.Write(msg, lv);
-        _engine.StatsChanged += _ => Dispatcher.BeginInvoke(UpdateStats);
-        _engine.Observed += o => Dispatcher.BeginInvoke(() =>
-            TxtScreen.Text = $"当前画面：{BotEngine.ScreenName(o.Screen)}（{o.Score:F1}）");
-        _engine.Capture.FrameUpdated += (_, _) => { /* 预览由定时器拉取 */ };
-        _engine.Capture.StepLog += s => Dispatcher.BeginInvoke(() => AppendLog($"[捕获] {s}", LogLevel.Info));
-        return _engine;
+        if (_workerHost is not null) return _workerHost;
+        _workerHost = new WorkerHost();
+        _workerHost.Log += (lv, msg) =>
+        {
+            // 文件日志：Worker 转发的全部日志落盘（M1 桥接补回，等同旧 engine.Log 双订阅）
+            FileLogger.Instance.Write(msg, Enum.TryParse<LogLevel>(lv, out var fl) ? fl : LogLevel.Info);
+            Dispatcher.BeginInvoke(() =>
+                AppendLog(msg, Enum.TryParse<LogLevel>(lv, out var l) ? l : LogLevel.Info));
+        };
+        _workerHost.StatsChanged += s => Dispatcher.BeginInvoke(UpdateStats);
+        // Worker 发 GameScreen 枚举名；GUI 本地化为中文并驱动图谱面板
+        _workerHost.ScreenObserved += (screen, score, evidence) => Dispatcher.BeginInvoke(() =>
+        {
+            var gs = Enum.TryParse<GameScreen>(screen, out var parsed) ? parsed : GameScreen.Unknown;
+            TxtScreen.Text = $"当前画面：{BotEngine.ScreenName(gs)}（{score:F1}）";
+            GraphOnScreen(gs, score, evidence);
+        });
+        _workerHost.ProbeUpdated += json => Dispatcher.BeginInvoke(() => _graphWindow?.OnProbe(json));
+        _workerHost.Navigated += (from, to) => Dispatcher.BeginInvoke(() => _graphWindow?.OnNav(from, to));
+        _workerHost.FlowStageChanged += (stage, deadline) => Dispatcher.BeginInvoke(() => _graphWindow?.OnFlow(stage, deadline));
+        _workerHost.PreviewReceived += pngB64 => Dispatcher.BeginInvoke(() => ShowPreviewPng(pngB64));
+        _workerHost.Exited += reason => Dispatcher.BeginInvoke(() =>
+        {
+            AppendLog($"场景已结束：{reason}", LogLevel.Success);
+            ResetButtons();
+            _statsTimer.Stop();
+            _hotkey.Unregister();
+        });
+        _workerHost.Disconnected += () => Dispatcher.BeginInvoke(() =>
+        {
+            AppendLog("Worker 进程已断开，场景已停止。", LogLevel.Warn);
+            ResetButtons();
+            _statsTimer.Stop();
+            _hotkey.Unregister();
+        });
+        return _workerHost;
     }
 
     // ---------------- 开始 / 停止 ----------------
@@ -131,12 +155,12 @@ public partial class MainWindow : Window
     private async Task ToggleScenarioAsync(Button btn, string? mode)
     {
         if (_starting) return;
-        var engine = GetOrCreateEngine();
+        var host = GetOrCreateWorkerHost();
 
-        if (engine.IsRunning)
+        if (host.IsRunning)
         {
             _hotkey.Unregister();
-            engine.Stop();
+            await host.StopAsync();
             AppendLog("正在停止…", LogLevel.Info);
             ResetButtons();
             // AutoCloseWhenDone：等待几秒让日志落盘，然后关闭
@@ -154,14 +178,28 @@ public partial class MainWindow : Window
             return;
         }
 
+        // 开始前必须手动确认的两点：
+        // ① 真实手柄占用 XInput 玩家1 时虚拟手柄输入会被游戏忽略，挂机前需拔下/关闭；
+        // ② 全屏（尤其超宽）下定位与捕获均不稳定，720p 窗口模式是实测可靠配置。
+        var confirm = System.Windows.MessageBox.Show(
+            this,
+            "开始前请确认两件事：\n\n" +
+            "① 关闭/拔下自己的真实手柄\n真实手柄会占用玩家 1，挂机用的虚拟手柄输入将被游戏忽略。\n\n" +
+            "② 游戏最好以 720p 窗口模式运行\n无边框窗口 1280×720 最稳定；独占全屏下挂机无法窗口化且定位易失效。",
+            "开始挂机前确认",
+            MessageBoxButton.OKCancel,
+            MessageBoxImage.Warning);
+        if (confirm != MessageBoxResult.OK) return;
+
         _starting = true;
         try
         {
             SaveUiToConfig();
             SetStartButtonsEnabled(false);
             TabLeague.IsEnabled = TabWeekly.IsEnabled = TabCnTour.IsEnabled = false;
-            await engine.StartAsync(mode!);
-            if (engine.IsRunning)
+            GraphReset(mode!);
+            await host.StartAsync(mode!);
+            if (host.IsRunning)
             {
                 btn.Content = "停止";
                 btn.Style = (Style)FindResource("DangerBtn");
@@ -188,7 +226,12 @@ public partial class MainWindow : Window
         }
         catch (Exception ex)
         {
-            AppendLog($"启动失败：{ex.Message}", LogLevel.Error);
+            // 空 Message 的异常（如单文件 exe 发布写入中途启动导致的程序集加载失败）
+            // 只打 Message 什么都看不到，输出类型+堆栈+内部异常+HRESULT
+            string detail = ex.ToString();
+            if (ex.InnerException is not null)
+                detail += $"\n → 内部异常：{ex.InnerException.GetType().Name}: {ex.InnerException.Message}\n{ex.InnerException.StackTrace}";
+            AppendLog($"启动失败：{detail}", LogLevel.Error);
             ResetButtons();
         }
         finally
@@ -220,7 +263,7 @@ public partial class MainWindow : Window
 
     private void UpdateStats()
     {
-        var s = _engine?.Stats;
+        var s = _workerHost?.LastStats;
         if (s is null) return;
         StMatches.Text = s.MatchesDone.ToString();
         StKey.Text = s.KeyMatches.ToString();
@@ -229,12 +272,29 @@ public partial class MainWindow : Window
         StError.Text = string.IsNullOrEmpty(s.LastError) ? "" : $"最近错误：{s.LastError}";
 
         // 场景自动结束（正常跑完 / 异常退出）：IsRunning 变 false 后按钮需从"停止"恢复为"开始"
-        if (_engine is { IsRunning: false } && _statsTimer.IsEnabled)
+        if (_workerHost is { IsRunning: false } && _statsTimer.IsEnabled)
         {
             _hotkey.Unregister();
             AppendLog("场景已结束，自动停止。", LogLevel.Success);
             ResetButtons();
         }
+    }
+
+    /// <summary>将 Worker 传来的 PNG base64 解码显示到预览控件。</summary>
+    private void ShowPreviewPng(string pngBase64)
+    {
+        try
+        {
+            var bytes = Convert.FromBase64String(pngBase64);
+            var bmp = new BitmapImage();
+            bmp.BeginInit();
+            bmp.CacheOption = BitmapCacheOption.OnLoad;
+            bmp.StreamSource = new MemoryStream(bytes);
+            bmp.EndInit();
+            bmp.Freeze();
+            Preview.Source = bmp;
+        }
+        catch { /* 解码失败跳过这一帧 */ }
     }
 
     protected override void OnClosing(CancelEventArgs e)
@@ -243,7 +303,8 @@ public partial class MainWindow : Window
         _previewTimer.Stop();
         _statsTimer.Stop();
         _hotkey.Dispose();
-        _engine?.Dispose();
+        _graphWindow?.Close();
+        _workerHost?.Dispose();
         FileLogger.Instance.Dispose();
         base.OnClosing(e);
     }

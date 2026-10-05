@@ -16,6 +16,7 @@ public enum GameScreen
     ChallengeList,      // 挑战清单（01/02… 以1胜为目标，含锁定卡）
     ChallengeHome,      // 挑战赛主页（前往比赛 / 教练模式 RS 开关 / 胜场 x/x / 完成的条件）
     EventSettings,      // 活动设置侧滑面板（赛事等级/自动控制/弹性自动控制）
+    DifficultySelect,   // 「选择赛事等级」模态弹窗（7 档难度单选 + 取消/确认，我的联赛开赛前）
     DailyRewards,       // 每日奖励 / 签到 / 小游戏
     MyLeagueHome,       // 我的联赛主页（前往比赛 / 赛程表 / 联赛排名）
     ActivityDetail,     // 活动详情页（i 图标进入：主要奖励进度 / 活动时间 / 活动说明）
@@ -184,6 +185,12 @@ public static class ScreenCatalog
             zh: new[] { ("弹性自动控制",3), ("活动设置",1), ("自动控制",2), ("赛事等级",1.5), ("选择的球队",1) }
         ), 4),
 
+        // 「选择赛事等级」模态弹窗（我的联赛开赛前）：标题 + 副标题独有；
+        // 弹窗同时列出 7 档难度名，会误中 PreMatch，必须在冲突消解中压制
+        new ScreenDef(GameScreen.DifficultySelect, Mix(
+            zh: new[] { ("选择赛事等级",4), ("选择符合",2.5), ("难度级别",2.5), ("可赚取",1.5) }
+        ), 4),
+
         new ScreenDef(GameScreen.DailyRewards, Mix(
             zh: new[] { ("登录奖励",2.5), ("签到",2), ("每日小游戏",2), ("每日",1.5) },
             en: new[] { ("loginbonus",2.5), ("daily",2), ("minigame",2) }
@@ -348,6 +355,17 @@ public sealed class ScreenClassifier
             scores.Remove(GameScreen.MatchHub);
         }
 
+        // 冲突消解：「选择赛事等级」模态弹窗：7 档难度名会喂高 PreMatch，
+        // 背景透出的主页（前往比赛/赛程表）会喂高 MyLeagueHome，标题命中时一律以弹窗为准
+        if (scores.ContainsKey(GameScreen.DifficultySelect))
+        {
+            scores.Remove(GameScreen.PreMatch);
+            scores.Remove(GameScreen.MyLeagueHome);
+            scores.Remove(GameScreen.Dialog);
+            scores.Remove(GameScreen.Schedule);
+            scores.Remove(GameScreen.MatchHub);
+        }
+
         // 冲突消解：「没有正在进行的对阵玩家活动」空页优先于活动列表（空页也含“对阵玩家/活动”）
         if (scores.ContainsKey(GameScreen.NoEvent))
         {
@@ -440,7 +458,7 @@ public sealed class ScreenClassifier
                 GameScreen.ChallengeList, GameScreen.ChallengeHome, GameScreen.ActivityDetail, GameScreen.PreMatch,
                 GameScreen.Schedule, GameScreen.Shop, GameScreen.ShopConfirm, GameScreen.DailyRewards,
                 GameScreen.EventSettings, GameScreen.KeyMatchBadge, GameScreen.MyLeagueHome,
-                GameScreen.CampaignBoard, GameScreen.NoEvent,
+                GameScreen.CampaignBoard, GameScreen.NoEvent, GameScreen.DifficultySelect,
             };
             bool hasMenu = menuScreens.Any(scores.ContainsKey);
 

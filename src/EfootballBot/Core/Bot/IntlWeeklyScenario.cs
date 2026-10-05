@@ -54,7 +54,7 @@ public sealed class IntlWeeklyScenario : ScenarioBase
             Ct.ThrowIfCancellationRequested();
 
             var o = await E.ObserveAsync(Ct);
-            o = await PassThroughAsync(o);
+            o = await E.Overlay.PassThroughAsync(o, Ct);
 
             // 匹配中 / 过场：只等待，不计卡死，绝不能按 B 取消匹配
             if (o.Is(GameScreen.Loading))
@@ -73,12 +73,12 @@ public sealed class IntlWeeklyScenario : ScenarioBase
             {
                 case GameScreen.Home:
                     _restartSweep = true;
-                    await SafeEnterEventHubAsync();
+                    await GoToEventHubSafeAsync();
                     break;
 
                 case GameScreen.MatchHub:
                     _restartSweep = true;
-                    await SafeEnterEventHubAsync();
+                    await GoToEventHubSafeAsync();
                     break;
 
                 case GameScreen.EventHub:
@@ -170,7 +170,7 @@ public sealed class IntlWeeklyScenario : ScenarioBase
 
                 case GameScreen.Disconnected:
                     await E.HandlePopupsAsync(o, Ct);
-                    await SafeEnterEventHubAsync();
+                    await GoToEventHubSafeAsync();
                     break;
 
                 default:
@@ -215,6 +215,24 @@ public sealed class IntlWeeklyScenario : ScenarioBase
 
         if (_finished)
             Log("活动全清结束：剩余活动均已完成或不可进入。", LogLevel.Success);
+    }
+
+    /// <summary>
+    /// 目标编排式导航到活动列表：声明目标页由 PageGraph BFS 寻路。
+    /// 导航超时（如比赛其实还在踢，回不到主页）只告警不抛异常，
+    /// 避免单次失败直接终止整个机器人。
+    /// </summary>
+    private async Task GoToEventHubSafeAsync()
+    {
+        try
+        {
+            await E.GoToAsync(nameof(GameScreen.EventHub), null, Ct);
+        }
+        catch (Exception ex)
+        {
+            Log($"导航到活动列表失败（{ex.GetType().Name}: {ex.Message}），本轮跳过稍后重试", LogLevel.Warn);
+            await E.Pad.Wait(3000, Ct);
+        }
     }
 
     // ================= 外层活动列表扫描 =================
@@ -289,7 +307,7 @@ public sealed class IntlWeeklyScenario : ScenarioBase
         {
             Ct.ThrowIfCancellationRequested();
             var o = await E.ObserveAsync(Ct);
-            o = await PassThroughAsync(o); // 中途确认弹窗（确定）
+            o = await E.Overlay.PassThroughAsync(o, Ct); // 中途确认弹窗（确定）
 
             switch (o.Screen)
             {
@@ -445,7 +463,7 @@ public sealed class IntlWeeklyScenario : ScenarioBase
             await E.Pad.Back();
             await E.Pad.Wait(2000, Ct);
             var o = await E.ObserveAsync(Ct);
-            o = await PassThroughAsync(o);
+            o = await E.Overlay.PassThroughAsync(o, Ct);
             if (o.Is(GameScreen.EventHub))
             {
                 OnEventCompleted("挑战活动已全部通关");

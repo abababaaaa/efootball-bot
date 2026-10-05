@@ -161,6 +161,37 @@ public static class FrameAnalyzer
     }
 
     /// <summary>
+    /// 蓝色对勾占比（「选择赛事等级」面板行首亮蓝 ✓，实测 RGB≈(37,125,232)）：
+    /// B≥170 且 B-R≥70、B-G≥45。比 ButtonBlueRatio 更严格，排除浅蓝底/白行。
+    /// </summary>
+    public static double CheckBlueRatio(FrameData f, NormRect region)
+        => CheckBlueRatioStep(f, region, 2);
+
+    /// <summary>逐像素版蓝勾检测：对勾笔画仅 2~3px，隔行采样会漏掉大半信号。</summary>
+    public static double CheckBlueRatioExact(FrameData f, NormRect region)
+        => CheckBlueRatioStep(f, region, 1);
+
+    private static double CheckBlueRatioStep(FrameData f, NormRect region, int step)
+    {
+        if (f.Bgra.Length == 0) return 0; // 帧已释放兜底
+        var (x, y, w, h) = PixelRect(f, region);
+        long hit = 0, n = 0;
+        var b = f.Bgra;
+        for (int yy = y; yy < y + h; yy += step)
+        {
+            int row = yy * f.Width * 4;
+            for (int xx = x; xx < x + w; xx += step)
+            {
+                int i = row + xx * 4;
+                int r = b[i + 2], g = b[i + 1], bl = b[i];
+                n++;
+                if (bl >= 170 && bl - r >= 70 && bl - g >= 45) hit++;
+            }
+        }
+        return n == 0 ? 0 : hit / (double)n;
+    }
+
+    /// <summary>
     /// 检测右下的 RT 提示横幅（「RT 前往比赛」「RT 跳过」，真机实测填充 RGB(0,0,150)、
     /// 位置约 x0.78~0.97、y0.90~0.96，整宽仅约 0.19 屏宽，且被黑色 RT 徽章/白文字/箭头切断）。
     /// 故：①搜索区限定右下 x 0.60~1、y 0.84~1（天然排除左下蓝色返回按钮）；

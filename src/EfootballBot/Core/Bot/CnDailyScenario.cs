@@ -68,7 +68,7 @@ public sealed class CnDailyScenario : ScenarioBase
             }
 
             var o = await E.ObserveAsync(Ct);
-            o = await PassThroughAsync(o);
+            o = await E.Overlay.PassThroughAsync(o, Ct);
 
             stuck = o.Screen == lastScreen ? stuck + 1 : 0;
             lastScreen = o.Screen;
@@ -801,7 +801,7 @@ public sealed class CnDailyScenario : ScenarioBase
             await E.Pad.Back();
             await E.Pad.Wait(2000, Ct);
             var o = await E.ObserveAsync(Ct);
-            o = await PassThroughAsync(o);
+            o = await E.Overlay.PassThroughAsync(o, Ct);
             if (o.Is(GameScreen.EventHub)) return;
         }
         Log("挑战退出后未回到活动列表，交外层恢复", LogLevel.Warn);

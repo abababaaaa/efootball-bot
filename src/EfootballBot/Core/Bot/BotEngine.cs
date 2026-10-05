@@ -1,8 +1,12 @@
 using System.Diagnostics;
-using System.Runtime;
+using EfootballBot.Core.Action;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Input;
+using EfootballBot.Core.Graph;
+using EfootballBot.Core.Observation;
+using EfootballBot.Core.Overlay;
+using EfootballBot.Core.Probe;
 using EfootballBot.Core.System;
 using EfootballBot.Core.Vision;
 
@@ -28,51 +32,54 @@ public sealed class BotEngine : IDisposable
     private readonly AppConfig _cfg;
     public readonly VirtualGamepad360 Pad360;
     public readonly Pad Pad;
+    public readonly ActionExecutor Actions;
+    public readonly OverlayEngine Overlay;
     public readonly WindowCapture Capture = new();
+    private DxgiDesktopCapture? _dxgi;
     public readonly OcrRecognizer Ocr;
+    public readonly ObservationService Observation;
     private readonly ScreenClassifier _classifier;
+    private readonly ProbeEngine _probeEngine;
+    public readonly PageGraph Graph;
     public readonly BotStats Stats = new();
 
     private CancellationTokenSource? _cts;
     private Task? _loop;
-    private FrameData? _frame;
-    private OcrResult _ocr = OcrResult.Empty;
     private Observation? _lastObs;
-    private long _lastOcrTick;
     private long _lastUnknownDumpTick;
     private GameWindowInfo? _window;
-    private GameWindow.SavedWindowState? _savedWinState;
-    private (int X, int Y)? _offscreenPos;
-    private bool _minimizedGame;
-    private DateTime _gcLastRun = DateTime.Now;
-    private int _unknownStreak;
     private bool _inputVerified;
 
     public event Action<string, LogLevel>? Log;
     public event Action<BotStats>? StatsChanged;
     public event Action<Observation>? Observed;
 
+    // ---------------- 可视化面板事件（Worker→GUI 图谱面板） ----------------
+    public event Action<ScreenEvent>? ScreenChanged;
+    public event Action<ProbeEvent>? ProbeUpdated;
+    public event Action<NavEvent>? NavPathFound;
+    public event Action<FlowEvent>? FlowStageChanged;
+
     public bool IsRunning => _loop is { IsCompleted: false };
     public GameWindowInfo? Window => _window;
-    public FrameData? LatestFrame => _frame;
-    public OcrResult LatestOcr => _ocr;
+    public FrameData? LatestFrame => Observation.LatestFrame;
+    public OcrResult LatestOcr => Observation.LatestOcr;
 
     public BotEngine(AppConfig cfg)
     {
         _cfg = cfg;
         Pad360 = new VirtualGamepad360();
         Pad = new Pad(Pad360, cfg.Timing);
+        Actions = new ActionExecutor(this, Pad);
+        Overlay = new OverlayEngine(this, Actions, Pad);
         Ocr = new OcrRecognizer(cfg.OcrLanguage);
         _classifier = new ScreenClassifier();
+        _probeEngine = new ProbeEngine(PageCatalog.Pages);
+        Graph = new PageGraph(PageCatalog.Edges);
+        Observation = new ObservationService(Capture, Ocr, cfg);
+        Observation.Log = (msg, lv) => LogInternal(msg, lv);
 
-        Capture.FrameUpdated += OnFrame;
         Capture.CaptureClosed += (_, msg) => LogInternal($"画面捕获已结束：{msg}", LogLevel.Warn);
-    }
-
-    private void OnFrame(object? sender, EventArgs e)
-    {
-        var f = Capture.TryGetLatest();
-        if (f is not null) _frame = f;
     }
 
     public IReadOnlyList<GameWindowInfo> DetectWindows() => GameWindow.FindAll();
@@ -83,6 +90,7 @@ public sealed class BotEngine : IDisposable
     {
         if (IsRunning) return;
         _classifier.Reset(); // 清除上一次的比赛锁定迟滞状态
+        _probeEngine.Reset();
         var token = await PrepareSessionAsync(mode == "cndaily" ? CnConfig.ProcessName : null);
 
         _loop = Task.Run(async () =>
@@ -97,6 +105,9 @@ public sealed class BotEngine : IDisposable
                     "cndaily" => new CnDailyScenario(this, _cfg, token),
                     _ => throw new ArgumentOutOfRangeException(nameof(mode)),
                 };
+                // 桥接比赛阶段事件到可视化面板
+                scenario.MatchFlow.StageChanged += (stage, deadline) =>
+                    FlowStageChanged?.Invoke(new FlowEvent { Stage = stage, Deadline = deadline });
                 LogInternal($"场景启动：{scenario.DisplayName}", LogLevel.Success);
                 await scenario.RunAsync();
             }
@@ -135,46 +146,8 @@ public sealed class BotEngine : IDisposable
                 ? "未找到正在运行的国服游戏窗口（eFootballOnline），请先启动「实况足球在线」。"
                 : "未找到正在运行的 eFootball 游戏窗口，请先启动游戏。");
 
-        // 挂机自动窗口化：全屏超宽（如 3440×1440）下 DWM 每帧合成近 500 万像素是卡顿根因，
-        // 与捕获无关（停止捕获 DWM 仍 49%）。窗口化到 1280×720 后 DWM 合成像素量降 6 倍，
-        // 且该分辨率正是全部识别参数的校准基准。停止挂机时还原。
-        if (_cfg.AutoWindowizeOnStart)
-        {
-            var saved = GameWindow.WindowizeTo(_window.Handle);
-            if (saved is not null)
-            {
-                await Task.Delay(600); // 等游戏重排 UI
-                // 验证窗口化是否生效：游戏可能抵抗样式修改（独占全屏），
-                // 此时客户区仍 >760 → 回退样式 + 移到屏幕外（DWM 合成开销归零）
-                var (_, _, _, _, _, ch) = GameWindow.GetWindowFrame(_window.Handle);
-                if (ch > 0 && ch <= 760)
-                {
-                    _savedWinState = saved;
-                    LogInternal("已将游戏窗口化为 1280×720（降低系统负载；停止挂机时自动还原）", LogLevel.Info);
-                }
-                else
-                {
-                    GameWindow.RestoreWindow(_window.Handle, saved);
-                    var pos = GameWindow.MoveOffscreen(_window.Handle);
-                    if (pos is not null)
-                    {
-                        _offscreenPos = pos.Value;
-                        LogInternal("窗口化被游戏抵抗，已将游戏窗口移到屏幕外（画面不可见但挂机正常；停止时移回）", LogLevel.Info);
-                    }
-                    else if (GameWindow.MinimizeWindow(_window.Handle))
-                    {
-                        // 最后的降级：最小化（DWM 对最小化窗口合成开销为零，WGC 通常仍能捕获）
-                        _minimizedGame = true;
-                        LogInternal("窗口化与屏幕外移动均被抵抗，已最小化游戏窗口（画面不可见但挂机正常；停止时还原）", LogLevel.Info);
-                    }
-                    else
-                    {
-                        LogInternal("窗口化/屏幕外移动/最小化均被游戏抵抗，保持全屏运行（可能较卡）", LogLevel.Warn);
-                    }
-                    await Task.Delay(300);
-                }
-            }
-        }
+        // 不再强制修改游戏窗口（独占全屏会抵抗，且改动用户窗口副作用大）。
+        // 非 720p 只在开始捕获时给一条性能提醒；高分辨率的捕获开销由帧池高≤720 降采样缓解。
 
         // 已在捕获另一个窗口（如国际服→国服切换）时，先停掉旧捕获
         if (Capture.IsRunning && Capture.Hwnd != _window.Handle)
@@ -182,62 +155,82 @@ public sealed class BotEngine : IDisposable
             LogInternal("切换游戏模块：重新绑定画面捕获窗口", LogLevel.Info);
             Capture.Stop();
         }
+        if (_dxgi is { IsRunning: true } && _dxgi.Hwnd != _window.Handle)
+            _dxgi.Stop();
 
-        if (!Capture.IsRunning)
+        if (!Capture.IsRunning && !(_dxgi?.IsRunning ?? false))
         {
             var (w, h) = GameWindow.GetClientSize(_window.Handle);
             if (w <= 0 || h <= 0) (w, h) = (1280, 720);
-            LogInternal($"开始捕获游戏窗口（{w}×{h}，后台可捕获）", LogLevel.Info);
-            await Task.Run(() => Capture.Start(_window.Handle, w, h));
+            if (h > 760)
+                LogInternal($"当前游戏分辨率 {w}×{h} 高于 720p，已自动降采样；DXGI 模式可显著降低高分辨率下的捕获开销", LogLevel.Warn);
+            await StartCaptureAsync(w, h);
         }
+
+        Observation.Window = _window;
 
         Pad360.Connect();
         LogInternal($"虚拟手柄已连接（XInput 玩家 {Pad360.UserIndex + 1}），OCR 语言：{Ocr.LanguageTag}", LogLevel.Success);
 
         Stats.StartedAt = DateTime.Now;
-        _gcLastRun = DateTime.Now;
         _cts = new CancellationTokenSource();
         return _cts.Token;
+    }
+
+    /// <summary>
+    /// 按配置启动捕获后端：DXGI 桌面复制（默认，高性能/全分辨率）或 WGC（备用，窗口专属/可被遮挡）。
+    /// DXGI 启动异常或 5s 内无桌面帧时自动回退 WGC，保证挂机可用。
+    /// </summary>
+    private async Task StartCaptureAsync(int w, int h)
+    {
+        if (_cfg.CaptureMode == CaptureMode.Dxgi)
+        {
+            try
+            {
+                _dxgi ??= new DxgiDesktopCapture();
+                if (!_dxgi.IsRunning)
+                {
+                    LogInternal($"开始捕获游戏窗口（DXGI 桌面复制，{w}×{h}，高性能全分辨率）", LogLevel.Info);
+                    LogInternal("DXGI 捕获整个显示器画面：挂机时游戏窗口请勿最小化或被其他窗口遮挡", LogLevel.Warn);
+                    await Task.Run(() => _dxgi.Start(_window!.Handle, w, h));
+                }
+                // Desktop Duplication 仅在桌面内容变化时产出帧，等待首帧最多 5s
+                var deadline = DateTime.Now.AddSeconds(5);
+                while (DateTime.Now < deadline && _dxgi.LastFrameAt == DateTime.MinValue)
+                    await Task.Delay(100);
+                if (_dxgi.LastFrameAt == DateTime.MinValue)
+                    throw new TimeoutException("DXGI 5s 内未收到桌面帧（画面静止/设备不支持/被远程桌面占用）");
+
+                if (Observation.Provider != _dxgi)
+                {
+                    try { Capture.Stop(); } catch { }
+                    Observation.AttachProvider(_dxgi);
+                }
+                LogInternal("DXGI 桌面复制捕获已就绪", LogLevel.Success);
+                return;
+            }
+            catch (Exception ex)
+            {
+                LogInternal($"DXGI 捕获启动失败，自动回退 WGC：{ex.Message}", LogLevel.Warn);
+                try { _dxgi?.Stop(); } catch { }
+            }
+        }
+
+        if (!Capture.IsRunning)
+        {
+            LogInternal($"开始捕获游戏窗口（WGC 窗口捕获，{w}×{h}，后台可捕获/可被遮挡）", LogLevel.Info);
+            await Task.Run(() => Capture.Start(_window!.Handle, w, h));
+        }
+        if (Observation.Provider != Capture)
+            Observation.AttachProvider(Capture);
     }
 
     public void Stop()
     {
         try { _cts?.Cancel(); } catch { }
         try { Pad360.ResetAll(); } catch { }
-        _frame = null;
         _lastObs = null;
         _inputVerified = false;
-        // 还原挂机开始时自动窗口化的游戏窗口
-        if (_savedWinState is not null && _window is not null)
-        {
-            try
-            {
-                GameWindow.RestoreWindow(_window.Handle, _savedWinState);
-                LogInternal("已还原游戏窗口尺寸。", LogLevel.Info);
-            }
-            catch { }
-            _savedWinState = null;
-        }
-        if (_offscreenPos is not null && _window is not null)
-        {
-            try
-            {
-                GameWindow.MoveBack(_window.Handle, _offscreenPos.Value.X, _offscreenPos.Value.Y);
-                LogInternal("已将游戏窗口移回屏幕内。", LogLevel.Info);
-            }
-            catch { }
-            _offscreenPos = null;
-        }
-        if (_minimizedGame && _window is not null)
-        {
-            try
-            {
-                GameWindow.RestoreFromMinimize(_window.Handle);
-                LogInternal("已还原游戏窗口。", LogLevel.Info);
-            }
-            catch { }
-            _minimizedGame = false;
-        }
         // 注意：此处不断开虚拟手柄。手柄一旦被游戏看到「断开→重连」，
         // eFootball 会把光标停靠到顶部头部的「手柄归属」图标上，重连设备的
         // Left/A 全部失效（焦点不在磁贴行）。设备在 Stop→Start 间保持存活，
@@ -246,95 +239,80 @@ public sealed class BotEngine : IDisposable
 
     // ---------------- 观察 ----------------
 
-    /// <summary>
-    /// 按画面状态调整捕获帧间隔（背压节流，降低全屏 DWM 负载）：
-    /// 比赛中 2000ms（挂机只需低频确认未结束）；加载/未知 500ms；其余全速 33ms。
-    /// 选卡相关画面（活动列表/挑战清单/弹窗）必须全速：MoveAndSettle 依赖 150ms 轮询签名。
-    /// </summary>
-    private void ApplyCaptureThrottle(GameScreen screen)
-    {
-        int ms = screen switch
-        {
-            GameScreen.InMatch => 2000,
-            GameScreen.Loading or GameScreen.Unknown => 500,
-            _ => 33,
-        };
-        Capture.SetMinFrameInterval(ms);
-    }
-
     /// <summary>OCR 间隔自适应：比赛中放宽到 2000ms，其余用配置值（默认 900ms）。</summary>
     private int EffectiveOcrIntervalMs()
         => _lastObs?.Screen == GameScreen.InMatch
             ? Math.Max(_cfg.Timing.OcrIntervalMs, 2000)
             : _cfg.Timing.OcrIntervalMs;
 
-    private int[] _frameSize = new int[2];
-
+    /// <summary>
+    /// 获取一帧新鲜画面 → OCR → 分类。捕获+OCR+节流由 ObservationService 负责，
+    /// 此处仅做画面分类、统计更新和事件派发。
+    /// </summary>
     public async Task<Observation> ObserveAsync(CancellationToken ct)
     {
-        // 等待第一帧
-        int wait = 0;
-        while (_frame is null && wait < 200)
+        var (f, ocr) = await Observation.ObserveAsync(ct, EffectiveOcrIntervalMs());
+
+        // 距上次 OCR 不足间隔时 ObservationService 返回缓存，直接复用上一次分类结果
+        if (_lastObs is not null && _lastObs.Frame == f && _lastObs.Ocr == ocr)
+            return _lastObs;
+
+        var (screen, score, ev) = _classifier.Classify(ocr, f);
+        var obs = new Observation(f, ocr, screen, score, ev);
+        _lastObs = obs;
+        Observation.ApplyCaptureThrottle(screen);
+
+        // 影子模式：并行运行新 ProbeEngine，仅日志对比差异，实际仍用旧结果
+        var probeObs = new Observation(f, ocr, screen, score, ev);
+        var newResult = _probeEngine.Classify(probeObs);
+        if (screen != newResult.Screen)
         {
-            await Task.Delay(100, ct);
-            wait++;
-            ct.ThrowIfCancellationRequested();
+            LogInternal(
+                $"[影子差异] old={screen}({score:F1}) new={newResult.Screen}({newResult.RawScore:F1}) ev={string.Join(",", newResult.Evidence)}",
+                LogLevel.Warn);
         }
-        var f = _frame ?? throw new InvalidOperationException("没有可用的游戏画面（游戏窗口可能已最小化）。");
 
-            // 窗口尺寸变化时重建捕获
-            if (_window is not null)
+        // ---------------- 可视化事件派发（非阻塞，订阅方自行异常保护） ----------------
+        ScreenChanged?.Invoke(new ScreenEvent
+        {
+            Screen = screen,
+            Score = score,
+            Evidence = ev,
+        });
+
+        var topCands = _probeEngine.GetTopCandidates(probeObs, 5);
+        if (topCands.Count > 0)
+        {
+            ProbeUpdated?.Invoke(new ProbeEvent
             {
-                var (cw, ch) = GameWindow.GetClientSize(_window.Handle);
-                if (cw > 0 && ch > 0 && (cw != f.Width || ch != f.Height) && (_frameSize[0] != cw || _frameSize[1] == 0))
+                TopCandidates = topCands.Select(c => new ProbeCandidate
                 {
-                    _frameSize[0] = cw; _frameSize[1] = ch;
-                    Capture.Resize(cw, ch);
-                }
-            }
+                    Screen = c.Screen,
+                    RawScore = c.Raw,
+                    Evidence = c.Ev,
+                }).ToList(),
+            });
+        }
 
-            long now = Environment.TickCount64;
-            // 定期 GC（每 5 分钟，仅当配置开启时）
-            if (_cfg.PeriodicGc && (DateTime.Now - _gcLastRun).TotalMinutes >= 5)
-            {
-                _gcLastRun = DateTime.Now;
-                LogInternal("执行定期内存整理（GC.Collect Aggressive）…", LogLevel.Debug);
-                GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-                GC.Collect(2, GCCollectionMode.Aggressive, true, true);
-                GC.WaitForPendingFinalizers();
-                LogInternal($"GC 完成。Gen0={GC.CollectionCount(0)} Gen1={GC.CollectionCount(1)} Gen2={GC.CollectionCount(2)} Mem={GC.GetTotalMemory(false):N0}", LogLevel.Debug);
-            }
-            if (now - _lastOcrTick < EffectiveOcrIntervalMs() && _lastObs is not null)
-                return _lastObs;
+        if (screen != Stats.LastScreen)
+        {
+            Stats.LastScreen = screen;
+            Stats.LastScreenEvidence = string.Join(",", ev);
+            LogInternal($"画面 → {ScreenName(screen)}（{score:F1} {Stats.LastScreenEvidence}）", LogLevel.Debug);
+            EmitStats();
+        }
 
-            await Task.Yield();
-            var ocr = await Ocr.RecognizeAsync(f, ct);
-            _ocr = ocr;
-            _lastOcrTick = now;
+        // 未识别时周期性输出 OCR 原文，便于校准关键词
+        long now = Environment.TickCount64;
+        if (screen == GameScreen.Unknown && now - _lastUnknownDumpTick > 5000)
+        {
+            _lastUnknownDumpTick = now;
+            var words = ocr.MergedWords.Take(25).Select(w => w.Text);
+            LogInternal($"[OCR原文] {string.Join(" | ", words)}", LogLevel.Warn);
+        }
 
-            var (screen, score, ev) = _classifier.Classify(ocr, f);
-            var obs = new Observation(f, ocr, screen, score, ev);
-            _lastObs = obs;
-            ApplyCaptureThrottle(screen);
-
-            if (screen != Stats.LastScreen)
-            {
-                Stats.LastScreen = screen;
-                Stats.LastScreenEvidence = string.Join(",", ev);
-                LogInternal($"画面 → {ScreenName(screen)}（{score:F1} {Stats.LastScreenEvidence}）", LogLevel.Debug);
-                EmitStats();
-            }
-
-            // 未识别时周期性输出 OCR 原文，便于校准关键词
-            if (screen == GameScreen.Unknown && now - _lastUnknownDumpTick > 5000)
-            {
-                _lastUnknownDumpTick = now;
-                var words = ocr.MergedWords.Take(25).Select(w => w.Text);
-                LogInternal($"[OCR原文] {string.Join(" | ", words)}", LogLevel.Warn);
-            }
-
-            Observed?.Invoke(obs);
-            return obs;
+        Observed?.Invoke(obs);
+        return obs;
     }
 
     /// <summary>等待进入任一指定画面。</summary>
@@ -373,90 +351,28 @@ public sealed class BotEngine : IDisposable
 
     /// <summary>
     /// 处理断线弹窗 / 通用确认框，返回 true 表示做过处理。
+    /// 委托给 OverlayEngine。
     /// </summary>
-    public async Task<bool> HandlePopupsAsync(Observation o, CancellationToken ct)
-    {
-        if (o.Is(GameScreen.Disconnected))
-        {
-            LogInternal("检测到断线 / 通信错误弹窗，尝试确认返回…", LogLevel.Warn);
-            await Pad.Confirm();
-            await Task.Delay(2000, ct);
-            return true;
-        }
-        if (o.Is(GameScreen.Dialog))
-        {
-            // 关键比赛弹窗：OK 按钮在右下角，需先 Up 把焦点移过去
-            if (o.Ocr.Contains("关键比赛") || o.Ocr.Contains("keymatch"))
-            {
-                LogInternal("关键比赛确认弹窗：方向上 → 点击 OK", LogLevel.Info);
-                await Pad.Dpad(PadDir.Up);
-                await Task.Delay(500, ct);
-            }
-            // 普通弹窗：OK/确定 可能不在默认焦点，走 PressButtonAsync 识别→移动→点击
-            if (!await PressButtonAsync(new[] { "ok", "确定", "确认", "下一步", "yes" }, ct))
-            {
-                await Pad.Confirm();
-                await Task.Delay(700, ct);
-            }
-            return true;
-        }
-        return false;
-    }
+    public Task<bool> HandlePopupsAsync(Observation o, CancellationToken ct)
+        => Overlay.HandlePopupsAsync(o, ct);
 
     /// <summary>
     /// 在垂直菜单中按 OCR 文字找到目标项：逐项下移并检测该项高亮（黄 / 亮白），命中后按 A。
     /// </summary>
-    public async Task<bool> SelectMenuByTextAsync(string[] normKeywords, CancellationToken ct, int maxItems = 8)
-    {
-        for (int i = 0; i < maxItems; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var o = await ObserveAsync(ct);
-            foreach (var kw in normKeywords)
-            {
-                var w = o.Ocr.FindFirst(kw);
-                if (w is null) continue;
-                var region = new NormRect(
-                    Math.Max(0, w.X - 0.04), Math.Max(0, w.Y - w.H * 0.6),
-                    Math.Min(1, w.W + 0.08), w.H * 2.2);
-                double yellow = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Yellow, region);
-                double bright = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Bright, region);
-                if (yellow > 0.04 || bright > 0.35)
-                {
-                    LogInternal($"菜单选中「{kw}」（y={yellow:F2} b={bright:F2}），按 A", LogLevel.Debug);
-                    await Pad.Confirm();
-                    return true;
-                }
-            }
-            await Pad.Dpad(PadDir.Down);
-        }
-        return false;
-    }
+    public Task<bool> SelectMenuByTextAsync(string[] normKeywords, CancellationToken ct, int maxItems = 8)
+        => Actions.SelectMenuByTextAsync(normKeywords, ct, maxItems);
 
     /// <summary>
-    /// 按钮区域尺寸：根据文字大小自适应，确保覆盖整个按钮（含发光边框）。
-    /// eFootball 按钮文字只占按钮中心一小部分，边框发光在文字外围，区域太小会漏检焦点。
+    /// 卡片白色高亮占比：联赛主页焦点卡整卡变白底黑字（白占比高），
+    /// 非焦点卡为深灰底+少量白色标题文字。用于判定 Down→Right 后焦点落在哪张卡。
+    /// 区域以卡片标题词为基准向左扩到图标、向右/上下扩出卡面左上主体。
     /// </summary>
-    private static NormRect ButtonRegion(OcrWord w)
+    internal static double CardWhiteScore(FrameData frame, OcrWord w)
     {
-        double rw = Math.Clamp(w.W * 8, 0.20, 0.42);
-        double rh = Math.Clamp(w.H * 4, 0.08, 0.16);
-        double x = Math.Clamp(w.CenterX - rw / 2, 0, 1 - rw);
-        double y = Math.Clamp(w.CenterY - rh / 2, 0, 1 - rh);
-        return new NormRect(x, y, rw, rh);
-    }
-
-    /// <summary>
-    /// 检测按钮焦点发光度：eFootball 聚焦按钮边框为青色/蓝色/亮白，
-    /// 需同时检查 Blue | Cyan | Bright 三色滤镜，单用 Blue 会漏检青色焦点。
-    /// </summary>
-    private static double ButtonGlow(FrameData frame, OcrWord w)
-    {
-        var r = ButtonRegion(w);
-        double blue = FrameAnalyzer.ColorRatio(frame, HsvFilter.Blue, r);
-        double cyan = FrameAnalyzer.ColorRatio(frame, HsvFilter.Cyan, r);
-        double bright = FrameAnalyzer.ColorRatio(frame, HsvFilter.Bright, r);
-        return Math.Max(blue, Math.Max(cyan, bright * 0.8));
+        var r = new NormRect(
+            Math.Max(0, w.X - 0.10), Math.Max(0, w.Y - 0.05),
+            Math.Min(1, w.W + 0.24), Math.Min(1, w.H + 0.11));
+        return FrameAnalyzer.ColorRatio(frame, HsvFilter.White, r);
     }
 
     /// <summary>
@@ -465,110 +381,8 @@ public sealed class BotEngine : IDisposable
     /// 焦点检测使用蓝+青+亮多色滤镜，兼容 eFootball 各种按钮高亮风格。
     /// exactMatch=true 时用精确词匹配（避免 "ok" 误匹配 "Fukuoka" 等队名）。
     /// </summary>
-    public async Task<bool> PressButtonAsync(string[] targetKeywords, CancellationToken ct, int maxMoves = 8, bool exactMatch = false)
-    {
-        // 弹窗里常见可聚焦按钮词（用于定位"当前指针在哪"）
-        string[] allButtons = { "ok", "确定", "确认", "取消", "下一步", "跳过", "返回", "是", "否", "yes", "no", "cancel", "skip", "next", "back" };
-        // 目标按钮被判定为已聚焦的发光度阈值
-        const double TargetFocused = 0.12;
-        // 找到当前焦点的发光度阈值（低于此值认为没检测到焦点）
-        const double FocusFound = 0.06;
-
-        for (int move = 0; move < maxMoves; move++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var o = await ObserveAsync(ct);
-
-            OcrWord? target = null;
-            foreach (var kw in targetKeywords)
-            {
-                if (exactMatch)
-                    target = o.Ocr.MergedWords.FirstOrDefault(w =>
-                        OcrText.Norm(w.Text).Equals(kw, StringComparison.OrdinalIgnoreCase));
-                else
-                    target = o.Ocr.FindFirst(kw);
-                if (target is not null) break;
-            }
-            if (target is null) return false; // 目标都不在屏幕上
-
-            double tGlow = ButtonGlow(o.Frame, target);
-
-            // 目标按钮已聚焦：直接按 A
-            if (tGlow >= TargetFocused)
-            {
-                LogInternal($"指针已在「{target.Text}」上（glow={tGlow:F2}），按 A", LogLevel.Debug);
-                await Pad.Confirm();
-                await Task.Delay(600, ct);
-                return true;
-            }
-
-            // 找当前焦点按钮：所有候选按钮中发光度最高者
-            OcrWord? focus = null;
-            double focusGlow = 0;
-            foreach (var kw in allButtons)
-            {
-                foreach (var w in o.Ocr.FindAll(kw))
-                {
-                    double g = ButtonGlow(o.Frame, w);
-                    if (g > focusGlow) { focusGlow = g; focus = w; }
-                }
-            }
-
-            if (focus is not null && focusGlow >= FocusFound && focus != target)
-            {
-                // 找到当前焦点：朝目标按钮移动
-                double dx = target.CenterX - focus.CenterX;
-                double dy = target.CenterY - focus.CenterY;
-                LogInternal($"移动指针：「{focus.Text}」→「{target.Text}」 dx={dx:F2} dy={dy:F2}", LogLevel.Debug);
-
-                if (Math.Abs(dx) < 0.05 && Math.Abs(dy) < 0.06)
-                {
-                    // 位置已对准但发光不足：直接按 A 尝试
-                    await Pad.Confirm();
-                    await Task.Delay(600, ct);
-                    return true;
-                }
-                if (Math.Abs(dx) > Math.Abs(dy))
-                    await Pad.Dpad(dx > 0 ? PadDir.Right : PadDir.Left);
-                else
-                    await Pad.Dpad(dy > 0 ? PadDir.Down : PadDir.Up);
-                await Task.Delay(400, ct);
-                continue;
-            }
-
-            // 没检测到任何高亮焦点：先盲按 A（焦点可能已在目标上但发光检测漏了），
-            // 若无效再按目标按钮位置做一次方向试探
-            if (move == 0)
-            {
-                LogInternal($"未检测到焦点，先盲按 A 尝试「{target.Text}」", LogLevel.Debug);
-                await Pad.Confirm();
-                await Task.Delay(600, ct);
-                // 重新观察：若目标按钮消失说明按 A 成功
-                var o2 = await ObserveAsync(ct);
-                bool stillThere = exactMatch
-                    ? targetKeywords.Any(kw => o2.Ocr.MergedWords.Any(w =>
-                          OcrText.Norm(w.Text).Equals(kw, StringComparison.OrdinalIgnoreCase)))
-                    : targetKeywords.Any(kw => o2.Ocr.FindFirst(kw) is not null);
-                if (!stillThere) return true;
-                // 按钮还在：说明 A 没点中，根据目标位置试探移动方向
-                double tx = target.CenterX, ty = target.CenterY;
-                LogInternal($"盲按 A 未生效，按目标位置试探移动（x={tx:F2} y={ty:F2}）", LogLevel.Debug);
-                if (ty > 0.6) await Pad.Dpad(PadDir.Down);        // 按钮在下方 → 往下
-                else if (ty < 0.4) await Pad.Dpad(PadDir.Up);     // 按钮在上方 → 往上
-                else if (tx > 0.6) await Pad.Dpad(PadDir.Right);  // 按钮在右方 → 往右
-                else await Pad.Dpad(PadDir.Left);                 // 按钮在左方 → 往左
-                await Task.Delay(400, ct);
-                continue;
-            }
-
-            // 后续轮次：仍无焦点，直接按 A 兜底
-            LogInternal($"仍未检测到焦点，直接按 A 兜底「{target.Text}」", LogLevel.Debug);
-            await Pad.Confirm();
-            await Task.Delay(600, ct);
-            return true;
-        }
-        return false;
-    }
+    public Task<bool> PressButtonAsync(string[] targetKeywords, CancellationToken ct, int maxMoves = 8, bool exactMatch = false)
+        => Actions.PressButtonAsync(targetKeywords, ct, maxMoves, exactMatch);
 
     /// <summary>连续按 B 尝试回到顶层主页。</summary>
     public async Task BackToHomeAsync(CancellationToken ct)
@@ -632,186 +446,161 @@ public sealed class BotEngine : IDisposable
         throw new InputNotRespondingException();
     }
 
-    /// <summary>卡死恢复：优先找“下一步/确定/确认”按 A；否则按 B；连续失败回主页。</summary>
-    public async Task RecoverAsync(Observation o, CancellationToken ct)
-    {
-        _unknownStreak++;
+    /// <summary>卡死恢复：优先找“下一步/确定/确认”按 A；否则按 B；连续失败回主页。委托给 OverlayEngine。</summary>
+    public Task RecoverAsync(Observation o, CancellationToken ct)
+        => Overlay.RecoverAsync(o, ct);
 
-        // 物品已过期弹窗：唯一按钮 OK 默认聚焦，OCR 可能漏识按钮文字，直接按 A 立刻确认
-        if (o.Ocr.Contains("过期") || o.Ocr.ContainsJoined("过期") || o.Ocr.Contains("获取新物品"))
-        {
-            LogInternal("检测到「物品已过期」弹窗，立即确认", LogLevel.Warn);
-            if (!await PressButtonAsync(new[] { "ok", "确定", "确认" }, ct))
-            {
-                await Pad.Confirm();
-                await Task.Delay(700, ct);
-            }
-            return;
-        }
-
-        // 优先：发现「下一步 / OK / 确定 / 确认」→ 走 PressButtonAsync（识别→移动→点击）
-        var next = o.Ocr.FindFirst("下一步") ?? o.Ocr.FindFirst("ok")
-                   ?? o.Ocr.FindFirst("确定") ?? o.Ocr.FindFirst("确认") ?? o.Ocr.FindFirst("next");
-        if (next is not null)
-        {
-            LogInternal($"未识别画面，但发现「{next.Text}」，识别并点击", LogLevel.Warn);
-            if (!await PressButtonAsync(new[] { "下一步", "ok", "确定", "确认", "next" }, ct))
-            {
-                await Pad.Confirm();
-                await Task.Delay(700, ct);
-            }
-            return;
-        }
-
-        // 直播画面已有草皮视觉判定、赛前过场在比赛流程内部处理，外层出现未知通常是
-        // 加载/黑屏——按 B 可能取消匹配，先只等待；连续多轮仍未恢复才回主页
-        if (_unknownStreak <= 2)
-        {
-            LogInternal("未识别画面，等待 2s 后重新观察（不按 B，避免误退/取消匹配）…", LogLevel.Warn);
-        }
-        else
-        {
-            _unknownStreak = 0;
-            await BackToHomeAsync(ct);
-        }
-        await Task.Delay(2000, ct);
-    }
-
-    public void ResetUnknown() => _unknownStreak = 0;
+    public void ResetUnknown() => Overlay.ResetUnknown();
 
     // ---------------- 导航 ----------------
 
     /// <summary>
     /// 二维卡片/磁贴导航：根据 OCR 坐标把焦点移动到目标卡片并按 A。
     /// 通过比较各候选卡片外扩区域的白色描边亮度找当前焦点。
+    /// 选词一律用原始 Words（不能用 MergedWords 行合并词：同一 y 高度的多张卡标题会被
+    /// 拼成「赛程表兑换积分」这类横跨两卡的假词，中心被左卡拖走导致只上下移动、永不右移）。
     /// </summary>
-    public async Task<bool> FocusAndConfirmAsync(string[] targetKeywords, string[] allCardKeywords, CancellationToken ct, int maxMoves = 14)
+    public Task<bool> FocusAndConfirmAsync(string[] targetKeywords, string[] allCardKeywords, CancellationToken ct, int maxMoves = 14)
+        => Actions.FocusAndConfirmAsync(targetKeywords, allCardKeywords, ct, maxMoves);
+
+    /// <summary>
+    /// 在 OCR 中定位某个卡片标题词的真实外接框，优先级：
+    /// ① 原始词完全相等；② 原始词包含关键词且最短；
+    /// ③ 原始碎词按阅读序拼接后包含关键词（中文常被逐字拆开）→ 命中间的词框合并；
+    /// ④ 兜底：行合并词中包含关键词且最短的（可能横跨多卡，仅最后手段）。
+    /// </summary>
+    internal static OcrWord? FindCardWord(OcrResult ocr, string keyword)
     {
-        for (int move = 0; move < maxMoves; move++)
+        keyword = OcrText.Norm(keyword);
+        var words = ocr.Words
+            .Select(w => (Word: w, Norm: OcrText.Norm(w.Text)))
+            .Where(t => t.Norm.Length > 0)
+            .ToList();
+
+        // ① 完全相等
+        var exact = words.Where(t => t.Norm == keyword)
+            .Select(t => t.Word)
+            .OrderBy(w => w.W * w.H).FirstOrDefault();
+        if (exact is not null) return exact;
+
+        // ② 单个原始词包含关键词，取最短（避开粘连长句）
+        var contains = words.Where(t => t.Norm.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(t => t.Word.Text.Length)
+            .Select(t => t.Word).FirstOrDefault();
+        if (contains is not null) return contains;
+
+        // ③ 碎词序列（先按 Y 行、再按 X）拼出关键词：把命中间的碎词外接框合并成一个 OcrWord
+        var ordered = words.OrderBy(t => t.Word.Y).ThenBy(t => t.Word.X).ToList();
+        for (int i = 0; i < ordered.Count; i++)
         {
-            ct.ThrowIfCancellationRequested();
-            var o = await ObserveAsync(ct);
-
-            OcrWord? target = null;
-            foreach (var kw in targetKeywords)
+            var sb = new global::System.Text.StringBuilder();
+            for (int j = i; j < ordered.Count && sb.Length < keyword.Length + 8; j++)
             {
-                target = o.Ocr.FindFirst(kw);
-                if (target is not null) break;
-            }
-            if (target is null)
-            {
-                await Pad.Dpad(PadDir.Right);
-                await Task.Delay(400, ct);
-                continue;
-            }
-
-            // 找当前焦点卡片：候选卡片中白色描边比例最高者
-            OcrWord? focus = null;
-            double focusScore = 0;
-            foreach (var kw in allCardKeywords)
-            {
-                foreach (var w in o.Ocr.FindAll(kw))
+                sb.Append(ordered[j].Norm);
+                string s = sb.ToString();
+                int idx = s.IndexOf(keyword, StringComparison.OrdinalIgnoreCase);
+                if (idx < 0) continue;
+                // 关键词在拼接串中的字符区间 [idx, idx+keyword.Length)，
+                // 反推覆盖该区间的碎词（假设归一化不改长度，极个别误识时区间会略偏）
+                int pos = 0;
+                var hit = new List<OcrWord>();
+                foreach (var t in ordered.Skip(i))
                 {
-                    var region = new NormRect(
-                        Math.Max(0, w.X - 0.09), Math.Max(0, w.Y - 0.30),
-                        Math.Min(1, w.W + 0.18), Math.Min(1, w.H + 0.34));
-                    double white = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.White, region);
-                    if (white > focusScore) { focusScore = white; focus = w; }
+                    int next = pos + t.Norm.Length;
+                    if (next > idx && pos < idx + keyword.Length) hit.Add(t.Word);
+                    pos = next;
+                    if (pos >= idx + keyword.Length) break;
+                }
+                if (hit.Count > 0)
+                {
+                    double x0 = hit.Min(w => w.X), y0 = hit.Min(w => w.Y);
+                    double x1 = hit.Max(w => w.X + w.W), y1 = hit.Max(w => w.Y + w.H);
+                    return new OcrWord(keyword, x0, y0, x1 - x0, y1 - y0);
                 }
             }
-
-            if (focus is null || focusScore < 0.015)
-            {
-                // 无法定位焦点：先往左上收拢
-                await Pad.Dpad(PadDir.Up);
-                await Task.Delay(300, ct);
-                continue;
-            }
-
-            double dx = target.CenterX - focus.CenterX;
-            double dy = target.CenterY - focus.CenterY;
-            LogInternal($"焦点导航：当前「{focus.Text}」→ 目标「{target.Text}」 dx={dx:F2} dy={dy:F2}", LogLevel.Debug);
-
-            if (Math.Abs(dx) < 0.06 && Math.Abs(dy) < 0.08)
-            {
-                await Pad.Confirm();
-                return true;
-            }
-            if (Math.Abs(dx) > Math.Abs(dy))
-                await Pad.Dpad(dx > 0 ? PadDir.Right : PadDir.Left);
-            else
-                await Pad.Dpad(dy > 0 ? PadDir.Down : PadDir.Up);
-            await Task.Delay(450, ct);
         }
-        return false;
+
+        // ④ 兜底：行合并词里最短的命中（可能横跨多卡）
+        return ocr.MergedWords
+            .Where(w => OcrText.Norm(w.Text).Contains(keyword, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(w => w.Text.Length)
+            .FirstOrDefault();
     }
 
-    /// <summary>半途友好的导航：如果已在 MatchHub/MyLeagueHome 就直接接上，不强制 BackToHome 回主页重导。</summary>
+    /// <summary>
+    /// 声明式导航：观察当前画面 → BFS 寻路 → 执行按键序列。
+    /// 半途接续免费获得（已在 MatchHub 则直接 MatchHub→目标，不回主页）。
+    /// </summary>
+    public async Task<bool> GoToAsync(string targetPage, NavContext? ctx = null, CancellationToken ct = default)
+    {
+        ctx ??= new NavContext();
+        var o = await ObserveAsync(ct);
+        var from = o.Screen.ToString();
+        var path = Graph.FindPath(from, targetPage, ctx);
+        if (path == null) return false;
+
+        // 可视化事件：派发找到的导航路径
+        NavPathFound?.Invoke(new NavEvent
+        {
+            From = from,
+            To = targetPage,
+            Path = path.Select(e => $"{e.From}→{e.To}").ToList(),
+        });
+
+        await Graph.ExecutePathAsync(path, Pad, ct);
+        return true;
+    }
+
+    /// <summary>半途友好的导航：如果已在 MyLeagueHome 就直接接上；否则用 BFS 寻路，失败时回主页重导。</summary>
     public async Task EnterMyLeagueAsync(CancellationToken ct)
     {
         var cur = await ObserveAsync(ct);
 
-        // 已经在联赛主页：什么都不用做
-        if (cur.Is(GameScreen.MyLeagueHome)
-            || cur.Ocr.Contains("下一场") || cur.Ocr.Contains("排名") || cur.Ocr.Contains("阵容"))
+        // 分类器明确判定联赛主页：什么都不用做。
+        // 注意：「下一场/排名/阵容」OCR 关键词会命中比赛菜单里「我的联赛」磁贴的预览文字，
+        // 不能压过分类器的明确判定，否则误判"已在主页"直接返回，主循环空转刷爆日志
+        if (cur.Is(GameScreen.MyLeagueHome))
         {
             LogInternal("已在我的联赛主页，直接接上", LogLevel.Info);
             return;
         }
 
-        // 已经在比赛菜单：跳过回主页，直接 Right×2
-        if (cur.Is(GameScreen.MatchHub) || cur.Ocr.Contains("活动") && cur.Ocr.Contains("联赛"))
+        // 分类器无法判定（Unknown）时，才允许 OCR 关键词兜底为"已在联赛主页"
+        if (IsLeagueHome(cur))
         {
-            LogInternal("已在比赛菜单，Right×2 → 我的联赛", LogLevel.Info);
-            await Pad.Dpad(PadDir.Right);
-            await Task.Delay(350, ct);
-            await Pad.Dpad(PadDir.Right);
-            await Task.Delay(500, ct);
-            await Pad.Confirm();
-            await Task.Delay(4500, ct);
-            var after = await ObserveAsync(ct);
-            if (after.Is(GameScreen.MyLeagueHome)
-                || after.Ocr.Contains("下一场") || after.Ocr.Contains("排名") || after.Ocr.Contains("阵容"))
-                return;
-            throw new InvalidOperationException("无法进入「我的联赛」，请确认已进入比赛菜单。");
+            LogInternal("已在我的联赛主页（OCR 兜底），直接接上", LogLevel.Info);
+            return;
         }
 
-        // 其他画面才回主页重导
+        // BFS 寻路（半途接续：已在 MatchHub 则直接 MatchHub→MyLeagueHome，不回主页）
+        if (await GoToAsync(nameof(GameScreen.MyLeagueHome), null, ct))
+        {
+            var after = await ObserveAsync(ct);
+            if (IsLeagueHome(after)) return;
+        }
+
+        // 寻路失败或未到达：回主页重导后再试一次
+        LogInternal("BFS 寻路未到达目标，回主页重导…", LogLevel.Warn);
         await BackToHomeAsync(ct);
         await WaitForAsync(GameScreen.Home, 30, ct);
 
-        LogInternal("导航：主页 → Down×2 → Left×2 → 「比赛」磁贴", LogLevel.Info);
-        await Pad.Dpad(PadDir.Down);
-        await Task.Delay(200, ct);
-        await Pad.Dpad(PadDir.Down);
-        await Task.Delay(300, ct);
-        await Pad.Dpad(PadDir.Left);
-        await Task.Delay(200, ct);
-        await Pad.Dpad(PadDir.Left);
-        await Task.Delay(500, ct);
-        await Pad.Confirm();
-        await Task.Delay(2500, ct);
-
-        var hub = await WaitForAnyAsync(new[] { GameScreen.MatchHub, GameScreen.MyLeagueHome, GameScreen.EventHub }, 20, ct, "进入比赛菜单");
-        if (hub.Is(GameScreen.MyLeagueHome)) return;
-
-        LogInternal("导航：比赛菜单 → Right×2 → 「我的联赛」", LogLevel.Info);
-        await Pad.Dpad(PadDir.Right);
-        await Task.Delay(350, ct);
-        await Pad.Dpad(PadDir.Right);
-        await Task.Delay(500, ct);
-        await Pad.Confirm();
-        await Task.Delay(4500, ct);
-
-        var res = await ObserveAsync(ct);
-        if (res.Is(GameScreen.MyLeagueHome)
-            || res.Ocr.Contains("下一场") || res.Ocr.Contains("排名") || res.Ocr.Contains("阵容"))
-            return;
+        if (await GoToAsync(nameof(GameScreen.MyLeagueHome), null, ct))
+        {
+            var after = await ObserveAsync(ct);
+            if (IsLeagueHome(after)) return;
+        }
 
         throw new InvalidOperationException("无法进入「我的联赛」，请确认已进入比赛菜单。");
     }
 
-    /// <summary>半途友好的导航：已在 EventHub/EventInfo/MatchHub 就直接接上，不强制回主页重导。</summary>
+    /// <summary>联赛主页判定：分类器明确命中才算；OCR 关键词仅在分类器 Unknown 时兜底，
+    /// 避免比赛菜单里「我的联赛」磁贴的预览文字（下一场/排名等）造成误判。</summary>
+    private static bool IsLeagueHome(Observation o)
+        => o.Is(GameScreen.MyLeagueHome)
+           || (o.Screen == GameScreen.Unknown
+               && (o.Ocr.Contains("下一场") || o.Ocr.Contains("排名") || o.Ocr.Contains("阵容")));
+
+    /// <summary>半途友好的导航：已在 EventHub/EventInfo/ChallengeList/ChallengeHome 就直接接上；否则 BFS 寻路，失败回主页重导。</summary>
     public async Task EnterEventHubAsync(CancellationToken ct)
     {
         var cur = await ObserveAsync(ct);
@@ -824,65 +613,27 @@ public sealed class BotEngine : IDisposable
             return;
         }
 
-        // 已经在比赛菜单：跳过回主页，直接收拢到最左"活动"卡
-        if (cur.Is(GameScreen.MatchHub) || cur.Ocr.Contains("活动"))
+        // BFS 寻路（半途接续：已在 MatchHub 则直接 MatchHub→EventHub，不回主页）
+        if (await GoToAsync(nameof(GameScreen.EventHub), null, ct))
         {
-            LogInternal("已在比赛菜单，收拢到最左「活动」卡", LogLevel.Info);
-            for (int i = 0; i < 2; i++)
-            {
-                await Pad.Dpad(PadDir.Up);
-                await Task.Delay(150, ct);
-            }
-            for (int i = 0; i < 8; i++)
-            {
-                await Pad.Dpad(PadDir.Left);
-                await Task.Delay(150, ct);
-            }
-            await Task.Delay(400, ct);
-            await Pad.Confirm();
-            await Task.Delay(2500, ct);
             var landed = await ObserveAsync(ct);
-            if (landed.Is(GameScreen.EventHub) || landed.Is(GameScreen.EventInfo)) return;
+            if (landed.Is(GameScreen.EventHub) || landed.Is(GameScreen.EventInfo)
+                || landed.Is(GameScreen.Loading) || landed.Is(GameScreen.PreMatch))
+                return;
         }
 
-        // 其他画面才回主页重导
+        // 寻路失败或未到达：回主页重导后再试一次
+        LogInternal("BFS 寻路未到达目标，回主页重导…", LogLevel.Warn);
         await BackToHomeAsync(ct);
         await WaitForAsync(GameScreen.Home, 30, ct);
 
-        LogInternal("导航：主页 → Down×2 → Left×2 → 「比赛」磁贴", LogLevel.Info);
-        await Pad.Dpad(PadDir.Down);
-        await Task.Delay(200, ct);
-        await Pad.Dpad(PadDir.Down);
-        await Task.Delay(300, ct);
-        await Pad.Dpad(PadDir.Left);
-        await Task.Delay(200, ct);
-        await Pad.Dpad(PadDir.Left);
-        await Task.Delay(500, ct);
-        await Pad.Confirm();
-        await Task.Delay(2500, ct);
-
-        var hub = await WaitForAnyAsync(new[] { GameScreen.MatchHub, GameScreen.EventHub }, 20, ct, "进入比赛菜单");
-        if (hub.Is(GameScreen.EventHub)) return;
-
-        LogInternal("导航：比赛菜单收拢到最左「活动」卡", LogLevel.Info);
-        for (int i = 0; i < 2; i++)
+        if (await GoToAsync(nameof(GameScreen.EventHub), null, ct))
         {
-            await Pad.Dpad(PadDir.Up);
-            await Task.Delay(150, ct);
+            var landed = await ObserveAsync(ct);
+            if (landed.Is(GameScreen.EventHub) || landed.Is(GameScreen.EventInfo)
+                || landed.Is(GameScreen.Loading) || landed.Is(GameScreen.PreMatch))
+                return;
         }
-        for (int i = 0; i < 8; i++)
-        {
-            await Pad.Dpad(PadDir.Left);
-            await Task.Delay(150, ct);
-        }
-        await Task.Delay(400, ct);
-        await Pad.Confirm();
-        await Task.Delay(2500, ct);
-
-        var landed2 = await ObserveAsync(ct);
-        if (landed2.Is(GameScreen.EventHub) || landed2.Is(GameScreen.EventInfo)
-            || landed2.Is(GameScreen.Loading) || landed2.Is(GameScreen.PreMatch))
-            return;
 
         throw new InvalidOperationException("无法进入「活动」列表。");
     }
@@ -929,7 +680,8 @@ public sealed class BotEngine : IDisposable
     public void Dispose()
     {
         Stop();
-        try { Capture.Dispose(); } catch { }
+        try { Observation.Dispose(); } catch { }
+        try { _dxgi?.Dispose(); } catch { }
         try { Pad360.Dispose(); } catch { }
         GC.SuppressFinalize(this);
     }

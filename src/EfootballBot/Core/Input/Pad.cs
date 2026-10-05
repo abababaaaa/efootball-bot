@@ -28,6 +28,9 @@ public sealed class Pad
     /// <summary>返回（手柄 B）。</summary>
     public Task Back() => _vg.TapAsync(PadButton.B, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
 
+    /// <summary>按任意指定按钮（供声明式导航图使用）。</summary>
+    public Task Press(PadButton b) => _vg.TapAsync(b, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
+
     public Task Dpad(PadDir dir) => _vg.TapDpadAsync(dir, Jitter(_t.DpadHoldMs), Jitter(_t.TapGapMs));
 
     public Task X() => _vg.TapAsync(PadButton.X, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));

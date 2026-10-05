@@ -12,8 +12,8 @@ using EfootballBot.Core.Bot;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Input;
-using EfootballBot.Core.System;
 using EfootballBot.Core.Logging;
+using EfootballBot.Core.System;
 using EfootballBot.Core.UI;
 using EfootballBot.Core.Vision;
 
@@ -26,10 +26,10 @@ public partial class MainWindow
     /// <summary>热键触发回调（UI 线程）。</summary>
     private void Hotkey_Triggered()
     {
-        if (_engine is not { IsRunning: true }) return;
+        if (_workerHost is not { IsRunning: true }) return;
         AppendLog($"已通过快捷键「{_cfg.Hotkey.DisplayString()}」停止。", LogLevel.Success);
         _hotkey.Unregister();
-        _engine.Stop();
+        _ = _workerHost.StopAsync();
         ResetButtons();
     }
 
@@ -86,7 +86,7 @@ public partial class MainWindow
         RefreshHotkeyUi();
 
         // 如果引擎正在运行，立即重新注册
-        if (_engine is { IsRunning: true } && _cfg.Hotkey.Enabled)
+        if (_workerHost is { IsRunning: true } && _cfg.Hotkey.Enabled)
         {
             try
             {

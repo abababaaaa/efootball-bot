@@ -1,6 +1,7 @@
-using System.Diagnostics;
+using EfootballBot.Core.Action;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
+using EfootballBot.Core.Flow;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.System;
 using EfootballBot.Core.Vision;
@@ -20,11 +21,14 @@ public abstract class ScenarioBase
     protected readonly BotEngine E;
     protected readonly AppConfig Cfg;
     protected readonly CancellationToken Ct;
+    /// <summary>单场比赛状态机（PlayOneMatchAsync 委托给它）。</summary>
+    public readonly MatchFlow MatchFlow;
     public abstract string DisplayName { get; }
 
     protected ScenarioBase(BotEngine engine, AppConfig cfg, CancellationToken ct)
     {
         E = engine; Cfg = cfg; Ct = ct;
+        MatchFlow = new MatchFlow(engine, engine.Actions, engine.Pad, TrySpecialInMatchActionAsync);
     }
 
     public abstract Task RunAsync();
@@ -65,7 +69,7 @@ public abstract class ScenarioBase
             || o.Ocr.Contains("过期") || o.Ocr.ContainsJoined("过期"))
         {
             Log("未识别画面中发现确认弹窗，立即识别并点击", LogLevel.Debug);
-            if (!await E.PressButtonAsync(new[] { "下一步", "ok", "确定", "确认", "next" }, Ct))
+            if (!await E.Actions.PressButtonAsync(new[] { "下一步", "ok", "确定", "确认", "next" }, Ct))
             {
                 await E.Pad.Confirm();
                 await E.Pad.Wait(700, Ct);
@@ -124,334 +128,44 @@ public abstract class ScenarioBase
         }
     }
 
-    /// <summary>处理加载 / 标题 / 奖励 / 断线等“路过型”画面。返回处理后最新观察。</summary>
-    protected async Task<Observation> PassThroughAsync(Observation o)
-    {
-        int guard = 0;
-        while (guard++ < 6)
-        {
-            Ct.ThrowIfCancellationRequested();
-            switch (o.Screen)
-            {
-                case GameScreen.Loading:
-                    await E.Pad.Wait(1500, Ct);
-                    break;
-                case GameScreen.TitleScreen:
-                    Log("标题画面，按 A 进入游戏", LogLevel.Info);
-                    await E.Pad.Confirm();
-                    await E.Pad.Wait(6000, Ct);
-                    break;
-                case GameScreen.Rewards:
-                    Log("处理奖励弹窗", LogLevel.Debug);
-                    await E.Pad.Confirm();
-                    await E.Pad.Wait(900, Ct);
-                    break;
-                case GameScreen.Dialog:
-                    // 确认弹窗：走 PressButtonAsync（OK/确定 可能不在默认焦点上，需移动后点击）
-                    Log("处理确认弹窗（识别按钮→移动焦点→点击）", LogLevel.Debug);
-                    if (!await E.PressButtonAsync(new[] { "ok", "确定", "确认", "下一步", "yes" }, Ct))
-                    {
-                        await E.Pad.Confirm();
-                        await E.Pad.Wait(700, Ct);
-                    }
-                    break;
-                case GameScreen.Disconnected:
-                    await E.HandlePopupsAsync(o, Ct);
-                    await E.Pad.Wait(8000, Ct);
-                    break;
-                case GameScreen.FullTime:
-                    await E.Pad.Confirm();
-                    await E.Pad.Wait(2500, Ct);
-                    break;
-                case GameScreen.CampaignBoard:
-                    o = await DismissCampaignBoardAsync(o);
-                    break;
-                default:
-                    return o;
-            }
-            o = await E.ObserveAsync(Ct);
-        }
-        return o;
-    }
-
-    /// <summary>
-    /// 国际服 International Match Campaign 棋盘格活动页（每场比赛结束后弹出）。
-    /// 光标默认停在棋盘节点上，右下「下一步」是未选中白底，直接按 A 无效；
-    /// 必须先按方向键右把光标移到按钮上（变青色发光）再按 A。
-    /// 棋盘可能连续推多个奖励节点，循环处理直到离开该页。
-    /// </summary>
-    protected async Task<Observation> DismissCampaignBoardAsync(Observation o)
-    {
-        Log("国际活动棋盘页：右移光标到「下一步」→ A 继续", LogLevel.Info);
-        for (int i = 0; i < 12 && o.Is(GameScreen.CampaignBoard); i++)
-        {
-            Ct.ThrowIfCancellationRequested();
-            await E.Pad.Dpad(PadDir.Right);
-            await E.Pad.Wait(800, Ct);
-            await E.Pad.Confirm();
-            await E.Pad.Wait(2300, Ct);
-            o = await E.ObserveAsync(Ct);
-        }
-        if (o.Is(GameScreen.CampaignBoard))
-            Log("活动棋盘页多次确认后仍未离开，交回外层处理", LogLevel.Warn);
-        return o;
-    }
-
     /// <summary>
     /// 从赛前画面开始，完整打完（或放弃）一场比赛，直到回到调用方所在页面之外。
     /// 调用时应处于 PreMatch / Schedule 刚按完进入之后。
+    /// 实际逻辑委托给 <see cref="MatchFlow"/> 状态机（7 阶段）。
     /// </summary>
     protected async Task<MatchRun> PlayOneMatchAsync(bool keyMatch, bool forfeit)
     {
         var run = new MatchRun { IsKeyMatch = keyMatch };
-        var sw = Stopwatch.StartNew();
 
-        // 1. 赛前页面：确认难度显示后开始比赛
+        // 初始观察 + PassThrough（与原版一致）
         var o = await E.ObserveAsync(Ct);
-        o = await PassThroughAsync(o);
+        o = await E.Overlay.PassThroughAsync(o, Ct);
 
-        int preGuard = 0;
-        while (o.Is(GameScreen.PreMatch) && preGuard++ < 10)
+        var opts = new MatchOptions
         {
-            Ct.ThrowIfCancellationRequested();
-            string diff = Cfg.MyLeague.Difficulty;
-            bool matched = o.Ocr.Contains(diff);
-            string levelText = matched ? "是" : $"未识别，如非{diff}请手动设为{diff}";
-            Log($"{(keyMatch ? "关键" : "普通")}比赛赛前画面，难度{diff}：{levelText}",
-                matched ? LogLevel.Debug : LogLevel.Warn);
+            ForfeitNormal = forfeit,
+            IsKeyMatch = keyMatch,
+            Difficulty = Cfg.MyLeague.Difficulty,
+            MatchTimeoutMin = Cfg.Timing.MatchTimeoutMin,
+            IdleTapMinMs = Cfg.Timing.IdleTapMinMs,
+            IdleTapMaxMs = Cfg.Timing.IdleTapMaxMs,
+        };
 
-            // 底部“开始比赛 / 下一步 / 前往比赛”大按钮直接 A
-            var start = o.Ocr.FindFirst("开始比赛") ?? o.Ocr.FindFirst("下一步")
-                        ?? o.Ocr.FindFirst("前往比赛") ?? o.Ocr.FindFirst("kickoff");
-            if (start is null || start.CenterY > 0.62)
-            {
-                await E.Pad.Confirm();
-                await E.Pad.Wait(2500, Ct);
-            }
-            else if (await E.SelectMenuByTextAsync(new[] { "开始比赛", "下一步", "前往比赛", "kickoff" }, Ct))
-            {
-                await E.Pad.Wait(2500, Ct);
-            }
-            o = await E.ObserveAsync(Ct);
-            o = await PassThroughAsync(o);
-            if (o.Is(GameScreen.InMatch) || o.Is(GameScreen.Loading)) break;
-        }
-
-        // 2. 等待开球：连续确认 InMatch 才认定比赛真正开始。
-        // 入场动画/球场特写时球场绿占比也高（greenPitch），但缺少 AI 图标和时钟，
-        // 单信号误判会导致比赛计时提前。连续 2 次确认（间隔 1.5s）过滤瞬时误判。
-        Log("等待比赛开始…", LogLevel.Info);
-        const int confirmNeeded = 2;
-        int confirmed = 0;
-        for (int i = 0; i < 12 && confirmed < confirmNeeded; i++) // 最多 ~18s
+        var result = await MatchFlow.RunAsync(o, opts, Ct);
+        switch (result)
         {
-            Ct.ThrowIfCancellationRequested();
-            o = await E.ObserveAsync(Ct);
-            o = await PassThroughAsync(o);
-            if (o.Is(GameScreen.InMatch))
-            {
-                confirmed++;
-                if (confirmed >= confirmNeeded)
-                    Log($"比赛开始确认（连续{confirmNeeded}次 InMatch）", LogLevel.Info);
-                else
-                    await E.Pad.Wait(1500, Ct); // 等下一次确认
-            }
-            else
-            {
-                confirmed = 0;
-                await E.Pad.Wait(1500, Ct);
-            }
-        }
-        if (confirmed < confirmNeeded)
-            Log("等待比赛开始超时，按当前画面继续处理", LogLevel.Warn);
-
-        // 3a. 弃权（仅普通比赛、只踢关键模式）
-        if (forfeit)
-        {
-            if (await TryForfeitAsync(o))
-            {
+            case MatchResult.Completed:
+                run.Completed = true;
+                break;
+            case MatchResult.Forfeited:
                 run.Forfeited = true;
                 run.Completed = true;
-                await PostMatchSequenceAsync();
-                return run;
-            }
-            Log("未能找到“放弃比赛”，改为正常完成本场。", LogLevel.Warn);
-        }
-
-        // 3b. 正常比赛：挂机等待结束，周期性 A 跳过回放 / 弹窗
-        Log("比赛进行中（AI 操控），挂机等待结束…", LogLevel.Info);
-        var matchDeadline = DateTime.Now.AddMinutes(Cfg.Timing.MatchTimeoutMin);
-        int loop = 0;
-        GameScreen? landedMenu = null;
-        bool ended = false;   // 看到结算/稳定菜单页才算真实结束
-        while (DateTime.Now < matchDeadline)
-        {
-            Ct.ThrowIfCancellationRequested();
-            loop++;
-            o = await E.ObserveAsync(Ct);
-            o = await PassThroughAsync(o);
-
-            // 每次确认仍在比赛就顺延死线：超时只用于卡死（长时间看不到 InMatch）的兜底，
-            // 避免比赛节奏慢于配置时在直播中误跑赛后流程
-            if (o.Is(GameScreen.InMatch))
-                matchDeadline = DateTime.Now.AddMinutes(Cfg.Timing.MatchTimeoutMin);
-
-            if (o.Is(GameScreen.Result) || o.Is(GameScreen.Rewards) || o.Is(GameScreen.FullTime))
-            {
-                ended = true;
                 break;
-            }
-
-            // 场景特殊动作（国服：右上「跳过比赛」绿✓可用 → 暂停菜单快速结束）
-            if (await TrySpecialInMatchActionAsync(o)) continue;
-
-            // 疑似已回到菜单页。比赛中的回放/入场/换人等画面 OCR 可能误识出菜单词
-            // （「比赛回放」曾让 MatchHub 单词命中），单帧判定会把还在踢的比赛误判结束，
-            // 进而外层连按 B「回主页」把整场流程带崩。这里必须隔 2.5s 复测一次：
-            // 两次都稳定落在菜单页才认定比赛结束
-            if (o.Screen is GameScreen.MyLeagueHome or GameScreen.Home
-                or GameScreen.EventHub or GameScreen.MatchHub or GameScreen.ActivityDetail
-                or GameScreen.ChallengeList or GameScreen.ChallengeHome or GameScreen.EventInfo)
-            {
-                Log($"疑似返回菜单页（{o.Screen}），2.5s 后复测确认", LogLevel.Debug);
-                await E.Pad.Wait(2500, Ct);
-                var o2 = await E.ObserveAsync(Ct);
-                o2 = await PassThroughAsync(o2);
-
-                if (o2.Is(GameScreen.Result) || o2.Is(GameScreen.Rewards) || o2.Is(GameScreen.FullTime))
-                {
-                    ended = true;
-                    break;
-                }
-
-                if (o2.Screen is GameScreen.MyLeagueHome or GameScreen.Home
-                    or GameScreen.EventHub or GameScreen.MatchHub or GameScreen.ActivityDetail
-                    or GameScreen.ChallengeList or GameScreen.ChallengeHome or GameScreen.EventInfo)
-                {
-                    landedMenu = o2.Screen;
-                    ended = true;
-                    Log($"复测确认已返回菜单页（{o2.Screen}），比赛结束", LogLevel.Info);
-                    break;
-                }
-
-                // 复测是比赛中/加载/中场/未知：说明刚才是误识，继续挂机不动
-                continue;
-            }
-
-            // 比赛内弹层（回放/进球/暂停/换人/蓝底“下一步/跳过”）指针移上去再按 A。
-            // 排除右上 HUD「跳过比赛 累积进球 n/3」提示词：它是状态提示不是按钮，
-            // 对它做焦点导航+A 会误开暂停菜单。
-            var skipWord = o.Ocr.FindAll("跳过")
-                .FirstOrDefault(w => !(w.CenterX > 0.78 && w.CenterY < 0.14));
-            var next = o.Ocr.FindFirst("下一步") ?? o.Ocr.FindFirst("确定") ?? o.Ocr.FindFirst("确认")
-                       ?? skipWord ?? o.Ocr.FindFirst("ok") ?? o.Ocr.FindFirst("skip");
-            if (next is not null)
-            {
-                Log($"比赛内出现「{next.Text}」，移动指针点击", LogLevel.Debug);
-                await E.PressButtonAsync(new[] { "下一步", "确定", "确认", "跳过", "ok", "skip" }, Ct);
-                await E.Pad.Wait(1200, Ct);
-                continue;
-            }
-
-            // 比赛内暂停菜单：右侧播放/继续按钮（粉色高亮框内白色三角图标）
-            // 该按钮无文字，需用颜色检测定位（Red 的 Hue 范围 345-12 或 300-330）
-            if (o.Is(GameScreen.InMatch) && o.Frame is not null)
-            {
-                var playBtnRoi = new NormRect(0.82, 0.06, 0.16, 0.10);
-                double redRatio = FrameAnalyzer.ColorRatioExact(o.Frame, HsvFilter.Red, playBtnRoi);
-                double blueRatio = FrameAnalyzer.ColorRatioExact(o.Frame, HsvFilter.Blue, playBtnRoi);
-                if (redRatio >= 0.08 && blueRatio >= 0.3)
-                {
-                    Log("检测到比赛暂停菜单播放按钮，点击继续", LogLevel.Debug);
-                    await E.Pad.Confirm();
-                    await E.Pad.Wait(1200, Ct);
-                    continue;
-                }
-            }
-
-            // 左上"比赛回放/进球"、右上暂停/回放图标等字样 → 立即按 A。
-            // OCR 常把中文逐字拆开，用全文拼接匹配
-            if (o.Ocr.ContainsJoined("回放") || o.Ocr.ContainsJoined("进球")
-                || o.Ocr.Contains("暂停") || o.Ocr.Contains("replay") || o.Ocr.Contains("goal"))
-            {
-                await E.Pad.Confirm();
-                await E.Pad.Wait(1200, Ct);
-                continue;
-            }
-
-            if (o.Is(GameScreen.HalfTime))
-            {
-                Log("中场休息，继续", LogLevel.Debug);
-                await E.Pad.Confirm();
-                await E.Pad.Wait(3000, Ct);
-                continue;
-            }
-
-            // 比赛中：轻按 A 过回放/提示。非必须立即的连点，间隔 1~10s 随机，避免固定节奏被检测
-            if (o.Is(GameScreen.InMatch))
-            {
-                await E.Pad.Confirm();
-                await E.Pad.HumanWait(Cfg.Timing.IdleTapMinMs, Cfg.Timing.IdleTapMaxMs, Ct);
-                continue;
-            }
-
-            // 无 InMatch 信号：球场过场/回放特写/阵容展示/加载。此类画面一律以 A 继续，
-            // 绝不按 B（过场中 B 可能退出本场）；加载画面会忽略 A
-            await E.Pad.Confirm();
-            await E.Pad.Wait(1600, Ct);
+            case MatchResult.Timeout:
+                // 未确认完赛，不跑赛后连按，交回外层重新观察
+                break;
         }
-
-        // 死线超时（长时间看不到比赛中/结算）：不当作完赛，不跑赛后连按，
-        // 交回外层重新观察——很可能比赛还在踢
-        if (!ended)
-        {
-            Log("等待比赛结束超时，未确认完赛，退出比赛循环重新观察", LogLevel.Warn);
-            return run;
-        }
-
-        run.Completed = true;
-        // 已落到菜单页时结算早被 A 跳完，不能再连按 A（会在主页误触发前往比赛、跳过判定）
-        if (landedMenu is null)
-            await PostMatchSequenceAsync();
         return run;
-    }
-
-    /// <summary>暂停 → 放弃比赛 → 确认。失败安全返回比赛。</summary>
-    private async Task<bool> TryForfeitAsync(Observation o)
-    {
-        Log("普通比赛：执行弃权（只踢关键比赛模式）", LogLevel.Info);
-        await E.Pad.Start();
-        await E.Pad.Wait(2500, Ct);
-        o = await E.ObserveAsync(Ct);
-
-        bool found = false;
-        if (o.Ocr.Contains("放弃") || o.Ocr.Contains("认输") || o.Ocr.Contains("forfeit"))
-            found = await E.SelectMenuByTextAsync(new[] { "放弃比赛", "放弃", "认输", "forfeit" }, Ct, 10);
-
-        if (!found)
-        {
-            // 再尝试逐行扫描
-            found = await E.SelectMenuByTextAsync(new[] { "放弃比赛", "放弃", "认输", "forfeit" }, Ct, 10);
-        }
-
-        if (!found)
-        {
-            await E.Pad.Back();
-            await E.Pad.Wait(1000, Ct);
-            return false;
-        }
-
-        // 二次确认弹窗
-        await E.Pad.Wait(1500, Ct);
-        var confirm = await E.ObserveAsync(Ct);
-        if (confirm.Is(GameScreen.Dialog) || confirm.Is(GameScreen.ShopConfirm)
-            || confirm.Ocr.Contains("放弃") || confirm.Ocr.Contains("确认"))
-        {
-            await E.SelectMenuByTextAsync(new[] { "确认", "确定", "放弃", "yes", "ok" }, Ct, 4);
-            await E.Pad.Confirm();
-        }
-        await E.Pad.Wait(6000, Ct);
-        return true;
     }
 
     /// <summary>
@@ -476,7 +190,7 @@ public abstract class ScenarioBase
             if (hasBtn)
             {
                 stable = 0;
-                if (!await E.PressButtonAsync(confirmBtns, Ct))
+                if (!await E.Actions.PressButtonAsync(confirmBtns, Ct))
                 {
                     await E.Pad.Confirm();
                     await E.Pad.Wait(700, Ct);
@@ -958,7 +672,7 @@ public abstract class ScenarioBase
             foreach (var kw in buttonWords)
                 foreach (var w in o.Ocr.FindAll(kw))
                 {
-                    double g = ButtonGlow(o, w);
+                    double g = E.Actions.ButtonGlow(o.Frame, w);
                     if (g > bestGlow) { bestGlow = g; focus = w; }
                 }
 
@@ -985,20 +699,5 @@ public abstract class ScenarioBase
     }
 
     /// <summary>按钮是否被高光聚焦：综合白色描边与亮底比例。</summary>
-    protected bool IsButtonGlowing(Observation o, OcrWord w) => ButtonGlow(o, w) >= GlowThreshold;
-
-    private static double ButtonGlow(Observation o, OcrWord w)
-    {
-        // 按钮比文字宽：以文字中心构造大尺寸按钮区域（含发光边框）
-        double rw = Math.Clamp(w.W * 8, 0.20, 0.42);
-        double rh = Math.Clamp(w.H * 4, 0.08, 0.16);
-        var region = new NormRect(
-            Math.Clamp(w.CenterX - rw / 2, 0, 1 - rw),
-            Math.Clamp(w.CenterY - rh / 2, 0, 1 - rh), rw, rh);
-        // eFootball 聚焦按钮边框为青色/蓝色/亮白，三色并检
-        double blue = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Blue, region);
-        double cyan = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Cyan, region);
-        double bright = FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Bright, region);
-        return Math.Max(blue, Math.Max(cyan, bright * 0.8));
-    }
+    protected bool IsButtonGlowing(Observation o, OcrWord w) => E.Actions.ButtonGlow(o.Frame, w) >= GlowThreshold;
 }

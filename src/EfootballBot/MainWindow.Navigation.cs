@@ -34,7 +34,7 @@ public partial class MainWindow
         NavigateTo(NavMode.Game);
 
         // 运行中不重新检测环境（避免切换视图时误报另一服务器窗口状态）
-        if (_engine?.IsRunning != true)
+        if (_workerHost?.IsRunning != true)
             RunEnvChecks();
     }
 
@@ -214,6 +214,11 @@ public partial class MainWindow
 
         // 切换到日志查看器时刷新文件列表
         if (isLog) RefreshLogFileList();
+
+        // 左栏工具按钮激活高亮（NavToolBtn 样式识别 Tag=Active）
+        BtnSettings.Tag = isSettings ? "Active" : null;
+        BtnUpdate.Tag = isUpdate ? "Active" : null;
+        BtnLogViewer.Tag = isLog ? "Active" : null;
     }
 
     private void BtnSettings_Click(object sender, RoutedEventArgs e)

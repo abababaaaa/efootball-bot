@@ -6,6 +6,15 @@ using EfootballBot.Core.Vision;
 
 namespace EfootballBot.Core.Config;
 
+/// <summary>画面捕获后端模式。</summary>
+public enum CaptureMode
+{
+    /// <summary>DXGI Desktop Duplication：直接读桌面合成画面，性能高，但窗口不能被遮挡/最小化（无法后台挂机）。</summary>
+    Dxgi,
+    /// <summary>Windows Graphics Capture：窗口专属捕获，被遮挡/后台也能抓（后台挂机默认）。</summary>
+    Wgc,
+}
+
 public sealed class TimingConfig
 {
     public int TapHoldMs { get; set; } = 130;       // 单键保持时长
@@ -88,7 +97,7 @@ public sealed class MyLeagueConfig
     public bool OnlyKeyMatches { get; set; } = false;  // 普通比赛自动弃权，只踢关键比赛
     public int TargetMatches { get; set; } = 0;        // 0 = 不限
     public bool SetAiControl { get; set; } = true;     // 赛前确认选手操作为 AI
-    public string Difficulty { get; set; } = "传奇";   // 新手 / 业余 / 职业 / 超级球星 / 传奇
+    public string Difficulty { get; set; } = "传奇";   // 我的联赛赛事等级（游戏内 7 档）：新手/业余/标准/职业/顶尖球员/超级球星/传奇
 }
 
 public sealed class DailyConfig
@@ -104,7 +113,7 @@ public sealed class DailyConfig
 public sealed class WeeklyConfig
 {
     public bool Enabled { get; set; } = true;
-    public string Difficulty { get; set; } = "传奇";   // 巡回活动设置中的赛事等级：新手/业余/职业/顶尖球员/超级球星/传奇
+    public string Difficulty { get; set; } = "传奇";   // 巡回活动赛事等级（游戏内 7 档）：新手/业余/标准/职业/顶尖球员/超级球星/传奇
     public int MaxEvents { get; set; } = 12;          // 单次遍历活动卡数安全上限
 }
 
@@ -204,6 +213,8 @@ public sealed class AppConfig
     public string? OcrLanguage { get; set; }
     public bool AutoLaunchGame { get; set; }
     public bool KeepGameOnTop { get; set; } = false; // 兜底模式：游戏窗口置顶（不激活）
+    /// <summary>画面捕获后端：WGC 窗口捕获（默认，支持后台挂机/窗口被遮挡）或 DXGI（高性能但窗口须可见）。</summary>
+    public CaptureMode CaptureMode { get; set; } = CaptureMode.Wgc;
     public TimingConfig Timing { get; set; } = new();
     public MyLeagueConfig MyLeague { get; set; } = new();
     public DailyConfig Daily { get; set; } = new();
@@ -218,8 +229,6 @@ public sealed class AppConfig
     // —— 设置面板：性能 / 内存 ——
     public bool PeriodicGc { get; set; } = true;
     public int PreviewIntervalMs { get; set; } = 300;
-    /// <summary>挂机开始时自动把游戏窗口化为 1280×720（实测该游戏独占全屏抵抗一切外部窗口修改，默认关闭）。</summary>
-    public bool AutoWindowizeOnStart { get; set; } = false;
 
     // —— 设置面板：日志 ——
     public bool FileLogEnabled { get; set; } = true;

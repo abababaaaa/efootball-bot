@@ -45,6 +45,30 @@ public partial class App : Application
                 Shutdown();
             };
         }
+        else if (args.Length > 0 && args[0] == "--worker")
+        {
+            // 无头工作进程：不获取单实例 Mutex、不检查更新、不显示主窗口。
+            // WinExe 默认无窗口时 ShutdownMode=OnLastWindowClose 会立即退出，
+            // 必须改为 OnExplicitShutdown 保持进程存活直到 WorkerProgram 主动退出。
+            Startup += async (_, _) =>
+            {
+                ShutdownMode = ShutdownMode.OnExplicitShutdown;
+                try { await EfootballBot.Worker.WorkerProgram.RunAsync(args); }
+                catch (Exception ex)
+                {
+                    // Worker 无人值守，异常必须落盘供 GUI 侧诊断
+                    try
+                    {
+                        File.WriteAllText(
+                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                                "EfootballBot", "worker-error.log"),
+                            $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ex}");
+                    }
+                    catch { }
+                }
+                Shutdown();
+            };
+        }
         else if (args.Length > 0 && args[0] == "--optimize-github")
         {
             // 提权离线执行 GitHub 直连优化（由 --optimize-github --report <path> 调用），结果写文件后退出。

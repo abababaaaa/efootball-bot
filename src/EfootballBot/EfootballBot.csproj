@@ -30,6 +30,9 @@
   <ItemGroup>
     <!-- 自带原生 vigemclient.dll（x64），用于与 ViGEmBus 驱动通信 -->
     <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.256" />
+    <!-- DXGI Desktop Duplication 捕获实现（SharpDX 统一锁定 4.2.0） -->
+    <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
+    <PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
   </ItemGroup>
 
   <ItemGroup>

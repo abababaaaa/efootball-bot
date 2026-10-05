@@ -54,17 +54,32 @@ public sealed class FileLogger : IDisposable
         Directory.CreateDirectory(LogDir);
         CleanupOldLogs(maxFiles);
 
-        string filename = $"bot-{DateTime.Now:yyyyMMdd-HHmmss}.log";
+        // 文件名带 PID：GUI 与 Worker 子进程同秒启动时不会撞同名文件
+        string filename = $"bot-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}.log";
         CurrentLogPath = Path.Combine(LogDir, filename);
-        _writer = new StreamWriter(CurrentLogPath, append: false, encoding: Encoding.UTF8)
+        try
         {
-            AutoFlush = true
-        };
+            _writer = new StreamWriter(CurrentLogPath, append: false, encoding: Encoding.UTF8)
+            {
+                AutoFlush = true
+            };
+        }
+        catch
+        {
+            // 文件创建失败（占用/权限/路径）→ 降级为不写文件，绝不让日志问题炸掉进程
+            CurrentLogPath = "";
+            _writer = null;
+            return;
+        }
 
         lock (_lock)
         {
-            _writer.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INFO]   === 日志会话开始：{filename} ===");
-            _writer.Flush();
+            try
+            {
+                _writer.WriteLine($"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] [INFO]   === 日志会话开始：{filename} ===");
+                _writer.Flush();
+            }
+            catch { }
         }
     }
 
