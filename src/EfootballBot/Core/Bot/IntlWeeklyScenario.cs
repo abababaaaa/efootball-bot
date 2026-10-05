@@ -168,6 +168,15 @@ public sealed class IntlWeeklyScenario : ScenarioBase
                     await E.Pad.Wait(1500, Ct);
                     break;
 
+                case GameScreen.NoEvent:
+                    // 误入「对阵玩家」空页：B 退回比赛菜单后重新导航到对阵AI 列表
+                    Log("误入对阵玩家空页，B 退出后重新导航", LogLevel.Warn);
+                    await E.Pad.Back();
+                    await E.Pad.Wait(1800, Ct);
+                    _restartSweep = true;
+                    await GoToEventHubSafeAsync();
+                    break;
+
                 case GameScreen.Disconnected:
                     await E.HandlePopupsAsync(o, Ct);
                     await GoToEventHubSafeAsync();

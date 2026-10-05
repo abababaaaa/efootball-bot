@@ -96,9 +96,10 @@ public sealed class FileLogger : IDisposable
     {
         if (!_enabled) return;
         if (_writer is null) return;
-        // LogLevel: Info=0, Success=1, Warn=2, Error=3, Debug=4（数值越大越详细）
-        // minLevel 语义：等于/小于它的写，大于它（更详细）的跳过
-        if (level > _minLevel) return;
+        // 严重度排序（与枚举数值顺序不一致，不能直接用 level > minLevel）：
+        // Debug 最轻 → Info/Success → Warn → Error。minLevel 语义：只写严重度 ≥ minLevel 的，
+        // 例如 Info 级别必须保留 Warn/Error（旧写法把它们误过滤，故障日志全丢）
+        if (Severity(level) < Severity(_minLevel)) return;
 
         // BotEngine.LogInternal 传入的 message 已带 [HH:mm:ss] 前缀，前面补完整日期
         string fullMsg = message;
@@ -130,6 +131,16 @@ public sealed class FileLogger : IDisposable
                             .Replace("\r", " ").Replace("\n", " ");
         _writer?.WriteLine($"- {{time: \"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\", level: \"{levelTag}\", msg: \"{escaped}\"}}");
     }
+
+    /// <summary>严重度等级：数字越大越严重（Debug=0 最详细最轻）。</summary>
+    private static int Severity(LogLevel level) => level switch
+    {
+        LogLevel.Debug => 0,
+        LogLevel.Info or LogLevel.Success => 1,
+        LogLevel.Warn => 2,
+        LogLevel.Error => 3,
+        _ => 1,
+    };
 
     private static LogLevel ParseLevel(string name) => name?.Trim().ToLowerInvariant() switch
     {

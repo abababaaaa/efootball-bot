@@ -232,17 +232,22 @@ public abstract class ScenarioBase
         await E.Pad.Wait(400, Ct);
 
         var o = await E.ObserveAsync(Ct);
-        var tab = o.Ocr.FindFirst("对阵ai");
-        if (tab is not null)
+        // 两个 Tab 各自锚定测亮度：只凭 AI Tab 单侧 ROI 误判率高（会把已选中的 AI 误判成暗
+        // 而 Left 切到玩家空页）。规则：AI 暗 且 玩家明显更亮才 Left。
+        var aiTab = o.Ocr.Words
+            .Where(w => OcrText.Norm(w.Text).Equals("对阵ai") || OcrText.Norm(w.Text).Equals("对阵电脑"))
+            .MinBy(w => w.X)
+            ?? o.Ocr.FindFirst("对阵ai");
+        var playerTab = o.Ocr.Words
+            .Where(w => OcrText.Norm(w.Text).Equals("对阵玩家"))
+            .MinBy(w => w.X)
+            ?? o.Ocr.FindFirst("对阵玩家");
+        if (aiTab is not null && playerTab is not null)
         {
-            double rx = Math.Clamp(tab.X - 0.09, 0, 0.9);
-            double ry = Math.Clamp(tab.Y - tab.H, 0, 0.9);
-            var region = new NormRect(rx, ry, Math.Min(0.20, 1 - rx), tab.H * 2.8);
-            double glow = Math.Max(
-                FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Bright, region),
-                FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.White, region));
-            Log($"二级 Tab：对阵AI 高亮度={glow:F2}", LogLevel.Debug);
-            if (glow < 0.25)
+            double aiGlow = TabGlow(o, aiTab);
+            double playerGlow = TabGlow(o, playerTab);
+            Log($"二级 Tab：对阵AI 亮度={aiGlow:F2} / 对阵玩家 亮度={playerGlow:F2}", LogLevel.Debug);
+            if (aiGlow < 0.25 && playerGlow > aiGlow + 0.10)
             {
                 Log("焦点在「对阵玩家」，Left 切到「对阵AI」", LogLevel.Info);
                 await E.Pad.Dpad(PadDir.Left);
@@ -258,6 +263,18 @@ public abstract class ScenarioBase
             await E.Pad.Wait(140, Ct);
         }
         await E.Pad.Wait(400, Ct);
+    }
+
+    /// <summary>测某个 Tab 词周围区域的高亮/白色占比（选中 Tab 会白亮）。</summary>
+    private static double TabGlow(Observation o, OcrWord w)
+    {
+        if (o.Frame is null) return 0;
+        double rx = Math.Clamp(w.X - 0.09, 0, 0.9);
+        double ry = Math.Clamp(w.Y - w.H, 0, 0.9);
+        var region = new NormRect(rx, ry, Math.Min(0.20, 1 - rx), w.H * 2.8);
+        return Math.Max(
+            FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.Bright, region),
+            FrameAnalyzer.ColorRatio(o.Frame, HsvFilter.White, region));
     }
 
     // ---- 挑战清单卡状态：用国服 ChallengeCardReader 动态定位焦点卡（替代旧固定 ROI）----
