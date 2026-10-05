@@ -170,11 +170,46 @@ public sealed class BotEngine : IDisposable
         Observation.Window = _window;
 
         Pad360.Connect();
+        _ = Task.Run(EnsureHidHideIsolation); // 静默检查虚拟手柄黑名单覆盖（不阻塞启动）
         LogInternal($"虚拟手柄已连接（XInput 玩家 {Pad360.UserIndex + 1}），OCR 语言：{Ocr.LanguageTag}", LogLevel.Success);
 
         Stats.StartedAt = DateTime.Now;
         _cts = new CancellationTokenSource();
         return _cts.Token;
+    }
+
+    /// <summary>
+    /// 虚拟手柄实例可能跨会话变化（黑名单按完整实例路径匹配）。
+    /// 连接后轮询枚举：若实例未被黑名单覆盖且已启用隔离，静默触发最高权限计划任务同步。
+    /// 读黑名单（GET）普通权限可用；sync 子进程自行提权执行 SET，全程无 UAC 弹窗。
+    /// </summary>
+    private async Task EnsureHidHideIsolation()
+    {
+        try
+        {
+            var hh = _cfg.HidHide;
+            if (!hh.Enabled || !Input.HidHideManager.IsDriverInstalled()) return;
+
+            // ViGEm 设备经系统注册有延迟，最多等 3 秒
+            List<string> vigem = new();
+            for (int i = 0; i < 10; i++)
+            {
+                vigem = Input.HidDeviceEnumerator.FindViGEmInstances();
+                if (vigem.Count > 0) break;
+                await Task.Delay(300);
+            }
+            if (vigem.Count == 0) return;
+
+            var bl = Input.HidHideIoctl.GetMultiString(Input.HidHideIoctl.IoctlGetBlacklist);
+            if (vigem.All(v => bl.Contains(v, StringComparer.OrdinalIgnoreCase))) return; // 已覆盖
+
+            LogInternal($"检测到虚拟手柄实例未加入 HidHide 黑名单（{string.Join(";", vigem)}），触发静默同步", LogLevel.Info);
+            Input.HidHideManager.RunSyncTaskSilently();
+        }
+        catch (Exception ex)
+        {
+            LogInternal($"HidHide 黑名单检查跳过：{ex.Message}", LogLevel.Warn);
+        }
     }
 
     /// <summary>
