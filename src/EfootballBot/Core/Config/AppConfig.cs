@@ -200,6 +200,22 @@ public sealed class UpdateConfig
     public bool AutoDownloadInstall { get; set; } = false;
 }
 
+/// <summary>手柄隔离（HidHide）配置。驱动侧持久化到注册表，此处仅存 UI 快照与回滚清单。</summary>
+public sealed class HidHideConfig
+{
+    /// <summary>已应用隔离（虚拟手柄已加入黑名单）。</summary>
+    public bool Enabled { get; set; }
+
+    /// <summary>同时隐藏真实手柄（默认关；开启期间 HID 层应用看不到真实手柄）。</summary>
+    public bool HidePhysicalGamepad { get; set; }
+
+    /// <summary>白名单游戏的完整镜像路径快照（应用隔离时快照，游戏未运行时无法更新）。</summary>
+    public string GameImagePath { get; set; } = "";
+
+    /// <summary>本次隔离实际加入的黑名单条目快照（解除隔离时精确回滚）。</summary>
+    public List<string> AppliedBlacklist { get; set; } = new();
+}
+
 public sealed class ScreenCalibration
 {
     public List<string> LearnedKeywords { get; set; } = new();
@@ -241,6 +257,9 @@ public sealed class AppConfig
     // —— 全局停止热键 ——
     public HotkeyConfig Hotkey { get; set; } = new();
     public UpdateConfig Update { get; set; } = new();
+
+    // —— 手柄隔离（HidHide）——
+    public HidHideConfig HidHide { get; set; } = new();
 
     public ScreenCalibration? Calib(GameScreen s)
         => Calibration.TryGetValue(s.ToString(), out var c) ? c : null;

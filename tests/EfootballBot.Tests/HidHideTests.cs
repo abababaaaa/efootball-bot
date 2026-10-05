@@ -126,4 +126,24 @@ public class HidHideTests
         Assert.Single(keep);
         Assert.Equal(2, vigemEntries.Count);
     }
+
+    // ---------- 配置序列化 ----------
+
+    [Fact]
+    public void HidHideConfig_JsonRoundTrip_PreservesSnapshot()
+    {
+        var cfg = new EfootballBot.Core.Config.AppConfig();
+        cfg.HidHide.Enabled = true;
+        cfg.HidHide.HidePhysicalGamepad = true;
+        cfg.HidHide.GameImagePath = @"C:\Games\eFootball.exe";
+        cfg.HidHide.AppliedBlacklist.Add(@"HID\VID_045E&PID_028E\6&2DF92C3&0&0000");
+
+        string json = System.Text.Json.JsonSerializer.Serialize(cfg);
+        var back = System.Text.Json.JsonSerializer.Deserialize<EfootballBot.Core.Config.AppConfig>(json);
+
+        Assert.True(back!.HidHide.Enabled);
+        Assert.True(back.HidHide.HidePhysicalGamepad);
+        Assert.Equal(@"C:\Games\eFootball.exe", back.HidHide.GameImagePath);
+        Assert.Single(back.HidHide.AppliedBlacklist);
+    }
 }
