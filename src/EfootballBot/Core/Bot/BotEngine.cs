@@ -43,7 +43,7 @@ public sealed class BotEngine : IDisposable
     public readonly PageGraph Graph;
     public readonly NavigationService Navigation;
     public readonly BotStats Stats = new();
-    public MyLeagueService? MyLeague { get; private set; }
+    public MyLeagueStateMachine? MyLeague { get; private set; }
 
     private CancellationTokenSource? _cts;
     private Task? _loop;
@@ -84,7 +84,7 @@ public sealed class BotEngine : IDisposable
             ev => NavPathFound?.Invoke(ev));
         Observation = new ObservationService(Capture, Ocr, cfg);
         Observation.Log = (msg, lv) => LogInternal(msg, lv);
-        MyLeague = new MyLeagueService(this);
+        MyLeague = new MyLeagueStateMachine(this);
 
         Capture.CaptureClosed += (_, msg) => LogInternal($"画面捕获已结束：{msg}", LogLevel.Warn);
     }
@@ -121,15 +121,19 @@ public sealed class BotEngine : IDisposable
                         : $"寻路结束未到达目标（{navResult.Outcome}）：{navResult.Message}",
                         navResult.Ok ? LogLevel.Success : LogLevel.Warn);
 
-                    // M1：寻路成功后执行场景逻辑
+                    // M1：寻路成功后进入我的联赛状态机
                     if (navResult.Ok && ts == GameScreen.MyLeagueHome && MyLeague is not null)
                     {
-                        LogInternal("开始我的联赛物品检查…", LogLevel.Info);
-                        await MyLeague.EnsureItemsAsync(token);
-
-                        // M1：进入比赛
-                        LogInternal("开始进入比赛流程…", LogLevel.Info);
-                        await MyLeague.StartMatchAsync(token);
+                        LogInternal("进入我的联赛状态机", LogLevel.Info);
+                        var stateMachine = new MyLeagueStateMachine(this);
+                        while (!token.IsCancellationRequested)
+                        {
+                            var state = await stateMachine.RunOnceAsync(token);
+                            if (state == MyLeagueStateMachine.State.Unknown)
+                                await Task.Delay(1000, token);
+                            else
+                                await Task.Delay(500, token);
+                        }
                     }
                 }
                 else

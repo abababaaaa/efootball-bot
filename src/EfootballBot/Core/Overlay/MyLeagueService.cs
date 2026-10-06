@@ -5,32 +5,291 @@ using EfootballBot.Core.Vision;
 
 namespace EfootballBot.Core.Overlay;
 
-/// <summary>我的联赛场景服务：弹窗处理、物品检查、兑换积分导航。</summary>
-public sealed class MyLeagueService
+/// <summary>我的联赛场景状态机：观察当前画面 → 判断状态 → 执行对应操作。</summary>
+public sealed class MyLeagueStateMachine
 {
     private readonly BotEngine _engine;
     private readonly FocusGraph _focusGraph;
 
-    public MyLeagueService(BotEngine engine)
+    public MyLeagueStateMachine(BotEngine engine)
     {
         _engine = engine;
         _focusGraph = MyLeagueHomeGraph.Build();
     }
 
-    /// <summary>
-    /// 检查我的联赛主页"使用的物品"面板，确认 3 个自动购买物品是否都在使用中。
-    /// 如有缺失，导航到兑换积分进入购买。
-    /// </summary>
-    public async Task EnsureItemsAsync(CancellationToken ct)
+    /// <summary>场景状态枚举。</summary>
+    public enum State
     {
-        // 1. 切换到"使用的物品"面板
+        Unknown,            // 未知
+        MyLeagueHome,       // 我的联赛主页
+        Schedule,           // 赛程表
+        DifficultySelect,   // 难度选择弹窗
+        ConfirmDialog,      // 确认弹窗（关键比赛）
+        PreMatch,           // 赛前准备
+        InMatch,            // 比赛中
+        HalfTime,           // 半场
+        FullTime,           // 全场结束
+        Result,             // 比赛结果
+        Rewards,            // 奖励结算
+        Exchange,           // 兑换积分页面
+        Shop,               // 我的联赛物品页面
+        Dialog,             // 通用弹窗
+    }
+
+    /// <summary>执行一轮状态机：观察 → 判断 → 操作。</summary>
+    public async Task<State> RunOnceAsync(CancellationToken ct)
+    {
+        var obs = await _engine.ObserveAsync(ct);
+        var state = DetectState(obs);
+
+        _engine.LogInternal($"状态机：{state}（{obs.Screen}）", LogLevel.Debug);
+
+        switch (state)
+        {
+            case State.MyLeagueHome:
+                await HandleMyLeagueHomeAsync(obs, ct);
+                break;
+            case State.Schedule:
+                await HandleScheduleAsync(obs, ct);
+                break;
+            case State.DifficultySelect:
+                await HandleDifficultySelectAsync(obs, ct);
+                break;
+            case State.ConfirmDialog:
+                await HandleConfirmDialogAsync(obs, ct);
+                break;
+            case State.PreMatch:
+                await HandlePreMatchAsync(obs, ct);
+                break;
+            case State.InMatch:
+                await HandleInMatchAsync(obs, ct);
+                break;
+            case State.Result:
+                await HandleResultAsync(obs, ct);
+                break;
+            case State.Rewards:
+                await HandleRewardsAsync(obs, ct);
+                break;
+            case State.Exchange:
+                await HandleExchangeAsync(obs, ct);
+                break;
+            case State.Shop:
+                await HandleShopAsync(obs, ct);
+                break;
+            case State.Dialog:
+                await HandleDialogAsync(obs, ct);
+                break;
+            default:
+                _engine.LogInternal($"未知状态，等待观察", LogLevel.Debug);
+                break;
+        }
+
+        return state;
+    }
+
+    /// <summary>检测当前状态。</summary>
+    private State DetectState(EfootballBot.Core.Bot.Observation obs)
+    {
+        var text = obs.Ocr.JoinedText;
+
+        // 弹窗优先判断
+        if (text.Contains("选择赛事等级") || text.Contains("选择AI难度"))
+            return State.DifficultySelect;
+
+        if (text.Contains("确认") && text.Contains("关键比赛") && !text.Contains("选择赛事等级"))
+            return State.ConfirmDialog;
+
+        if (text.Contains("物品使用中") || text.Contains("使用物品"))
+            return State.Dialog;
+
+        if (obs.Screen == GameScreen.Dialog)
+            return State.Dialog;
+
+        // 页面判断
+        if (obs.Screen == GameScreen.MyLeagueHome)
+            return State.MyLeagueHome;
+
+        if (obs.Screen == GameScreen.Schedule)
+            return State.Schedule;
+
+        if (obs.Screen == GameScreen.PreMatch)
+            return State.PreMatch;
+
+        if (obs.Screen == GameScreen.InMatch)
+            return State.InMatch;
+
+        if (obs.Screen == GameScreen.HalfTime)
+            return State.HalfTime;
+
+        if (obs.Screen == GameScreen.FullTime)
+            return State.FullTime;
+
+        if (obs.Screen == GameScreen.Result)
+            return State.Result;
+
+        if (obs.Screen == GameScreen.Rewards)
+            return State.Rewards;
+
+        if (obs.Screen == GameScreen.Shop)
+            return State.Shop;
+
+        // 兑换积分页面（OCR 关键词）
+        if (text.Contains("兑换积分") || text.Contains("我的联赛积分"))
+            return State.Exchange;
+
+        return State.Unknown;
+    }
+
+    /// <summary>我的联赛主页：检查物品、进入比赛。</summary>
+    private async Task HandleMyLeagueHomeAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        // 1. 检查物品（只检查一次）
+        if (!_itemsChecked)
+        {
+            _engine.LogInternal("我的联赛主页：检查物品", LogLevel.Info);
+            await EnsureItemsAsync(ct);
+            _itemsChecked = true;
+            return;
+        }
+
+        // 2. 进入比赛
+        _engine.LogInternal("我的联赛主页：进入比赛", LogLevel.Info);
+        await _engine.Pad.Confirm();
+        await Task.Delay(2500, ct);
+    }
+
+    private bool _itemsChecked = false;
+
+    /// <summary>赛程表：选择比赛。</summary>
+    private async Task HandleScheduleAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        _engine.LogInternal("赛程表：选择比赛", LogLevel.Info);
+        await _engine.Pad.Confirm();
+        await Task.Delay(2000, ct);
+    }
+
+    /// <summary>难度选择弹窗：选择难度并确认。</summary>
+    private async Task HandleDifficultySelectAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        var targetDifficulty = _engine.Config.MyLeague.Difficulty;
+        _engine.LogInternal($"难度选择：目标 {targetDifficulty}", LogLevel.Info);
+
+        // 难度列表顺序：新手(0)、业余(1)、标准(2)、职业(3)、顶尖球员(4)、超级球星(5)、传奇(6)
+        var difficultyIndex = targetDifficulty switch
+        {
+            "新手" => 0,
+            "业余" => 1,
+            "标准" => 2,
+            "职业" => 3,
+            "顶尖球员" => 4,
+            "超级球星" => 5,
+            "传奇" => 6,
+            _ => 6,
+        };
+
+        // 先回到列表顶部
+        for (int i = 0; i < 10; i++) await _engine.Pad.Dpad(PadDir.Up);
+        await Task.Delay(300, ct);
+
+        // 向下移动到目标难度
+        for (int i = 0; i < difficultyIndex; i++)
+        {
+            await _engine.Pad.Dpad(PadDir.Down);
+            await Task.Delay(300, ct);
+        }
+
+        // 移动到最下层（确认按钮）
+        for (int i = 0; i < 10; i++) await _engine.Pad.Dpad(PadDir.Down);
+        await Task.Delay(300, ct);
+
+        // 向右平移到确认按钮
+        await _engine.Pad.Dpad(PadDir.Right);
+        await Task.Delay(300, ct);
+
+        // 点击确认
+        await _engine.Pad.Confirm();
+        await Task.Delay(3000, ct);
+    }
+
+    /// <summary>确认弹窗（关键比赛）：上移高光并点击。</summary>
+    private async Task HandleConfirmDialogAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        _engine.LogInternal("确认弹窗：上移高光并点击", LogLevel.Info);
+        await _engine.Pad.Dpad(PadDir.Up);
+        await Task.Delay(300, ct);
+        await _engine.Pad.Confirm();
+        await Task.Delay(2000, ct);
+    }
+
+    /// <summary>赛前准备：等待或跳过。</summary>
+    private async Task HandlePreMatchAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        _engine.LogInternal("赛前准备：等待比赛开始", LogLevel.Info);
+        // 可按 A 跳过等待
+        await _engine.Pad.Confirm();
+        await Task.Delay(2000, ct);
+    }
+
+    /// <summary>比赛中：AI 代打，不操作。</summary>
+    private async Task HandleInMatchAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        _engine.LogInternal("比赛中：AI 代打，等待结束", LogLevel.Debug);
+        await Task.Delay(5000, ct); // 比赛中每 5 秒观察一次
+    }
+
+    /// <summary>比赛结果：按 A 进入奖励结算。</summary>
+    private async Task HandleResultAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        _engine.LogInternal("比赛结果：按 A 继续", LogLevel.Info);
+        await _engine.Pad.Confirm();
+        await Task.Delay(2000, ct);
+    }
+
+    /// <summary>奖励结算：按 A 领取奖励。</summary>
+    private async Task HandleRewardsAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        _engine.LogInternal("奖励结算：按 A 领取", LogLevel.Info);
+        await _engine.Pad.Confirm();
+        await Task.Delay(2000, ct);
+    }
+
+    /// <summary>兑换积分页面：进入我的联赛物品。</summary>
+    private async Task HandleExchangeAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        _engine.LogInternal("兑换积分页面：进入我的联赛物品", LogLevel.Info);
+        await _engine.Pad.Dpad(PadDir.Right);
+        await Task.Delay(400, ct);
+        await _engine.Pad.Confirm();
+        await Task.Delay(2500, ct);
+    }
+
+    /// <summary>我的联赛物品页面：购买缺失物品。</summary>
+    private async Task HandleShopAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        _engine.LogInternal("我的联赛物品页面：购买缺失物品", LogLevel.Info);
+        // TODO: 实现购买逻辑
+        await Task.Delay(1000, ct);
+    }
+
+    /// <summary>通用弹窗：按 A 或 B 关闭。</summary>
+    private async Task HandleDialogAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        _engine.LogInternal("通用弹窗：按 A 关闭", LogLevel.Info);
+        await _engine.Pad.Confirm();
+        await Task.Delay(1000, ct);
+    }
+
+    /// <summary>检查我的联赛主页"使用的物品"面板。</summary>
+    private async Task EnsureItemsAsync(CancellationToken ct)
+    {
+        // 切换到"使用的物品"面板
         if (!await SwitchToUsedItemsPanelAsync(ct))
         {
             _engine.LogInternal("未能切换到「使用的物品」面板，跳过物品检查", LogLevel.Warn);
             return;
         }
 
-        // 2. OCR 检查 3 个物品
+        // OCR 检查 3 个物品
         var obs = await _engine.ObserveAsync(ct);
         var missing = new List<string>();
 
@@ -49,7 +308,7 @@ public sealed class MyLeagueService
 
         _engine.LogInternal($"缺失物品：{string.Join("、", missing)}，准备进入兑换积分购买", LogLevel.Warn);
 
-        // 3. 导航到兑换积分
+        // 导航到兑换积分
         if (await NavigateToExchangeAsync(ct))
         {
             _engine.LogInternal("已到达兑换积分页面，开始购买缺失物品", LogLevel.Info);
@@ -81,7 +340,6 @@ public sealed class MyLeagueService
                 continue;
             }
 
-            // 既不是挑战也不是使用的物品，可能已经在其他面板
             _engine.LogInternal($"未识别面板类型：{obs.Ocr.JoinedText.Substring(0, Math.Min(50, obs.Ocr.JoinedText.Length))}", LogLevel.Debug);
             await _engine.Pad.RsFlick(PadDir.Right);
             await Task.Delay(800, ct);
@@ -102,15 +360,11 @@ public sealed class MyLeagueService
         return false;
     }
 
-    /// <summary>
-    /// 检测当前焦点卡，排除导航栏和误识别。
-    /// 返回 (卡名, 置信度, 是否可靠)。
-    /// </summary>
+    /// <summary>检测当前焦点卡。</summary>
     private async Task<(string Name, bool Reliable)> DetectFocusCardAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
     {
         var card = FocusCardDetector.Detect(obs.Frame, obs.Ocr);
 
-        // 排除导航栏白色块（左上角 Home 图标区域，非卡片）
         if (card is not null && card.CX < 0.10 && card.CY < 0.10)
         {
             _engine.LogInternal($"检测到导航栏白色块（{card.CX:F2},{card.CY:F2}），忽略", LogLevel.Debug);
@@ -125,7 +379,6 @@ public sealed class MyLeagueService
 
         _engine.LogInternal($"焦点检测：{card.Name}（{card.CX:F2},{card.CY:F2} 置信度 {card.Confidence:F2}）", LogLevel.Info);
 
-        // unknown 卡：用坐标匹配最近的已知槽位
         if (card.Name == "unknown")
         {
             var nearest = _focusGraph.Nearest(card.CX, card.CY, maxDy: 0.20, maxDx: 0.25);
@@ -136,8 +389,6 @@ public sealed class MyLeagueService
             }
         }
 
-        // eFootball联赛 是 MatchHub 的卡，但 FocusCardDetector 可能误识别我的联赛主页的卡
-        // 用坐标推断：如果检测到 eFootball联赛，且坐标在右侧（x > 0.35），则是我的联赛主页的卡
         if (card.Name == "eFootball联赛")
         {
             var nearest = _focusGraph.Nearest(card.CX, card.CY, maxDy: 0.20, maxDx: 0.25);
@@ -150,8 +401,6 @@ public sealed class MyLeagueService
             return ("兑换积分", false);
         }
 
-        // i 的高光太小，OCR 可能读不到，但 FocusCardDetector 应该能检测到白色块
-        // 如果检测到的是 i，置信度通常较低，但坐标应该正确
         if (card.Name == "i" && card.Confidence < 0.03)
         {
             _engine.LogInternal("i 卡置信度过低，可能误检测", LogLevel.Debug);
@@ -184,28 +433,23 @@ public sealed class MyLeagueService
                 return true;
             }
 
-            // 硬编码路径（真机验证可靠）
             switch (cardName)
             {
                 case "前往比赛":
-                    // 真机验证：大概率 下右上，小概率 下右
                     _engine.LogInternal("硬编码路径：前往比赛 → Down → Right → Up（大概率）", LogLevel.Info);
                     await _engine.Pad.Dpad(PadDir.Down); await Task.Delay(300, ct);
                     await _engine.Pad.Dpad(PadDir.Right); await Task.Delay(300, ct);
                     await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
                     break;
                 case "i":
-                    // i 和前往比赛同行，路径相同
                     _engine.LogInternal("硬编码路径：i → Down → Right → Up（与前往比赛同行）", LogLevel.Info);
                     await _engine.Pad.Dpad(PadDir.Down); await Task.Delay(300, ct);
                     await _engine.Pad.Dpad(PadDir.Right); await Task.Delay(300, ct);
                     await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
                     break;
                 case "赛程表":
-                    // 赛程表 Right 可能到兑换积分或赛季纪录，需要结尾判断
                     _engine.LogInternal("硬编码路径：赛程表 → Right → 判断 → Up（如需要）", LogLevel.Info);
                     await _engine.Pad.Dpad(PadDir.Right); await Task.Delay(300, ct);
-                    // 检测是否已到兑换积分
                     var obsAfterRight = await _engine.ObserveAsync(ct);
                     var (afterRightName, _) = await DetectFocusCardAsync(obsAfterRight, ct);
                     if (afterRightName == "兑换积分")
@@ -213,7 +457,6 @@ public sealed class MyLeagueService
                         _engine.LogInternal("Right 后已到兑换积分", LogLevel.Info);
                         break;
                     }
-                    // 否则再按 Up
                     _engine.LogInternal("Right 后未到兑换积分，再按 Up", LogLevel.Info);
                     await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
                     break;
@@ -253,7 +496,6 @@ public sealed class MyLeagueService
                     break;
             }
 
-            // 执行完硬编码路径后，检测是否到达兑换积分
             var obsAfterMove = await _engine.ObserveAsync(ct);
             var (afterMoveName, _) = await DetectFocusCardAsync(obsAfterMove, ct);
             if (afterMoveName == "兑换积分")
@@ -264,8 +506,6 @@ public sealed class MyLeagueService
                 return true;
             }
 
-            // 路径执行后未检测到兑换积分，但可能检测失败（白边框卡 OCR 漏读）
-            // 尝试直接按 A，如果页面变化说明已到兑换积分
             _engine.LogInternal($"硬编码路径执行后焦点在「{afterMoveName}」，尝试按 A 确认", LogLevel.Info);
             await _engine.Pad.Confirm();
             await Task.Delay(2500, ct);
@@ -285,21 +525,17 @@ public sealed class MyLeagueService
     /// <summary>购买缺失物品。</summary>
     private async Task BuyMissingItemsAsync(List<string> missing, CancellationToken ct)
     {
-        // 从兑换积分页面进入"我的联赛物品"（向右 + A）
         _engine.LogInternal("进入「我的联赛物品」", LogLevel.Info);
         await _engine.Pad.Dpad(PadDir.Right);
         await Task.Delay(400, ct);
         await _engine.Pad.Confirm();
         await Task.Delay(2500, ct);
 
-        // 物品列表顺序（从上到下）：
-        // 1.状态:普通+ 2.状态:好+ 3.状态:杰出 4.经验值:2x 5.经验值:3x 6.经验值:4x
-        // 7.控球:99 8.头球:99 9.加速:99 10.FW球员能力值+ 11.MF球员能力值+ 12.DF球员能力值+ 13.主教练强化
         var itemDownCounts = new Dictionary<string, int>
         {
-            ["杰出状态"] = 2,      // 第3项，从顶部Down 2次
-            ["4倍经验"] = 5,       // 第6项，从顶部Down 5次
-            ["主教练强化"] = 12,   // 第13项，从顶部Down 12次
+            ["杰出状态"] = 2,
+            ["4倍经验"] = 5,
+            ["主教练强化"] = 12,
         };
 
         foreach (var item in missing)
@@ -312,30 +548,25 @@ public sealed class MyLeagueService
 
             _engine.LogInternal($"购买「{item}」，向下移动 {downCount} 次", LogLevel.Info);
 
-            // 从列表顶部开始，先回到顶部（连按Up确保）
             for (int i = 0; i < 15; i++) await _engine.Pad.Dpad(PadDir.Up);
             await Task.Delay(300, ct);
 
-            // 向下移动到目标物品
             for (int i = 0; i < downCount; i++)
             {
                 await _engine.Pad.Dpad(PadDir.Down);
                 await Task.Delay(300, ct);
             }
 
-            // 按 A 购买
             _engine.LogInternal($"按 A 购买「{item}」", LogLevel.Info);
             await _engine.Pad.Confirm();
             await Task.Delay(1500, ct);
 
-            // 处理购买确认弹窗（上移 + 点击）
             _engine.LogInternal("处理购买确认弹窗", LogLevel.Info);
             await _engine.Pad.Dpad(PadDir.Up);
             await Task.Delay(300, ct);
             await _engine.Pad.Confirm();
             await Task.Delay(2000, ct);
 
-            // 处理"物品使用中"成功弹窗（只有 OK 按钮）
             _engine.LogInternal("处理物品使用中弹窗", LogLevel.Info);
             await _engine.Pad.Confirm();
             await Task.Delay(1500, ct);
@@ -343,123 +574,10 @@ public sealed class MyLeagueService
             _engine.LogInternal($"「{item}」购买完成", LogLevel.Success);
         }
 
-        // 全部购买完毕，连按两次返回我的联赛首页
         _engine.LogInternal("全部购买完毕，返回我的联赛首页", LogLevel.Info);
         await _engine.Pad.Back();
         await Task.Delay(1500, ct);
         await _engine.Pad.Back();
         await Task.Delay(2000, ct);
-    }
-
-    /// <summary>进入比赛：前往比赛 → 赛程表 → 选择比赛 → 难度选择 → 进入比赛。</summary>
-    public async Task StartMatchAsync(CancellationToken ct)
-    {
-        // 1. 从我的联赛主页进入赛程表
-        _engine.LogInternal("进入赛程表", LogLevel.Info);
-        await NavigateToScheduleAsync(ct);
-
-        // 2. 选择比赛（关键比赛或普通比赛）
-        _engine.LogInternal("选择比赛", LogLevel.Info);
-        await SelectMatchAsync(ct);
-
-        // 3. 处理难度选择弹窗
-        _engine.LogInternal("处理难度选择", LogLevel.Info);
-        await HandleDifficultySelectAsync(ct);
-    }
-
-    /// <summary>从我的联赛主页导航到赛程表。</summary>
-    private async Task NavigateToScheduleAsync(CancellationToken ct)
-    {
-        // 当前应该在 MyLeagueHome，焦点在「前往比赛」
-        // 直接按 A 进入赛程表
-        await _engine.Pad.Confirm();
-        await Task.Delay(2500, ct);
-        _engine.LogInternal("已进入赛程表", LogLevel.Info);
-    }
-
-    /// <summary>在赛程表选择比赛。</summary>
-    private async Task SelectMatchAsync(CancellationToken ct)
-    {
-        // 赛程表显示即将到来的比赛列表
-        // 关键比赛有钥匙图标，普通比赛没有
-        // 优先选择关键比赛（如果有），否则选择普通比赛
-        // 当前实现：直接按 A 选择第一场比赛（最近的比赛）
-        await _engine.Pad.Confirm();
-        await Task.Delay(2000, ct);
-        _engine.LogInternal("已选择比赛", LogLevel.Info);
-    }
-
-    /// <summary>处理难度选择弹窗。</summary>
-    private async Task HandleDifficultySelectAsync(CancellationToken ct)
-    {
-        var targetDifficulty = _engine.Config.MyLeague.Difficulty; // 用户配置的难度，如 "传奇"
-
-        // 等待弹窗出现
-        await Task.Delay(1000, ct);
-        var obs = await _engine.ObserveAsync(ct);
-
-        // 检测是否为确认弹窗（上下两个按钮，无难度列表）
-        if (obs.Ocr.JoinedText.Contains("确认") && !obs.Ocr.JoinedText.Contains("选择赛事等级"))
-        {
-            _engine.LogInternal("检测到确认弹窗（关键比赛），上移高光并点击", LogLevel.Info);
-            await _engine.Pad.Dpad(PadDir.Up);
-            await Task.Delay(300, ct);
-            await _engine.Pad.Confirm();
-            await Task.Delay(2000, ct);
-            return;
-        }
-
-        // 难度选择弹窗：检测蓝色钩子位置
-        // 蓝色钩子在选中的难度左侧
-        // 如果传奇有蓝色钩子，直接点击确认
-        // 否则移动焦点到传奇，再移动到最下层，向右平移点击确认
-
-        // 检测当前选中的难度（蓝色钩子位置）
-        // 由于 OCR 无法直接检测蓝色钩子，我们假设：
-        // 1. 如果 OCR 读到"传奇"且弹窗中有蓝色，则已选中
-        // 2. 否则需要移动
-
-        // 简化实现：直接移动到传奇位置，然后按 Down 到最下层，Right 到确认，A 点击
-        _engine.LogInternal($"目标难度：{targetDifficulty}，移动焦点", LogLevel.Info);
-
-        // 难度列表顺序：新手(0)、业余(1)、标准(2)、职业(3)、顶尖球员(4)、超级球星(5)、传奇(6)
-        // 关键比赛可能只有：超级球星(0)、传奇(1)
-        var difficultyIndex = targetDifficulty switch
-        {
-            "新手" => 0,
-            "业余" => 1,
-            "标准" => 2,
-            "职业" => 3,
-            "顶尖球员" => 4,
-            "超级球星" => 5,
-            "传奇" => 6,
-            _ => 6, // 默认传奇
-        };
-
-        // 先回到列表顶部（连按 Up）
-        for (int i = 0; i < 10; i++) await _engine.Pad.Dpad(PadDir.Up);
-        await Task.Delay(300, ct);
-
-        // 向下移动到目标难度
-        for (int i = 0; i < difficultyIndex; i++)
-        {
-            await _engine.Pad.Dpad(PadDir.Down);
-            await Task.Delay(300, ct);
-        }
-
-        // 移动到最下层（确认按钮）
-        _engine.LogInternal("移动到最下层确认按钮", LogLevel.Info);
-        for (int i = 0; i < 10; i++) await _engine.Pad.Dpad(PadDir.Down);
-        await Task.Delay(300, ct);
-
-        // 向右平移到确认按钮
-        _engine.LogInternal("向右平移到确认按钮", LogLevel.Info);
-        await _engine.Pad.Dpad(PadDir.Right);
-        await Task.Delay(300, ct);
-
-        // 点击确认
-        _engine.LogInternal("点击确认进入比赛", LogLevel.Info);
-        await _engine.Pad.Confirm();
-        await Task.Delay(3000, ct);
     }
 }
