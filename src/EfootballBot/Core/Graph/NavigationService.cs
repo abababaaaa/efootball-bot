@@ -238,6 +238,19 @@ public sealed class NavigationService
                         To = target,
                         Path = path.Select(e => $"{e.From}→{e.To}").ToList(),
                     });
+
+                    // MatchHub→MyLeagueHome：用视觉焦点导航替代固定序列
+                    if (edge.From == "MatchHub" && edge.To == "MyLeagueHome")
+                    {
+                        bool ok = await TryFocusNavigateAsync("我的联赛", obs, ct);
+                        if (ok) { expectedTo = null; break; }
+                        // 视觉导航失败，回退固定序列
+                        Emit(NavEventKind.HopExecuted, edge.From, edge.To,
+                            $"视觉导航失败，回退固定边 {edge.From}→{edge.To}（{edge.Actions.Length} 个动作）");
+                        await _io.RunActionsAsync(edge.Actions, ct);
+                        break;
+                    }
+
                     Emit(NavEventKind.HopExecuted, edge.From, edge.To,
                         $"执行边 {edge.From}→{edge.To}（{edge.Actions.Length} 个动作）");
                     await _io.RunActionsAsync(edge.Actions, ct);
@@ -260,6 +273,56 @@ public sealed class NavigationService
 
     private static string RecentTrail(List<GameScreen> trail)
         => string.Join("→", trail.TakeLast(8).Select(s => s.ToString()));
+
+    /// <summary>
+    /// MatchHub 视觉焦点导航：检测当前高亮卡，按卡名决定方向键，逐步逼近目标。
+    /// 返回是否成功执行了视觉导航（false 表示检测失败，调用方回退固定序列）。
+    /// </summary>
+    private async Task<bool> TryFocusNavigateAsync(string targetCard, EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        if (obs.Frame is null || obs.Ocr is null) return false;
+
+        for (int step = 0; step < 6; step++)
+        {
+            var card = FocusCardDetector.Detect(obs.Frame, obs.Ocr);
+            if (card is null) return false;
+
+            _log($"焦点检测：{card.Name}（置信度 {card.Confidence:F2}）", LogLevel.Info);
+
+            if (card.Name == targetCard)
+            {
+                _log($"焦点已在目标卡「{targetCard}」，按 A 确认", LogLevel.Info);
+                await _io.RunActionsAsync(
+                    new[] { NavAction.Press(PadButton.A), NavAction.Wait(4500) }, ct);
+                return true;
+            }
+
+            PadDir? dir = card.Name switch
+            {
+                "活动" => PadDir.Right,
+                "eFootball联赛" => PadDir.Right,
+                "自定义锦标赛" => PadDir.Up,
+                "快速" => PadDir.Up,
+                _ => null,
+            };
+
+            if (dir is null)
+            {
+                _log($"未识别的焦点卡「{card.Name}」，无法视觉导航", LogLevel.Warn);
+                return false;
+            }
+
+            _log($"焦点在「{card.Name}」，按 {dir} 移向「{targetCard}」", LogLevel.Info);
+            await _io.RunActionsAsync(new[] { NavAction.Dpad(dir.Value), NavAction.Wait(300) }, ct);
+
+            // 移动后重新观察
+            obs = await _io.ObserveAsync(ct);
+            if (obs.Screen != GameScreen.MatchHub) return false; // 页面变了，交回主导航
+        }
+
+        _log("视觉导航 6 步未到达目标，回退固定序列", LogLevel.Warn);
+        return false;
+    }
 
     private void Emit(NavEventKind kind, string from, string to, string detail)
     {
