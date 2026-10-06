@@ -152,8 +152,75 @@ public sealed class MyLeagueStateMachine
             return;
         }
 
-        // 2. 进入比赛
-        _engine.LogInternal("我的联赛主页：进入比赛", LogLevel.Info);
+        // 2. 进入比赛：先确保高光在「前往比赛」上
+        _engine.LogInternal("我的联赛主页：确保高光在「前往比赛」", LogLevel.Info);
+
+        var (cardName, reliable) = await DetectFocusCardAsync(obs, ct);
+        if (cardName != "前往比赛")
+        {
+            _engine.LogInternal($"当前焦点在「{cardName}」，移动到「前往比赛」", LogLevel.Info);
+
+            // 硬编码路径：从任意卡到前往比赛
+            switch (cardName)
+            {
+                case "i":
+                    // i → Left → 前往比赛
+                    await _engine.Pad.Dpad(PadDir.Left);
+                    await Task.Delay(300, ct);
+                    break;
+                case "赛程表":
+                    // 赛程表 → Up → 前往比赛
+                    await _engine.Pad.Dpad(PadDir.Up);
+                    await Task.Delay(300, ct);
+                    break;
+                case "兑换积分":
+                    // 兑换积分 → Left → 前往比赛
+                    await _engine.Pad.Dpad(PadDir.Left);
+                    await Task.Delay(300, ct);
+                    break;
+                case "赛季纪录":
+                    // 赛季纪录 → Up → 兑换积分 → Left → 前往比赛
+                    await _engine.Pad.Dpad(PadDir.Up);
+                    await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Left);
+                    await Task.Delay(300, ct);
+                    break;
+                case "赛事信息":
+                    // 赛事信息 → Up → 赛程表 → Up → 前往比赛
+                    await _engine.Pad.Dpad(PadDir.Up);
+                    await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Up);
+                    await Task.Delay(300, ct);
+                    break;
+                case "建议":
+                    // 建议 → Up → 赛季纪录 → Up → 兑换积分 → Left → 前往比赛
+                    await _engine.Pad.Dpad(PadDir.Up);
+                    await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Up);
+                    await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Left);
+                    await Task.Delay(300, ct);
+                    break;
+                default:
+                    _engine.LogInternal($"未知卡「{cardName}」，尝试默认路径", LogLevel.Warn);
+                    // 默认：Up → Up → Up → Left → Left → Left（压到左上角）
+                    for (int i = 0; i < 3; i++) await _engine.Pad.Dpad(PadDir.Up);
+                    for (int i = 0; i < 3; i++) await _engine.Pad.Dpad(PadDir.Left);
+                    await Task.Delay(300, ct);
+                    break;
+            }
+
+            // 再次检测确认
+            obs = await _engine.ObserveAsync(ct);
+            (cardName, _) = await DetectFocusCardAsync(obs, ct);
+            if (cardName != "前往比赛")
+            {
+                _engine.LogInternal($"移动后焦点仍在「{cardName}」，无法进入比赛", LogLevel.Error);
+                return;
+            }
+        }
+
+        _engine.LogInternal("高光已在「前往比赛」，按 A 进入", LogLevel.Info);
         await _engine.Pad.Confirm();
         await Task.Delay(2500, ct);
     }
