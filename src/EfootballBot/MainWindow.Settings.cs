@@ -479,47 +479,107 @@ public partial class MainWindow
             _ = SetHidHideEnabledAsync(true, automatic: true);
     }
 
-    /// <summary>提权执行 job 并轮询结果文件（setup 含驱动下载，超时放宽到 5 分钟）。</summary>
-    private async Task<HidHideConfigJob.HidHideResultDto?> RunHidHideJobAsync(HidHideConfigJob.HidHideJobDto job)
+    /// <summary>
+    /// 提权执行 job：启动 runas 子进程 → 日志记录 PID → 并行等待「子进程退出」与「结果文件」。
+    /// 三类失败均返回带明确 Error 的结果：
+    /// ① UAC 被否(1223)/被策略拦截(5)；② 子进程退出但未写回结果（疑崩溃，指引查日志）；
+    /// ③ 300s 超时（疑卡在下载/安装）。
+    /// </summary>
+    private async Task<HidHideConfigJob.HidHideResultDto> RunHidHideJobAsync(HidHideConfigJob.HidHideJobDto job)
     {
         string jobPath = Path.Combine(Path.GetTempPath(), $"hidhide_{Guid.NewGuid():N}.json");
         File.WriteAllText(jobPath, System.Text.Json.JsonSerializer.Serialize(job));
 
-        System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
+        Process child;
+        try
         {
-            FileName = Environment.ProcessPath!,
-            Arguments = $"--hidhide-config \"{jobPath}\"",
-            Verb = "runas",
-            UseShellExecute = true,
-        });
+            child = Process.Start(new ProcessStartInfo
+            {
+                FileName = Environment.ProcessPath!,
+                Arguments = $"--hidhide-config \"{jobPath}\"",
+                Verb = "runas",
+                UseShellExecute = true,
+            }) ?? throw new InvalidOperationException("Process.Start 返回 null");
+        }
+        catch (Win32Exception ex) when (ex.NativeErrorCode is 1223 or 5)
+        {
+            AppendLog($"提权子进程未启动（Win32 {ex.NativeErrorCode}：" +
+                (ex.NativeErrorCode == 1223 ? "UAC 被拒绝" : "访问被策略或安全软件拦截") + "）。", LogLevel.Warn);
+            TryDelete(jobPath);
+            return new HidHideConfigJob.HidHideResultDto
+            {
+                Success = false,
+                Error = $"提权子进程未启动（Win32 {ex.NativeErrorCode}）。" +
+                    "若本程序本身是「以管理员身份运行」，则不会弹窗、属正常现象，请直接观察是否静默配置成功",
+            };
+        }
 
-        var sw = System.Diagnostics.Stopwatch.StartNew();
+        AppendLog($"提权配置子进程已启动（PID={child.Id}），等待其退出…", LogLevel.Info);
+
+        HidHideConfigJob.HidHideResultDto? result = null;
+        bool exited, resultWritten;
+        exited = resultWritten = false;
+        var sw = Stopwatch.StartNew();
         while (sw.Elapsed.TotalSeconds < 300)
         {
+            if (child.HasExited)
+            {
+                AppendLog($"提权配置子进程已退出（ExitCode={child.ExitCode}）。", LogLevel.Info);
+                await Task.Delay(150); // 等结果文件刷盘
+                exited = true;
+                break;
+            }
             try
             {
-                var text = await File.ReadAllTextAsync(jobPath);
-                if (text.Contains("\"Success\"") || text.Contains("\"success\""))
-                    break;
+                string text = await File.ReadAllTextAsync(jobPath);
+                if (text.Contains("\"Success\"")) { resultWritten = true; break; }
             }
             catch { /* 文件被占用：子进程正在写 */ }
             await Task.Delay(500);
         }
 
+        bool timeout = !exited && !resultWritten;
+        if (timeout && !child.HasExited)
+        {
+            AppendLog("提权配置子进程 300 秒未退出，本次配置超时。", LogLevel.Warn);
+            try { child.Kill(false); } catch { /* 提权进程可能无权结束 */ }
+        }
+
         try
         {
-            var result = System.Text.Json.JsonSerializer.Deserialize<HidHideConfigJob.HidHideResultDto>(
+            result = System.Text.Json.JsonSerializer.Deserialize<HidHideConfigJob.HidHideResultDto>(
                 await File.ReadAllTextAsync(jobPath));
-            return result;
         }
-        catch
+        catch (Exception ex)
         {
-            return null; // 取消授权 / 超时 / 文件异常
+            string hint = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
+                "EfootballBot", "hidhide-config-error.log");
+            AppendLog(exited
+                ? $"子进程未写回有效结果，可能启动即崩溃，详见 {hint}（{ex.Message}）"
+                : $"结果文件读取失败：{ex.Message}", LogLevel.Warn);
         }
-        finally
-        {
-            try { File.Delete(jobPath); } catch { }
-        }
+
+        TryDelete(jobPath);
+        child.Dispose();
+
+        result ??= timeout
+            ? new HidHideConfigJob.HidHideResultDto
+            {
+                Success = false,
+                Error = "提权配置子进程超时（300 秒未退出），可能卡在下载 HidHide 或静默安装环节",
+            }
+            : new HidHideConfigJob.HidHideResultDto
+            {
+                Success = false,
+                Error = "子进程已退出但未写回结果，可能启动即崩溃；" +
+                    "请查看 %AppData%\\EfootballBot\\hidhide-config-error.log",
+            };
+        return result;
+    }
+
+    private static void TryDelete(string path)
+    {
+        try { File.Delete(path); } catch { }
     }
 
     /// <summary>主开关切换：on=自动装驱动+配置（setup），off=解除（clear）。</summary>
@@ -530,9 +590,11 @@ public partial class MainWindow
         ChkHidHideEnabled.IsEnabled = false;
         try
         {
-            TxtHidHideStatus.Text = on
-                ? (automatic ? "首次启用正在自动配置，请在授权窗口点「是」…" : "正在开启手柄隔离，请在授权窗口点「是」…")
-                : "正在关闭手柄隔离，请在授权窗口点「是」…";
+            TxtHidHideStatus.Text = GitHostsOptimizer.IsAdministrator()
+                ? "已具备管理员权限，正在静默配置（不会弹出授权窗口）…"
+                : on
+                    ? (automatic ? "首次启用正在自动配置，请在授权窗口点「是」…" : "正在开启手柄隔离，请在授权窗口点「是」…")
+                    : "正在关闭手柄隔离，请在授权窗口点「是」…";
 
             var job = new HidHideConfigJob.HidHideJobDto
             {
@@ -542,52 +604,34 @@ public partial class MainWindow
                 GameImagePath = _cfg.HidHide.GameImagePath,
             };
 
-            HidHideConfigJob.HidHideResultDto? result;
-            try
-            {
-                result = await RunHidHideJobAsync(job);
-            }
-            catch (System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 1223)
-            {
-                result = null; // 用户拒绝 UAC
-            }
+            // 拒权(1223)/拦截(5)/崩溃/超时均由 RunHidHideJobAsync 转成带 Error 的结果
+            var result = await RunHidHideJobAsync(job);
 
-            if (result is null)
-            {
-                // 授权被拒/超时：开关回退到实际状态，意图保留在配置中，下次启动自动重试
-                _loadingConfig = true;
-                ChkHidHideEnabled.IsChecked = !on ? true : _cfg.HidHide.Enabled;
-                _loadingConfig = false;
-                TxtHidHideStatus.Text = "需要管理员授权才能切换，下次启动应用时重试";
-                return;
-            }
-
-            if (result.Success)
-            {
-                _cfg.HidHide.Enabled = on;
-                if (on)
-                {
-                    if (!string.IsNullOrWhiteSpace(result.ResolvedGameImagePath))
-                        _cfg.HidHide.GameImagePath = result.ResolvedGameImagePath;
-                    // job 只返回本次新增条目，快照须合并（幂等重跑新增为 0 时不能清空，否则 clear 无法回滚）
-                    _cfg.HidHide.AppliedBlacklist =
-                        HidHideManager.MergeInto(_cfg.HidHide.AppliedBlacklist, result.AppliedBlacklist);
-                }
-                _cfg.Save();
-                AppendLog(on
-                    ? (result.AppliedBlacklist.Count > 0
-                        ? $"手柄隔离已开启（黑名单托管 {result.AppliedBlacklist.Count} 项）。"
-                        : "手柄隔离已开启，配置已生效。")
-                    : "手柄隔离已关闭，虚拟手柄恢复全局可见。", LogLevel.Info);
-                TxtHidHideStatus.Text = result.Message;
-            }
-            else
+            if (!result.Success)
             {
                 _loadingConfig = true;
                 ChkHidHideEnabled.IsChecked = !on;
                 _loadingConfig = false;
                 TxtHidHideStatus.Text = $"配置失败：{result.Error}";
+                return;
             }
+
+            _cfg.HidHide.Enabled = on;
+            if (on)
+            {
+                if (!string.IsNullOrWhiteSpace(result.ResolvedGameImagePath))
+                    _cfg.HidHide.GameImagePath = result.ResolvedGameImagePath;
+                // job 只返回本次新增条目，快照须合并（幂等重跑新增为 0 时不能清空，否则 clear 无法回滚）
+                _cfg.HidHide.AppliedBlacklist =
+                    HidHideManager.MergeInto(_cfg.HidHide.AppliedBlacklist, result.AppliedBlacklist);
+            }
+            _cfg.Save();
+            AppendLog(on
+                ? (result.AppliedBlacklist.Count > 0
+                    ? $"手柄隔离已开启（黑名单托管 {result.AppliedBlacklist.Count} 项）。"
+                    : "手柄隔离已开启，配置已生效。")
+                : "手柄隔离已关闭，虚拟手柄恢复全局可见。", LogLevel.Info);
+            TxtHidHideStatus.Text = result.Message;
         }
         finally
         {
