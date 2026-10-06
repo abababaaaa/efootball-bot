@@ -99,7 +99,7 @@ public sealed class MyLeagueStateMachine
         if (text.Contains("确认") && text.Contains("关键比赛") && !text.Contains("选择赛事等级"))
             return State.ConfirmDialog;
 
-        if (text.Contains("物品使用中") || text.Contains("使用物品"))
+        if (text.Contains("物品使用中"))
             return State.Dialog;
 
         if (obs.Screen == GameScreen.Dialog)
@@ -267,13 +267,91 @@ public sealed class MyLeagueStateMachine
     private async Task HandleShopAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
     {
         _engine.LogInternal("我的联赛物品页面：购买缺失物品", LogLevel.Info);
-        // TODO: 实现购买逻辑
-        await Task.Delay(1000, ct);
+
+        // 物品列表顺序：状态:普通+(0)、状态:好+(1)、状态:杰出(2)、经验值:2x(3)、经验值:3x(4)、经验值:4x(5)、控球:99(6)、头球:99(7)、加速:99(8)、FW球员能力值+(9)、MF球员能力值+(10)、DF球员能力值+(11)、主教练强化(12)
+        var itemDownCounts = new Dictionary<string, int>
+        {
+            ["杰出状态"] = 2,
+            ["4倍经验"] = 5,
+            ["主教练强化"] = 12,
+        };
+
+        foreach (var item in itemDownCounts)
+        {
+            var itemName = item.Key;
+            var downCount = item.Value;
+
+            // 检查是否需要购买该物品
+            bool shouldBuy = itemName switch
+            {
+                "杰出状态" => _engine.Config.MyLeague.BuyExcellentCondition,
+                "4倍经验" => _engine.Config.MyLeague.Buy4xExp,
+                "主教练强化" => _engine.Config.MyLeague.BuyManagerBoost,
+                _ => false,
+            };
+
+            if (!shouldBuy)
+            {
+                _engine.LogInternal($"跳过「{itemName}」（未配置购买）", LogLevel.Debug);
+                continue;
+            }
+
+            _engine.LogInternal($"购买「{itemName}」，向下移动 {downCount} 次", LogLevel.Info);
+
+            // 先回到列表顶部
+            for (int i = 0; i < 15; i++) await _engine.Pad.Dpad(PadDir.Up);
+            await Task.Delay(300, ct);
+
+            // 向下移动到目标物品
+            for (int i = 0; i < downCount; i++)
+            {
+                await _engine.Pad.Dpad(PadDir.Down);
+                await Task.Delay(300, ct);
+            }
+
+            // 按 A 购买
+            _engine.LogInternal($"按 A 购买「{itemName}」", LogLevel.Info);
+            await _engine.Pad.Confirm();
+            await Task.Delay(1500, ct);
+
+            // 处理购买确认弹窗（上移 + 点击）
+            _engine.LogInternal("处理购买确认弹窗", LogLevel.Info);
+            await _engine.Pad.Dpad(PadDir.Up);
+            await Task.Delay(300, ct);
+            await _engine.Pad.Confirm();
+            await Task.Delay(2000, ct);
+
+            // 处理"物品使用中"成功弹窗（点击 OK）
+            _engine.LogInternal("处理物品使用中弹窗", LogLevel.Info);
+            await _engine.Pad.Confirm();
+            await Task.Delay(1500, ct);
+
+            _engine.LogInternal($"「{itemName}」购买完成", LogLevel.Success);
+        }
+
+        // 全部购买完毕，返回我的联赛首页
+        _engine.LogInternal("全部购买完毕，返回我的联赛首页", LogLevel.Info);
+        await _engine.Pad.Back();
+        await Task.Delay(1500, ct);
+        await _engine.Pad.Back();
+        await Task.Delay(2000, ct);
     }
 
     /// <summary>通用弹窗：按 A 或 B 关闭。</summary>
     private async Task HandleDialogAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
     {
+        var text = obs.Ocr.JoinedText;
+
+        // "物品使用中"弹窗：点击 OK
+        if (text.Contains("物品使用中"))
+        {
+            _engine.LogInternal("物品使用中弹窗：点击 OK", LogLevel.Info);
+            await _engine.Pad.Confirm();
+            await Task.Delay(1500, ct);
+            return;
+        }
+
+        // 其他弹窗：按 A 关闭
         _engine.LogInternal("通用弹窗：按 A 关闭", LogLevel.Info);
         await _engine.Pad.Confirm();
         await Task.Delay(1000, ct);
