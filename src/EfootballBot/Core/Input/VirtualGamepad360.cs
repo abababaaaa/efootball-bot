@@ -53,11 +53,25 @@ public sealed class VirtualGamepad360 : IDisposable
         catch { return false; }
     }
 
+    /// <summary>
+    /// eFootball 菜单只响应 XInput Player 1（slot 0）。
+    /// 连接前若真实手柄已占用 slot 0，虚拟手柄必然落到 slot 1+，输入被游戏忽略。
+    /// 提取为纯静态函数便于单测；返回 null 表示 slot 0 空闲。
+    /// </summary>
+    public static string? SlotZeroOccupiedMessage(bool slot0Connected)
+        => slot0Connected
+            ? "检测到真实手柄已占用 XInput Player 1（slot 0）。eFootball 菜单只响应 Player 1，虚拟手柄会被分到 slot 2+ 导致输入无效。请先拔下或关闭真实手柄，再点击开始挂机。"
+            : null;
+
     public void Connect()
     {
         if (_connected) return;
         if (!IsDriverInstalled())
             throw new InvalidOperationException("未检测到 ViGEmBus 驱动，请先安装 ViGEmBus Setup。");
+
+        // slot 0 被真实手柄占用时，虚拟手柄必然分到 slot 1+，游戏不响应 → 直接阻断
+        if (SlotZeroOccupiedMessage(XInputGetState(0, out _) == 0) is { } blockMsg)
+            throw new InvalidOperationException(blockMsg);
 
         // 连接前快照已占用槽位，连接后用 XInput 轮询找到新设备，即虚拟手柄真实 slot
         var before = new HashSet<int>();
