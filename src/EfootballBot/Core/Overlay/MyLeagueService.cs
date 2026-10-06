@@ -102,6 +102,58 @@ public sealed class MyLeagueService
         return false;
     }
 
+    /// <summary>
+    /// 检测当前焦点卡，排除导航栏和误识别。
+    /// 返回 (卡名, 置信度, 是否可靠)。
+    /// </summary>
+    private async Task<(string Name, bool Reliable)> DetectFocusCardAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        var card = FocusCardDetector.Detect(obs.Frame, obs.Ocr);
+
+        // 排除导航栏白色块（左上角 Home 图标区域，非卡片）
+        if (card is not null && card.CX < 0.10 && card.CY < 0.10)
+        {
+            _engine.LogInternal($"检测到导航栏白色块（{card.CX:F2},{card.CY:F2}），忽略", LogLevel.Debug);
+            card = null;
+        }
+
+        // 排除 eFootball联赛（MatchHub 的卡，不是我的联赛主页）
+        if (card?.Name == "eFootball联赛")
+        {
+            _engine.LogInternal("检测到 eFootball联赛（MatchHub 卡），当前不在我的联赛主页", LogLevel.Warn);
+            return ("eFootball联赛", false);
+        }
+
+        if (card is null)
+        {
+            _engine.LogInternal("未检测到焦点卡，默认当前高光在「赛程表」", LogLevel.Warn);
+            return ("赛程表", false);
+        }
+
+        _engine.LogInternal($"焦点检测：{card.Name}（{card.CX:F2},{card.CY:F2} 置信度 {card.Confidence:F2}）", LogLevel.Info);
+
+        // unknown 卡：用坐标匹配最近的已知槽位
+        if (card.Name == "unknown")
+        {
+            var nearest = _focusGraph.Nearest(card.CX, card.CY, maxDy: 0.20, maxDx: 0.25);
+            if (nearest is not null)
+            {
+                _engine.LogInternal($"unknown 卡坐标推断为「{nearest.Id}」", LogLevel.Info);
+                return (nearest.Id, true);
+            }
+        }
+
+        // i 的高光太小，OCR 可能读不到，但 FocusCardDetector 应该能检测到白色块
+        // 如果检测到的是 i，置信度通常较低，但坐标应该正确
+        if (card.Name == "i" && card.Confidence < 0.03)
+        {
+            _engine.LogInternal("i 卡置信度过低，可能误检测", LogLevel.Debug);
+            return ("i", false);
+        }
+
+        return (card.Name, true);
+    }
+
     /// <summary>用 FocusGraph 导航到兑换积分。</summary>
     private async Task<bool> NavigateToExchangeAsync(CancellationToken ct)
     {
@@ -115,31 +167,16 @@ public sealed class MyLeagueService
                 return false;
             }
 
-            // 检测当前焦点卡；我的联赛主页「赛程表」高光只有白色边框，极易漏检
-            var card = FocusCardDetector.Detect(obs.Frame, obs.Ocr);
-            string detectedName = card?.Name ?? "null";
-            double detectedConf = card?.Confidence ?? 0;
+            var (cardName, reliable) = await DetectFocusCardAsync(obs, ct);
 
-            if (card is null)
+            // 如果检测到 eFootball联赛，说明不在我的联赛主页，直接失败
+            if (cardName == "eFootball联赛")
             {
-                _engine.LogInternal("未检测到焦点卡，默认当前高光在「赛程表」", LogLevel.Warn);
-                card = new FocusCard("赛程表", 0.13, 0.50, 0.00, 0.37, 0.25, 0.25, 0.0);
+                _engine.LogInternal("检测到 eFootball联赛，当前不在我的联赛主页", LogLevel.Error);
+                return false;
             }
 
-            _engine.LogInternal($"焦点检测：{card.Name}（{card.CX:F2},{card.CY:F2}）", LogLevel.Info);
-
-            // unknown 卡：用坐标匹配最近的已知槽位（OCR 可能漏读白边框卡的标题）
-            if (card.Name == "unknown")
-            {
-                var nearest = _focusGraph.Nearest(card.CX, card.CY, maxDy: 0.20, maxDx: 0.25);
-                if (nearest is not null)
-                {
-                    _engine.LogInternal($"unknown 卡坐标推断为「{nearest.Id}」", LogLevel.Info);
-                    card = new FocusCard(nearest.Id, card.CX, card.CY, card.X, card.Y, card.W, card.H, card.Confidence);
-                }
-            }
-
-            if (card.Name == "兑换积分")
+            if (cardName == "兑换积分")
             {
                 _engine.LogInternal("焦点已在「兑换积分」，按 A 进入", LogLevel.Info);
                 await _engine.Pad.Confirm();
@@ -147,20 +184,37 @@ public sealed class MyLeagueService
                 return true;
             }
 
-            // 简化硬编码：已知可靠路径，不依赖 FocusGraph 每步检测
-            // 前往比赛/赛程表/赛季纪录 都可通过固定序列到达兑换积分
-            switch (card.Name)
+            // 硬编码路径（真机验证可靠）
+            switch (cardName)
             {
                 case "前往比赛":
-                    _engine.LogInternal("硬编码路径：前往比赛 → Down → Down → Right → Up → 兑换积分", LogLevel.Info);
+                    // 真机验证：大概率 下右上，小概率 下右
+                    _engine.LogInternal("硬编码路径：前往比赛 → Down → Right → Up（大概率）", LogLevel.Info);
                     await _engine.Pad.Dpad(PadDir.Down); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Right); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
+                    break;
+                case "i":
+                    // i 和前往比赛同行，路径相同
+                    _engine.LogInternal("硬编码路径：i → Down → Right → Up（与前往比赛同行）", LogLevel.Info);
                     await _engine.Pad.Dpad(PadDir.Down); await Task.Delay(300, ct);
                     await _engine.Pad.Dpad(PadDir.Right); await Task.Delay(300, ct);
                     await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
                     break;
                 case "赛程表":
-                    _engine.LogInternal("硬编码路径：赛程表 → Right → Up → 兑换积分", LogLevel.Info);
+                    // 赛程表 Right 可能到兑换积分或赛季纪录，需要结尾判断
+                    _engine.LogInternal("硬编码路径：赛程表 → Right → 判断 → Up（如需要）", LogLevel.Info);
                     await _engine.Pad.Dpad(PadDir.Right); await Task.Delay(300, ct);
+                    // 检测是否已到兑换积分
+                    var obsAfterRight = await _engine.ObserveAsync(ct);
+                    var (afterRightName, _) = await DetectFocusCardAsync(obsAfterRight, ct);
+                    if (afterRightName == "兑换积分")
+                    {
+                        _engine.LogInternal("Right 后已到兑换积分", LogLevel.Info);
+                        break;
+                    }
+                    // 否则再按 Up
+                    _engine.LogInternal("Right 后未到兑换积分，再按 Up", LogLevel.Info);
                     await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
                     break;
                 case "赛季纪录":
@@ -178,20 +232,12 @@ public sealed class MyLeagueService
                     await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
                     await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
                     break;
-                case "i":
-                    _engine.LogInternal("硬编码路径：i → Left → Down → Down → Right → Up → 兑换积分", LogLevel.Info);
-                    await _engine.Pad.Dpad(PadDir.Left); await Task.Delay(300, ct);
-                    await _engine.Pad.Dpad(PadDir.Down); await Task.Delay(300, ct);
-                    await _engine.Pad.Dpad(PadDir.Down); await Task.Delay(300, ct);
-                    await _engine.Pad.Dpad(PadDir.Right); await Task.Delay(300, ct);
-                    await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
-                    break;
                 default:
-                    _engine.LogInternal($"未知卡「{card.Name}」，尝试通用 FocusGraph 寻路", LogLevel.Warn);
-                    var slot = _focusGraph.SlotByName(card.Name);
+                    _engine.LogInternal($"未知卡「{cardName}」，尝试通用 FocusGraph 寻路", LogLevel.Warn);
+                    var slot = _focusGraph.SlotByName(cardName);
                     if (slot is null)
                     {
-                        _engine.LogInternal($"未知焦点卡「{card.Name}」，无法寻路", LogLevel.Warn);
+                        _engine.LogInternal($"未知焦点卡「{cardName}」，无法寻路", LogLevel.Warn);
                         return false;
                     }
                     var path = _focusGraph.FindPath(slot.Id, "兑换积分");
@@ -206,6 +252,19 @@ public sealed class MyLeagueService
                     await Task.Delay(400, ct);
                     break;
             }
+
+            // 执行完硬编码路径后，检测是否到达兑换积分
+            var obsAfterMove = await _engine.ObserveAsync(ct);
+            var (afterMoveName, _) = await DetectFocusCardAsync(obsAfterMove, ct);
+            if (afterMoveName == "兑换积分")
+            {
+                _engine.LogInternal("硬编码路径执行后到达兑换积分，按 A 进入", LogLevel.Info);
+                await _engine.Pad.Confirm();
+                await Task.Delay(2500, ct);
+                return true;
+            }
+
+            _engine.LogInternal($"硬编码路径执行后焦点在「{afterMoveName}」，继续循环", LogLevel.Info);
         }
 
         _engine.LogInternal("焦点导航 8 步未到达兑换积分", LogLevel.Warn);
