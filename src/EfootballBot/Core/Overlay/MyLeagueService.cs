@@ -117,13 +117,6 @@ public sealed class MyLeagueService
             card = null;
         }
 
-        // 排除 eFootball联赛（MatchHub 的卡，不是我的联赛主页）
-        if (card?.Name == "eFootball联赛")
-        {
-            _engine.LogInternal("检测到 eFootball联赛（MatchHub 卡），当前不在我的联赛主页", LogLevel.Warn);
-            return ("eFootball联赛", false);
-        }
-
         if (card is null)
         {
             _engine.LogInternal("未检测到焦点卡，默认当前高光在「赛程表」", LogLevel.Warn);
@@ -168,13 +161,6 @@ public sealed class MyLeagueService
             }
 
             var (cardName, reliable) = await DetectFocusCardAsync(obs, ct);
-
-            // 如果检测到 eFootball联赛，说明不在我的联赛主页，直接失败
-            if (cardName == "eFootball联赛")
-            {
-                _engine.LogInternal("检测到 eFootball联赛，当前不在我的联赛主页", LogLevel.Error);
-                return false;
-            }
 
             if (cardName == "兑换积分")
             {
@@ -264,7 +250,18 @@ public sealed class MyLeagueService
                 return true;
             }
 
-            _engine.LogInternal($"硬编码路径执行后焦点在「{afterMoveName}」，继续循环", LogLevel.Info);
+            // 路径执行后未检测到兑换积分，但可能检测失败（白边框卡 OCR 漏读）
+            // 尝试直接按 A，如果页面变化说明已到兑换积分
+            _engine.LogInternal($"硬编码路径执行后焦点在「{afterMoveName}」，尝试按 A 确认", LogLevel.Info);
+            await _engine.Pad.Confirm();
+            await Task.Delay(2500, ct);
+            var obsAfterA = await _engine.ObserveAsync(ct);
+            if (obsAfterA.Screen != GameScreen.MyLeagueHome)
+            {
+                _engine.LogInternal("按 A 后页面已变化，假设已进入兑换积分", LogLevel.Info);
+                return true;
+            }
+            _engine.LogInternal("按 A 后仍在我的联赛主页，继续循环", LogLevel.Info);
         }
 
         _engine.LogInternal("焦点导航 8 步未到达兑换积分", LogLevel.Warn);
