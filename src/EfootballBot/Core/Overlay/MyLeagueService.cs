@@ -345,4 +345,116 @@ public sealed class MyLeagueService
         await _engine.Pad.Back();
         await Task.Delay(2000, ct);
     }
+
+    /// <summary>进入比赛：前往比赛 → 赛程表 → 选择比赛 → 难度选择 → 进入比赛。</summary>
+    public async Task StartMatchAsync(CancellationToken ct)
+    {
+        // 1. 从我的联赛主页进入赛程表
+        _engine.LogInternal("进入赛程表", LogLevel.Info);
+        await NavigateToScheduleAsync(ct);
+
+        // 2. 选择比赛（关键比赛或普通比赛）
+        _engine.LogInternal("选择比赛", LogLevel.Info);
+        await SelectMatchAsync(ct);
+
+        // 3. 处理难度选择弹窗
+        _engine.LogInternal("处理难度选择", LogLevel.Info);
+        await HandleDifficultySelectAsync(ct);
+    }
+
+    /// <summary>从我的联赛主页导航到赛程表。</summary>
+    private async Task NavigateToScheduleAsync(CancellationToken ct)
+    {
+        // 当前应该在 MyLeagueHome，焦点在「前往比赛」
+        // 直接按 A 进入赛程表
+        await _engine.Pad.Confirm();
+        await Task.Delay(2500, ct);
+        _engine.LogInternal("已进入赛程表", LogLevel.Info);
+    }
+
+    /// <summary>在赛程表选择比赛。</summary>
+    private async Task SelectMatchAsync(CancellationToken ct)
+    {
+        // 赛程表显示即将到来的比赛列表
+        // 关键比赛有钥匙图标，普通比赛没有
+        // 优先选择关键比赛（如果有），否则选择普通比赛
+        // 当前实现：直接按 A 选择第一场比赛（最近的比赛）
+        await _engine.Pad.Confirm();
+        await Task.Delay(2000, ct);
+        _engine.LogInternal("已选择比赛", LogLevel.Info);
+    }
+
+    /// <summary>处理难度选择弹窗。</summary>
+    private async Task HandleDifficultySelectAsync(CancellationToken ct)
+    {
+        var targetDifficulty = _engine.Config.MyLeague.Difficulty; // 用户配置的难度，如 "传奇"
+
+        // 等待弹窗出现
+        await Task.Delay(1000, ct);
+        var obs = await _engine.ObserveAsync(ct);
+
+        // 检测是否为确认弹窗（上下两个按钮，无难度列表）
+        if (obs.Ocr.JoinedText.Contains("确认") && !obs.Ocr.JoinedText.Contains("选择赛事等级"))
+        {
+            _engine.LogInternal("检测到确认弹窗（关键比赛），上移高光并点击", LogLevel.Info);
+            await _engine.Pad.Dpad(PadDir.Up);
+            await Task.Delay(300, ct);
+            await _engine.Pad.Confirm();
+            await Task.Delay(2000, ct);
+            return;
+        }
+
+        // 难度选择弹窗：检测蓝色钩子位置
+        // 蓝色钩子在选中的难度左侧
+        // 如果传奇有蓝色钩子，直接点击确认
+        // 否则移动焦点到传奇，再移动到最下层，向右平移点击确认
+
+        // 检测当前选中的难度（蓝色钩子位置）
+        // 由于 OCR 无法直接检测蓝色钩子，我们假设：
+        // 1. 如果 OCR 读到"传奇"且弹窗中有蓝色，则已选中
+        // 2. 否则需要移动
+
+        // 简化实现：直接移动到传奇位置，然后按 Down 到最下层，Right 到确认，A 点击
+        _engine.LogInternal($"目标难度：{targetDifficulty}，移动焦点", LogLevel.Info);
+
+        // 难度列表顺序：新手(0)、业余(1)、标准(2)、职业(3)、顶尖球员(4)、超级球星(5)、传奇(6)
+        // 关键比赛可能只有：超级球星(0)、传奇(1)
+        var difficultyIndex = targetDifficulty switch
+        {
+            "新手" => 0,
+            "业余" => 1,
+            "标准" => 2,
+            "职业" => 3,
+            "顶尖球员" => 4,
+            "超级球星" => 5,
+            "传奇" => 6,
+            _ => 6, // 默认传奇
+        };
+
+        // 先回到列表顶部（连按 Up）
+        for (int i = 0; i < 10; i++) await _engine.Pad.Dpad(PadDir.Up);
+        await Task.Delay(300, ct);
+
+        // 向下移动到目标难度
+        for (int i = 0; i < difficultyIndex; i++)
+        {
+            await _engine.Pad.Dpad(PadDir.Down);
+            await Task.Delay(300, ct);
+        }
+
+        // 移动到最下层（确认按钮）
+        _engine.LogInternal("移动到最下层确认按钮", LogLevel.Info);
+        for (int i = 0; i < 10; i++) await _engine.Pad.Dpad(PadDir.Down);
+        await Task.Delay(300, ct);
+
+        // 向右平移到确认按钮
+        _engine.LogInternal("向右平移到确认按钮", LogLevel.Info);
+        await _engine.Pad.Dpad(PadDir.Right);
+        await Task.Delay(300, ct);
+
+        // 点击确认
+        _engine.LogInternal("点击确认进入比赛", LogLevel.Info);
+        await _engine.Pad.Confirm();
+        await Task.Delay(3000, ct);
+    }
 }
