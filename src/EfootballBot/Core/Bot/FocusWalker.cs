@@ -1,3 +1,4 @@
+using EfootballBot.Core.Capture;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 
@@ -130,13 +131,17 @@ public sealed class FocusWalker
     private readonly FocusGraph _g;
     private readonly CancellationToken _ct;
     private readonly Action<string, LogLevel> _log;
+    private readonly Func<FrameData, OcrResult, FocusCard?> _detect;
 
-    public FocusWalker(BotEngine engine, FocusGraph graph, CancellationToken ct, Action<string, LogLevel>? log = null)
+    public FocusWalker(BotEngine engine, FocusGraph graph, CancellationToken ct,
+        Action<string, LogLevel>? log = null,
+        Func<FrameData, OcrResult, FocusCard?>? detector = null)
     {
         _e = engine;
         _g = graph;
         _ct = ct;
         _log = log ?? ((_, _) => { });
+        _detect = detector ?? FocusCardDetector.Detect;
     }
 
     /// <summary>高光丢失或图上无路时的恢复动作（通常为焦点归位）。全程最多调用 1 次。</summary>
@@ -299,13 +304,13 @@ public sealed class FocusWalker
         if (initial)
         {
             var o = await _e.ObserveAsync(_ct);
-            card = FocusCardDetector.Detect(o.Frame, o.Ocr);
+            card = _detect(o.Frame, o.Ocr);
         }
         else
         {
             await _e.Pad.Wait(120, _ct);
             var f = _e.LatestFrame;
-            card = f is null ? null : FocusCardDetector.Detect(f, OcrResult.Empty);
+            card = f is null ? null : _detect(f, OcrResult.Empty);
         }
         if (card is not null) return _g.SlotByName(card.Name) ?? _g.Nearest(card.CX, card.CY);
         return _g.PhotoSlotId is null ? null : _g.Slot(_g.PhotoSlotId);
@@ -328,7 +333,7 @@ public sealed class FocusWalker
             await _e.Pad.Wait(100, _ct);
             var f = _e.LatestFrame;
             if (f is null || f.TimestampMs <= t0) continue;   // 只要复核开始后的新帧
-            var c = FocusCardDetector.Detect(f, OcrResult.Empty);
+            var c = _detect(f, OcrResult.Empty);
             if (c is null) continue;                          // 漏检帧忽略
             if (AtSlot(c, target)) { if (++hits >= 2) return true; }
             else return false;                                // 高光在别的槽位=真离开了
@@ -370,7 +375,7 @@ public sealed class FocusWalker
             await _e.Pad.Wait(120, _ct);
             var f = _e.LatestFrame;
             if (f is null || f.TimestampMs <= pressTick) continue;  // 只要按键后的新帧
-            var c = FocusCardDetector.Detect(f, OcrResult.Empty);
+            var c = _detect(f, OcrResult.Empty);
             if (c is null) continue;   // 无白块=高光在照片槽位或动画中，不参与判稳
 
             bool movedLittle = lx is not null && ly is not null
@@ -395,7 +400,7 @@ public sealed class FocusWalker
         await _e.Pad.Wait(130, _ct);
         var f = _e.LatestFrame;
         if (f is null || f.TimestampMs <= pressTick) return false;
-        var c = FocusCardDetector.Detect(f, OcrResult.Empty);
+        var c = _detect(f, OcrResult.Empty);
         return c is not null
             && Math.Max(Math.Abs(c.CX - x), Math.Abs(c.CY - y)) < 0.02;
     }

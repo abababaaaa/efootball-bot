@@ -5,6 +5,7 @@ using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using EfootballBot.Core.Config;
+using EfootballBot.Core.Graph;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 
@@ -72,13 +73,12 @@ public sealed class IntlWeeklyScenario : ScenarioBase
             switch (o.Screen)
             {
                 case GameScreen.Home:
-                    _restartSweep = true;
-                    await GoToEventHubSafeAsync();
-                    break;
-
                 case GameScreen.MatchHub:
+                    // 全流程闭环导航：首页锚定主菜单 → 比赛页步行高光到「活动」卡 → A 进活动列表
                     _restartSweep = true;
-                    await GoToEventHubSafeAsync();
+                    if (!await NavigateToCardAsync(MatchHubCards.Event)) return;
+                    await E.Pad.Confirm();
+                    await E.Pad.Wait(2500, Ct);
                     break;
 
                 case GameScreen.EventHub:

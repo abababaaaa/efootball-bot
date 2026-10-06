@@ -41,6 +41,7 @@ public sealed class BotEngine : IDisposable
     private readonly ScreenClassifier _classifier;
     private readonly ProbeEngine _probeEngine;
     public readonly PageGraph Graph;
+    public readonly NavigationService Navigation;
     public readonly BotStats Stats = new();
 
     private CancellationTokenSource? _cts;
@@ -72,10 +73,12 @@ public sealed class BotEngine : IDisposable
         Pad = new Pad(Pad360, cfg.Timing);
         Actions = new ActionExecutor(this, Pad);
         Overlay = new OverlayEngine(this, Actions, Pad);
-        Ocr = new OcrRecognizer(cfg.OcrLanguage);
+        Ocr = new OcrRecognizer(cfg.OcrEngine, cfg.OcrLanguage);
+        LogInternal($"OCR 引擎：{Ocr.LanguageTag}（{Ocr.EngineKind}）", LogLevel.Info);
         _classifier = new ScreenClassifier();
         _probeEngine = new ProbeEngine(PageCatalog.Pages);
         Graph = new PageGraph(PageCatalog.Edges);
+        Navigation = new NavigationService(this, Pad, LogInternal);
         Observation = new ObservationService(Capture, Ocr, cfg);
         Observation.Log = (msg, lv) => LogInternal(msg, lv);
 
@@ -292,20 +295,25 @@ public sealed class BotEngine : IDisposable
         if (_lastObs is not null && _lastObs.Frame == f && _lastObs.Ocr == ocr)
             return _lastObs;
 
-        var (screen, score, ev) = _classifier.Classify(ocr, f);
+        // 新声明式引擎 ProbeEngine 生效；旧 ScreenClassifier 降为影子对照，仅记录分歧日志
+        var probeObs = new Observation(f, ocr, GameScreen.Unknown, 0, Array.Empty<string>());
+        var newResult = _probeEngine.Classify(probeObs);
+        GameScreen screen = newResult.Screen;
+        double score = newResult.RawScore;
+        List<string> ev = newResult.Evidence;
+
+        var (oldScreen, oldScore, _) = _classifier.Classify(ocr, f);
+        if (oldScreen != screen)
+        {
+            string over = newResult.OverrideReason is null ? "" : $"[override:{newResult.OverrideReason}]";
+            LogInternal(
+                $"[旧分类器分歧] new={screen}({score:F1}){over} old={oldScreen}({oldScore:F1}) ev={string.Join(",", ev)}",
+                LogLevel.Warn);
+        }
+
         var obs = new Observation(f, ocr, screen, score, ev);
         _lastObs = obs;
         Observation.ApplyCaptureThrottle(screen);
-
-        // 影子模式：并行运行新 ProbeEngine，仅日志对比差异，实际仍用旧结果
-        var probeObs = new Observation(f, ocr, screen, score, ev);
-        var newResult = _probeEngine.Classify(probeObs);
-        if (screen != newResult.Screen)
-        {
-            LogInternal(
-                $"[影子差异] old={screen}({score:F1}) new={newResult.Screen}({newResult.RawScore:F1}) ev={string.Join(",", newResult.Evidence)}",
-                LogLevel.Warn);
-        }
 
         // ---------------- 可视化事件派发（非阻塞，订阅方自行异常保护） ----------------
         ScreenChanged?.Invoke(new ScreenEvent
@@ -716,6 +724,7 @@ public sealed class BotEngine : IDisposable
     {
         Stop();
         try { Observation.Dispose(); } catch { }
+        try { Ocr.Dispose(); } catch { }
         try { _dxgi?.Dispose(); } catch { }
         try { Pad360.Dispose(); } catch { }
         GC.SuppressFinalize(this);

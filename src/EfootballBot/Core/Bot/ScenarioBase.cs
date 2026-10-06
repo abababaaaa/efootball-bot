@@ -2,6 +2,7 @@ using EfootballBot.Core.Action;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Flow;
+using EfootballBot.Core.Graph;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.System;
 using EfootballBot.Core.Vision;
@@ -126,6 +127,33 @@ public abstract class ScenarioBase
             await E.Pad.Wait(3000, Ct);
             return false;
         }
+    }
+
+    /// <summary>
+    /// 全流程闭环导航到比赛页指定卡片：
+    /// 在首页 → 先锚定游戏主菜单（Tab 跑偏则自动 LB 返回），再进入比赛页；
+    /// 已在比赛页 → 直接闭环步行到目标卡（禁用卡上自动走回）。
+    /// 返回 false=导航失败已记录错误并停机，调用方应结束场景。
+    /// </summary>
+    protected async Task<bool> NavigateToCardAsync(string targetCard)
+    {
+        var o = await E.ObserveAsync(Ct);
+        if (o.Is(GameScreen.Home))
+        {
+            if (!await E.Navigation.EnsureAnchoredAsync(new HomeNode(), Ct)) return false;
+            if (!await E.GoToAsync(nameof(GameScreen.MatchHub), null, Ct))
+            {
+                Log("无法进入比赛页，导航终止", LogLevel.Error);
+                return false;
+            }
+        }
+        else if (!o.Is(GameScreen.MatchHub))
+        {
+            Log($"当前不在首页 / 比赛页（{o.Screen}），无法导航到比赛卡片", LogLevel.Error);
+            return false;
+        }
+
+        return await E.Navigation.EnsureAnchoredAsync(new MatchHubNode(targetCard), Ct);
     }
 
     /// <summary>

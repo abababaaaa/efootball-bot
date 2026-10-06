@@ -1,4 +1,5 @@
 using EfootballBot.Core.Config;
+using EfootballBot.Core.Graph;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 
@@ -37,8 +38,11 @@ public sealed class MyLeagueScenario : ScenarioBase
             {
                 case GameScreen.Home:
                 case GameScreen.MatchHub:
-                    // 目标编排式导航：声明目标页，由 PageGraph BFS 寻路执行按键序列
-                    await E.GoToAsync(nameof(GameScreen.MyLeagueHome), null, Ct);
+                    // 全流程闭环导航：首页锚定主菜单 → 比赛页步行高光到「我的联赛」卡
+                    if (!await NavigateToCardAsync(MatchHubCards.MyLeague)) return;
+                    Log("已到达「我的联赛」卡片，确认进入", LogLevel.Info);
+                    await E.Pad.Confirm();
+                    await E.Pad.Wait(3000, Ct);
                     break;
 
                 case GameScreen.MyLeagueHome:
