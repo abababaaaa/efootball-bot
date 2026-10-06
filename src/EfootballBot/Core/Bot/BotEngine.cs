@@ -100,9 +100,29 @@ public sealed class BotEngine : IDisposable
         {
             try
             {
-                // 框架就绪：场景逻辑待逐步重写。当前仅保持会话存活并持续观察画面，
-                // 供探针引擎校准与导航验证使用。
-                LogInternal($"引擎框架已就绪（模式：{mode}），等待场景逻辑重写接入", LogLevel.Success);
+                // M0 导航框架：启动后先执行一次全页面智能寻路到模式枢纽。
+                // 到达后的比赛/活动循环待 M1 场景重写接入，当前寻路结束后仅保持观察。
+                GameScreen? targetScreen = mode switch
+                {
+                    "myleague" => GameScreen.MyLeagueHome,
+                    "intlweekly" => GameScreen.EventHub,
+                    _ => null,
+                };
+
+                if (targetScreen is { } ts)
+                {
+                    LogInternal($"开始智能寻路：任意画面 → {ScreenName(ts)}", LogLevel.Info);
+                    var navResult = await GoToAsync(ts.ToString(), null, token);
+                    LogInternal(navResult.Ok
+                        ? $"寻路成功，已到达{ScreenName(ts)}（M0 导航验证通过，等待场景循环接入）"
+                        : $"寻路结束未到达目标（{navResult.Outcome}）：{navResult.Message}",
+                        navResult.Ok ? LogLevel.Success : LogLevel.Warn);
+                }
+                else
+                {
+                    LogInternal($"引擎框架已就绪（模式：{mode}），该模式暂未接入寻路，仅观察画面", LogLevel.Success);
+                }
+
                 while (!token.IsCancellationRequested)
                 {
                     await ObserveAsync(token);
