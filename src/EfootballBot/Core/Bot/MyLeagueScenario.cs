@@ -50,20 +50,30 @@ public sealed class MyLeagueScenario : ScenarioBase
                         p = await E.Overlay.PassThroughAsync(p, Ct);
                         bool isKeyMatch = p.Ocr.Contains("关键比赛");
                         // 「OK」必须独立成词（精确匹配），否则赛程卡上的 "Fukuoka" 会子串命中导致误判
+                        // OCR 可能把字母 O 识别为数字 0，因此同时接受 0K
                         bool hasOk = p.Ocr.Words.Any(w =>
                         {
                             string t = OcrText.Norm(w.Text);
                             return t.Equals("OK", StringComparison.OrdinalIgnoreCase)
-                                   || t.Equals("okay", StringComparison.OrdinalIgnoreCase);
+                                   || t.Equals("okay", StringComparison.OrdinalIgnoreCase)
+                                   || t.Equals("0K", StringComparison.OrdinalIgnoreCase);
                         });
                         bool hasExpired = p.Ocr.Contains("过期") || p.Ocr.ContainsJoined("过期")
                                           || p.Ocr.Contains("获取新物品");
-                        bool hasPopup = isKeyMatch || hasOk || hasExpired
+                        // 赛后积分弹窗「收到我的联赛积分」没有确定/OK 关键词，必须显式列入。
+                        // ContainsJoined 跨词拼接匹配，对抗 OCR 把长标题拆成碎词（如「收」「到」「我」「的」）。
+                        bool hasRewardPopup = p.Ocr.ContainsJoined("收到我的联赛积分")
+                                              || p.Ocr.ContainsJoined("获得的活动积分")
+                                              || p.Ocr.ContainsJoined("物品已送到收件箱")
+                                              || p.Ocr.ContainsJoined("送到收件箱")
+                                              // 紫色弹窗上的「详情」+ 大数字 + OK 是辅助特征
+                                              || (p.Ocr.Contains("详情") && hasOk);
+                        bool hasPopup = isKeyMatch || hasOk || hasExpired || hasRewardPopup
                                         || p.Ocr.Contains("实时更新")
                                         || p.Ocr.Contains("下一步")
                                         || p.Ocr.Contains("确定") || p.Ocr.Contains("物品");
                         if (!hasPopup) break;
-                        Log($"联赛主页弹窗（第{popup + 1}轮）：{(isKeyMatch ? "关键比赛" : "其他")}", LogLevel.Info);
+                        Log($"联赛主页弹窗（第{popup + 1}轮）：{(isKeyMatch ? "关键比赛" : hasRewardPopup ? "赛后积分" : "其他")}", LogLevel.Info);
                         if (isKeyMatch)
                         {
                             await E.Pad.Dpad(PadDir.Up);
@@ -74,6 +84,14 @@ public sealed class MyLeagueScenario : ScenarioBase
                         {
                             // 「物品已过期」弹窗只有一个 OK 且默认聚焦，立刻按 A
                             Log("物品已过期弹窗，立即确认", LogLevel.Info);
+                            if (!await E.PressButtonAsync(new[] { "ok" }, Ct, exactMatch: true))
+                            {
+                                await E.Pad.Confirm();
+                            }
+                        }
+                        else if (hasRewardPopup)
+                        {
+                            // 「收到我的联赛积分」等赛后积分弹窗：底部白色 OK 按钮默认聚焦
                             if (!await E.PressButtonAsync(new[] { "ok" }, Ct, exactMatch: true))
                             {
                                 await E.Pad.Confirm();
@@ -157,14 +175,14 @@ public sealed class MyLeagueScenario : ScenarioBase
     private int _enterMatchFailures;
 
     /// <summary>
-    /// 焦点归位到左上「前往比赛」卡：Left×2 → Up×2（各 250ms，到边界后多按无效，幂等）。
-    /// 商店 B×3 返回主页后焦点停在「兑换积分」卡上（真机截图白框证实），
-    /// 任何从主页出发的 A 导航前都必须先归位，否则盲按 A 会重复进商店。
+    /// 焦点归位到左上「前往比赛」卡：Left×2 → Up×4（各 250ms，到边界后多按无效，幂等）。
+    /// 商店 B×3 返回主页后焦点可能停在兑换积分/建议/赛事信息等任意位置，
+    /// 必须收拢到左上角 go 卡后再出发，否则盲按 A 会重复进商店。
     /// </summary>
     private async Task ResetFocusToGoToMatchAsync()
     {
         for (int i = 0; i < 2; i++) { await E.Pad.Dpad(PadDir.Left); await E.Pad.Wait(250, Ct); }
-        for (int i = 0; i < 2; i++) { await E.Pad.Dpad(PadDir.Up); await E.Pad.Wait(250, Ct); }
+        for (int i = 0; i < 4; i++) { await E.Pad.Dpad(PadDir.Up); await E.Pad.Wait(250, Ct); }
     }
 
     /// <summary>
@@ -248,18 +266,69 @@ public sealed class MyLeagueScenario : ScenarioBase
     }
 
     /// <summary>
-    /// 判断是否已翻到「使用的物品」全屏页。粉色标题 OCR 经常识别失败，不能只靠标题词：
-    /// ① 标题「使用的物品」/空列表「没有正在使用」命中；
-    /// ② 物品名出现在屏幕左半部（词左缘 x&lt;0.50）——全屏页物品名从 x≈0.05 开始，
-    ///    而主页右侧预览栏的物品名在 x&gt;0.65，天然区分翻页是否成功。
+    /// 识别「使用的物品」面板并逐项判定道具是否在使用中。游戏存在两种版式：
+    /// ① 全屏页：物品名从屏幕左缘开始（中心 x&lt;0.55）；
+    /// ② 联赛主页右侧轮播面板（右下角 RS 小圆点）：物品行在右 1/3（中心 x&gt;0.58），
+    ///    粉色标题 OCR 经常失败，改用白色物品行关键词（杰出 / 主教练强化 / 经验值）定位。
+    /// 仅标题命中但读不到物品行时返回 true 但三项全部 false（调用方会走商店兜底，安全）。
     /// </summary>
-    private static bool IsInUseItemsPage(OcrResult ocr)
+    private static bool DetectInUseItems(OcrResult ocr, out bool sidePanel,
+        out bool exp4xInUse, out bool condInUse, out bool mgrInUse, out bool empty)
     {
-        if (ocr.Contains("使用的物品") || ocr.Contains("没有正在使用")) return true;
-        return ocr.MergedWords.Any(w => w.X < 0.50 &&
-            (OcrText.Norm(w.Text).Contains("经验值")
-             || OcrText.Norm(w.Text).Contains("主教练强化")
-             || OcrText.Norm(w.Text).Contains("杰出")));
+        empty = ocr.Contains("没有正在使用");
+        bool titleHit = ocr.Contains("使用的物品") || empty;
+
+        bool lExp = false, lCond = false, lMgr = false;
+        bool rExp = false, rCond = false, rMgr = false;
+
+        foreach (var w in ocr.MergedWords)
+        {
+            string n = OcrText.Norm(w.Text);
+            int kind;
+            if (n.Contains("主教练强化") || n.Contains("教练强化")) kind = 2;
+            else if (n.Contains("杰出")) kind = 1;
+            else if (n.Contains("经验")) kind = 0;
+            else continue;
+
+            // 物品行只可能出现在面板中段，滤掉头部/底部按钮栏的偶然误识
+            if (w.CenterY < 0.28 || w.CenterY > 0.82) continue;
+
+            if (w.CenterX < 0.55)
+            {
+                if (kind == 0) lExp = true;
+                else if (kind == 1) lCond = true;
+                else lMgr = true;
+            }
+            else if (w.CenterX > 0.58)
+            {
+                if (kind == 0) rExp = true;
+                else if (kind == 1) rCond = true;
+                else rMgr = true;
+            }
+        }
+
+        bool page = titleHit || lExp || lCond || lMgr || rExp || rCond || rMgr;
+        if (!page)
+        {
+            sidePanel = false;
+            exp4xInUse = condInUse = mgrInUse = false;
+            return false;
+        }
+
+        // 右侧面板版式：只有右区命中（或右区命中且标题也在）；否则按全屏页处理
+        bool rightHit = rExp || rCond || rMgr;
+        bool leftHit = lExp || lCond || lMgr;
+        sidePanel = rightHit && !leftHit;
+        if (sidePanel)
+        {
+            exp4xInUse = rExp; condInUse = rCond; mgrInUse = rMgr;
+        }
+        else
+        {
+            exp4xInUse = lExp; condInUse = lCond; mgrInUse = lMgr;
+        }
+        if (empty) exp4xInUse = condInUse = mgrInUse = false;
+        return true;
     }
 
     /// <summary>画面 OCR 指纹：所有原始词按阅读序拼接（截断 160 字），用于判定翻页后画面是否真的变化。</summary>
@@ -282,22 +351,23 @@ public sealed class MyLeagueScenario : ScenarioBase
         if (!need4x && !needCond && !needMgr)
             return;
 
-        // 1. 右摇杆向右「翻到为止」：主页横向面板页数/顺序因账号而异，
-        //    「使用的物品」可能在第 3 页之后，写死 1~2 次会停在赛程/数据页。
-        //    终止条件：命中物品页 / 翻回主页（看到「前往比赛」）/ 连续两页指纹不变（到头）/ 最多 5 次。
-        Log("检查物品栏：右摇杆向右翻页查看「使用的物品」…", LogLevel.Info);
-        await E.Pad.RsFlick(PadDir.Right);
-        await E.Pad.Wait(1400, Ct);
+        // 1. 先看当前帧（右侧轮播面板可能本来就停在「使用的物品」页，一次摇杆都不用推）；
+        //    没命中再右摇杆向右逐页翻。两种版式都认：全屏页物品名在左半幅，
+        //    主页右侧面板物品行在右 1/3。
+        //    终止：命中物品页 / 翻回主页（看到「前往比赛」）/ 连续两屏指纹不变（到头）/ 最多 4 次。
+        Log("检查物品栏：查看「使用的物品」面板…", LogLevel.Info);
         var o = await E.ObserveAsync(Ct);
         o = await E.Overlay.PassThroughAsync(o, Ct);
 
-        bool inUsePage = IsInUseItemsPage(o.Ocr);
-        int flips = 1;
+        bool inUsePage = DetectInUseItems(o.Ocr, out bool sidePanel,
+            out bool exp4xInUse, out bool condInUse, out bool mgrInUse, out bool noItem);
+        int flips = 0;
         string prevFp = OcrFingerprint(o.Ocr);
-        const int maxFlips = 5;
+        const int maxFlips = 4;
         while (!inUsePage && flips < maxFlips)
         {
-            // 翻完一圈回主页（第 1 次就回主页多半是首次翻动未生效，不算）
+            // 全屏轮播绕完一圈会回主页（右侧面板版式下「前往比赛」常驻，
+            // flips>=2 停手也足够覆盖该面板的两个分页）
             if (flips >= 2 && o.Ocr.Contains("前往比赛"))
             {
                 Log("翻页已绕回主页，未找到「使用的物品」面板", LogLevel.Info);
@@ -308,7 +378,8 @@ public sealed class MyLeagueScenario : ScenarioBase
             o = await E.ObserveAsync(Ct);
             o = await E.Overlay.PassThroughAsync(o, Ct);
             flips++;
-            inUsePage = IsInUseItemsPage(o.Ocr);
+            inUsePage = DetectInUseItems(o.Ocr, out sidePanel,
+                out exp4xInUse, out condInUse, out mgrInUse, out noItem);
             string fp = OcrFingerprint(o.Ocr);
             if (!inUsePage && fp == prevFp)
             {
@@ -318,29 +389,23 @@ public sealed class MyLeagueScenario : ScenarioBase
             prevFp = fp;
         }
         if (inUsePage)
-            Log($"第 {flips} 次翻页到达「使用的物品」面板", LogLevel.Debug);
+            Log($"第 {(flips == 0 ? "当前屏" : $"{flips} 次翻页")}命中「使用的物品」{(sidePanel ? "（右侧面板）" : "（全屏页）")}", LogLevel.Debug);
 
-        // 2. 逐项判定使用中
-        bool noItem = o.Ocr.Contains("没有正在使用");
-        bool exp4xInUse, condInUse, mgrInUse;
-        if (inUsePage)
+        // 2. 逐项判定使用中（DetectInUseItems 已按物品行所在区域给出结果）
+        if (!inUsePage)
         {
-            exp4xInUse = !noItem && o.Ocr.Contains("经验");
-            condInUse  = !noItem && o.Ocr.Contains("状态");
-            mgrInUse   = !noItem && o.Ocr.Contains("强化");
-
-            if (noItem)
-                Log("物品栏为空：没有正在使用的物品", LogLevel.Info);
-            else
-                Log($"物品栏：4x经验[{(exp4xInUse ? "在用" : "缺")}] 杰出状态[{(condInUse ? "在用" : "缺")}] 教练强化[{(mgrInUse ? "在用" : "缺")}]", LogLevel.Info);
-        }
-        else
-        {
-            // 没确认翻到「使用的物品」页（空列表/粉色标题 OCR 极易失败，主页文字还会误命中
-            // 「经验/状态/强化」）：此时 OCR 的在用/缺失判定全部不可信，不能跳过——
+            // 没确认到物品页（空列表/标题 OCR 失败）：在用/缺失判定不可信，不能跳过——
             // 改去商店逐行核对：商店行内有「使用中」检测 + 游戏购买确认弹窗双保险，不会重复购买
             Log("未能确认「使用的物品」页面（空列表/标题 OCR 失败），改为前往商店逐行核对", LogLevel.Warn);
             exp4xInUse = condInUse = mgrInUse = false;
+        }
+        else if (noItem)
+        {
+            Log("物品栏为空：没有正在使用的物品", LogLevel.Info);
+        }
+        else
+        {
+            Log($"物品栏：4x经验[{(exp4xInUse ? "在用" : "缺")}] 杰出状态[{(condInUse ? "在用" : "缺")}] 教练强化[{(mgrInUse ? "在用" : "缺")}]", LogLevel.Info);
         }
 
         bool skip4x = !need4x || exp4xInUse;
@@ -466,6 +531,13 @@ public sealed class MyLeagueScenario : ScenarioBase
     }
 
     /// <summary>
+    /// 道具「在用」判定：只认「使用中 / 已使用」。
+    /// 「有效场数:N 场」是道具时效说明，商店每行常驻，绝不能作为在用信号。
+    /// </summary>
+    internal static bool IsInUse(OcrResult ocr)
+        => ocr.Contains("使用中") || ocr.Contains("已使用");
+
+    /// <summary>
     /// 积分商店内页：Right Tab → 「我的联赛物品」，按列表从上到下的顺序逐项购买。
     /// 列表行号（从顶部焦点行 0=状态普通+ 起）：杰出状态=2，经验值4x=5，主教练强化=12。
     /// 每项流程：行内「使用中」判定 → A → 弹窗分支（使用中/资金不足/确认购买 Up+A）。
@@ -514,7 +586,7 @@ public sealed class MyLeagueScenario : ScenarioBase
                 var o = await E.ObserveAsync(Ct);
                 var texts = string.Join("|", o.Ocr.Words.Where(w => !string.IsNullOrWhiteSpace(w.Text)).Take(20).Select(w => w.Text));
                 Log($"{name} 使用中检测 (retry {retry + 1}/2)：OCR={texts}", LogLevel.Debug);
-                if (o.Ocr.Contains("使用中"))
+                if (IsInUse(o.Ocr))
                     inUse = true;
                 else
                     await E.Pad.Wait(300, Ct);
@@ -535,7 +607,7 @@ public sealed class MyLeagueScenario : ScenarioBase
             Log($"{name} 弹窗原文：{popupText}", LogLevel.Debug);
 
             // 弹窗分支 a：使用中（行内 OCR 漏了但游戏知道）
-            if (popup.Ocr.Contains("使用中"))
+            if (IsInUse(popup.Ocr))
             {
                 Log($"{name} 弹窗确认使用中，A 关闭，继续下一项", LogLevel.Info);
                 await E.Pad.Confirm();
