@@ -548,8 +548,11 @@ public sealed class ScreenClassifier
         // 判 PreMatch → 场景层进入比赛流程后统一按 A 推进，绝不按 B。
         // 注意：比赛结束画面也有「下一步」白色大按钮，需先排除赛后画面
         // 同时排除周活动主页（有「完成挑战」或「活动信息」等特征词）
+        // 也排除已命中的 InMatch：直播帧底部记分牌蓝色会让 bBtn 误高（真机 0.62），
+        // 覆盖成 PreMatch 会冲破比赛迟滞并导致每 ~10s 盲按 A
         bool isWeeklyHub = ocr.ContainsAny(new[] { "完成挑战", "活动信息", "比赛历史", "建议" });
         if (frame is not null
+            && !scores.ContainsKey(GameScreen.InMatch)
             && !scores.ContainsKey(GameScreen.Result)
             && !scores.ContainsKey(GameScreen.Rewards)
             && !scores.ContainsKey(GameScreen.FullTime)
@@ -623,11 +626,11 @@ public sealed class ScreenClassifier
     /// 「过期」兼容「物品已过期」（中间隔字，整词 Contains 会漏），同时查 JoinedText 防逐字拆开。
     /// </summary>
     private static bool HasRewardPopup(OcrResult ocr)
-        => ocr.Contains("获得的活动积分")
-           || ocr.Contains("距离下个奖励")
-           || ocr.Contains("物品已送到收件箱")
-           || ocr.Contains("送到收件箱")
-           || ocr.Contains("收到我的联赛积分")
+        => ocr.ContainsJoined("获得的活动积分")
+           || ocr.ContainsJoined("距离下个奖励")
+           || ocr.ContainsJoined("物品已送到收件箱")
+           || ocr.ContainsJoined("送到收件箱")
+           || ocr.ContainsJoined("收到我的联赛积分")
            || ocr.Contains("过期")
            || ocr.ContainsJoined("过期")
            || ocr.Contains("获取新物品");
