@@ -517,6 +517,15 @@
                                        Text="WGC 是 Windows 官方窗口专属捕获（Discord/Teams/OBS 同款），游戏被遮挡、你在操作其他程序时照常挂机；DXGI 直接读显卡桌面画面、高分辨率略快，但窗口不能被遮挡或最小化。建议游戏设为无边框窗口模式。更改在下次开始挂机时生效。"/>
                             <CheckBox x:Name="ChkPeriodicGc" Content="挂机期间定期强制 GC（每 5 分钟）" IsChecked="True"/>
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <TextBlock Text="OCR 识别引擎" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="CmbOcrEngine" Width="280" Margin="10,0,0,0" SelectedIndex="0">
+                                    <ComboBoxItem Content="RapidOCR PP-OCRv6（精准，推荐）"/>
+                                    <ComboBoxItem Content="Windows 内置 OCR（更快，回退用）"/>
+                                </ComboBox>
+                            </StackPanel>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,6,0,9"
+                                       Text="PP-OCRv6 是随程序自带的离线深度学习模型（约 30MB，不联网、不装第三方软件），对游戏美术字、小号说明文字、繁简英日混排的识别显著优于 Windows OCR；代价是全屏识别约 0.3~0.5 秒。若新引擎在你的机器上异常，可随时切回 Windows OCR。更改在下次开始挂机时生效。"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,0">
                                 <TextBlock Text="OCR 识别频率" Style="{StaticResource FieldLabel}"/>
                                 <ComboBox x:Name="CmbOcrInterval" Width="116" Margin="10,0,0,0" SelectedIndex="1">
                                     <ComboBoxItem Content="500 ms"/>

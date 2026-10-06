@@ -33,6 +33,17 @@
     <!-- DXGI Desktop Duplication 捕获实现（SharpDX 统一锁定 4.2.0） -->
     <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
     <PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
+    <!-- PP-OCRv6 本地离线 OCR（ONNX Runtime，包自带 v5 检测/方向分类模型） -->
+    <PackageReference Include="RapidOcrNet" Version="4.2.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- PP-OCRv6-small 多语言识别模型（简繁英日，约 30MB），随程序松散输出到 models/v6；
+         单文件发布时不嵌入 exe，避免启动时整包解压到临时目录 -->
+    <Content Include="models\**\*.*">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+    </Content>
   </ItemGroup>
 
   <ItemGroup>

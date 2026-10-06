@@ -241,6 +241,8 @@ public sealed class AppConfig
     public string Theme { get; set; } = "Dark"; // Dark / Light / DeepBlue
     public string? GameExePath { get; set; }
     public string? OcrLanguage { get; set; }
+    /// <summary>OCR 识别引擎：RapidV6（PP-OCRv6 深度学习，默认）或 Windows（内置 OCR 回退）。下次启动挂机生效。</summary>
+    public OcrEngineKind OcrEngine { get; set; } = OcrEngineKind.RapidV6;
     public bool AutoLaunchGame { get; set; }
     public bool KeepGameOnTop { get; set; } = false; // 兜底模式：游戏窗口置顶（不激活）
     /// <summary>画面捕获后端：WGC 窗口捕获（默认，支持后台挂机/窗口被遮挡）或 DXGI（高性能但窗口须可见）。</summary>

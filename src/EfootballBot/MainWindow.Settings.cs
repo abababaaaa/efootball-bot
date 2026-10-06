@@ -41,6 +41,9 @@ public partial class MainWindow
         ChkMinimizeTray.IsChecked = false;
         ChkPeriodicGc.IsChecked = _cfg.PeriodicGc;
 
+        // OCR 引擎（枚举顺序 RapidV6=0 / Windows=1，与下拉项一致）
+        CmbOcrEngine.SelectedIndex = _cfg.OcrEngine == OcrEngineKind.Windows ? 1 : 0;
+
         // OCR 频率
         int[] ocrMsValues = { 500, 900, 1500, 2500, 5000 };
         for (int i = 0; i < ocrMsValues.Length; i++)
@@ -108,6 +111,7 @@ public partial class MainWindow
         // 设置面板
         _cfg.AutoCloseWhenDone = ChkAutoClose.IsChecked == true;
         _cfg.PeriodicGc = ChkPeriodicGc.IsChecked == true;
+        _cfg.OcrEngine = CmbOcrEngine.SelectedIndex == 1 ? OcrEngineKind.Windows : OcrEngineKind.RapidV6;
 
         if (CmbOcrInterval.SelectedIndex >= 0)
         {
