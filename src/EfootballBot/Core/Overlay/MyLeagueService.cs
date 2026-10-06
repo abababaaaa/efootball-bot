@@ -117,6 +117,9 @@ public sealed class MyLeagueService
 
             // 检测当前焦点卡；我的联赛主页「赛程表」高光只有白色边框，极易漏检
             var card = FocusCardDetector.Detect(obs.Frame, obs.Ocr);
+            string detectedName = card?.Name ?? "null";
+            double detectedConf = card?.Confidence ?? 0;
+
             if (card is null)
             {
                 _engine.LogInternal("未检测到焦点卡，默认当前高光在「赛程表」", LogLevel.Warn);
@@ -144,25 +147,65 @@ public sealed class MyLeagueService
                 return true;
             }
 
-            // 用 FocusGraph 找路径
-            var slot = _focusGraph.SlotByName(card.Name);
-            if (slot is null)
+            // 简化硬编码：已知可靠路径，不依赖 FocusGraph 每步检测
+            // 前往比赛/赛程表/赛季纪录 都可通过固定序列到达兑换积分
+            switch (card.Name)
             {
-                _engine.LogInternal($"未知焦点卡「{card.Name}」，无法寻路", LogLevel.Warn);
-                return false;
+                case "前往比赛":
+                    _engine.LogInternal("硬编码路径：前往比赛 → Down → Down → Right → Up → 兑换积分", LogLevel.Info);
+                    await _engine.Pad.Dpad(PadDir.Down); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Down); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Right); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
+                    break;
+                case "赛程表":
+                    _engine.LogInternal("硬编码路径：赛程表 → Right → Up → 兑换积分", LogLevel.Info);
+                    await _engine.Pad.Dpad(PadDir.Right); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
+                    break;
+                case "赛季纪录":
+                    _engine.LogInternal("硬编码路径：赛季纪录 → Up → 兑换积分", LogLevel.Info);
+                    await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
+                    break;
+                case "赛事信息":
+                    _engine.LogInternal("硬编码路径：赛事信息 → Right → Up → Up → 兑换积分", LogLevel.Info);
+                    await _engine.Pad.Dpad(PadDir.Right); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
+                    break;
+                case "建议":
+                    _engine.LogInternal("硬编码路径：建议 → Up → Up → 兑换积分", LogLevel.Info);
+                    await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
+                    break;
+                case "i":
+                    _engine.LogInternal("硬编码路径：i → Left → Down → Down → Right → Up → 兑换积分", LogLevel.Info);
+                    await _engine.Pad.Dpad(PadDir.Left); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Down); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Down); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Right); await Task.Delay(300, ct);
+                    await _engine.Pad.Dpad(PadDir.Up); await Task.Delay(300, ct);
+                    break;
+                default:
+                    _engine.LogInternal($"未知卡「{card.Name}」，尝试通用 FocusGraph 寻路", LogLevel.Warn);
+                    var slot = _focusGraph.SlotByName(card.Name);
+                    if (slot is null)
+                    {
+                        _engine.LogInternal($"未知焦点卡「{card.Name}」，无法寻路", LogLevel.Warn);
+                        return false;
+                    }
+                    var path = _focusGraph.FindPath(slot.Id, "兑换积分");
+                    if (path is null || path.Count == 0)
+                    {
+                        _engine.LogInternal($"从「{slot.Id}」到「兑换积分」无路径", LogLevel.Warn);
+                        return false;
+                    }
+                    var (dir, to) = path[0];
+                    _engine.LogInternal($"焦点导航：{slot.Id} → {dir} → {to}", LogLevel.Info);
+                    await _engine.Pad.Dpad(dir);
+                    await Task.Delay(400, ct);
+                    break;
             }
-
-            var path = _focusGraph.FindPath(slot.Id, "兑换积分");
-            if (path is null || path.Count == 0)
-            {
-                _engine.LogInternal($"从「{slot.Id}」到「兑换积分」无路径", LogLevel.Warn);
-                return false;
-            }
-
-            var (dir, to) = path[0];
-            _engine.LogInternal($"焦点导航：{slot.Id} → {dir} → {to}", LogLevel.Info);
-            await _engine.Pad.Dpad(dir);
-            await Task.Delay(400, ct);
         }
 
         _engine.LogInternal("焦点导航 8 步未到达兑换积分", LogLevel.Warn);

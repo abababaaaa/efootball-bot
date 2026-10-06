@@ -43,6 +43,14 @@ public static class MyLeagueHomeGraph
         g.AddEdge("赛事信息", PadDir.Up, "赛程表");
         g.AddEdge("建议", PadDir.Left, "赛事信息");
 
+        // 快捷路径：前往比赛直达兑换积分（避开 i 检测不到的问题）
+        // 真机验证：前往比赛 Down→Down→Right 大概率到赛季纪录，再 Up 到兑换积分
+        g.AddEdge("前往比赛", PadDir.Down, "赛程表");
+        g.AddEdge("赛程表", PadDir.Down, "赛事信息");
+        g.AddEdge("赛事信息", PadDir.Right, "建议");
+        g.AddEdge("建议", PadDir.Up, "赛季纪录");
+        g.AddEdge("赛季纪录", PadDir.Up, "兑换积分");
+
         return g;
     }
 }
