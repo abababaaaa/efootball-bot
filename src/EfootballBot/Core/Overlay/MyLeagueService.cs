@@ -115,12 +115,12 @@ public sealed class MyLeagueService
                 return false;
             }
 
-            // 检测当前焦点卡
+            // 检测当前焦点卡；我的联赛主页「赛程表」高光只有白色边框，极易漏检
             var card = FocusCardDetector.Detect(obs.Frame, obs.Ocr);
             if (card is null)
             {
-                _engine.LogInternal("未检测到焦点卡，无法导航", LogLevel.Warn);
-                return false;
+                _engine.LogInternal("未检测到焦点卡，默认当前高光在「赛程表」", LogLevel.Warn);
+                card = new FocusCard("赛程表", 0.13, 0.50, 0.00, 0.37, 0.25, 0.25, 0.0);
             }
 
             _engine.LogInternal($"焦点检测：{card.Name}（{card.CX:F2},{card.CY:F2}）", LogLevel.Info);
