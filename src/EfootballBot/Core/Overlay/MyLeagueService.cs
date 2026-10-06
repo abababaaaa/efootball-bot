@@ -335,6 +335,11 @@ public sealed class MyLeagueService
             await _engine.Pad.Confirm();
             await Task.Delay(2000, ct);
 
+            // 处理"物品使用中"成功弹窗（只有 OK 按钮）
+            _engine.LogInternal("处理物品使用中弹窗", LogLevel.Info);
+            await _engine.Pad.Confirm();
+            await Task.Delay(1500, ct);
+
             _engine.LogInternal($"「{item}」购买完成", LogLevel.Success);
         }
 
