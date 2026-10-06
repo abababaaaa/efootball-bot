@@ -842,7 +842,8 @@ public sealed class CnDailyScenario : ScenarioBase
             await BackToChallengeListAsync();
             return;
         }
-        if (o.Ocr.ContainsJoined("主要奖励"))
+        // v6 下「主要奖励」44/44 帧都在同一个 OCR 词内（dump 审计 joinedOnly=0），无需跨词拼接
+        if (o.Ocr.Contains("主要奖励"))
         {
             bool hasCheck = HasMainRewardCheck(o, RewardCheckRoi, RewardCheckMin, out var checkEvidence);
             Log($"主要奖励对勾：{(hasCheck ? "有" : "无")}（{checkEvidence}）", LogLevel.Info);

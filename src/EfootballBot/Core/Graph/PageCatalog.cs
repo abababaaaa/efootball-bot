@@ -77,7 +77,8 @@ public static class PageCatalog
         new PageDef
         {
             Screen = GameScreen.ActivityDetail,
-            MinScore = 4,
+            // 「活动说明」是活动详情页底部独占标签（真机 dump 130836 全页仅该强特征）
+            MinScore = 3,
             Priority = 100,
             Probes = new EfootballBot.Core.Probe.Probe[]
             {
@@ -145,8 +146,12 @@ public static class PageCatalog
             Probes = new EfootballBot.Core.Probe.Probe[]
             {
                 new OcrProbe { Text = "详情", Weight = 3 },
-                new OcrProbe { Text = "进入", Weight = 1.5 },
+                // 按按钮计数：卡片列表同排并列多个「进入」（行聚合会并成一条）
+                new OcrProbe { Text = "进入", Weight = 1.5, CountWords = true },
                 new OcrProbe { Text = "挑战活动", Weight = 1.5 },
+                // 活动卡片列表（每张卡带「进入」+「剩余时间」，真机 dump 131240 等 7 帧）：
+                // 仅靠 2 个「进入」3 分不够门槛，剩余时间补分；活动中心磁贴页无「进入」
+                new OcrProbe { Text = "剩余时间", Weight = 1 },
                 new OcrProbe { Text = "结束倒数", Weight = 1 },
                 new OcrProbe { Text = "关闭", Weight = 1 },
             }
@@ -207,7 +212,9 @@ public static class PageCatalog
             Probes = new EfootballBot.Core.Probe.Probe[]
             {
                 new OcrProbe { Text = "中场休息", Weight = 2.5 },
-                new OcrProbe { Text = "中场", Weight = 2 },
+                // 「中场」单独出现（主页新闻横幅等）不足以判定中场休息，权重压到阈值下，
+                // 需与「中场休息」等其他信号同行/同帧共现（MinScore=2）
+                new OcrProbe { Text = "中场", Weight = 1.5 },
                 new OcrProbe { Text = "halftime", Weight = 2.5 },
             }
         },
@@ -292,7 +299,8 @@ public static class PageCatalog
                 new OcrProbe { Text = "下一场", Weight = 2.5 },
                 new OcrProbe { Text = "联赛排名", Weight = 2.5 },
                 new OcrProbe { Text = "赛程表", Weight = 2 },
-                new OcrProbe { Text = "阵容", Weight = 2 },
+                // 不收录「阵容」：活动中心的「阵容召集」磁贴标签+描述会在两行命中（真机 dump
+                // 130834 等 3 帧误判 MyLeagueHome），而联赛主页本身无「阵容」字样
                 new OcrProbe { Text = "排名", Weight = 1.5 },
                 new OcrProbe { Text = "积分榜", Weight = 1.5 },
                 new OcrProbe { Text = "比赛计划", Weight = 1 },
@@ -380,13 +388,17 @@ public static class PageCatalog
                     MaxOcrWords = 6,
                     MaxRatio = 0.6,
                 },
+                // 草皮绿只是弱佐证：入场过场同样满屏绿，单独不得越过 MinScore（旧分类器
+                // 要求 green 与 robot/clock 同时成立），且菜单/多词帧直接归零
                 new VisualProbe
                 {
                     Filter = HsvFilter.Green,
                     Roi = NormRect.Full,
                     MinRatio = 0.10,
-                    Weight = 5,
+                    Weight = 0.4,
+                    MaxOcrWords = 6,
                 },
+                new ClockHudProbe(),
                 new OcrProbe { Text = "回放", Weight = 3 },
                 new OcrProbe { Text = "进球", Weight = 3 },
                 new OcrProbe { Text = "replay", Weight = 3 },
@@ -490,6 +502,8 @@ public static class PageCatalog
                 new OcrProbe { Text = "我的联赛", Weight = 2.5 },
                 new OcrProbe { Text = "快速比赛", Weight = 2 },
                 new OcrProbe { Text = "好友对战", Weight = 2 },
+                // 天梯巅峰赛是比赛菜单好友对战页独占入口（真机 dump 131238，区别于活动磁贴「天梯赛-教练」）
+                new OcrProbe { Text = "天梯巅峰赛", Weight = 2 },
                 new OcrProbe { Text = "自定义锦标赛", Weight = 2 },
                 new OcrProbe { Text = "球员俱乐部", Weight = 1.5 },
                 new OcrProbe { Text = "match", Weight = 1 },
@@ -507,6 +521,7 @@ public static class PageCatalog
             Probes = new EfootballBot.Core.Probe.Probe[]
             {
                 new OcrProbe { Text = "对阵电脑", Weight = 2.5 },
+                new OcrProbe { Text = "对阵ai", Weight = 2.5 },
                 new OcrProbe { Text = "巡回赛", Weight = 2 },
                 new OcrProbe { Text = "对阵玩家", Weight = 1.5 },
                 new OcrProbe { Text = "挑战赛", Weight = 1.5 },
@@ -533,8 +548,14 @@ public static class PageCatalog
                 new OcrProbe { Text = "活动中心", Weight = 2 },
                 new OcrProbe { Text = "我的球队", Weight = 1.5 },
                 new OcrProbe { Text = "推荐", Weight = 1.5 },
+                // 顶部导航词（真机 dump 130850 OCR 只抓到导航行）：权重低，需两个以上共现，
+                // 比赛菜单/商店等页有更强的高分探针压过
+                new OcrProbe { Text = "签约", Weight = 1 },
+                new OcrProbe { Text = "商店", Weight = 1 },
                 new OcrProbe { Text = "每日小游戏", Weight = 1.5 },
                 new OcrProbe { Text = "额外选项", Weight = 1 },
+                // OCR 逐字拆开时底部标签只剩「额|外」，行拼接后由此探针兜底
+                new OcrProbe { Text = "额外", Weight = 1 },
                 new OcrProbe { Text = "合约", Weight = 1 },
                 new OcrProbe { Text = "横幅设置", Weight = 1 },
                 new OcrProbe { Text = "mainmenu", Weight = 2 },

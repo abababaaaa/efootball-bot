@@ -57,6 +57,12 @@ public sealed class ProbeEngine
             result.Override = GameScreen.Dialog;
             result.OverrideReason = "fixed-assist-popup";
         }
+        // 关键比赛通知弹窗（白色 OK + 蓝色取消，背景透出赛程表会喂高 Schedule）：强制 Dialog
+        if (ScreenClassifier.IsKeyNotice(obs.Ocr))
+        {
+            result.Override = GameScreen.Dialog;
+            result.OverrideReason = "key-notice";
+        }
         if (IsLoadingSpinner(obs))
         {
             result.Override = GameScreen.Loading;
