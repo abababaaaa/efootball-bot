@@ -632,6 +632,7 @@ public static class PageCatalog
                 .Concat(new[]
                 {
                     NavAction.Dpad(PadDir.Right), NavAction.Wait(350),
+                    NavAction.Dpad(PadDir.Right), NavAction.Wait(500),
                     NavAction.Press(PadButton.A), NavAction.Wait(4500),
                 })
                 .ToArray(),
