@@ -60,9 +60,10 @@ public class GraphConnectivityTests
     }
 
     [Fact]
-    public void Exactly_18_new_edges_are_unverified()
+    public void Exactly_20_new_edges_are_unverified()
     {
+        // 18 条回退边 + Home→MatchHub / MatchHub→MyLeagueHome 光标饱和归位改造（待真机验证）
         var unverified = PageCatalog.Edges.Where(e => !e.Verified).ToList();
-        Assert.Equal(18, unverified.Count);
+        Assert.Equal(20, unverified.Count);
     }
 }

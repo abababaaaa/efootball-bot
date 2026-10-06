@@ -602,34 +602,38 @@ public static class PageCatalog
     public static readonly Edge[] Edges = new[]
     {
         // ---------- Home → MatchHub ----------
-        // 原 EnterMyLeagueAsync / EnterEventHubAsync：
-        //   Down(200) → Down(300) → Left(200) → Left(500) → A(2500)
+        // 光标位置无关：先饱和归位再确认。Down×4 把光标压到最底部磁贴行（从顶部标签/
+        // 横幅区/磁贴行任意位置都到底），Left×8 压到行首「比赛」磁贴，最后 A 进入。
+        // 前提：主页磁贴行十字键到边界不环绕（待真机验证）。
         new Edge
         {
             From = nameof(GameScreen.Home),
             To = nameof(GameScreen.MatchHub),
-            Actions = new[]
-            {
-                NavAction.Dpad(PadDir.Down),  NavAction.Wait(200),
-                NavAction.Dpad(PadDir.Down),  NavAction.Wait(300),
-                NavAction.Dpad(PadDir.Left),  NavAction.Wait(200),
-                NavAction.Dpad(PadDir.Left),  NavAction.Wait(500),
-                NavAction.Press(PadButton.A), NavAction.Wait(2500),
-            },
+            Verified = false,
+            Actions = RepeatDpad(PadDir.Down, 4, 300)
+                .Concat(RepeatDpad(PadDir.Left, 8, 200))
+                .Concat(new[]
+                {
+                    NavAction.Press(PadButton.A), NavAction.Wait(2500),
+                })
+                .ToArray(),
         },
 
         // ---------- MatchHub → MyLeagueHome ----------
-        // 原 EnterMyLeagueAsync：Right(350) → Right(500) → A(4500)
+        // 光标位置无关：Left×6 饱和到行首，再 Right×2 到「我的联赛」，A 进入。
         new Edge
         {
             From = nameof(GameScreen.MatchHub),
             To = nameof(GameScreen.MyLeagueHome),
-            Actions = new[]
-            {
-                NavAction.Dpad(PadDir.Right), NavAction.Wait(350),
-                NavAction.Dpad(PadDir.Right), NavAction.Wait(500),
-                NavAction.Press(PadButton.A), NavAction.Wait(4500),
-            },
+            Verified = false,
+            Actions = RepeatDpad(PadDir.Left, 6, 200)
+                .Concat(new[]
+                {
+                    NavAction.Dpad(PadDir.Right), NavAction.Wait(350),
+                    NavAction.Dpad(PadDir.Right), NavAction.Wait(500),
+                    NavAction.Press(PadButton.A), NavAction.Wait(4500),
+                })
+                .ToArray(),
         },
 
         // ---------- MatchHub → EventHub ----------
