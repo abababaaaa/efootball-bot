@@ -125,6 +125,17 @@ public sealed class MyLeagueService
 
             _engine.LogInternal($"焦点检测：{card.Name}（{card.CX:F2},{card.CY:F2}）", LogLevel.Info);
 
+            // unknown 卡：用坐标匹配最近的已知槽位（OCR 可能漏读白边框卡的标题）
+            if (card.Name == "unknown")
+            {
+                var nearest = _focusGraph.Nearest(card.CX, card.CY, maxDy: 0.20, maxDx: 0.25);
+                if (nearest is not null)
+                {
+                    _engine.LogInternal($"unknown 卡坐标推断为「{nearest.Id}」", LogLevel.Info);
+                    card = new FocusCard(nearest.Id, card.CX, card.CY, card.X, card.Y, card.W, card.H, card.Confidence);
+                }
+            }
+
             if (card.Name == "兑换积分")
             {
                 _engine.LogInternal("焦点已在「兑换积分」，按 A 进入", LogLevel.Info);
