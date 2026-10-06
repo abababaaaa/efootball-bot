@@ -52,8 +52,8 @@ public sealed class MyLeagueService
         // 3. 导航到兑换积分
         if (await NavigateToExchangeAsync(ct))
         {
-            _engine.LogInternal("已到达兑换积分页面，待实现购买逻辑", LogLevel.Info);
-            // TODO: 购买逻辑（M2）
+            _engine.LogInternal("已到达兑换积分页面，开始购买缺失物品", LogLevel.Info);
+            await BuyMissingItemsAsync(missing, ct);
         }
         else
         {
@@ -266,5 +266,69 @@ public sealed class MyLeagueService
 
         _engine.LogInternal("焦点导航 8 步未到达兑换积分", LogLevel.Warn);
         return false;
+    }
+
+    /// <summary>购买缺失物品。</summary>
+    private async Task BuyMissingItemsAsync(List<string> missing, CancellationToken ct)
+    {
+        // 从兑换积分页面进入"我的联赛物品"（向右 + A）
+        _engine.LogInternal("进入「我的联赛物品」", LogLevel.Info);
+        await _engine.Pad.Dpad(PadDir.Right);
+        await Task.Delay(400, ct);
+        await _engine.Pad.Confirm();
+        await Task.Delay(2500, ct);
+
+        // 物品列表顺序（从上到下）：
+        // 1.状态:普通+ 2.状态:好+ 3.状态:杰出 4.经验值:2x 5.经验值:3x 6.经验值:4x
+        // 7.控球:99 8.头球:99 9.加速:99 10.FW球员能力值+ 11.MF球员能力值+ 12.DF球员能力值+ 13.主教练强化
+        var itemDownCounts = new Dictionary<string, int>
+        {
+            ["杰出状态"] = 2,      // 第3项，从顶部Down 2次
+            ["4倍经验"] = 5,       // 第6项，从顶部Down 5次
+            ["主教练强化"] = 12,   // 第13项，从顶部Down 12次
+        };
+
+        foreach (var item in missing)
+        {
+            if (!itemDownCounts.TryGetValue(item, out int downCount))
+            {
+                _engine.LogInternal($"未知物品「{item}」，跳过", LogLevel.Warn);
+                continue;
+            }
+
+            _engine.LogInternal($"购买「{item}」，向下移动 {downCount} 次", LogLevel.Info);
+
+            // 从列表顶部开始，先回到顶部（连按Up确保）
+            for (int i = 0; i < 15; i++) await _engine.Pad.Dpad(PadDir.Up);
+            await Task.Delay(300, ct);
+
+            // 向下移动到目标物品
+            for (int i = 0; i < downCount; i++)
+            {
+                await _engine.Pad.Dpad(PadDir.Down);
+                await Task.Delay(300, ct);
+            }
+
+            // 按 A 购买
+            _engine.LogInternal($"按 A 购买「{item}」", LogLevel.Info);
+            await _engine.Pad.Confirm();
+            await Task.Delay(1500, ct);
+
+            // 处理购买确认弹窗（上移 + 点击）
+            _engine.LogInternal("处理购买确认弹窗", LogLevel.Info);
+            await _engine.Pad.Dpad(PadDir.Up);
+            await Task.Delay(300, ct);
+            await _engine.Pad.Confirm();
+            await Task.Delay(2000, ct);
+
+            _engine.LogInternal($"「{item}」购买完成", LogLevel.Success);
+        }
+
+        // 全部购买完毕，连按两次返回我的联赛首页
+        _engine.LogInternal("全部购买完毕，返回我的联赛首页", LogLevel.Info);
+        await _engine.Pad.Back();
+        await Task.Delay(1500, ct);
+        await _engine.Pad.Back();
+        await Task.Delay(2000, ct);
     }
 }
