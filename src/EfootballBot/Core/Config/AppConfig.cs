@@ -253,6 +253,8 @@ public sealed class AppConfig
     public WeeklyConfig Weekly { get; set; } = new();
     public CnConfig Cn { get; set; } = new();
     public QueueConfig Queue { get; set; } = new();
+    /// <summary>全页面智能寻路预算（M0 导航框架）。</summary>
+    public NavConfig Nav { get; set; } = new();
     public Dictionary<string, ScreenCalibration> Calibration { get; set; } = new();
 
     // —— 设置面板：结束行为 ——
@@ -316,4 +318,15 @@ public sealed class AppConfig
         Directory.CreateDirectory(ConfigDir);
         File.WriteAllText(ConfigPath, JsonSerializer.Serialize(this, JsonOpts));
     }
+}
+
+/// <summary>智能寻路预算配置。</summary>
+public sealed class NavConfig
+{
+    /// <summary>单次导航最大跳数（每跳 = 执行一条边）。</summary>
+    public int MaxHops { get; set; } = 25;
+    /// <summary>Unknown 页面 B 键步进预算，耗尽即停机。</summary>
+    public int UnknownBudget { get; set; } = 6;
+    /// <summary>单次导航总超时（分钟）。</summary>
+    public int TimeoutMinutes { get; set; } = 10;
 }
