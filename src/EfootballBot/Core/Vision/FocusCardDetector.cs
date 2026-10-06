@@ -21,8 +21,8 @@ public static class FocusCardDetector
     // 卡片区（避开顶部账号/任务栏 与 底部 B/X/Y 操作栏；宽度覆盖全屏——右列卡/兑换积分最右可到 0.95）
     private const double Rx0 = 0.02, Ry0 = 0.15, Rx1 = 0.97, Ry1 = 0.86;
     private const int GridW = 60, GridH = 32;
-    private const double CellWhiteRatio = 0.55;   // 单格白像素占比阈值
-    private const int MinComponentCells = 12;    // i 小白块也能过，滤噪点
+    private const double CellWhiteRatio = 0.25;   // 单格白像素占比阈值（MatchHub 高亮卡边框较细，降低阈值）
+    private const int MinComponentCells = 8;      // 降低最小连通域，适配 MatchHub 小卡片
 
     private static readonly (string Name, string[] Keys)[] Titles =
     {
@@ -94,8 +94,8 @@ public static class FocusCardDetector
                         int i = row + xx * 4;
                         byte b = bgra[i], g = bgra[i + 1], r = bgra[i + 2];
                         // 格内抽 4×4 子点
-                        if (r >= 215 && g >= 215 && b >= 215 &&
-                            Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b)) <= 25)
+                        if (r >= 160 && g >= 160 && b >= 160 &&
+                            Math.Max(r, Math.Max(g, b)) - Math.Min(r, Math.Min(g, b)) <= 40)
                             hit++;
                         n++;
                     }
