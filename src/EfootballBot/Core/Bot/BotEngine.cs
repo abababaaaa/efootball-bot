@@ -486,28 +486,11 @@ public sealed class BotEngine : IDisposable
     }
 
     /// <summary>
-    /// 声明式导航：观察当前画面 → BFS 寻路 → 执行按键序列。
-    /// 半途接续免费获得（已在 MatchHub 则直接 MatchHub→目标，不回主页）。
+    /// 全页面智能寻路：任意画面出发，闭环导航到目标页（观察→过境处理→BFS 单跳→落点验证）。
+    /// 半途接续免费获得；返回详细停机结果。
     /// </summary>
-    public async Task<bool> GoToAsync(string targetPage, NavContext? ctx = null, CancellationToken ct = default)
-    {
-        ctx ??= new NavContext();
-        var o = await ObserveAsync(ct);
-        var from = o.Screen.ToString();
-        var path = Graph.FindPath(from, targetPage, ctx);
-        if (path == null) return false;
-
-        // 可视化事件：派发找到的导航路径
-        NavPathFound?.Invoke(new NavEvent
-        {
-            From = from,
-            To = targetPage,
-            Path = path.Select(e => $"{e.From}→{e.To}").ToList(),
-        });
-
-        await Graph.ExecutePathAsync(path, Pad, ct);
-        return true;
-    }
+    public Task<NavResult> GoToAsync(string targetPage, NavContext? ctx = null, CancellationToken ct = default)
+        => Navigation.NavigateToAsync(targetPage, ctx ?? new NavContext(), ct);
 
     // ---------------- 杂项 ----------------
 

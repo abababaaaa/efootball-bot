@@ -79,28 +79,4 @@ public sealed class PageGraph
 
     private static bool IsTraversable(Edge e, NavContext ctx) => e.Condition == null || e.Condition(ctx);
     private static bool IsGoal(string page, string target) => page == target;
-
-    /// <summary>按顺序执行路径上所有边的动作。</summary>
-    public async Task<bool> ExecutePathAsync(List<Edge> path, Pad pad, CancellationToken ct)
-    {
-        foreach (var edge in path)
-        {
-            foreach (var action in edge.Actions)
-            {
-                switch (action.Type)
-                {
-                    case ActionType.Press:
-                        await pad.Press(action.Button!.Value);
-                        break;
-                    case ActionType.Dpad:
-                        await pad.Dpad(action.Direction!.Value);
-                        break;
-                    case ActionType.Wait:
-                        await Task.Delay(action.Ms!.Value, ct);
-                        break;
-                }
-            }
-        }
-        return true;
-    }
 }
