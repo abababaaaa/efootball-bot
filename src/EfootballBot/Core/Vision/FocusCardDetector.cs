@@ -21,8 +21,8 @@ public static class FocusCardDetector
     // 卡片区：MatchHub 卡片占满全屏，扩大范围覆盖全部卡片区域
     private const double Rx0 = 0.00, Ry0 = 0.10, Rx1 = 1.00, Ry1 = 0.90;
     private const int GridW = 60, GridH = 32;
-    private const double CellWhiteRatio = 0.25;   // 单格白像素占比阈值（MatchHub 高亮卡边框较细，降低阈值）
-    private const int MinComponentCells = 8;      // 降低最小连通域，适配 MatchHub 小卡片
+    private const double CellWhiteRatio = 0.12;   // 单格白像素占比阈值（我的联赛主页高亮卡是白边框+深色内部，占比更低）
+    private const int MinComponentCells = 6;      // 降低最小连通域，适配小卡片
 
     private static readonly (string Name, string[] Keys)[] Titles =
     {
@@ -56,11 +56,11 @@ public static class FocusCardDetector
             double conf = cells / (double)(GridW * GridH);
 
             // 置信度过低：可能是噪声（如 i 图标、小光点），直接忽略
-            if (conf < 0.05) return null;
+            if (conf < 0.02) return null;
 
             string name = ReadCardName(ocr, cx, cy, Math.Max(w, 0.06), Math.Max(h, 0.05));
             // 小白方块（i 图标）：面积小且无标题，且置信度低——直接忽略
-            if (name == "unknown" && w < 0.12 && h < 0.20) return null;
+            if (name == "unknown" && w < 0.12 && h < 0.20 && conf < 0.05) return null;
             return new FocusCard(name, cx, cy, x, y, w, h, conf);
         }
 
