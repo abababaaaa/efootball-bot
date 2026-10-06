@@ -620,17 +620,18 @@ public static class PageCatalog
         },
 
         // ---------- MatchHub → MyLeagueHome ----------
-        // 光标位置无关：Left×6 饱和到行首，再 Right×2 到「我的联赛」，A 进入。
+        // 光标位置无关：2×2 网格布局（活动|eFootball联赛 / 自定义锦标赛|快速...）。
+        // Up×4 饱和到顶行，Left×6 饱和到「活动」，Right×1 到「我的联赛」，A 进入。
         new Edge
         {
             From = nameof(GameScreen.MatchHub),
             To = nameof(GameScreen.MyLeagueHome),
             Verified = false,
-            Actions = RepeatDpad(PadDir.Left, 6, 200)
+            Actions = RepeatDpad(PadDir.Up, 4, 200)
+                .Concat(RepeatDpad(PadDir.Left, 6, 200))
                 .Concat(new[]
                 {
                     NavAction.Dpad(PadDir.Right), NavAction.Wait(350),
-                    NavAction.Dpad(PadDir.Right), NavAction.Wait(500),
                     NavAction.Press(PadButton.A), NavAction.Wait(4500),
                 })
                 .ToArray(),
