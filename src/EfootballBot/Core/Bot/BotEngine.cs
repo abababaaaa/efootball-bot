@@ -126,6 +126,10 @@ public sealed class BotEngine : IDisposable
                     {
                         LogInternal("开始我的联赛物品检查…", LogLevel.Info);
                         await MyLeague.EnsureItemsAsync(token);
+
+                        // M1：进入比赛
+                        LogInternal("开始进入比赛流程…", LogLevel.Info);
+                        await MyLeague.StartMatchAsync(token);
                     }
                 }
                 else
