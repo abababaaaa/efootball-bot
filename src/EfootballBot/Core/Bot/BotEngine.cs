@@ -121,9 +121,12 @@ public sealed class BotEngine : IDisposable
                         : $"寻路结束未到达目标（{navResult.Outcome}）：{navResult.Message}",
                         navResult.Ok ? LogLevel.Success : LogLevel.Warn);
 
-                    // M1：寻路成功后进入我的联赛状态机
-                    if (navResult.Ok && ts == GameScreen.MyLeagueHome && MyLeague is not null)
+                    // M1：进入我的联赛状态机（无论导航成功与否，从当前页面开始）
+                    if (ts == GameScreen.MyLeagueHome && MyLeague is not null)
                     {
+                        if (!navResult.Ok)
+                            LogInternal($"导航未到达目标（{navResult.Outcome}），状态机从当前页面接管", LogLevel.Warn);
+
                         LogInternal("进入我的联赛状态机", LogLevel.Info);
                         var stateMachine = new MyLeagueStateMachine(this);
                         while (!token.IsCancellationRequested)
