@@ -376,6 +376,9 @@ public static class PageCatalog
                     Roi = new NormRect(0.86, 0.005, 0.135, 0.07),
                     MinRatio = 0.015,
                     Weight = 10,
+                    // 商店「M 112,980」余额白字落在同 ROI：多词帧/占比过高均排除
+                    MaxOcrWords = 6,
+                    MaxRatio = 0.6,
                 },
                 new VisualProbe
                 {
