@@ -136,6 +136,20 @@ public sealed class MyLeagueService
             }
         }
 
+        // eFootball联赛 是 MatchHub 的卡，但 FocusCardDetector 可能误识别我的联赛主页的卡
+        // 用坐标推断：如果检测到 eFootball联赛，且坐标在右侧（x > 0.35），则是我的联赛主页的卡
+        if (card.Name == "eFootball联赛")
+        {
+            var nearest = _focusGraph.Nearest(card.CX, card.CY, maxDy: 0.20, maxDx: 0.25);
+            if (nearest is not null)
+            {
+                _engine.LogInternal($"eFootball联赛 坐标推断为「{nearest.Id}」", LogLevel.Info);
+                return (nearest.Id, true);
+            }
+            _engine.LogInternal("eFootball联赛 坐标推断失败，默认「兑换积分」", LogLevel.Warn);
+            return ("兑换积分", false);
+        }
+
         // i 的高光太小，OCR 可能读不到，但 FocusCardDetector 应该能检测到白色块
         // 如果检测到的是 i，置信度通常较低，但坐标应该正确
         if (card.Name == "i" && card.Confidence < 0.03)
