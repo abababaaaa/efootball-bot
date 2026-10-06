@@ -651,7 +651,7 @@ public sealed class MyLeagueScenario : ScenarioBase
             }
         }
 
-        // 3. 全部处理完，B 连退回联赛主页（主循环会重新走 BackToHome+Enter+弹窗清扫）
+        // 3. 全部处理完，B 连退回联赛主页（主循环会重新走 EnterMyLeague+弹窗清扫）
         for (int i = 0; i < 3; i++)
         {
             var back = await E.ObserveAsync(Ct);

@@ -133,8 +133,8 @@ public static class PageCatalog
                 new OcrProbe { Text = "完成挑战", Weight = 2 },
                 new OcrProbe { Text = "活动信息", Weight = 2 },
                 new OcrProbe { Text = "比赛历史", Weight = 2 },
-                new OcrProbe { Text = "建议", Weight = 1.5 },
-                new OcrProbe { Text = "前往比赛", Weight = 1.5 },
+                // 不收录「建议」「前往比赛」：比赛菜单磁贴预览含这两词（真机 19:34 日志
+                // 曾以 4.5 越过门槛误判 ChallengeHome）；本页独占词已足够过 MinScore
             }
         },
 
@@ -458,14 +458,16 @@ public static class PageCatalog
         new PageDef
         {
             Screen = GameScreen.DailyRewards,
-            MinScore = 2,
+            // 主页「每日小游戏」磁贴只值 2 分，单独不得过门槛（真机 19:34 日志：
+            // 「每日小游戏」+泛词「每日」=3.5 曾判 DailyRewards 压过主页）
+            MinScore = 3.5,
             Priority = 30,
             Probes = new EfootballBot.Core.Probe.Probe[]
             {
                 new OcrProbe { Text = "登录奖励", Weight = 2.5 },
                 new OcrProbe { Text = "签到", Weight = 2 },
                 new OcrProbe { Text = "每日小游戏", Weight = 2 },
-                new OcrProbe { Text = "每日", Weight = 1.5 },
+                // 「每日」过于泛化（主页磁贴/商店均有），不收录
                 new OcrProbe { Text = "loginbonus", Weight = 2.5 },
                 new OcrProbe { Text = "daily", Weight = 2 },
                 new OcrProbe { Text = "minigame", Weight = 2 },

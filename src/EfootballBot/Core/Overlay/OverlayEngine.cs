@@ -121,7 +121,7 @@ public sealed class OverlayEngine
         return o;
     }
 
-    /// <summary>卡死恢复：优先找“下一步/确定/确认”按 A；否则按 B；连续失败回主页。</summary>
+    /// <summary>卡死恢复：优先找“下一步/确定/确认”按 A；否则只等待重观察（绝不盲按 B/回主页）。</summary>
     public async Task RecoverAsync(Bot.Observation o, CancellationToken ct)
     {
         _unknownStreak++;
@@ -153,15 +153,10 @@ public sealed class OverlayEngine
         }
 
         // 直播画面已有草皮视觉判定、赛前过场在比赛流程内部处理，外层出现未知通常是
-        // 加载/黑屏——按 B 可能取消匹配，先只等待；连续多轮仍未恢复才回主页
-        if (_unknownStreak <= 2)
+        // 加载/黑屏——只等待重观察，绝不盲按 B（可能取消匹配/误退）
+        if (_unknownStreak % 3 == 1)
         {
             _engine.LogInternal("未识别画面，等待 2s 后重新观察（不按 B，避免误退/取消匹配）…", Bot.LogLevel.Warn);
-        }
-        else
-        {
-            _unknownStreak = 0;
-            await _engine.BackToHomeAsync(ct);
         }
         await Task.Delay(2000, ct);
     }

@@ -55,9 +55,6 @@ public sealed class CnDailyScenario : ScenarioBase
 
     public override async Task RunAsync()
     {
-        int stuck = 0;
-        GameScreen? lastScreen = null;
-
         while (!Ct.IsCancellationRequested)
         {
             Ct.ThrowIfCancellationRequested();
@@ -69,9 +66,6 @@ public sealed class CnDailyScenario : ScenarioBase
 
             var o = await E.ObserveAsync(Ct);
             o = await E.Overlay.PassThroughAsync(o, Ct);
-
-            stuck = o.Screen == lastScreen ? stuck + 1 : 0;
-            lastScreen = o.Screen;
 
             switch (o.Screen)
             {
@@ -177,25 +171,9 @@ public sealed class CnDailyScenario : ScenarioBase
                     // 通用规则：有「确定」就点确定，有「进入」就点进入；高光不在目标上就移过去
                     if (await TryConfirmOrEnterAsync(o))
                         break;
-                    // 安全恢复：先等待（匹配/过场绝不按 B）→ 最多一次 B → 最后才回主页
-                    if (await HandleUnknownAsync(o))
-                    {
-                        stuck = 0;
-                        lastScreen = null;
-                    }
+                    // 安全恢复：先等待（匹配/过场绝不按 B）→ 最多一次 B → 之后只等待
+                    await HandleUnknownAsync(o);
                     break;
-            }
-
-            // 同一画面连续无进展：整体回主大厅重新导航。
-            // 挑战清单的连续同名是扫描动作本身（收拢/右移/读卡各算一轮，有 8 次上限自限），
-            // 看门狗对它放行，避免扫卡途中误回主页
-            bool watchdogable = o.Screen is not (GameScreen.EventHub or GameScreen.ChallengeList);
-            if (watchdogable && stuck > 12)
-            {
-                Log("长时间无画面进展，回主大厅重新导航。", LogLevel.Warn);
-                await E.BackToHomeAsync(Ct);
-                stuck = 0;
-                lastScreen = null;
             }
         }
     }

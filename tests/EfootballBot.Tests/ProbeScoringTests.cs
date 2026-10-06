@@ -147,6 +147,36 @@ public sealed class ProbeScoringTests
     }
 
     [Fact]
+    public void MatchHub_WithGoToMatchAndSuggestionTiles_NotChallengeHome()
+    {
+        // 真机 19:34 日志：比赛菜单磁贴预览含「前往比赛」×2 行 +「建议」=4.5 曾越过
+        // ChallengeHome 门槛 4（旧分类器 MatchHub 21.0 高置信）。泛词不得判 ChallengeHome
+        var o = Obs(
+            new OcrWord("快速比赛", 0.10, 0.30, 0.10, 0.04),
+            new OcrWord("我的联赛", 0.30, 0.30, 0.10, 0.04),
+            new OcrWord("好友对战", 0.50, 0.30, 0.10, 0.04),
+            new OcrWord("前往比赛", 0.30, 0.36, 0.08, 0.03),
+            new OcrWord("天梯巅峰赛", 0.10, 0.50, 0.10, 0.04),
+            new OcrWord("好友对战", 0.50, 0.50, 0.10, 0.04),
+            new OcrWord("前往比赛", 0.10, 0.56, 0.08, 0.03),
+            new OcrWord("建议", 0.70, 0.50, 0.05, 0.03));
+        Assert.NotEqual(GameScreen.ChallengeHome, new ProbeEngine(PageCatalog.Pages).Classify(o).Screen);
+    }
+
+    [Fact]
+    public void Home_WithDailyMinigameTile_NotDailyRewards()
+    {
+        // 真机 19:34 日志：主页「每日小游戏」磁贴+弱词「每日」=3.5 曾判 DailyRewards（P30 压过 Home P10）
+        var o = Obs(
+            new OcrWord("活动中心", 0.10, 0.20, 0.08, 0.03),
+            new OcrWord("我的球队", 0.30, 0.20, 0.08, 0.03),
+            new OcrWord("推荐", 0.50, 0.20, 0.05, 0.03),
+            new OcrWord("每日小游戏", 0.10, 0.60, 0.10, 0.03),
+            new OcrWord("签约", 0.85, 0.05, 0.04, 0.02));
+        Assert.Equal(GameScreen.Home, new ProbeEngine(PageCatalog.Pages).Classify(o).Screen);
+    }
+
+    [Fact]
     public void HalfTime_SingleWeakWord_DoesNotFire_NeedsFullPhrase()
     {
         // 主页新闻横幅里可能出现「中场」二字；必须是「中场休息」或多信号才行

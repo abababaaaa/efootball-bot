@@ -189,18 +189,12 @@ public sealed class IntlWeeklyScenario : ScenarioBase
                         ResetSafeUnknown();
                         break;
                     }
-                    // 安全恢复：先等待（匹配/过场）→ 最多一次 B → 最后才回主页
-                    if (await HandleUnknownAsync(o))
-                    {
-                        _restartSweep = true;
-                        _chal = ChalPhase.Collapse;
-                        stuck = 0;
-                        lastScreen = null;
-                    }
+                    // 安全恢复：先等待（匹配/过场）→ 最多一次 B → 之后只等待
+                    await HandleUnknownAsync(o);
                     break;
             }
 
-            // 同一画面长时间无进展：先本地按一次 B 退回上层，仍不动才回主页重导。
+            // 同一画面长时间无进展：本地按一次 B 退回上层（不回主页强导航）。
             // 阈值高于合法同名重复：列表 Right 扫描最多 12 轮、挑战清单找卡约 10 轮。
             // EventHub/ChallengeList 的重复是扫描动作本身（有 MaxEvents/8 次上限自限），
             // 看门狗只针对其他画面，避免扫卡途中误按 B
@@ -210,15 +204,6 @@ public sealed class IntlWeeklyScenario : ScenarioBase
                 Log("同一画面无进展，本地按 1 次 B 尝试退回", LogLevel.Warn);
                 await E.Pad.Back();
                 await E.Pad.Wait(1800, Ct);
-            }
-            else if (watchdogable && stuck > 28)
-            {
-                Log("本地恢复无效，回主页重新导航到活动列表", LogLevel.Warn);
-                await E.BackToHomeAsync(Ct);
-                _restartSweep = true;
-                _chal = ChalPhase.Collapse;
-                stuck = 0;
-                lastScreen = null;
             }
         }
 

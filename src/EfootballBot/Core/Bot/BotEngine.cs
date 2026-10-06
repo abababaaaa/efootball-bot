@@ -49,7 +49,6 @@ public sealed class BotEngine : IDisposable
     private Observation? _lastObs;
     private long _lastUnknownDumpTick;
     private GameWindowInfo? _window;
-    private bool _inputVerified;
 
     public event Action<string, LogLevel>? Log;
     public event Action<BotStats>? StatsChanged;
@@ -117,11 +116,6 @@ public sealed class BotEngine : IDisposable
             catch (OperationCanceledException)
             {
                 LogInternal("已停止。", LogLevel.Info);
-            }
-            catch (InputNotRespondingException ex)
-            {
-                Stats.LastError = ex.Message;
-                LogInternal(ex.Message, LogLevel.Error);
             }
             catch (Exception ex)
             {
@@ -268,7 +262,6 @@ public sealed class BotEngine : IDisposable
         try { _cts?.Cancel(); } catch { }
         try { Pad360.ResetAll(); } catch { }
         _lastObs = null;
-        _inputVerified = false;
         // 注意：此处不断开虚拟手柄。手柄一旦被游戏看到「断开→重连」，
         // eFootball 会把光标停靠到顶部头部的「手柄归属」图标上，重连设备的
         // Left/A 全部失效（焦点不在磁贴行）。设备在 Stop→Start 间保持存活，
@@ -373,9 +366,6 @@ public sealed class BotEngine : IDisposable
         throw new TimeoutException($"等待画面 [{string.Join("/", set.Select(ScreenName))}] 超时（{timeoutS}s）{(why is null ? "" : "：" + why)}");
     }
 
-    public Task<Observation> WaitForAsync(GameScreen screen, int timeoutS, CancellationToken ct)
-        => WaitForAnyAsync(new[] { screen }, timeoutS, ct);
-
     /// <summary>等待画面离开当前状态。</summary>
     public async Task<bool> WaitLeaveAsync(GameScreen screen, int timeoutS, CancellationToken ct)
     {
@@ -427,69 +417,7 @@ public sealed class BotEngine : IDisposable
     public Task<bool> PressButtonAsync(string[] targetKeywords, CancellationToken ct, int maxMoves = 8, bool exactMatch = false)
         => Actions.PressButtonAsync(targetKeywords, ct, maxMoves, exactMatch);
 
-    /// <summary>连续按 B 尝试回到顶层主页。</summary>
-    public async Task BackToHomeAsync(CancellationToken ct)
-    {
-        LogInternal("正在回到游戏主页…", LogLevel.Info);
-        for (int i = 0; i < 8; i++)
-        {
-            ct.ThrowIfCancellationRequested();
-            var o = await ObserveAsync(ct);
-            if (o.Is(GameScreen.Home))
-            {
-                await VerifyInputOnHomeAsync(ct);
-                return;
-            }
-            if (o.Is(GameScreen.Disconnected) || o.Is(GameScreen.Dialog))
-            {
-                await HandlePopupsAsync(o, ct);
-                continue;
-            }
-            await Pad.Back();
-            await Task.Delay(900, ct);
-        }
-    }
-
-    /// <summary>
-    /// 主页输入活性自检：按↓后中心磁贴区签名应立即变化；两次无变化判定输入链路已死。
-    /// 每个会话只检一次，通过后按↑归位焦点（后续导航仍从原磁贴出发）。
-    /// 不预检时，睡眠唤醒后 Steam 输入层卡死会导致盲按整条导航并在 20s 后抛超时堆栈。
-    /// </summary>
-    private async Task VerifyInputOnHomeAsync(CancellationToken ct)
-    {
-        if (_inputVerified || _window is null) return;
-        var f0 = LatestFrame;
-        if (f0 is null) return; // 能判 Home 必有帧；无帧时不阻断挂机
-
-        var wf = GameWindow.GetWindowFrame(_window.Handle);
-        (double OffX, double OffY, double CliW, double CliH) geo = (wf.OffX, wf.OffY, wf.CliW, wf.CliH);
-
-        for (int attempt = 1; attempt <= 2; attempt++)
-        {
-            var before = InputLivenessProbe.Signature(f0, geo);
-            await Pad.Dpad(PadDir.Down);
-            // 约 450ms 内每 150ms 比对一次（含 Dpad 点按自身的按下/抬起间隔）
-            for (int i = 0; i < 3; i++)
-            {
-                await Task.Delay(150, ct);
-                var f = LatestFrame;
-                if (f is not null && InputLivenessProbe.Mad(before, InputLivenessProbe.Signature(f, geo))
-                        >= InputLivenessProbe.MoveMadMin)
-                {
-                    _inputVerified = true;
-                    LogInternal($"手柄输入自检通过（第 {attempt} 次方向键画面有响应）", LogLevel.Info);
-                    await Pad.Dpad(PadDir.Up);
-                    return;
-                }
-            }
-            f0 = LatestFrame ?? f0; // 第二次尝试用最新帧重定基线
-            LogInternal($"手柄输入自检第 {attempt} 次方向键无画面响应…", LogLevel.Warn);
-        }
-
-        throw new InputNotRespondingException();
-    }
-
-    /// <summary>卡死恢复：优先找“下一步/确定/确认”按 A；否则按 B；连续失败回主页。委托给 OverlayEngine。</summary>
+    /// <summary>卡死恢复：优先找“下一步/确定/确认”按 A；否则等待重观察。委托给 OverlayEngine。</summary>
     public Task RecoverAsync(Observation o, CancellationToken ct)
         => Overlay.RecoverAsync(o, ct);
 
@@ -594,7 +522,7 @@ public sealed class BotEngine : IDisposable
         return true;
     }
 
-    /// <summary>半途友好的导航：如果已在 MyLeagueHome 就直接接上；否则用 BFS 寻路，失败时回主页重导。</summary>
+    /// <summary>半途友好的导航：如果已在 MyLeagueHome 就直接接上；否则用 BFS 寻路，失败抛异常。</summary>
     public async Task EnterMyLeagueAsync(CancellationToken ct)
     {
         var cur = await ObserveAsync(ct);
@@ -615,18 +543,7 @@ public sealed class BotEngine : IDisposable
             return;
         }
 
-        // BFS 寻路（半途接续：已在 MatchHub 则直接 MatchHub→MyLeagueHome，不回主页）
-        if (await GoToAsync(nameof(GameScreen.MyLeagueHome), null, ct))
-        {
-            var after = await ObserveAsync(ct);
-            if (IsLeagueHome(after)) return;
-        }
-
-        // 寻路失败或未到达：回主页重导后再试一次
-        LogInternal("BFS 寻路未到达目标，回主页重导…", LogLevel.Warn);
-        await BackToHomeAsync(ct);
-        await WaitForAsync(GameScreen.Home, 30, ct);
-
+        // BFS 寻路（半途接续：已在 MatchHub 则直接 MatchHub→MyLeagueHome）
         if (await GoToAsync(nameof(GameScreen.MyLeagueHome), null, ct))
         {
             var after = await ObserveAsync(ct);
@@ -643,7 +560,7 @@ public sealed class BotEngine : IDisposable
            || (o.Screen == GameScreen.Unknown
                && (o.Ocr.Contains("下一场") || o.Ocr.Contains("排名") || o.Ocr.Contains("阵容")));
 
-    /// <summary>半途友好的导航：已在 EventHub/EventInfo/ChallengeList/ChallengeHome 就直接接上；否则 BFS 寻路，失败回主页重导。</summary>
+    /// <summary>半途友好的导航：已在 EventHub/EventInfo/ChallengeList/ChallengeHome 就直接接上；否则 BFS 寻路，失败抛异常。</summary>
     public async Task EnterEventHubAsync(CancellationToken ct)
     {
         var cur = await ObserveAsync(ct);
@@ -656,20 +573,7 @@ public sealed class BotEngine : IDisposable
             return;
         }
 
-        // BFS 寻路（半途接续：已在 MatchHub 则直接 MatchHub→EventHub，不回主页）
-        if (await GoToAsync(nameof(GameScreen.EventHub), null, ct))
-        {
-            var landed = await ObserveAsync(ct);
-            if (landed.Is(GameScreen.EventHub) || landed.Is(GameScreen.EventInfo)
-                || landed.Is(GameScreen.Loading) || landed.Is(GameScreen.PreMatch))
-                return;
-        }
-
-        // 寻路失败或未到达：回主页重导后再试一次
-        LogInternal("BFS 寻路未到达目标，回主页重导…", LogLevel.Warn);
-        await BackToHomeAsync(ct);
-        await WaitForAsync(GameScreen.Home, 30, ct);
-
+        // BFS 寻路（半途接续：已在 MatchHub 则直接 MatchHub→EventHub）
         if (await GoToAsync(nameof(GameScreen.EventHub), null, ct))
         {
             var landed = await ObserveAsync(ct);

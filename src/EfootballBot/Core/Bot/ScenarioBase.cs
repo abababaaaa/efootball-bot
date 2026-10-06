@@ -58,10 +58,9 @@ public abstract class ScenarioBase
     /// <summary>
     /// 中途画面未识别时的安全处理（绝不立刻按 B——匹配中/赛前按 B 会取消流程）：
     /// ① 先找「确定/确认/下一步」弹窗按 A；② 连续 4 次只等待（匹配/过场可能持续几十秒）；
-    /// ③ 仍不动按 1 次 B 尝试退回上层；④ 再不动才回主页重新导航。
-    /// 返回 true 表示执行了回主页大重置（调用方需重新导航到活动列表）。
+    /// ③ 仍不动按 1 次 B 尝试退回上层，之后继续等待（不再回主页强导航）。
     /// </summary>
-    protected async Task<bool> HandleUnknownAsync(Observation o)
+    protected async Task HandleUnknownAsync(Observation o)
     {
         // 物品已过期弹窗 / 明确的确认弹窗（下一步 / OK / 确定 / 确认）：立刻确认，不按 B
         if (o.Is(GameScreen.Dialog)
@@ -76,7 +75,7 @@ public abstract class ScenarioBase
                 await E.Pad.Wait(700, Ct);
             }
             _safeUnknown = 0;
-            return false;
+            return;
         }
 
         _safeUnknown++;
@@ -84,28 +83,22 @@ public abstract class ScenarioBase
         {
             Log($"中途未识别画面，等待不操作（{_safeUnknown}/4，可能在匹配/过场）", LogLevel.Warn);
             await E.Pad.Wait(2200, Ct);
-            return false;
+            return;
         }
 
-        if (_safeUnknown <= 8)
+        if (_safeUnknown == 5)
         {
-            if (_safeUnknown == 5)
-            {
-                Log("持续未识别，按 1 次 B 尝试退回上层（不回主菜单）", LogLevel.Warn);
-                await E.Pad.Back();
-                await E.Pad.Wait(1600, Ct);
-            }
-            else
-            {
-                await E.Pad.Wait(1800, Ct);
-            }
-            return false;
+            Log("持续未识别，按 1 次 B 尝试退回上层（不回主菜单）", LogLevel.Warn);
+            await E.Pad.Back();
+            await E.Pad.Wait(1600, Ct);
+            return;
         }
 
-        Log("中途画面长时间无法恢复，回主页重新导航", LogLevel.Warn);
-        await E.BackToHomeAsync(Ct);
-        _safeUnknown = 0;
-        return true;
+        if (_safeUnknown % 4 == 2)
+        {
+            Log("仍未识别，继续等待（匹配/过场/异常画面均不回主页）", LogLevel.Warn);
+        }
+        await E.Pad.Wait(1800, Ct);
     }
 
     protected bool TargetReached(int done, int target) => target > 0 && done >= target;
