@@ -74,7 +74,12 @@ public sealed class BotEngine : IDisposable
         LogInternal($"OCR 引擎：{Ocr.LanguageTag}（{Ocr.EngineKind}）", LogLevel.Info);
         _probeEngine = new ProbeEngine(PageCatalog.Pages);
         Graph = new PageGraph(PageCatalog.Edges);
-        Navigation = new NavigationService(this, Pad, LogInternal);
+        Navigation = new NavigationService(
+            Graph,
+            new BotNavIO(this),
+            new NavLimits(_cfg.Nav.MaxHops, _cfg.Nav.UnknownBudget, _cfg.Nav.TimeoutMinutes),
+            LogInternal,
+            ev => NavPathFound?.Invoke(ev));
         Observation = new ObservationService(Capture, Ocr, cfg);
         Observation.Log = (msg, lv) => LogInternal(msg, lv);
 
