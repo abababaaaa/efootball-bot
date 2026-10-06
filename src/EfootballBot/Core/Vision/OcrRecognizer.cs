@@ -87,6 +87,28 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
         => normalizedKeywords.Any(Contains);
 
     public OcrWord? FindFirst(string normalizedKeyword) => FindAll(normalizedKeyword).FirstOrDefault();
+
+    /// <summary>
+    /// 按词找按钮：纯拉丁字母短词（ok/skip/yes/no/next 等）要求整词精确相等，
+    /// 避免「Opoku」「NGoloKante」含子串「ok」被误当按钮（真机 2026-10-06 故障）；
+    /// 中文等关键词仍走子串包含（OCR 常把图标误识字拼到词尾，如「跳过參」）。
+    /// </summary>
+    public IEnumerable<OcrWord> FindButtonWords(string normalizedKeyword)
+    {
+        bool exact = normalizedKeyword.Length > 0 && normalizedKeyword.All(char.IsAsciiLetter);
+        foreach (var w in MergedWords)
+        {
+            string t = OcrText.Norm(w.Text);
+            bool hit = exact
+                ? t.Equals(normalizedKeyword, StringComparison.OrdinalIgnoreCase)
+                : t.Contains(normalizedKeyword, StringComparison.OrdinalIgnoreCase);
+            if (hit) yield return w;
+        }
+    }
+
+    /// <summary>按钮词匹配的第一个命中（规则见 <see cref="FindButtonWords"/>）。</summary>
+    public OcrWord? FindButton(string normalizedKeyword)
+        => FindButtonWords(normalizedKeyword).FirstOrDefault();
 }
 
 /// <summary>文字规范化，对抗 OCR 的空格 / 全半角 / 常见误识。</summary>

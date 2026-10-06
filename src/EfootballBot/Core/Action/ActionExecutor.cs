@@ -103,7 +103,7 @@ public sealed class ActionExecutor
                     target = o.Ocr.MergedWords.FirstOrDefault(w =>
                         OcrText.Norm(w.Text).Equals(kw, StringComparison.OrdinalIgnoreCase));
                 else
-                    target = o.Ocr.FindFirst(kw);
+                    target = o.Ocr.FindButtonWords(kw).FirstOrDefault();
                 if (target is not null) break;
             }
             if (target is null) return false; // 目标都不在屏幕上
@@ -124,7 +124,7 @@ public sealed class ActionExecutor
             double focusGlow = 0;
             foreach (var kw in allButtons)
             {
-                foreach (var w in o.Ocr.FindAll(kw))
+                foreach (var w in o.Ocr.FindButtonWords(kw))
                 {
                     double g = ButtonGlow(o.Frame, w);
                     if (g > focusGlow) { focusGlow = g; focus = w; }
@@ -165,7 +165,7 @@ public sealed class ActionExecutor
                 bool stillThere = exactMatch
                     ? targetKeywords.Any(kw => o2.Ocr.MergedWords.Any(w =>
                           OcrText.Norm(w.Text).Equals(kw, StringComparison.OrdinalIgnoreCase)))
-                    : targetKeywords.Any(kw => o2.Ocr.FindFirst(kw) is not null);
+                    : targetKeywords.Any(kw => o2.Ocr.FindButtonWords(kw).Any());
                 if (!stillThere) return true;
                 // 按钮还在：说明 A 没点中，根据目标位置试探移动方向
                 double tx = target.CenterX, ty = target.CenterY;

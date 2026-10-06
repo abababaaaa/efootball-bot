@@ -279,8 +279,9 @@ public sealed class MatchFlow
             // 排除右上 HUD「跳过比赛 累积进球 n/3」提示词：它是状态提示不是按钮。
             var skipWord = _obs.Ocr.FindAll("跳过")
                 .FirstOrDefault(w => !(w.CenterX > 0.78 && w.CenterY < 0.14));
+            // ok/skip 走整词匹配：球员名（Opoku/N'GoloKante）含子串「ok」，子串匹配会误点
             var next = _obs.Ocr.FindFirst("下一步") ?? _obs.Ocr.FindFirst("确定") ?? _obs.Ocr.FindFirst("确认")
-                       ?? skipWord ?? _obs.Ocr.FindFirst("ok") ?? _obs.Ocr.FindFirst("skip");
+                       ?? skipWord ?? _obs.Ocr.FindButton("ok") ?? _obs.Ocr.FindButton("skip");
             if (next is not null)
             {
                 Log($"比赛内出现「{next.Text}」，移动指针点击", LogLevel.Debug);

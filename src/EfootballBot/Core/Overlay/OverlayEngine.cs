@@ -145,8 +145,8 @@ public sealed class OverlayEngine
         }
 
         // 优先：发现「下一步 / OK / 确定 / 确认」→ 走 PressButtonAsync（识别→移动→点击）
-        var next = o.Ocr.FindFirst("下一步") ?? o.Ocr.FindFirst("ok")
-                   ?? o.Ocr.FindFirst("确定") ?? o.Ocr.FindFirst("确认") ?? o.Ocr.FindFirst("next");
+        var next = o.Ocr.FindFirst("下一步") ?? o.Ocr.FindButton("ok")
+                   ?? o.Ocr.FindFirst("确定") ?? o.Ocr.FindFirst("确认") ?? o.Ocr.FindButton("next");
         if (next is not null)
         {
             _engine.LogInternal($"未识别画面，但发现「{next.Text}」，识别并点击", Bot.LogLevel.Warn);
