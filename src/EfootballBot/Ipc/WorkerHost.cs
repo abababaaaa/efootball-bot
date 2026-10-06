@@ -23,7 +23,6 @@ public sealed class WorkerHost : IDisposable
     public event Action<string, double, string?>? ScreenObserved; // screenName, score, evidence
     public event Action<string>? ProbeUpdated;          // top-5 candidates JSON
     public event Action<string, string>? Navigated;     // from, to
-    public event Action<string, string?>? FlowStageChanged; // stage, deadline
     public event Action<string>? PreviewReceived;       // pngBase64
     public event Action<string>? Exited;                // reason
     public event Action? Disconnected;                  // 管道断开 / 进程退出
@@ -149,9 +148,6 @@ public sealed class WorkerHost : IDisposable
                         break;
                     case "nav":
                         Navigated?.Invoke(msg.Text ?? "", msg.Screen ?? "");
-                        break;
-                    case "flow":
-                        FlowStageChanged?.Invoke(msg.Flow ?? "", msg.Deadline);
                         break;
                     case "preview":
                         if (!string.IsNullOrEmpty(msg.Png))

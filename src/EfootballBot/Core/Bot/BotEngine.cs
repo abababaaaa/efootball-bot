@@ -38,7 +38,6 @@ public sealed class BotEngine : IDisposable
     private DxgiDesktopCapture? _dxgi;
     public readonly OcrRecognizer Ocr;
     public readonly ObservationService Observation;
-    private readonly ScreenClassifier _classifier;
     private readonly ProbeEngine _probeEngine;
     public readonly PageGraph Graph;
     public readonly NavigationService Navigation;
@@ -58,7 +57,6 @@ public sealed class BotEngine : IDisposable
     public event Action<ScreenEvent>? ScreenChanged;
     public event Action<ProbeEvent>? ProbeUpdated;
     public event Action<NavEvent>? NavPathFound;
-    public event Action<FlowEvent>? FlowStageChanged;
 
     public bool IsRunning => _loop is { IsCompleted: false };
     public GameWindowInfo? Window => _window;
@@ -74,7 +72,6 @@ public sealed class BotEngine : IDisposable
         Overlay = new OverlayEngine(this, Actions, Pad);
         Ocr = new OcrRecognizer(cfg.OcrEngine, cfg.OcrLanguage);
         LogInternal($"OCR 引擎：{Ocr.LanguageTag}（{Ocr.EngineKind}）", LogLevel.Info);
-        _classifier = new ScreenClassifier();
         _probeEngine = new ProbeEngine(PageCatalog.Pages);
         Graph = new PageGraph(PageCatalog.Edges);
         Navigation = new NavigationService(this, Pad, LogInternal);
@@ -91,7 +88,6 @@ public sealed class BotEngine : IDisposable
     public async Task StartAsync(string mode)
     {
         if (IsRunning) return;
-        _classifier.Reset(); // 清除上一次的比赛锁定迟滞状态
         _probeEngine.Reset();
         var token = await PrepareSessionAsync(mode == "cndaily" ? CnConfig.ProcessName : null);
 
@@ -99,19 +95,14 @@ public sealed class BotEngine : IDisposable
         {
             try
             {
-                ScenarioBase scenario = mode switch
+                // 框架就绪：场景逻辑待逐步重写。当前仅保持会话存活并持续观察画面，
+                // 供探针引擎校准与导航验证使用。
+                LogInternal($"引擎框架已就绪（模式：{mode}），等待场景逻辑重写接入", LogLevel.Success);
+                while (!token.IsCancellationRequested)
                 {
-                    "myleague" => new MyLeagueScenario(this, _cfg, token),
-                    "daily" => new IntlWeeklyScenario(this, _cfg, token),
-                    "intlweekly" => new IntlWeeklyScenario(this, _cfg, token),
-                    "cndaily" => new CnDailyScenario(this, _cfg, token),
-                    _ => throw new ArgumentOutOfRangeException(nameof(mode)),
-                };
-                // 桥接比赛阶段事件到可视化面板
-                scenario.MatchFlow.StageChanged += (stage, deadline) =>
-                    FlowStageChanged?.Invoke(new FlowEvent { Stage = stage, Deadline = deadline });
-                LogInternal($"场景启动：{scenario.DisplayName}", LogLevel.Success);
-                await scenario.RunAsync();
+                    await ObserveAsync(token);
+                    await Task.Delay(500, token);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -288,21 +279,12 @@ public sealed class BotEngine : IDisposable
         if (_lastObs is not null && _lastObs.Frame == f && _lastObs.Ocr == ocr)
             return _lastObs;
 
-        // 新声明式引擎 ProbeEngine 生效；旧 ScreenClassifier 降为影子对照，仅记录分歧日志
+        // 声明式探针引擎 ProbeEngine 分类画面
         var probeObs = new Observation(f, ocr, GameScreen.Unknown, 0, Array.Empty<string>());
         var newResult = _probeEngine.Classify(probeObs);
         GameScreen screen = newResult.Screen;
         double score = newResult.RawScore;
         List<string> ev = newResult.Evidence;
-
-        var (oldScreen, oldScore, _) = _classifier.Classify(ocr, f);
-        if (oldScreen != screen)
-        {
-            string over = newResult.OverrideReason is null ? "" : $"[override:{newResult.OverrideReason}]";
-            LogInternal(
-                $"[旧分类器分歧] new={screen}({score:F1}){over} old={oldScreen}({oldScore:F1}) ev={string.Join(",", ev)}",
-                LogLevel.Warn);
-        }
 
         var obs = new Observation(f, ocr, screen, score, ev);
         _lastObs = obs;
@@ -520,69 +502,6 @@ public sealed class BotEngine : IDisposable
 
         await Graph.ExecutePathAsync(path, Pad, ct);
         return true;
-    }
-
-    /// <summary>半途友好的导航：如果已在 MyLeagueHome 就直接接上；否则用 BFS 寻路，失败抛异常。</summary>
-    public async Task EnterMyLeagueAsync(CancellationToken ct)
-    {
-        var cur = await ObserveAsync(ct);
-
-        // 分类器明确判定联赛主页：什么都不用做。
-        // 注意：「下一场/排名/阵容」OCR 关键词会命中比赛菜单里「我的联赛」磁贴的预览文字，
-        // 不能压过分类器的明确判定，否则误判"已在主页"直接返回，主循环空转刷爆日志
-        if (cur.Is(GameScreen.MyLeagueHome))
-        {
-            LogInternal("已在我的联赛主页，直接接上", LogLevel.Info);
-            return;
-        }
-
-        // 分类器无法判定（Unknown）时，才允许 OCR 关键词兜底为"已在联赛主页"
-        if (IsLeagueHome(cur))
-        {
-            LogInternal("已在我的联赛主页（OCR 兜底），直接接上", LogLevel.Info);
-            return;
-        }
-
-        // BFS 寻路（半途接续：已在 MatchHub 则直接 MatchHub→MyLeagueHome）
-        if (await GoToAsync(nameof(GameScreen.MyLeagueHome), null, ct))
-        {
-            var after = await ObserveAsync(ct);
-            if (IsLeagueHome(after)) return;
-        }
-
-        throw new InvalidOperationException("无法进入「我的联赛」，请确认已进入比赛菜单。");
-    }
-
-    /// <summary>联赛主页判定：分类器明确命中才算；OCR 关键词仅在分类器 Unknown 时兜底，
-    /// 避免比赛菜单里「我的联赛」磁贴的预览文字（下一场/排名等）造成误判。</summary>
-    private static bool IsLeagueHome(Observation o)
-        => o.Is(GameScreen.MyLeagueHome)
-           || (o.Screen == GameScreen.Unknown
-               && (o.Ocr.Contains("下一场") || o.Ocr.Contains("排名") || o.Ocr.Contains("阵容")));
-
-    /// <summary>半途友好的导航：已在 EventHub/EventInfo/ChallengeList/ChallengeHome 就直接接上；否则 BFS 寻路，失败抛异常。</summary>
-    public async Task EnterEventHubAsync(CancellationToken ct)
-    {
-        var cur = await ObserveAsync(ct);
-
-        // 已经在活动列表/详情/挑战清单：直接接上
-        if (cur.Is(GameScreen.EventHub) || cur.Is(GameScreen.EventInfo)
-            || cur.Is(GameScreen.ChallengeList) || cur.Is(GameScreen.ChallengeHome))
-        {
-            LogInternal("已在活动列表，直接接上", LogLevel.Info);
-            return;
-        }
-
-        // BFS 寻路（半途接续：已在 MatchHub 则直接 MatchHub→EventHub）
-        if (await GoToAsync(nameof(GameScreen.EventHub), null, ct))
-        {
-            var landed = await ObserveAsync(ct);
-            if (landed.Is(GameScreen.EventHub) || landed.Is(GameScreen.EventInfo)
-                || landed.Is(GameScreen.Loading) || landed.Is(GameScreen.PreMatch))
-                return;
-        }
-
-        throw new InvalidOperationException("无法进入「活动」列表。");
     }
 
     // ---------------- 杂项 ----------------

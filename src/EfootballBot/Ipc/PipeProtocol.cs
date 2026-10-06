@@ -28,15 +28,13 @@ public static class PipeProtocol
         public bool? On { get; set; }             // preview: true/false
 
         // 事件（Worker→GUI）
-        public string? Ev { get; set; }           // log | stats | screen | probe | nav | flow | preview | pong | exited
+        public string? Ev { get; set; }           // log | stats | screen | probe | nav | preview | pong | exited
         public string? Level { get; set; }        // log: Info/Success/Warn/Error/Debug
         public string? Text { get; set; }         // log.msg / exited.reason / nav.from
         public string? Screen { get; set; }       // screen.screen / nav.to
         public double Score { get; set; }         // screen.score
         public string? Evidence { get; set; }     // screen.evidence
         public string? Probe { get; set; }        // probe: top-5 candidates JSON
-        public string? Flow { get; set; }         // flow: stage name
-        public string? Deadline { get; set; }     // flow: deadline ISO
         public string? Png { get; set; }          // preview: base64 PNG
         public int Matches { get; set; }          // stats
         public int KeyMatches { get; set; }
@@ -58,8 +56,6 @@ public static class PipeProtocol
         => new() { Ev = "screen", Screen = screen, Score = score, Evidence = evidence };
     public static Msg EvProbe(string topJson) => new() { Ev = "probe", Probe = topJson };
     public static Msg EvNav(string from, string to) => new() { Ev = "nav", Text = from, Screen = to };
-    public static Msg EvFlow(string stage, string? deadline)
-        => new() { Ev = "flow", Flow = stage, Deadline = deadline };
     public static Msg EvPreview(string pngBase64) => new() { Ev = "preview", Png = pngBase64 };
     public static Msg EvPong() => new() { Ev = "pong" };
     public static Msg EvExited(string reason) => new() { Ev = "exited", Text = reason };

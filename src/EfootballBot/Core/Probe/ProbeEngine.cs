@@ -58,7 +58,7 @@ public sealed class ProbeEngine
             result.OverrideReason = "fixed-assist-popup";
         }
         // 关键比赛通知弹窗（白色 OK + 蓝色取消，背景透出赛程表会喂高 Schedule）：强制 Dialog
-        if (ScreenClassifier.IsKeyNotice(obs.Ocr))
+        if (IsKeyNotice(obs.Ocr))
         {
             result.Override = GameScreen.Dialog;
             result.OverrideReason = "key-notice";
@@ -168,6 +168,28 @@ public sealed class ProbeEngine
     private static bool HasFixedAssistPopup(EfootballBot.Core.Bot.Observation o)
         => o.Ocr.ContainsJoined("固定智能辅助")
            || o.Ocr.ContainsJoined("智能辅助固定");
+
+    /// <summary>
+    /// 是否为关键比赛通知弹窗（「即将进行的 Key Match」）：
+    /// ① 拼接文本含「即将进行」；② 存在独立成词的 OK（兼容 okay / 0K，O 可能被识成 0）；
+    /// ③ 拼接文本含「关键 / 下一场 / cancel」之一。
+    /// OK 必须独立成词（Opoku 等队名不算）；真正的赛程表没有 OK 按钮，不会误触发。
+    /// </summary>
+    private static bool IsKeyNotice(OcrResult ocr)
+    {
+        if (!ocr.ContainsJoined("即将进行")) return false;
+        if (!ocr.Words.Any(w =>
+            {
+                string t = OcrText.Norm(w.Text);
+                return t.Equals("ok", StringComparison.OrdinalIgnoreCase)
+                       || t.Equals("okay", StringComparison.OrdinalIgnoreCase)
+                       || t.Equals("0k", StringComparison.OrdinalIgnoreCase);
+            }))
+            return false;
+        return ocr.ContainsJoined("关键")
+               || ocr.ContainsJoined("下一场")
+               || ocr.ContainsJoined("cancel");
+    }
 
     /// <summary>KONAMI 过渡加载画面：暗屏 + 白色点状转圈。</summary>
     private static bool IsLoadingSpinner(EfootballBot.Core.Bot.Observation o)

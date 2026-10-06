@@ -87,9 +87,6 @@ public static class WorkerProgram
             // 导航寻路路径
             e.NavPathFound += n =>
                 _ = SendAsync(PipeProtocol.EvNav(n.From, n.To));
-            // 比赛阶段切换
-            e.FlowStageChanged += f =>
-                _ = SendAsync(PipeProtocol.EvFlow(f.Stage.ToString(), f.Deadline));
             e.Capture.StepLog += s =>
             {
                 if (console) Console.WriteLine($"[cap] {s}");

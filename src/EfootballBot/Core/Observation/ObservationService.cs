@@ -10,7 +10,7 @@ namespace EfootballBot.Core.Observation;
 /// <summary>
 /// 观察服务：封装画面捕获 + OCR 识别 + 捕获节流，不含画面分类。
 /// 持有 ICaptureProvider（DXGI Desktop Duplication 或 WGC），支持运行时切换捕获后端。
-/// 分类逻辑（ScreenClassifier.Classify）仍由 BotEngine 负责。
+/// 分类逻辑（ProbeEngine.Classify）仍由 BotEngine 负责。
 /// </summary>
 public sealed class ObservationService : IDisposable
 {
@@ -154,7 +154,7 @@ public sealed class ObservationService : IDisposable
 
     /// <summary>
     /// 获取一帧新鲜画面并执行 OCR。若距上次 OCR 不足 ocrIntervalMs 且有缓存，则返回缓存结果。
-    /// 不含画面分类——由 BotEngine 调用 ScreenClassifier 完成。
+    /// 不含画面分类——由 BotEngine 调用 ProbeEngine 完成。
     /// </summary>
     public async Task<(FrameData Frame, OcrResult Ocr)> ObserveAsync(CancellationToken ct, int ocrIntervalMs)
     {

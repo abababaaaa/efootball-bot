@@ -122,7 +122,6 @@ public partial class MainWindow : Window
         });
         _workerHost.ProbeUpdated += json => Dispatcher.BeginInvoke(() => _graphWindow?.OnProbe(json));
         _workerHost.Navigated += (from, to) => Dispatcher.BeginInvoke(() => _graphWindow?.OnNav(from, to));
-        _workerHost.FlowStageChanged += (stage, deadline) => Dispatcher.BeginInvoke(() => _graphWindow?.OnFlow(stage, deadline));
         _workerHost.PreviewReceived += pngB64 => Dispatcher.BeginInvoke(() => ShowPreviewPng(pngB64));
         _workerHost.Exited += reason => Dispatcher.BeginInvoke(() =>
         {

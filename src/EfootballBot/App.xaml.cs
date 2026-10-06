@@ -219,15 +219,14 @@ public partial class App : Application
     }
 
     /// <summary>
-    /// 离线帧自检：EfootballBot --check-frame &lt;png&gt; [cropY=0] [cropH=0] [frameW=1296] [frameH=759] [png2]
-    /// 加载 PNG（可选纵向裁剪）→ 缩放为标准整窗帧 → 用真实 OCR + ChallengeCardReader 跑判定。
-    /// 提供 png2 时额外输出两帧签名 MAD（验证「Right 是否真的移动」信号）。
-    /// 用于改完选卡逻辑后离线验证，无需操作游戏。
+    /// 离线帧自检：EfootballBot --check-frame &lt;png&gt; [cropY=0] [cropH=0] [frameW=1296] [frameH=759]
+    /// 加载 PNG（可选纵向裁剪）→ 缩放为标准整窗帧 → 用真实 OCR 输出关键词 + RT 横幅 + 跳过比赛判定。
+    /// 用于改完探针/帧分析逻辑后离线验证，无需操作游戏。
     /// </summary>
     private static async Task RunCheckFrameAsync(string[] args)
     {
         if (args.Length < 2)
-            throw new ArgumentException("用法：--check-frame <png> [cropY] [cropH] [frameW] [frameH] [png2]");
+            throw new ArgumentException("用法：--check-frame <png> [cropY] [cropH] [frameW] [frameH]");
 
         string pngPath = args[1];
         int cropY = args.Length > 2 && int.TryParse(args[2], out int cy) ? Math.Max(0, cy) : 0;
@@ -246,40 +245,6 @@ public partial class App : Application
             Console.WriteLine($"[{wd.X:F3},{wd.Y:F3} {wd.W:F3}x{wd.H:F3}] {wd.Text} => {OcrText.Norm(wd.Text)}");
         Console.WriteLine($"JoinedText = {ocr.JoinedText}");
 
-        var info = ChallengeCardReader.Read(frame, ocr, 8, 31, 1280, 720);
-        Console.WriteLine("---- 焦点卡判定（真实生产代码 ChallengeCardReader.Read）----");
-        Console.WriteLine($"卡号={info.Number?.ToString() ?? "未识别"} 背景亮={info.BgLum:F0} 锁占比={info.LockRatio:F3} ✓绿={info.GreenRatio:F3} 定位={info.Located}");
-        Console.WriteLine($"=> Unlocked(未锁)={info.Unlocked}  Done(已打勾)={info.Done}");
-        var actCard = ChallengeCardReader.LocateFocusedCardEx(frame, 8, 31, 1280, 720, 0.40, 0.05, 35, 0.10);
-        if (actCard is null)
-            Console.WriteLine("活动卡焦点卡定位：失败");
-        else
-        {
-            var (al, at, ar, ab) = actCard.Value;
-            double acx = ((al + ar) / 2.0 - 8) / 1280.0;
-            Console.WriteLine($"活动卡焦点卡定位：left={al} top={at} right={ar} bot={ab} 中心cx={acx:F3}");
-        }
-        if (actCard is not null)
-        {
-            var (al, at, ar, ab) = actCard.Value;
-            double acx = ((al + ar) / 2.0 - 8) / 1280.0;
-            var fpRoi = ChallengeCardReader.Map(frame, new NormRect(acx - 0.15, 0.10, 0.30, 0.50), 8, 31, 1280, 720);
-            string fp = string.Concat(ocr.Words
-                .Where(w => fpRoi.Contains(w.CenterX, w.CenterY))
-                .OrderBy(w => w.CenterY).ThenBy(w => w.CenterX)
-                .Select(w => OcrText.Norm(w.Text)));
-            Console.WriteLine($"活动卡焦点卡 OCR 指纹 = {fp}");
-        }
-        var actFocused = ChallengeCardReader.LocateActivityFocusedCard(frame, 8, 31, 1280, 720);
-        if (actFocused is null)
-            Console.WriteLine("活动卡白按钮定位焦点卡：失败");
-        else
-        {
-            var (fl, ft, fr, fb) = actFocused.Value;
-            double fcx = ((fl + fr) / 2.0 - 8) / 1280.0;
-            int white = ChallengeCardReader.CountWhite(frame, fl, fr, fb - (int)((fb - ft) * 0.12), fb);
-            Console.WriteLine($"活动卡白按钮定位焦点卡：left={fl} top={ft} right={fr} bot={fb} 中心cx={fcx:F3} 按钮白像素={white}");
-        }
         Console.WriteLine($"RT蓝横幅={FrameAnalyzer.FindRtBanner(frame, out double bannerCy)}（cy={bannerCy:F3}）");
         var skipCheckRoi = new NormRect(0.945, 0.021, 0.050, 0.110);
         int skipGreen = FrameAnalyzer.CountBrightGreen(frame, skipCheckRoi);
@@ -303,16 +268,6 @@ public partial class App : Application
         string hudJoined = hudSb.ToString();
         bool hudSkip = hudJoined.Contains("跳过比赛");
         Console.WriteLine($"跳过比赛绿勾={hudSkip && skipGreen >= 100}（HUD含跳过比赛={hudSkip}，亮绿像素={skipGreen}，阈值100）");
-
-        if (args.Length >= 7 && !string.IsNullOrWhiteSpace(args[6]))
-        {
-            var frame2 = LoadFrame(args[6], cropY, cropH, frameW, frameH);
-            byte[] s1 = ChallengeCardReader.Signature(frame, 8, 31, 1280, 720);
-            byte[] s2 = ChallengeCardReader.Signature(frame2, 8, 31, 1280, 720);
-            double mad = ChallengeCardReader.SignatureMad(s1, s2);
-            Console.WriteLine($"---- 签名对比：{Path.GetFileName(pngPath)} vs {Path.GetFileName(args[6])} ----");
-            Console.WriteLine($"MAD={mad:F1}（阈值 {ChallengeCardReader.MoveMadMin}）=> 判定「{(mad >= ChallengeCardReader.MoveMadMin ? "已移动" : "未移动")}」");
-        }
     }
 
     private static FrameData LoadFrame(string pngPath, int cropY, int cropH, int frameW, int frameH)
