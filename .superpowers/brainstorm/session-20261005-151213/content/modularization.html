@@ -1,0 +1,157 @@
+<h2>模块化拆分方案</h2>
+<p class="subtitle">从 3 个上帝类拆为 8 个独立模块 + 绞杀式迁移策略</p>
+
+<div class="section">
+  <h3>目标模块结构</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;font-size:12px;">
+    <div class="mockup">
+      <div class="mockup-header" style="background:#1a3a5c;">Core 内核</div>
+      <div class="mockup-body" style="line-height:1.6;">
+        <b>BotEngine</b>（精简）<br>
+        生命周期 · 观察调度<br>
+        事件派发 · 统计<br>
+        <span style="color:#888">~300 行</span>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header" style="background:#2a5c3a;">Probe 探针</div>
+      <div class="mockup-body" style="line-height:1.6;">
+        <b>ProbeEngine</b><br>
+        OcrProbe · VisualProbe<br>
+        CompositeProbe · 优先级消解<br>
+        <span style="color:#888">~400 行</span>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header" style="background:#5c3a1a;">Graph 图谱</div>
+      <div class="mockup-body" style="line-height:1.6;">
+        <b>PageGraph</b><br>
+        PageNode · Edge · BFS寻路<br>
+        Overlay 注册<br>
+        <span style="color:#888">~350 行</span>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header" style="background:#5c1a3a;">Flow 流程</div>
+      <div class="mockup-body" style="line-height:1.6;">
+        <b>MatchFlow</b><br>
+        7 阶段状态机<br>
+        Forfeit 子流程<br>
+        <span style="color:#888">~450 行</span>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header" style="background:#3a1a5c;">Action 动作</div>
+      <div class="mockup-body" style="line-height:1.6;">
+        <b>ActionExecutor</b><br>
+        PressButton · Dpad<br>
+        FocusAndConfirm · Wait<br>
+        <span style="color:#888">~400 行</span>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header" style="background:#1a5c5c;">Overlay 覆盖层</div>
+      <div class="mockup-body" style="line-height:1.6;">
+        <b>OverlayEngine</b><br>
+        弹窗检测 · 自动清除<br>
+        断线 · 棋盘页<br>
+        <span style="color:#888">~250 行</span>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header" style="background:#5c5c1a;">Observe 观察</div>
+      <div class="mockup-body" style="line-height:1.6;">
+        <b>Observation</b><br>
+        帧捕获 · OCR<br>
+        节流 · 自愈<br>
+        <span style="color:#888">~300 行</span>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header" style="background:#444;">Config 配置</div>
+      <div class="mockup-body" style="line-height:1.6;">
+        <b>PageCatalog</b><br>
+        页面定义 · 边定义<br>
+        探针参数 · JSON<br>
+        <span style="color:#888">数据文件</span>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header" style="background:#444;">Scenario 场景</div>
+      <div class="mockup-body" style="line-height:1.6;">
+        <b>Scenario</b>（薄）<br>
+        只声明目标 + 钩子<br>
+        我的联赛/周活动/国服<br>
+        <span style="color:#888">~150 行/个</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>当前代码 → 新模块映射</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="font-size:12px;line-height:1.7;">
+      <b>BotEngine.cs (1006行)</b><br>
+      &nbsp;&nbsp;├─ 生命周期/观察调度 → <b>BotEngine</b>（保留）<br>
+      &nbsp;&nbsp;├─ WaitForFreshFrame/捕获自愈 → <b>Observation</b><br>
+      &nbsp;&nbsp;├─ Classify/ScreenClassifier → <b>ProbeEngine</b><br>
+      &nbsp;&nbsp;├─ PressButton/FocusAndConfirm/SelectMenu → <b>ActionExecutor</b><br>
+      &nbsp;&nbsp;├─ HandlePopups/Recover → <b>OverlayEngine</b><br>
+      &nbsp;&nbsp;├─ EnterMyLeague/EnterEventHub → <b>PageGraph</b>（变为数据）<br>
+      &nbsp;&nbsp;└─ ButtonGlow/FindCardWord（重复）→ <b>ActionExecutor</b>（去重）<br><br>
+      <b>ScenarioBase.cs (1004行)</b><br>
+      &nbsp;&nbsp;├─ PlayOneMatch/PostMatch/TryForfeit → <b>MatchFlow</b><br>
+      &nbsp;&nbsp;├─ HandleTourHome/ParseRewards → <b>Scenario</b>（场景钩子）<br>
+      &nbsp;&nbsp;├─ ButtonGlow/TryConfirmOrEnter → <b>ActionExecutor</b>（去重）<br>
+      &nbsp;&nbsp;└─ PassThrough/DismissCampaignBoard → <b>OverlayEngine</b><br><br>
+      <b>Screens.cs (639行)</b><br>
+      &nbsp;&nbsp;├─ GameScreen 枚举 → <b>PageCatalog</b>（页面 Id）<br>
+      &nbsp;&nbsp;├─ ScreenDef/ScreenKeyword → <b>ProbeEngine</b>（探针定义）<br>
+      &nbsp;&nbsp;├─ Classify 巨型 if-else → <b>ProbeEngine</b>（优先级 + Override）<br>
+      &nbsp;&nbsp;└─ 冲突消解规则 → <b>PageCatalog</b>（Priority 声明）
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>绞杀式迁移策略（7 步，每步可发布实测）</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="font-size:12px;line-height:1.8;">
+      <b>Step 1</b>: 抽取 ActionExecutor（PressButton/FocusAndConfirm/SelectMenu/Dpad/Press）<br>
+      &nbsp;&nbsp;风险=低 · 纯搬运 · BotEngine/ScenarioBase 改为调用<br>
+      <b>Step 2</b>: 抽取 Observation（捕获帧/OCR/节流/自愈）<br>
+      &nbsp;&nbsp;风险=中 · 涉及捕获线程 · 需验证帧流转<br>
+      <b>Step 3</b>: 抽取 OverlayEngine（弹窗/断线/棋盘页）<br>
+      &nbsp;&nbsp;风险=低 · PassThrough/HandlePopups 集中<br>
+      <b>Step 4</b>: 重写 ProbeEngine（替换 ScreenClassifier）<br>
+      &nbsp;&nbsp;风险=高 · 画面识别核心 · 需大量真机截图回归<br>
+      <b>Step 5</b>: 重写 MatchFlow（替换 PlayOneMatchAsync）<br>
+      &nbsp;&nbsp;风险=高 · 比赛流程 · 需实测整场比赛<br>
+      <b>Step 6</b>: 引入 PageGraph + BFS（替换 EnterXxxAsync）<br>
+      &nbsp;&nbsp;风险=中 · 导航逻辑 · 半途接续需验证<br>
+      <b>Step 7</b>: 场景瘦身（Scenario 只声明目标+钩子）<br>
+      &nbsp;&nbsp;风险=低 · 收尾
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>迁移原则</h4>
+    <ul>
+      <li>每步独立可发布：Step 1-3 是纯搬运，不改变行为</li>
+      <li>Step 4-5 是核心重写，需真机回归</li>
+      <li>新旧并存：重写期间用开关切换，验证后删除旧代码</li>
+      <li>SSOT：页面/边/探针参数统一在 PageCatalog，无硬编码</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>风险点</h4>
+    <ul>
+      <li>Step 4 画面识别：OCR 关键词权重和视觉阈值需真机校准</li>
+      <li>Step 5 比赛流程：滑动超时、复测机制、弃权分支需实测</li>
+      <li>去重 ButtonGlow：两处实现需统一为一份</li>
+    </ul>
+  </div>
+</div>

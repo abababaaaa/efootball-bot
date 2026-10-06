@@ -1,0 +1,77 @@
+<h2>流程可视化面板</h2>
+<p class="subtitle">实时展示当前页面、探针得分、导航路径、比赛阶段</p>
+
+<div class="section">
+  <h3>面板布局</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+    <div class="mockup">
+      <div class="mockup-header">① 当前页面卡片</div>
+      <div class="mockup-body" style="font-size:12px;line-height:1.5;">
+        大字号显示当前 PageNode Id<br>
+        下方：rawScore + evidence 关键词<br>
+        背景色按页面类型着色<br>
+        <span style="color:#888;">替代当前的「画面 → xxx」日志</span>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">② 探针得分条</div>
+      <div class="mockup-body" style="font-size:12px;line-height:1.5;">
+        Top-5 候选页面的 rawScore 横向条形图<br>
+        绿色=命中，灰色=未达阈值<br>
+        鼠标悬停显示 evidence 详情<br>
+        <span style="color:#888;">调试画面误判的核心工具</span>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">③ 导航路径图</div>
+      <div class="mockup-body" style="font-size:12px;line-height:1.5;">
+        页面图谱的局部可视化<br>
+        当前页高亮，目标页闪烁<br>
+        已走过的边实线，计划走的边虚线<br>
+        <span style="color:#888;">BFS 寻路结果可视化</span>
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">④ 比赛阶段指示</div>
+      <div class="mockup-body" style="font-size:12px;line-height:1.5;">
+        7 阶段进度条：PreMatch→Kickoff→Playing→...<br>
+        当前阶段高亮，已完成阶段打勾<br>
+        滑动超时剩余时间倒计时<br>
+        <span style="color:#888;">MatchFlow 状态实时展示</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>数据来源（事件驱动）</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="font-family:monospace;font-size:12px;line-height:1.7;">
+      Worker → GUI 事件流（命名管道）：<br>
+      &nbsp;&nbsp;screen: { page, rawScore, evidence, override }<br>
+      &nbsp;&nbsp;nav: { from, to, path: [...] }<br>
+      &nbsp;&nbsp;flow: { stage, deadline, forfeit }<br>
+      &nbsp;&nbsp;overlay: { id, dismiss }<br>
+      &nbsp;&nbsp;probe: { candidates: [{page, score, evidence}] }
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>价值</h4>
+    <ul>
+      <li>替代大量日志，一眼看清当前状态</li>
+      <li>画面误判时直接看到 Top-5 得分，快速定位关键词问题</li>
+      <li>导航卡顿时看到路径图，定位哪条边失效</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>实现要点</h4>
+    <ul>
+      <li>事件从 Worker 进程通过管道发到 GUI</li>
+      <li>GraphWindow 已存在骨架，可复用</li>
+      <li>探针得分条是调试核心，优先级最高</li>
+    </ul>
+  </div>
+</div>

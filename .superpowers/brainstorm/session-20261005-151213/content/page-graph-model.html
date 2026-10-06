@@ -1,0 +1,71 @@
+<h2>页面图谱数据模型</h2>
+<p class="subtitle">核心三层：底层页（BasePage）+ 覆盖层（Overlay）+ 导航边（Edge）</p>
+
+<div class="section">
+  <h3>分层结构</h3>
+  <div style="display:flex;gap:16px;align-items:stretch;">
+    <div class="mockup" style="flex:1;">
+      <div class="mockup-header">BasePage（底层页）</div>
+      <div class="mockup-body" style="font-size:13px;line-height:1.6;">
+        <b>Id</b>: myleague_home<br>
+        <b>Probes</b>: [OCR 前往比赛×2.5, 下一场×2.5]<br>
+        <b>Actions</b>: [清弹窗→买道具→开赛]<br>
+        <b>Edges</b>: →schedule, →shop<br>
+        <span style="color:#888;">游戏的稳定画面，参与导航寻路</span>
+      </div>
+    </div>
+    <div class="mockup" style="flex:1;">
+      <div class="mockup-header">Overlay（覆盖层）</div>
+      <div class="mockup-body" style="font-size:13px;line-height:1.6;">
+        <b>Id</b>: dialog_ok<br>
+        <b>Probes</b>: [OCR 确定×1.5]<br>
+        <b>Dismiss</b>: PressButton(确定)<br>
+        <span style="color:#888;">弹窗/断线/奖励，可叠在任意底层页上，优先处理</span>
+      </div>
+    </div>
+    <div class="mockup" style="flex:1;">
+      <div class="mockup-header">Edge（导航边）</div>
+      <div class="mockup-body" style="font-size:13px;line-height:1.6;">
+        <b>From</b>: home<br>
+        <b>To</b>: match_hub<br>
+        <b>Action</b>: Down×2→Left×2→A<br>
+        <b>Condition</b>: (可选)<br>
+        <span style="color:#888;">有向边，引擎自动寻路</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>引擎主循环（极简）</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="font-family:monospace;font-size:13px;line-height:1.7;">
+      while (!cancel):<br>
+      &nbsp;&nbsp;obs = observe()&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# 捕获帧 + OCR<br>
+      &nbsp;&nbsp;overlay = matchOverlay(obs)&nbsp;# 优先匹配覆盖层<br>
+      &nbsp;&nbsp;if overlay: overlay.dismiss(); continue<br>
+      &nbsp;&nbsp;page = matchPage(obs)&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# 匹配底层页<br>
+      &nbsp;&nbsp;page.executeActions()&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;# 执行该页声明的动作<br>
+      &nbsp;&nbsp;if needNav: path = graph.findPath(page, target)<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;for edge in path: edge.execute()
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>为什么分底层页/覆盖层</h4>
+    <ul>
+      <li>弹窗可出现在任意页面，不参与导航图</li>
+      <li>覆盖层优先级更高，先清弹窗再处理页面</li>
+      <li>当前代码里 HandlePopups / PassThrough 散落各处，统一为 Overlay 层</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>需要注意</h4>
+    <ul>
+      <li>比赛中(InMatch)是长流程，不是简单页面</li>
+      <li>部分页面有条件分支（如关键比赛 vs 普通比赛）</li>
+    </ul>
+  </div>
+</div>

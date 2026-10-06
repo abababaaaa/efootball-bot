@@ -30,6 +30,7 @@ public sealed class BotStats
 public sealed class BotEngine : IDisposable
 {
     private readonly AppConfig _cfg;
+    public AppConfig Config => _cfg;
     public readonly VirtualGamepad360 Pad360;
     public readonly Pad Pad;
     public readonly ActionExecutor Actions;
@@ -42,6 +43,7 @@ public sealed class BotEngine : IDisposable
     public readonly PageGraph Graph;
     public readonly NavigationService Navigation;
     public readonly BotStats Stats = new();
+    public MyLeagueService? MyLeague { get; private set; }
 
     private CancellationTokenSource? _cts;
     private Task? _loop;
@@ -82,6 +84,7 @@ public sealed class BotEngine : IDisposable
             ev => NavPathFound?.Invoke(ev));
         Observation = new ObservationService(Capture, Ocr, cfg);
         Observation.Log = (msg, lv) => LogInternal(msg, lv);
+        MyLeague = new MyLeagueService(this);
 
         Capture.CaptureClosed += (_, msg) => LogInternal($"画面捕获已结束：{msg}", LogLevel.Warn);
     }
@@ -114,9 +117,16 @@ public sealed class BotEngine : IDisposable
                     LogInternal($"开始智能寻路：任意画面 → {ScreenName(ts)}", LogLevel.Info);
                     var navResult = await GoToAsync(ts.ToString(), null, token);
                     LogInternal(navResult.Ok
-                        ? $"寻路成功，已到达{ScreenName(ts)}（M0 导航验证通过，等待场景循环接入）"
+                        ? $"寻路成功，已到达{ScreenName(ts)}"
                         : $"寻路结束未到达目标（{navResult.Outcome}）：{navResult.Message}",
                         navResult.Ok ? LogLevel.Success : LogLevel.Warn);
+
+                    // M1：寻路成功后执行场景逻辑
+                    if (navResult.Ok && ts == GameScreen.MyLeagueHome && MyLeague is not null)
+                    {
+                        LogInternal("开始我的联赛物品检查…", LogLevel.Info);
+                        await MyLeague.EnsureItemsAsync(token);
+                    }
                 }
                 else
                 {

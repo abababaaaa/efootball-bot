@@ -1,0 +1,100 @@
+<h2>探针引擎（Probe Engine）判定逻辑</h2>
+<p class="subtitle">统一命中口径 + 分离原始指标与综合分 + 禁止早返回强制策略</p>
+
+<div class="section">
+  <h3>探针类型（3 种原子探针 + 1 种组合）</h3>
+  <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+    <div class="mockup">
+      <div class="mockup-header">① OcrProbe</div>
+      <div class="mockup-body" style="font-size:12px;line-height:1.5;">
+        <b>输入</b>: OCR 结果<br>
+        <b>规则</b>: 关键词列表 [{text, weight, region?}]<br>
+        <b>输出</b>: rawScore = Σ weight（命中词）<br>
+        <b>阈值</b>: minScore（原始分硬阈值）
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">② VisualProbe</div>
+      <div class="mockup-body" style="font-size:12px;line-height:1.5;">
+        <b>输入</b>: 帧像素<br>
+        <b>规则</b>: ROI + HSV 滤镜<br>
+        <b>输出</b>: rawRatio = 命中像素占比<br>
+        <b>阈值</b>: minRatio（原始占比硬阈值）
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">③ CompositeProbe</div>
+      <div class="mockup-body" style="font-size:12px;line-height:1.5;">
+        <b>组合</b>: OcrProbe AND/OR VisualProbe<br>
+        <b>输出</b>: 各子探针 raw 值<br>
+        <b>用途</b>: InMatch 需「草皮 AND (机器人图标 OR 时钟)」
+      </div>
+    </div>
+    <div class="mockup">
+      <div class="mockup-header">④ Override 标记</div>
+      <div class="mockup-body" style="font-size:12px;line-height:1.5;">
+        <b>不是早返回</b>，而是写入结果对象：<br>
+        <code>result.Override = "reward-popup"</code><br>
+        由统一出口消费，不中断其他探针计算
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>判定流程（无早返回，统一出口）</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="font-family:monospace;font-size:12px;line-height:1.7;">
+      1. 并行计算所有 PageNode 的探针 → 得到 <b>Candidate[]</b><br>
+      &nbsp;&nbsp;&nbsp;&nbsp;每个 Candidate: { page, rawOcrScore, rawVisuals[], evidence[] }<br><br>
+      2. 计算 Override（强制覆盖）信号：<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;- reward-popup → override = MyLeagueHome<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;- loading-spinner → override = Loading<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;写入 result.Override，<b>不中断</b><br><br>
+      3. 迟滞状态（Hysteresis）：<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;若 holdMatch=true，检查强退出信号（赛后画面≥阈值 / Dialog≥3 / 菜单≥4）<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;无强退出 → 维持 InMatch<br><br>
+      4. 冲突消解（Priority 规则，声明式）：<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;按声明的优先级排序，高优先级候选压制低优先级<br><br>
+      5. 统一出口返回：<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;result = { screen, rawScore, evidence, override, holdMatch }<br>
+      &nbsp;&nbsp;&nbsp;&nbsp;所有字段完整，调用方按需消费
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>冲突消解（声明式 Priority，非字典删键）</h3>
+  <div class="mockup">
+    <div class="mockup-body" style="font-size:13px;line-height:1.6;">
+      每个 PageNode 声明 <code>Priority</code> 数值，引擎按优先级排序：<br><br>
+      <b>高优先级</b>（先判定，命中则压制低优先级）：<br>
+      &nbsp;&nbsp;Loading(spinner) · Disconnected · ActivityDetail · EventSettings<br>
+      &nbsp;&nbsp;ChallengeHome · EventInfo · ChallengeList · NoEvent · CampaignBoard<br><br>
+      <b>中优先级</b>：<br>
+      &nbsp;&nbsp;MyLeagueHome · PreMatch · Shop · InMatch<br><br>
+      <b>低优先级</b>：<br>
+      &nbsp;&nbsp;MatchHub · EventHub · Home · Dialog<br><br>
+      <span style="color:#888;">同优先级按 rawScore 降序。证据门（如 MyLeagueHome 需强特征词）作为 Probe 的 minScore 实现。</span>
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons">
+  <div class="pros">
+    <h4>对比当前代码的改进</h4>
+    <ul>
+      <li>无早返回：所有探针都计算，证据完整可追溯</li>
+      <li>rawScore 与 composite 分离：阈值只基于原始分</li>
+      <li>Priority 声明式：新增页面只需设优先级，不改消解代码</li>
+      <li>迟滞状态独立：holdMatch 作为状态字段，不混入打分</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>注意事项</h4>
+    <ul>
+      <li>Override 信号（弹窗/spinner）仍需特殊处理，但通过结果对象传递</li>
+      <li>VisualProbe 的 ROI 和滤镜需要一个注册表</li>
+    </ul>
+  </div>
+</div>
