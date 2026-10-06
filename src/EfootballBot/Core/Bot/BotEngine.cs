@@ -114,6 +114,16 @@ public sealed class BotEngine : IDisposable
 
                 if (targetScreen is { } ts)
                 {
+                    // 导航前处理可能存在的弹窗（如"物品使用中"）
+                    LogInternal("导航前检查弹窗", LogLevel.Info);
+                    var preObs = await ObserveAsync(token);
+                    if (preObs.Ocr.JoinedText.Contains("物品使用中"))
+                    {
+                        LogInternal("检测到「物品使用中」弹窗，点击 OK", LogLevel.Info);
+                        await Pad.Confirm();
+                        await Task.Delay(1500, token);
+                    }
+
                     LogInternal($"开始智能寻路：任意画面 → {ScreenName(ts)}", LogLevel.Info);
                     var navResult = await GoToAsync(ts.ToString(), null, token);
                     LogInternal(navResult.Ok
