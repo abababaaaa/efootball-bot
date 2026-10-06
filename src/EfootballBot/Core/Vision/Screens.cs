@@ -306,6 +306,13 @@ public sealed class ScreenClassifier
         if (HasFixedAssistPopup(ocr))
             return (GameScreen.Dialog, 5, new List<string> { "fixed-assist-popup" });
 
+        // 「即将进行的 Key Match」关键比赛通知弹窗：白色 OK + 蓝色 CANCEL（默认焦点在 CANCEL）。
+        // 目录打分下「比赛日/即将进行」会喂高 Schedule（真机 3.5），场景层盲按 A 恰好确认
+        // CANCEL → 退回主页反复横跳，永远进不了比赛。三特征唯一，强制 Dialog，
+        // PassThrough 的 PressButtonAsync 会先移焦点到 OK 再点击
+        if (IsKeyNotice(ocr))
+            return (GameScreen.Dialog, 5, new List<string> { "key-notice" });
+
         foreach (var def in _defs)
         {
             double score = 0;
@@ -336,6 +343,16 @@ public sealed class ScreenClassifier
             && ocr.ContainsJoined("参加"))
         {
             scores[GameScreen.MatchHub] = (2.5, new List<string> { "joined-hub" });
+        }
+
+        // 主大厅首帧大字被 OCR 逐字拆开（游|戏|主|菜|单）：整词「游戏主菜单」只计 2 分
+        // 达不到 Home 阈值，单字一个都不命中 → Unknown。拼接文本同时含「游戏主」与
+        // 「额外」（额外选项）时按主页兜底；缺「额外」不兜底，避免误判
+        if (scores.Count == 0
+            && ocr.ContainsJoined("游戏主")
+            && ocr.ContainsJoined("额外"))
+        {
+            scores[GameScreen.Home] = (2.5, new List<string> { "joined-home" });
         }
 
         // 国服主大厅顶部合并行「推荐比赛签约商店」含“比赛”，会同时命中比赛菜单；
@@ -642,6 +659,28 @@ public sealed class ScreenClassifier
     private static bool HasFixedAssistPopup(OcrResult ocr)
         => ocr.ContainsJoined("固定智能辅助")
            || ocr.ContainsJoined("智能辅助固定");
+
+    /// <summary>
+    /// 是否为关键比赛通知弹窗（「即将进行的 Key Match」）：
+    /// ① 拼接文本含「即将进行」；② 存在独立成词的 OK（兼容 okay / 0K，O 可能被识成 0）；
+    /// ③ 拼接文本含「关键 / 下一场 / cancel」之一。
+    /// OK 必须独立成词（Opoku 等队名不算）；真正的赛程表没有 OK 按钮，不会误触发。
+    /// </summary>
+    internal static bool IsKeyNotice(OcrResult ocr)
+    {
+        if (!ocr.ContainsJoined("即将进行")) return false;
+        if (!ocr.Words.Any(w =>
+            {
+                string t = OcrText.Norm(w.Text);
+                return t.Equals("ok", StringComparison.OrdinalIgnoreCase)
+                       || t.Equals("okay", StringComparison.OrdinalIgnoreCase)
+                       || t.Equals("0k", StringComparison.OrdinalIgnoreCase);
+            }))
+            return false;
+        return ocr.ContainsJoined("关键")
+               || ocr.ContainsJoined("下一场")
+               || ocr.ContainsJoined("cancel");
+    }
 
     /// <summary>
     /// KONAMI 过渡加载画面：整屏很暗（均值亮度&lt;30）、OCR 词极少（≤5）且无比赛时钟，
