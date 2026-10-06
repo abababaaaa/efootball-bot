@@ -712,5 +712,226 @@ public static class PageCatalog
                 NavAction.Press(PadButton.A), NavAction.Wait(2500),
             },
         },
+
+        // ---------- 全量回退边（18 条，Verified=false，待真机逐条确认） ----------
+
+        // 1. MatchHub → Home
+        new Edge
+        {
+            From = nameof(GameScreen.MatchHub),
+            To = nameof(GameScreen.Home),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(1000),
+            },
+        },
+
+        // 2. MyLeagueHome → MatchHub
+        new Edge
+        {
+            From = nameof(GameScreen.MyLeagueHome),
+            To = nameof(GameScreen.MatchHub),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 3. EventHub → MatchHub
+        new Edge
+        {
+            From = nameof(GameScreen.EventHub),
+            To = nameof(GameScreen.MatchHub),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 4. EventInfo → EventHub
+        new Edge
+        {
+            From = nameof(GameScreen.EventInfo),
+            To = nameof(GameScreen.EventHub),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 5. Schedule → MyLeagueHome
+        new Edge
+        {
+            From = nameof(GameScreen.Schedule),
+            To = nameof(GameScreen.MyLeagueHome),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 6. PreMatch → MyLeagueHome
+        new Edge
+        {
+            From = nameof(GameScreen.PreMatch),
+            To = nameof(GameScreen.MyLeagueHome),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 7. DifficultySelect → PreMatch
+        new Edge
+        {
+            From = nameof(GameScreen.DifficultySelect),
+            To = nameof(GameScreen.PreMatch),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(700),
+            },
+        },
+
+        // 8. Shop → MyLeagueHome（连按 3 次 B：逐层退出商店）
+        new Edge
+        {
+            From = nameof(GameScreen.Shop),
+            To = nameof(GameScreen.MyLeagueHome),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(600),
+                NavAction.Press(PadButton.B), NavAction.Wait(600),
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 9. ShopConfirm → Shop
+        new Edge
+        {
+            From = nameof(GameScreen.ShopConfirm),
+            To = nameof(GameScreen.Shop),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(700),
+            },
+        },
+
+        // 10. EventSettings → EventInfo
+        new Edge
+        {
+            From = nameof(GameScreen.EventSettings),
+            To = nameof(GameScreen.EventInfo),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 11. ChallengeHome → EventInfo
+        new Edge
+        {
+            From = nameof(GameScreen.ChallengeHome),
+            To = nameof(GameScreen.EventInfo),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 12. ChallengeList → ChallengeHome
+        new Edge
+        {
+            From = nameof(GameScreen.ChallengeList),
+            To = nameof(GameScreen.ChallengeHome),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 13. ActivityDetail → EventHub
+        new Edge
+        {
+            From = nameof(GameScreen.ActivityDetail),
+            To = nameof(GameScreen.EventHub),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 14. NoEvent → EventHub
+        new Edge
+        {
+            From = nameof(GameScreen.NoEvent),
+            To = nameof(GameScreen.EventHub),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 15. CampaignBoard → EventHub（右移焦点到关闭/返回入口后 A 确认）
+        new Edge
+        {
+            From = nameof(GameScreen.CampaignBoard),
+            To = nameof(GameScreen.EventHub),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Dpad(PadDir.Right), NavAction.Wait(800),
+                NavAction.Press(PadButton.A),    NavAction.Wait(2300),
+            },
+        },
+
+        // 16. DailyRewards → Home
+        new Edge
+        {
+            From = nameof(GameScreen.DailyRewards),
+            To = nameof(GameScreen.Home),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 17. ItemsBar → MyLeagueHome
+        new Edge
+        {
+            From = nameof(GameScreen.ItemsBar),
+            To = nameof(GameScreen.MyLeagueHome),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(900),
+            },
+        },
+
+        // 18. KeyMatchBadge → Schedule
+        new Edge
+        {
+            From = nameof(GameScreen.KeyMatchBadge),
+            To = nameof(GameScreen.Schedule),
+            Verified = false,
+            Actions = new[]
+            {
+                NavAction.Press(PadButton.B), NavAction.Wait(700),
+            },
+        },
     };
 }

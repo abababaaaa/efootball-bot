@@ -26,6 +26,8 @@ public sealed class Edge
     public NavAction[] Actions { get; init; } = Array.Empty<NavAction>();
     public Func<NavContext, bool>? Condition { get; init; }
     public int Cost { get; init; } = 1;
+    /// <summary>真机验证标记：老 8 条边已由 legacy 版本真机验证=true；新回退边=false，待真机逐条确认。</summary>
+    public bool Verified { get; init; } = true;
 }
 
 /// <summary>BFS 寻路时的上下文，供条件边判断使用。</summary>
