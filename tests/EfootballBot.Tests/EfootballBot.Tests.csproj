@@ -18,4 +18,8 @@
     <ProjectReference Include="..\..\src\EfootballBot\EfootballBot.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <None Include="TestData\*.png" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>

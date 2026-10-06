@@ -36,14 +36,8 @@ public sealed class OverlayEngine
         }
         if (o.Is(GameScreen.Dialog))
         {
-            // 关键比赛弹窗：OK 按钮在右下角，需先 Up 把焦点移过去
-            if (o.Ocr.Contains("关键比赛") || o.Ocr.Contains("keymatch"))
-            {
-                _engine.LogInternal("关键比赛确认弹窗：方向上 → 点击 OK", Bot.LogLevel.Info);
-                await _pad.Dpad(PadDir.Up);
-                await Task.Delay(500, ct);
-            }
-            // 普通弹窗：OK/确定 可能不在默认焦点，走 PressButtonAsync 识别→移动→点击
+            // 弹窗按钮可能不在默认焦点（如关键比赛弹窗默认焦点是「取消」，OK 是上方白底按钮），
+            // PressButtonAsync 以蓝/青彩色焦点为准移动指针，亮白底不会被误判为聚焦
             if (!await _actions.PressButtonAsync(new[] { "ok", "确定", "确认", "下一步", "yes" }, ct))
             {
                 await _pad.Confirm();

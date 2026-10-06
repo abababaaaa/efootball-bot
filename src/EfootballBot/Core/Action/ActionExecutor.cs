@@ -54,7 +54,7 @@ public sealed class ActionExecutor
     /// 按钮区域尺寸：根据文字大小自适应，确保覆盖整个按钮（含发光边框）。
     /// eFootball 按钮文字只占按钮中心一小部分，边框发光在文字外围，区域太小会漏检焦点。
     /// </summary>
-    private static NormRect ButtonRegion(OcrWord w)
+    internal static NormRect ButtonRegion(OcrWord w)
     {
         double rw = Math.Clamp(w.W * 8, 0.20, 0.42);
         double rh = Math.Clamp(w.H * 4, 0.08, 0.16);
@@ -66,14 +66,41 @@ public sealed class ActionExecutor
     /// <summary>
     /// 检测按钮焦点发光度：eFootball 聚焦按钮边框为青色/蓝色/亮白，
     /// 需同时检查 Blue | Cyan | Bright 三色滤镜，单用 Blue 会漏检青色焦点。
+    /// 注意：单按钮启发式，不区分"白底未聚焦按钮"（亮白天然高），
+    /// 多按钮弹窗内判定焦点必须用 <see cref="IsTargetFocused"/> + 其他按钮彩色分量竞争。
     /// </summary>
     internal double ButtonGlow(FrameData frame, OcrWord w)
     {
-        var r = ButtonRegion(w);
-        double blue = FrameAnalyzer.ColorRatio(frame, HsvFilter.Blue, r);
-        double cyan = FrameAnalyzer.ColorRatio(frame, HsvFilter.Cyan, r);
-        double bright = FrameAnalyzer.ColorRatio(frame, HsvFilter.Bright, r);
+        var (blue, cyan, bright) = ButtonGlows(frame, w);
         return Math.Max(blue, Math.Max(cyan, bright * 0.8));
+    }
+
+    /// <summary>按钮区域三色发光分量（Blue / Cyan / Bright）。</summary>
+    internal static (double Blue, double Cyan, double Bright) ButtonGlows(FrameData frame, OcrWord w)
+    {
+        var r = ButtonRegion(w);
+        return (FrameAnalyzer.ColorRatio(frame, HsvFilter.Blue, r),
+                FrameAnalyzer.ColorRatio(frame, HsvFilter.Cyan, r),
+                FrameAnalyzer.ColorRatio(frame, HsvFilter.Bright, r));
+    }
+
+    // 目标按钮被判定为已聚焦的发光度阈值
+    internal const double FocusedGlow = 0.12;
+    // 找到当前焦点的彩色发光度阈值（低于此值认为没检测到焦点）
+    internal const double FocusFoundGlow = 0.06;
+
+    /// <summary>
+    /// 目标按钮当前是否已聚焦（可直接按 A）。
+    /// 蓝/青彩色发光是硬信号；亮白不可单独采信——未聚焦按钮本身就可能是纯白底
+    /// （关键比赛弹窗的 OK：bright≈0.86 但无焦点，默认焦点在蓝色「取消」上，
+    /// 旧逻辑误判后按 A 恰好确认取消）。仅当屏幕上不存在其他彩色聚焦按钮时，亮白才作兜底。
+    /// </summary>
+    internal static bool IsTargetFocused(double blue, double cyan, double bright, double otherColorMax)
+    {
+        double color = Math.Max(blue, cyan);
+        if (color >= FocusedGlow) return true;
+        if (otherColorMax >= FocusedGlow) return false;
+        return bright * 0.8 >= FocusedGlow;
     }
 
     /// <summary>
@@ -86,10 +113,6 @@ public sealed class ActionExecutor
     {
         // 弹窗里常见可聚焦按钮词（用于定位"当前指针在哪"）
         string[] allButtons = { "ok", "确定", "确认", "取消", "下一步", "跳过", "返回", "是", "否", "yes", "no", "cancel", "skip", "next", "back" };
-        // 目标按钮被判定为已聚焦的发光度阈值
-        const double TargetFocused = 0.12;
-        // 找到当前焦点的发光度阈值（低于此值认为没检测到焦点）
-        const double FocusFound = 0.06;
 
         for (int move = 0; move < maxMoves; move++)
         {
@@ -108,35 +131,41 @@ public sealed class ActionExecutor
             }
             if (target is null) return false; // 目标都不在屏幕上
 
-            double tGlow = ButtonGlow(o.Frame, target);
+            var (tBlue, tCyan, tBright) = ButtonGlows(o.Frame, target);
 
-            // 目标按钮已聚焦：直接按 A
-            if (tGlow >= TargetFocused)
+            // 扫描其他候选按钮的彩色（蓝/青）焦点——白按钮 bright 天然高，不能当选焦点依据，
+            // 否则关键比赛弹窗会把白底 OK 当成焦点，按 A 点中默认聚焦的「取消」
+            OcrWord? colorFocus = null;
+            double otherColorMax = 0;
+            foreach (var kw in allButtons)
             {
-                _engine.LogInternal($"指针已在「{target.Text}」上（glow={tGlow:F2}），按 A", LogLevel.Debug);
+                foreach (var w in o.Ocr.FindButtonWords(kw))
+                {
+                    // 排除目标按钮自身（同一 OCR 词或位置重合）
+                    if (ReferenceEquals(w, target)
+                        || (Math.Abs(w.CenterX - target.CenterX) < 0.03 && Math.Abs(w.CenterY - target.CenterY) < 0.03))
+                        continue;
+                    var (b, c, _) = ButtonGlows(o.Frame, w);
+                    double color = Math.Max(b, c);
+                    if (color > otherColorMax) { otherColorMax = color; colorFocus = w; }
+                }
+            }
+
+            // 目标按钮已聚焦（彩色硬信号；无彩色竞争时亮白兜底）：直接按 A
+            if (IsTargetFocused(tBlue, tCyan, tBright, otherColorMax))
+            {
+                _engine.LogInternal($"指针已在「{target.Text}」上（b={tBlue:F2} c={tCyan:F2} w={tBright:F2}），按 A", LogLevel.Debug);
                 await _pad.Confirm();
                 await Task.Delay(600, ct);
                 return true;
             }
 
-            // 找当前焦点按钮：所有候选按钮中发光度最高者
-            OcrWord? focus = null;
-            double focusGlow = 0;
-            foreach (var kw in allButtons)
+            if (colorFocus is not null && otherColorMax >= FocusFoundGlow)
             {
-                foreach (var w in o.Ocr.FindButtonWords(kw))
-                {
-                    double g = ButtonGlow(o.Frame, w);
-                    if (g > focusGlow) { focusGlow = g; focus = w; }
-                }
-            }
-
-            if (focus is not null && focusGlow >= FocusFound && focus != target)
-            {
-                // 找到当前焦点：朝目标按钮移动
-                double dx = target.CenterX - focus.CenterX;
-                double dy = target.CenterY - focus.CenterY;
-                _engine.LogInternal($"移动指针：「{focus.Text}」→「{target.Text}」 dx={dx:F2} dy={dy:F2}", LogLevel.Debug);
+                // 找到彩色焦点在别的按钮上：朝目标按钮移动
+                double dx = target.CenterX - colorFocus.CenterX;
+                double dy = target.CenterY - colorFocus.CenterY;
+                _engine.LogInternal($"移动指针：「{colorFocus.Text}」→「{target.Text}」 dx={dx:F2} dy={dy:F2}", LogLevel.Debug);
 
                 if (Math.Abs(dx) < 0.05 && Math.Abs(dy) < 0.06)
                 {
