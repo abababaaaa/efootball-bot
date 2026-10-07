@@ -114,36 +114,68 @@ public sealed class BotEngine : IDisposable
 
                 if (targetScreen is { } ts)
                 {
-                    // 导航前处理可能存在的弹窗（如"物品使用中"）
-                    LogInternal("导航前检查弹窗", LogLevel.Info);
-                    var preObs = await ObserveAsync(token);
-                    if (preObs.Ocr.JoinedText.Contains("物品使用中"))
+                    // 启动第一步：先观察识别当前游戏内状态（什么画面/比赛阶段/流程），再决定入口。
+                    // 绝不盲目寻路——游戏中/赛后画面被寻路方向键打断会把流程搅乱
+                    LogInternal("启动检查：观察当前游戏内状态…", LogLevel.Info);
+                    var startObs = await ObserveAsync(token);
+                    var startState = MyLeague!.DetectCurrentState(startObs);
+                    LogInternal(
+                        $"启动状态：{startState}（探针 {startObs.Screen}，" +
+                        $"证据：{string.Join(" | ", startObs.Evidence.Take(3))}）", LogLevel.Info);
+
+                    // 比赛流程（赛前/比赛中/中场/全场结束/结果/奖励）与我的联赛内部页面：
+                    // 状态机本身按「观察→判断→操作」逐轮推进，从当前阶段直接接管
+                    bool inMatchFlow = startState is MyLeagueStateMachine.State.PreMatch
+                        or MyLeagueStateMachine.State.InMatch
+                        or MyLeagueStateMachine.State.HalfTime
+                        or MyLeagueStateMachine.State.FullTime
+                        or MyLeagueStateMachine.State.Result
+                        or MyLeagueStateMachine.State.Rewards;
+                    bool inMyLeague = startState is MyLeagueStateMachine.State.MyLeagueHome
+                        or MyLeagueStateMachine.State.Schedule
+                        or MyLeagueStateMachine.State.Exchange
+                        or MyLeagueStateMachine.State.Shop
+                        or MyLeagueStateMachine.State.Dialog
+                        or MyLeagueStateMachine.State.DifficultySelect
+                        or MyLeagueStateMachine.State.ConfirmDialog;
+
+                    if (inMatchFlow || inMyLeague)
                     {
-                        LogInternal("检测到「物品使用中」弹窗，点击 OK", LogLevel.Info);
-                        await Pad.Confirm();
-                        await Task.Delay(1500, token);
+                        LogInternal(inMatchFlow
+                            ? "检测到处于比赛流程中，跳过寻路，状态机从当前比赛阶段直接接管"
+                            : "检测到处于我的联赛页面，跳过寻路，状态机直接接管", LogLevel.Info);
+                    }
+                    else
+                    {
+                        // 未识别画面：可能是转场加载/标题画面，等待一拍再确认一次，仍不明才寻路
+                        await Task.Delay(2500, token);
+                        var reObs = await ObserveAsync(token);
+                        var reState = MyLeague.DetectCurrentState(reObs);
+                        LogInternal($"二次确认：{reState}（探针 {reObs.Screen}）", LogLevel.Info);
+
+                        if (reState == MyLeagueStateMachine.State.Unknown)
+                        {
+                            LogInternal($"开始智能寻路：任意画面 → {ScreenName(ts)}", LogLevel.Info);
+                            var navResult = await GoToAsync(ts.ToString(), null, token);
+                            LogInternal(navResult.Ok
+                                ? $"寻路成功，已到达{ScreenName(ts)}"
+                                : $"寻路结束未到达目标（{navResult.Outcome}）：{navResult.Message}",
+                                navResult.Ok ? LogLevel.Success : LogLevel.Warn);
+                        }
+                        else
+                        {
+                            LogInternal("二次确认已识别到我的联赛/比赛画面，跳过寻路", LogLevel.Info);
+                        }
                     }
 
-                    LogInternal($"开始智能寻路：任意画面 → {ScreenName(ts)}", LogLevel.Info);
-                    var navResult = await GoToAsync(ts.ToString(), null, token);
-                    LogInternal(navResult.Ok
-                        ? $"寻路成功，已到达{ScreenName(ts)}"
-                        : $"寻路结束未到达目标（{navResult.Outcome}）：{navResult.Message}",
-                        navResult.Ok ? LogLevel.Success : LogLevel.Warn);
-
-                    // M1：进入我的联赛状态机（无论导航成功与否，从当前页面开始）
-                    if (ts == GameScreen.MyLeagueHome && MyLeague is not null)
+                    // 进入我的联赛状态机（无论是否经过寻路，从当前页面开始逐轮观察决策）。
+                    // 每次启动新建实例：道具检查/赛后过渡等状态不跨启停残留
+                    LogInternal("进入我的联赛状态机", LogLevel.Info);
+                    var stateMachine = new MyLeagueStateMachine(this);
+                    while (!token.IsCancellationRequested)
                     {
-                        if (!navResult.Ok)
-                            LogInternal($"导航未到达目标（{navResult.Outcome}），状态机从当前页面接管", LogLevel.Warn);
-
-                        LogInternal("进入我的联赛状态机", LogLevel.Info);
-                        var stateMachine = new MyLeagueStateMachine(this);
-                        while (!token.IsCancellationRequested)
-                        {
-                            var (state, delayMs) = await stateMachine.RunOnceAsync(token);
-                            await Task.Delay(delayMs, token);
-                        }
+                        var (state, delayMs) = await stateMachine.RunOnceAsync(token);
+                        await Task.Delay(delayMs, token);
                     }
                 }
                 else

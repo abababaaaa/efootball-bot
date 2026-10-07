@@ -36,6 +36,9 @@ public sealed class MyLeagueStateMachine
         Dialog,             // 通用弹窗
     }
 
+    /// <summary>启动时评估当前画面所处状态（状态/比赛阶段/流程），供引擎决定入口动作。</summary>
+    public State DetectCurrentState(EfootballBot.Core.Bot.Observation obs) => DetectState(obs);
+
     /// <summary>执行一轮状态机：观察 → 判断 → 操作。返回状态与建议轮询间隔（毫秒）。</summary>
     public async Task<(State State, int DelayMs)> RunOnceAsync(CancellationToken ct)
     {
