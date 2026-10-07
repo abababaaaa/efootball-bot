@@ -48,6 +48,18 @@ public sealed class MyLeagueStateMachine
 
         _engine.LogInternal($"状态机：{state}（{obs.Screen}）", LogLevel.Debug);
 
+        // 主页闸门：画面已是干净主页（主页双卡词齐 + 无弹窗遮罩）时，绝不允许任何比赛
+        // 推进状态执行。「下一步/前往比赛」等转场残留词会把主页误判成 PreMatch/FullTime，
+        // 随后的节奏 A/锚定点击会命中主页默认高光「前往比赛」直接开赛，错过道具检查；
+        // 赛后「下一步」点完回主页的最后一按同理。闸住后从主页流程重新开始（含道具检查）
+        if ((state is State.PreMatch or State.InMatch or State.HalfTime
+                or State.Result or State.Rewards or State.FullTime)
+            && IsHomePage(obs))
+        {
+            _engine.LogInternal("画面已是干净主页，终止比赛推进（防误点「前往比赛」错过道具检查）", LogLevel.Info);
+            state = State.MyLeagueHome;
+        }
+
         switch (state)
         {
             case State.MyLeagueHome:
@@ -171,29 +183,30 @@ public sealed class MyLeagueStateMachine
         // 页面判断
         if (obs.Screen == GameScreen.MyLeagueHome)
         {
-            // 探针误判防线（实测：赛前阵容/列队画面仅凭弱词命中 3.5 分误判主页，
-            // 导致物品检查必然失败连环重试直至停机、或在错误画面盲点「前往比赛」）：
-            // 主页必须「前往比赛」+「赛程表」双卡词同时在场，词不齐一律不认，
-            // 落到后续分支（多为 Unknown 兜底：有蓝按钮按 A 推进过场，无按钮等待）
-            bool homeWords = text.Contains("前往比赛") && text.Contains("赛程表");
-            if (!homeWords)
-            {
-                _engine.LogInternal($"探针判主页但双卡词不齐（OCR 前 30 字：{text[..Math.Min(30, text.Length)]}），按误判丢弃", LogLevel.Warn);
-            }
             // 回到主页优先清弹窗：主页上覆盖模态弹窗（如物品已过期）时探针可能仍判主页。
             // 必须同时满足「浅色弹窗遮罩 + 中部蓝按钮」，避免深色主页 UI 被误判成弹窗后永远进不了主页
-            else if (FrameAnalyzer.HasModalOverlay(obs.Frame)
+            if (FrameAnalyzer.HasModalOverlay(obs.Frame)
                 && FrameAnalyzer.FindBlueDialogButton(obs.Frame, out _))
                 return State.Dialog;
-            else
-                return State.MyLeagueHome;
+            return State.MyLeagueHome;
         }
 
         if (obs.Screen == GameScreen.Schedule)
             return State.Schedule;
 
         if (obs.Screen == GameScreen.PreMatch)
-            return State.PreMatch;
+        {
+            // 赛前页必须命中专属词才采信：「下一步/前往比赛/难度」是跨页词，
+            // 主页/赛后转场残留词会单独喂够 PreMatch 分数，随后节奏 A 命中主页默认
+            // 高光「前往比赛」直接开赛，错过道具检查（真机 17:03 实录）
+            bool preMatchSpecific = text.Contains("开始比赛") || text.Contains("选择比赛难度")
+                || text.Contains("比赛条件") || text.Contains("选手操作")
+                || text.Contains("首发阵容") || text.Contains("matchconditions")
+                || text.Contains("playeroperations") || text.Contains("difficulty");
+            if (preMatchSpecific)
+                return State.PreMatch;
+            _engine.LogInternal("探针判 PreMatch 但无赛前专属词，不采信（防主页被误判开赛）", LogLevel.Debug);
+        }
 
         // 赛后过渡期间：探针/hold 的「比赛中」一律不采信（FullTime 之后不应存在比赛中），
         // 落到后续分支——弹窗词→Dialog、主页→道具检查、无词过场→Unknown 兜底按蓝按钮跳过

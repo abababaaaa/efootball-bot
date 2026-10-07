@@ -331,6 +331,10 @@ public static class PageCatalog
             Priority = 50,
             Probes = new EfootballBot.Core.Probe.Probe[]
             {
+                // 「首发阵容」：比赛开始时显示的阵容展示页专属词（实测 OCR 前 30 字
+                // eFootball/GöztepeSK/首发阵容/球员名），主页/赛后转场均无此词。
+                // 2.5 单词即可达标——否则该画面曾因无词被丢弃成 Unknown 靠蓝按钮碰运气
+                new OcrProbe { Text = "首发阵容", Weight = 2.5 },
                 new OcrProbe { Text = "开始比赛", Weight = 2.5 },
                 new OcrProbe { Text = "下一步", Weight = 2.5 },
                 new OcrProbe { Text = "前往比赛", Weight = 2.5 },
