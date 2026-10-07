@@ -10,13 +10,16 @@ namespace EfootballBot.Ipc;
 /// <summary>
 /// GUI 侧 Worker 管理器：启动本 exe 的 --worker 子进程，通过命名管道通信。
 /// 崩溃/断开时触发 <see cref="Disconnected"/> 事件。
+/// 所有启停操作由 <see cref="_lifecycle"/> 串行化，快速连续点击开始/停止不会竞态。
 /// </summary>
 public sealed class WorkerHost : IDisposable
 {
+    private readonly SemaphoreSlim _lifecycle = new(1, 1);
     private Process? _process;
     private NamedPipeClientStream? _pipe;
     private CancellationTokenSource? _readCts;
     private BotStats _lastStats = new();
+    private bool _disposed;
 
     public event Action<string, string>? Log;           // level, msg
     public event Action<BotStats>? StatsChanged;
@@ -30,15 +33,38 @@ public sealed class WorkerHost : IDisposable
     public bool IsRunning => _process is { HasExited: false };
     public BotStats LastStats => _lastStats;
 
-    /// <summary>启动 Worker 子进程并建立管道连接。</summary>
+    /// <summary>启动 Worker 子进程并建立管道连接（与 StopAsync 互斥，重入时排队等待）。</summary>
     public async Task StartAsync(string mode)
     {
-        if (_process is not null && !_process.HasExited)
+        await _lifecycle.WaitAsync();
+        try
         {
-            // Worker 已在跑，直接发 start 命令
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            await StartInternalAsync(mode);
+        }
+        catch
+        {
+            // 任何失败（连接超时/握手失败/NRE）都必须回收残留子进程与句柄，
+            // 否则孤儿 Worker 会让下一次点击走进"进程还在但管道没连上"的死分支
+            await TeardownAsync(killIfAlive: true);
+            throw;
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    private async Task StartInternalAsync(string mode)
+    {
+        // 已在跑且管道健康：直接发 start。管道为空说明是上次失败残留的孤儿，走下方重建
+        if (_process is { HasExited: false } && _pipe is { IsConnected: true })
+        {
             await SendAsync(PipeProtocol.CmdStart(mode));
             return;
         }
+        if (_process is not null)
+            await TeardownAsync(killIfAlive: true);
 
         string exePath = Process.GetCurrentProcess().MainModule?.FileName
             ?? throw new InvalidOperationException("无法获取当前 exe 路径");
@@ -52,8 +78,9 @@ public sealed class WorkerHost : IDisposable
             CreateNoWindow = true,
         };
 
-        _process = Process.Start(psi)
+        var process = Process.Start(psi)
             ?? throw new InvalidOperationException("无法启动 Worker 子进程");
+        _process = process;
 
         // 等待 Worker 建立管道服务器。单文件自包含 exe 冷启动需解压（可能 10s+），给足 30s。
         // 关键：超时的 ConnectAsync 残留底层 CreateFile，可能被服务器"幽灵授予"，
@@ -65,8 +92,9 @@ public sealed class WorkerHost : IDisposable
 
         while (sw.ElapsedMilliseconds < 30000)
         {
-            if (_process.HasExited)
-                throw new InvalidOperationException($"Worker 进程已退出（代码 {_process.ExitCode}）。{ReadWorkerError()}");
+            if (process.HasExited)
+                throw new InvalidOperationException(
+                    $"Worker 进程已退出（代码 {process.ExitCode}）。{ReadWorkerError()}");
 
             if (!PipeExists(pipeName))
             {
@@ -114,21 +142,24 @@ public sealed class WorkerHost : IDisposable
         if (connectedPipe is null || reader is null)
             throw new InvalidOperationException(
                 $"无法连接到 Worker 命名管道（30s 超时，管道名 {pipeName}，最后错误：{lastConnectError?.Message}）。{ReadWorkerError()}");
+        if (process.HasExited)
+            throw new InvalidOperationException(
+                $"握手后 Worker 进程已退出（代码 {process.ExitCode}）。{ReadWorkerError()}");
 
         _pipe = connectedPipe;
-        Log?.Invoke("Info", $"Worker 管道已连接（耗时 {sw.ElapsedMilliseconds}ms），发送启动命令…");
+        var readCts = new CancellationTokenSource();
+        _readCts = readCts;
+        EmitLog("Info", $"Worker 管道已连接（耗时 {sw.ElapsedMilliseconds}ms），发送启动命令…");
 
-        _readCts = new CancellationTokenSource();
-
-        // 读循环：复用握手 reader 接收 Worker 事件
-        _ = PipeProtocol.ReadLoopAsync(reader, async msg =>
+        // 读循环：复用握手 reader 接收 Worker 事件。回调内任何异常吞掉，绝不让它冒到 StartAsync
+        _ = PipeProtocol.ReadLoopAsync(reader, msg =>
         {
             try
             {
                 switch (msg.Ev)
                 {
                     case "log":
-                        Log?.Invoke(msg.Level ?? "Info", msg.Text ?? "");
+                        EmitLog(msg.Level ?? "Info", msg.Text ?? "");
                         break;
                     case "stats":
                         _lastStats.MatchesDone = msg.Matches;
@@ -158,23 +189,20 @@ public sealed class WorkerHost : IDisposable
                         break;
                 }
             }
-            catch { /* 事件回调异常不中断读循环 */ }
-        }, _readCts.Token);
+            catch { /* 事件回调异常不中断读循环，也不冒出调用方 */ }
+            return Task.CompletedTask;
+        }, readCts.Token);
 
-        // 看门狗：监控进程退出
+        // 看门狗：局部捕获 process，Stop/Cleanup 置空字段也不会 NRE
         _ = Task.Run(async () =>
         {
             try
             {
-                if (_process is not null)
-                    await _process.WaitForExitAsync();
+                await process.WaitForExitAsync();
             }
             catch { }
-            finally
-            {
-                _readCts?.Cancel();
-                Disconnected?.Invoke();
-            }
+            try { readCts.Cancel(); } catch { }
+            try { Disconnected?.Invoke(); } catch { }
         });
 
         // 发送 start 命令
@@ -184,24 +212,49 @@ public sealed class WorkerHost : IDisposable
     /// <summary>发送 stop 命令，等待 5s 后若仍在跑则 Kill。</summary>
     public async Task StopAsync()
     {
+        await _lifecycle.WaitAsync();
+        try
+        {
+            await TeardownAsync(killIfAlive: true);
+        }
+        finally
+        {
+            _lifecycle.Release();
+        }
+    }
+
+    /// <summary>回收当前会话：发 stop → 等退出（5s）→ Kill 兜底 → 取消读循环 → 释放句柄。幂等。</summary>
+    private async Task TeardownAsync(bool killIfAlive)
+    {
         if (_pipe is { IsConnected: true })
         {
             try { await SendAsync(PipeProtocol.CmdStop()); }
             catch { }
         }
 
-        if (_process is not null && !_process.HasExited)
+        var process = _process;
+        if (process is not null && !process.HasExited)
         {
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            try { await _process.WaitForExitAsync(cts.Token); }
+            try { await process.WaitForExitAsync(cts.Token); }
             catch (OperationCanceledException)
             {
-                try { _process.Kill(); } catch { }
+                if (killIfAlive)
+                    try { process.Kill(); } catch { }
             }
         }
 
-        _readCts?.Cancel();
-        Cleanup();
+        try { _readCts?.Cancel(); } catch { }
+        try { _pipe?.Dispose(); } catch { }
+        _pipe = null;
+        try { process?.Dispose(); } catch { }
+        _process = null;
+        _readCts = null;
+    }
+
+    private void EmitLog(string level, string text)
+    {
+        try { Log?.Invoke(level, text); } catch { /* 订阅方异常不影响管道流程 */ }
     }
 
     /// <summary>发送预览开关命令。</summary>
@@ -243,18 +296,23 @@ public sealed class WorkerHost : IDisposable
         await PipeProtocol.WriteLineAsync(_pipe, msg);
     }
 
-    private void Cleanup()
-    {
-        try { _pipe?.Dispose(); } catch { }
-        _pipe = null;
-        try { _process?.Dispose(); } catch { }
-        _process = null;
-    }
-
     public void Dispose()
     {
-        try { _readCts?.Cancel(); } catch { }
-        try { _process?.Kill(); } catch { }
-        Cleanup();
+        if (_disposed) return;
+        _disposed = true;
+        try
+        {
+            // Dispose 可能在信号量被占用时调用，不等锁，直接硬回收
+            try { _readCts?.Cancel(); } catch { }
+            try { _process?.Kill(); } catch { }
+            try { _pipe?.Dispose(); } catch { }
+            try { _process?.Dispose(); } catch { }
+            _pipe = null;
+            _process = null;
+        }
+        finally
+        {
+            _lifecycle.Dispose();
+        }
     }
 }
