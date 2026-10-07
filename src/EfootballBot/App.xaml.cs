@@ -246,6 +246,7 @@ public partial class App : Application
         Console.WriteLine($"JoinedText = {ocr.JoinedText}");
 
         Console.WriteLine($"RT蓝横幅={FrameAnalyzer.FindRtBanner(frame, out double bannerCy)}（cy={bannerCy:F3}）");
+        Console.WriteLine($"蓝色推进按钮={FrameAnalyzer.FindBlueAdvanceButton(frame, out double advCy)}（cy={advCy:F3}）");
         var skipCheckRoi = new NormRect(0.945, 0.021, 0.050, 0.110);
         int skipGreen = FrameAnalyzer.CountBrightGreen(frame, skipCheckRoi);
         var hudWords = ocr.Words
