@@ -60,12 +60,11 @@ public sealed class MyLeagueStateMachine
                 await HandleConfirmDialogAsync(obs, ct);
                 break;
 
-            // ---- 比赛全流程（赛前开始点 / 比赛中 / 中场 / 全场 / 结果 / 奖励）----
+            // ---- 比赛全流程（赛前开始点 / 比赛中 / 中场 / 结果 / 奖励）----
             // 通用模块：右下角蓝色推进按钮立即响应；无按钮时按挂机节奏随机轻按 A
             case State.PreMatch:
             case State.InMatch:
             case State.HalfTime:
-            case State.FullTime:
             case State.Result:
             case State.Rewards:
             {
@@ -73,6 +72,11 @@ public sealed class MyLeagueStateMachine
                 delayMs = matchDelay;
                 break;
             }
+
+            // 全场结束终点页：比赛流程的结束点，专用处理（锚定「下一步」再点击）
+            case State.FullTime:
+                await HandleFullTimeAsync(obs, ct);
+                break;
 
             case State.Exchange:
                 await HandleExchangeAsync(obs, ct);
@@ -105,7 +109,14 @@ public sealed class MyLeagueStateMachine
 
         // 最高优先级：顶部 AI 代打图标 = 正常比赛中（国际服/国服通用，位置全顶条带扫描；
         // 有图标时 AI 正在操作，按 A 安全，且可纠正探针因左上角图标/文字变化导致的误判）
-        if (FrameAnalyzer.FindAiControlIcon(obs.Frame, out double iconX, out double iconY))
+        // 例外：全场结束终点页及其后（RS 翻页/经验/奖励/回主页）顶栏可能残留 AI 图标，
+        // 出现赛后/菜单特征词时一律忽略——这些页面绝不允许记为比赛中（智能启停/统计同理）
+        bool afterMatchEnd = text.Contains("球员评价")
+            || text.Contains("下一步") || text.Contains("下ー步")
+            || text.Contains("最佳球员") || text.Contains("球员经验")
+            || text.Contains("获得奖励") || text.Contains("前往比赛")
+            || text.Contains("赛程表") || text.Contains("比赛计划");
+        if (!afterMatchEnd && FrameAnalyzer.FindAiControlIcon(obs.Frame, out double iconX, out double iconY))
         {
             // 右侧顶栏图标区（实测真图标 cx≈0.935）无条件采信；
             // 左侧命中只可能是「国服错版」，必须探针也判比赛类页面——
@@ -244,6 +255,27 @@ public sealed class MyLeagueStateMachine
     private int _itemCheckFails = 0;
     /// <summary>上一轮状态机状态，用于「刚回到主页」边沿触发道具检查。</summary>
     private State _lastState = State.Unknown;
+
+    /// <summary>
+    /// 全场结束终点页（比赛流程结束点，RS 第 1 屏）：左列固定双卡「下一步」(上,白) /
+    /// 「建议」(下,黑)。比分/球员名/队名/队徽全部可变，不作识别与操作依据。
+    /// 焦点可能因 RS 翻页或上一屏遗留而漂移——高光不在「下一步」即为错误状态：
+    /// 每轮先 上×2+左×1 夹紧回左上初始位（高光已在「下一步」上时全部为无害夹紧输入），
+    /// 再按 A 点击「下一步」推进到下一屏；连续多轮推进直到离开本页组。
+    /// </summary>
+    private async Task HandleFullTimeAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
+    {
+        _engine.LogInternal("全场结束：锚定高光到「下一步」并点击推进", LogLevel.Info);
+        for (int i = 0; i < 2; i++)
+        {
+            await _engine.Pad.Dpad(PadDir.Up);
+            await Task.Delay(MenuMoveMs, ct);
+        }
+        await _engine.Pad.Dpad(PadDir.Left);
+        await Task.Delay(MenuMoveMs, ct);
+        await _engine.Pad.Confirm();
+        await Task.Delay(2000, ct);
+    }
 
     /// <summary>赛程表：选择比赛。</summary>
     private async Task HandleScheduleAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)

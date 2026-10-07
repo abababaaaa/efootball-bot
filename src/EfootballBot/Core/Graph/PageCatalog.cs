@@ -221,15 +221,22 @@ public static class PageCatalog
 
         new PageDef
         {
+            // 全场结束终点页（RS 第 1 屏）：比分板「全场」+ 左列固定双卡「下一步」(白)/「建议」(黑)。
+            // 比分/球员名/队名/队徽全部可变，不作探针；左列双卡词是此页专属特征
+            //（主页只有「建议」没有「下一步」），两词共现才可达 MinScore，单词不触发。
+            // 此页必须强判出：它是 holdMatch 的强退出信号，判不出会把赛后一直 hold 成比赛中。
             Screen = GameScreen.FullTime,
-            MinScore = 2,
+            MinScore = 2.4,
             Priority = 80,
             Probes = new EfootballBot.Core.Probe.Probe[]
             {
                 new OcrProbe { Text = "全场比赛结束", Weight = 2.5 },
-                new OcrProbe { Text = "比赛结束", Weight = 2 },
+                new OcrProbe { Text = "比赛结束", Weight = 2.5 },
                 new OcrProbe { Text = "fulltime", Weight = 2.5 },
                 new OcrProbe { Text = "matchended", Weight = 2 },
+                new OcrProbe { Text = "下一步", Weight = 1.2 },
+                new OcrProbe { Text = "建议", Weight = 1.2 },
+                new OcrProbe { Text = "球员评价", Weight = 2.5 },
             }
         },
 
