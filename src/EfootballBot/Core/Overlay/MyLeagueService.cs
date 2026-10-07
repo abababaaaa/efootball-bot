@@ -179,12 +179,28 @@ public sealed class MyLeagueStateMachine
             _engine.LogInternal("检测到一场比赛结束，重新检查消耗品", LogLevel.Info);
         }
 
-        // 1. 检查物品（只检查一次）
+        // 1. 检查物品：必须确认成功才放行；失败下一轮重试，连续失败超上限则停机（绝不裸奔开赛）
         if (!_itemsChecked)
         {
             _engine.LogInternal("我的联赛主页：检查物品", LogLevel.Info);
-            await EnsureItemsAsync(ct);
-            _itemsChecked = true;
+            bool ok = await EnsureItemsAsync(ct);
+            if (ok)
+            {
+                _itemsChecked = true;
+                _itemCheckFails = 0;
+            }
+            else
+            {
+                _itemCheckFails++;
+                if (_itemCheckFails >= MaxItemCheckFails)
+                {
+                    _engine.LogInternal(
+                        $"物品检查连续 {_itemCheckFails} 次未完成，停止挂机以防无道具开赛，请人工检查后重新启动",
+                        LogLevel.Error);
+                    throw new InvalidOperationException("物品检查连续失败，已停止挂机（防止无道具进入比赛）");
+                }
+                _engine.LogInternal($"物品检查未完成（第 {_itemCheckFails}/{MaxItemCheckFails} 次），稍后重试，本轮不进入比赛", LogLevel.Warn);
+            }
             return;
         }
 
@@ -256,17 +272,35 @@ public sealed class MyLeagueStateMachine
             }
         }
 
+        // 硬门控：任何情况下未确认道具齐全都不允许开赛
+        if (!_itemsChecked)
+        {
+            _engine.LogInternal("道具尚未确认齐全，跳过本轮开赛", LogLevel.Warn);
+            return;
+        }
+
         _engine.LogInternal("高光已在「前往比赛」，按 A 进入", LogLevel.Info);
         await _engine.Pad.Confirm();
         await Task.Delay(2500, ct);
     }
 
+    private const int MaxItemCheckFails = 8;
     private bool _itemsChecked = false;
+    private int _itemCheckFails = 0;
     private bool _wasInMatch = false;
 
     /// <summary>赛程表：选择比赛。</summary>
     private async Task HandleScheduleAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
     {
+        // 门控：未完成道具确认（如启动时直接停在赛程表）时，退回主页先清弹窗、检查道具
+        if (!_itemsChecked)
+        {
+            _engine.LogInternal("赛程表：尚未完成道具检查，按 B 退回主页先走「弹窗→道具」流程", LogLevel.Warn);
+            await _engine.Pad.Back();
+            await Task.Delay(1500, ct);
+            return;
+        }
+
         _engine.LogInternal("赛程表：选择比赛", LogLevel.Info);
         await _engine.Pad.Confirm();
         await Task.Delay(2000, ct);
@@ -542,14 +576,17 @@ public sealed class MyLeagueStateMachine
         }
     }
 
-    /// <summary>检查我的联赛主页"使用的物品"面板。</summary>
-    private async Task EnsureItemsAsync(CancellationToken ct)
+    /// <summary>
+    /// 检查并补齐消耗品。返回 true 表示「已确认配置物品都在使用中」或「购买流程已执行完」，
+    /// 可以进入比赛；false 表示未能完成确认（面板切换失败 / 购买导航失败），调用方不得放行开赛。
+    /// </summary>
+    private async Task<bool> EnsureItemsAsync(CancellationToken ct)
     {
         // 切换到"使用的物品"面板
         if (!await SwitchToUsedItemsPanelAsync(ct))
         {
-            _engine.LogInternal("未能切换到「使用的物品」面板，跳过物品检查", LogLevel.Warn);
-            return;
+            _engine.LogInternal("未能切换到「使用的物品」面板，本轮物品检查未完成（禁止放行开赛）", LogLevel.Warn);
+            return false;
         }
 
         // OCR 检查 3 个物品
@@ -566,7 +603,7 @@ public sealed class MyLeagueStateMachine
         if (missing.Count == 0)
         {
             _engine.LogInternal("所有自动购买物品都在使用中", LogLevel.Success);
-            return;
+            return true;
         }
 
         _engine.LogInternal($"缺失物品：{string.Join("、", missing)}，准备进入兑换积分购买", LogLevel.Warn);
@@ -576,11 +613,12 @@ public sealed class MyLeagueStateMachine
         {
             _engine.LogInternal("已到达兑换积分页面，开始购买缺失物品", LogLevel.Info);
             await BuyMissingItemsAsync(missing, ct);
+            // 购买序列已执行（含返回主页），信任购买结果放行；下一场结束会重新检查
+            return true;
         }
-        else
-        {
-            _engine.LogInternal("导航到兑换积分失败", LogLevel.Error);
-        }
+
+        _engine.LogInternal("导航到兑换积分失败，本轮物品检查未完成（禁止放行开赛）", LogLevel.Error);
+        return false;
     }
 
     /// <summary>切换到"使用的物品"面板（RsFlick Right）。</summary>
