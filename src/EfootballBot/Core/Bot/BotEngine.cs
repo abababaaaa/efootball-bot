@@ -141,11 +141,8 @@ public sealed class BotEngine : IDisposable
                         var stateMachine = new MyLeagueStateMachine(this);
                         while (!token.IsCancellationRequested)
                         {
-                            var state = await stateMachine.RunOnceAsync(token);
-                            if (state == MyLeagueStateMachine.State.Unknown)
-                                await Task.Delay(1000, token);
-                            else
-                                await Task.Delay(500, token);
+                            var (state, delayMs) = await stateMachine.RunOnceAsync(token);
+                            await Task.Delay(delayMs, token);
                         }
                     }
                 }

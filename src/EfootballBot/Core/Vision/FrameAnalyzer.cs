@@ -234,6 +234,48 @@ public static class FrameAnalyzer
     }
 
     /// <summary>
+    /// 检测右下角蓝色「推进」大按钮（赛前/中场/全场/结果/奖励等流程页的
+    /// 「下一步 / 确定 / OK / 跳过」，国际服国服样式一致，不依赖文字）。
+    /// 搜索区限定右下 x 0.77~0.995、y 0.88~0.995；蓝色判定同 ButtonBlueRatio
+    /// （B−R≥45、B−G≥25、B≥90）；要求行内蓝占比≥0.22 的支撑行纵向跨度≥0.03 屏高，
+    /// 排除比赛 HUD 中零散蓝色元素。命中时 cy 为按钮纵向中心（帧归一化）。
+    /// </summary>
+    public static bool FindBlueAdvanceButton(FrameData f, out double cy)
+    {
+        if (f.Bgra.Length == 0) { cy = 0; return false; }
+        int xFrom = (int)(0.77 * f.Width);
+        int yFrom = (int)(0.88 * f.Height);
+        int spanNeeded = (int)(0.03 * f.Height);
+        var b = f.Bgra;
+
+        int top = -1, bottom = -1;
+        for (int y = yFrom; y < f.Height; y += 2)
+        {
+            int blue = 0, n = 0;
+            int row = y * f.Width * 4;
+            for (int x = xFrom; x < f.Width; x += 2)
+            {
+                int i = row + x * 4;
+                int rr = b[i + 2], gg = b[i + 1], bb = b[i];
+                n++;
+                if (bb - rr >= 45 && bb - gg >= 25 && bb >= 90) blue++;
+            }
+            if (n > 0 && blue / (double)n >= 0.22)
+            {
+                if (top < 0) top = y;
+                bottom = y;
+            }
+        }
+        if (top >= 0 && bottom - top >= spanNeeded)
+        {
+            cy = (top + bottom) / 2.0 / f.Height;
+            return true;
+        }
+        cy = 0;
+        return false;
+    }
+
+    /// <summary>
     /// 统计区域内「亮绿」像素数（逐像素）：G≥150 且 G−R≥80 且 G−B≥60。
     /// 用于右上 HUD「跳过比赛」绿色圆勾检测——真机实测圆勾 RGB(50,200,90)，
     /// 草皮 (72,108,52) 暗、黄色广告牌 R 高，均被排除；绿"1"数字仅约 30 个稀疏散点。

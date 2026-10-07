@@ -1,6 +1,7 @@
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Graph;
 using EfootballBot.Core.Input;
+using EfootballBot.Core.Match;
 using EfootballBot.Core.Vision;
 
 namespace EfootballBot.Core.Overlay;
@@ -10,11 +11,13 @@ public sealed class MyLeagueStateMachine
 {
     private readonly BotEngine _engine;
     private readonly FocusGraph _focusGraph;
+    private readonly MatchFlowService _matchFlow;
 
     public MyLeagueStateMachine(BotEngine engine)
     {
         _engine = engine;
         _focusGraph = MyLeagueHomeGraph.Build();
+        _matchFlow = new MatchFlowService(engine);
     }
 
     /// <summary>场景状态枚举。</summary>
@@ -36,11 +39,12 @@ public sealed class MyLeagueStateMachine
         Dialog,             // 通用弹窗
     }
 
-    /// <summary>执行一轮状态机：观察 → 判断 → 操作。</summary>
-    public async Task<State> RunOnceAsync(CancellationToken ct)
+    /// <summary>执行一轮状态机：观察 → 判断 → 操作。返回状态与建议轮询间隔（毫秒）。</summary>
+    public async Task<(State State, int DelayMs)> RunOnceAsync(CancellationToken ct)
     {
         var obs = await _engine.ObserveAsync(ct);
         var state = DetectState(obs);
+        int delayMs = 600;
 
         _engine.LogInternal($"状态机：{state}（{obs.Screen}）", LogLevel.Debug);
 
@@ -58,18 +62,23 @@ public sealed class MyLeagueStateMachine
             case State.ConfirmDialog:
                 await HandleConfirmDialogAsync(obs, ct);
                 break;
+
+            // ---- 比赛全流程（赛前开始点 / 比赛中 / 中场 / 全场 / 结果 / 奖励）----
+            // 通用模块：右下角蓝色推进按钮最高优先级，无按钮则等待（AI 代打 / 过场播放）
             case State.PreMatch:
-                await HandlePreMatchAsync(obs, ct);
-                break;
             case State.InMatch:
-                await HandleInMatchAsync(obs, ct);
-                break;
+            case State.HalfTime:
+            case State.FullTime:
             case State.Result:
-                await HandleResultAsync(obs, ct);
-                break;
             case State.Rewards:
-                await HandleRewardsAsync(obs, ct);
+            {
+                _wasInMatch = true; // 标记正在/曾在比赛流程，回到主页后需重新检查消耗品
+                var phase = await _matchFlow.RunOnceAsync(ct);
+                // 比赛/过场等待时拉长轮询间隔，降低 OCR 开销
+                delayMs = phase == MatchPhase.Waiting ? 3000 : 600;
                 break;
+            }
+
             case State.Exchange:
                 await HandleExchangeAsync(obs, ct);
                 break;
@@ -79,12 +88,18 @@ public sealed class MyLeagueStateMachine
             case State.Dialog:
                 await HandleDialogAsync(obs, ct);
                 break;
+
             default:
-                _engine.LogInternal($"未知状态，等待观察", LogLevel.Debug);
+            {
+                // 未知画面兜底：左上角队徽/文字变化会导致探针判错，
+                // 但右下角蓝色推进按钮是跨页面稳定锚点，照样尝试推进
+                var fallbackPhase = await _matchFlow.RunOnceAsync(ct);
+                delayMs = fallbackPhase == MatchPhase.Waiting ? 1200 : 600;
                 break;
+            }
         }
 
-        return state;
+        return (state, delayMs);
     }
 
     /// <summary>检测当前状态。</summary>
@@ -143,6 +158,14 @@ public sealed class MyLeagueStateMachine
     /// <summary>我的联赛主页：检查物品、进入比赛。</summary>
     private async Task HandleMyLeagueHomeAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
     {
+        // 一场比赛结束回到主页：消耗品（4x经验/杰出状态/教练强化）每场都要重新检查
+        if (_wasInMatch)
+        {
+            _wasInMatch = false;
+            _itemsChecked = false;
+            _engine.LogInternal("检测到一场比赛结束，重新检查消耗品", LogLevel.Info);
+        }
+
         // 1. 检查物品（只检查一次）
         if (!_itemsChecked)
         {
@@ -226,6 +249,7 @@ public sealed class MyLeagueStateMachine
     }
 
     private bool _itemsChecked = false;
+    private bool _wasInMatch = false;
 
     /// <summary>赛程表：选择比赛。</summary>
     private async Task HandleScheduleAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
@@ -363,38 +387,6 @@ public sealed class MyLeagueStateMachine
         _engine.LogInternal("确认弹窗：上移高光并点击", LogLevel.Info);
         await _engine.Pad.Dpad(PadDir.Up);
         await Task.Delay(300, ct);
-        await _engine.Pad.Confirm();
-        await Task.Delay(2000, ct);
-    }
-
-    /// <summary>赛前准备：等待或跳过。</summary>
-    private async Task HandlePreMatchAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
-    {
-        _engine.LogInternal("赛前准备：等待比赛开始", LogLevel.Info);
-        // 可按 A 跳过等待
-        await _engine.Pad.Confirm();
-        await Task.Delay(2000, ct);
-    }
-
-    /// <summary>比赛中：AI 代打，不操作。</summary>
-    private async Task HandleInMatchAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
-    {
-        _engine.LogInternal("比赛中：AI 代打，等待结束", LogLevel.Debug);
-        await Task.Delay(5000, ct); // 比赛中每 5 秒观察一次
-    }
-
-    /// <summary>比赛结果：按 A 进入奖励结算。</summary>
-    private async Task HandleResultAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
-    {
-        _engine.LogInternal("比赛结果：按 A 继续", LogLevel.Info);
-        await _engine.Pad.Confirm();
-        await Task.Delay(2000, ct);
-    }
-
-    /// <summary>奖励结算：按 A 领取奖励。</summary>
-    private async Task HandleRewardsAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
-    {
-        _engine.LogInternal("奖励结算：按 A 领取", LogLevel.Info);
         await _engine.Pad.Confirm();
         await Task.Delay(2000, ct);
     }
