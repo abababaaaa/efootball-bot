@@ -302,34 +302,53 @@ public sealed class MyLeagueStateMachine
         await Task.Delay(3000, ct);
     }
 
-    /// <summary>检测难度选择弹窗中已选中的难度（蓝色钩子位置）。</summary>
+    /// <summary>检测难度选择弹窗中已选中的难度（行首蓝色对勾位置）。</summary>
     private string DetectSelectedDifficulty(EfootballBot.Core.Bot.Observation obs)
     {
-        var text = obs.Ocr.JoinedText;
-
-        // 难度列表顺序：新手、业余、标准、职业、顶尖球员、超级球星、传奇
+        // 7 档难度（关键比赛可能只有部分，逐行检测即可）
         var difficulties = new[] { "新手", "业余", "标准", "职业", "顶尖球员", "超级球星", "传奇" };
-
-        // OCR 识别难度列表中的蓝色钩子
-        // 蓝色钩子在难度名称左侧，OCR 会识别为"✓"或"√"
-        // 但由于 OCR 可能无法识别符号，我们用关键词匹配
-
-        // 简化实现：检测 OCR 结果中是否包含难度关键词
-        // 如果包含"传奇"，且 OCR 中有蓝色标记（如"✓传奇"），则选中传奇
-        // 由于 OCR 无法直接检测颜色，我们假设：
-        // 1. 如果 OCR 读到"传奇"且弹窗中有蓝色，则已选中
-        // 2. 否则返回第一个检测到的难度
+        var ratios = new List<(string Diff, double Ratio)>();
 
         foreach (var diff in difficulties)
         {
-            if (text.Contains(diff))
+            // 找到该难度名对应的 OCR 词（多字词可能被 OCR 拆开，双向包含匹配，至少 2 字）
+            OcrWord? word = null;
+            foreach (var w in obs.Ocr.Words)
             {
-                // 假设第一个检测到的难度是选中的
-                // 实际应该用 FrameAnalyzer 检测蓝色区域
+                if (w.Text.Length >= 2 && (w.Text.Contains(diff) || diff.Contains(w.Text)))
+                {
+                    word = w;
+                    break;
+                }
+            }
+
+            if (word is null)
+            {
+                _engine.LogInternal($"难度「{diff}」未出现在列表中（可能是关键比赛）", LogLevel.Debug);
+                continue;
+            }
+
+            // 蓝勾在难度词左侧：X 约 word.X - 0.06 ~ word.X - 0.015，Y 与词对齐
+            double x0 = Math.Max(0, word.X - 0.07);
+            double x1 = Math.Max(0, word.X - 0.015);
+            double y0 = Math.Max(0, word.Y - 0.012);
+            double y1 = Math.Min(1, word.Y + word.H + 0.012);
+
+            if (x1 <= x0) continue;
+
+            var region = new NormRect(x0, y0, x1 - x0, y1 - y0);
+            var blueRatio = FrameAnalyzer.CheckBlueRatioExact(obs.Frame, region);
+            ratios.Add((diff, blueRatio));
+            _engine.LogInternal($"难度「{diff}」行首蓝勾占比：{blueRatio:F3}", LogLevel.Debug);
+
+            if (blueRatio >= 0.03)
+            {
+                _engine.LogInternal($"蓝勾位于「{diff}」行", LogLevel.Info);
                 return diff;
             }
         }
 
+        _engine.LogInternal($"未检测到蓝勾，各行占比：{string.Join(" / ", ratios.Select(r => $"{r.Diff}={r.Ratio:F3}"))}", LogLevel.Warn);
         return "未知";
     }
 
