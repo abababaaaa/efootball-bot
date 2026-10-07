@@ -340,15 +340,20 @@ public sealed class MyLeagueStateMachine
             var blueRatio = FrameAnalyzer.CheckBlueRatioExact(obs.Frame, region);
             ratios.Add((diff, blueRatio));
             _engine.LogInternal($"难度「{diff}」行首蓝勾占比：{blueRatio:F3}", LogLevel.Debug);
-
-            if (blueRatio >= 0.03)
-            {
-                _engine.LogInternal($"蓝勾位于「{diff}」行", LogLevel.Info);
-                return diff;
-            }
         }
 
-        _engine.LogInternal($"未检测到蓝勾，各行占比：{string.Join(" / ", ratios.Select(r => $"{r.Diff}={r.Ratio:F3}"))}", LogLevel.Warn);
+        // 蓝勾笔画仅 2~3px，占比绝对值很小（实测选中行≈0.011，未选中=0.000）。
+        // 用"最大值胜出"：占比最高且 ≥0.005 的行即为选中行。
+        var best = ratios.OrderByDescending(r => r.Ratio).FirstOrDefault();
+        _engine.LogInternal($"各行蓝勾占比：{string.Join(" / ", ratios.Select(r => $"{r.Diff}={r.Ratio:F3}"))}", LogLevel.Debug);
+
+        if (best.Ratio >= 0.005)
+        {
+            _engine.LogInternal($"蓝勾位于「{best.Diff}」行（占比 {best.Ratio:F3}）", LogLevel.Info);
+            return best.Diff;
+        }
+
+        _engine.LogInternal($"未检测到蓝勾（最高占比 {best.Ratio:F3}）", LogLevel.Warn);
         return "未知";
     }
 
