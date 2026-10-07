@@ -29,6 +29,15 @@ public partial class App : Application
                 Shutdown();
             };
         }
+        else if (args.Length > 0 && args[0] == "--survey")
+        {
+            Startup += async (_, _) =>
+            {
+                try { Console.OutputEncoding = System.Text.Encoding.UTF8; await EfootballBot.Core.Survey.SurveyRunner.RunAsync(args); }
+                catch (Exception ex) { Console.WriteLine($"SURVEY FAIL: {ex}"); }
+                Shutdown();
+            };
+        }
         else if (args.Length > 0 && args[0] == "--check-frame")
         {
             Startup += async (_, _) =>
