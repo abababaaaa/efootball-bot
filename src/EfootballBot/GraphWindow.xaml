@@ -39,13 +39,13 @@
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <!-- 总：编号步骤链（横向，可点击展开） -->
+            <!-- 总：编号步骤链（横向，单页自适应缩放，可点击展开） -->
             <Border Background="{DynamicResource PreviewBg}"
                     BorderBrush="{DynamicResource CardBorder}" BorderThickness="1"
-                    CornerRadius="12" Padding="10,8" ClipToBounds="True">
-                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                    <StackPanel Orientation="Horizontal" x:Name="StepsHost"/>
-                </ScrollViewer>
+                    CornerRadius="12" Padding="8,6" ClipToBounds="True">
+                <Viewbox Stretch="Uniform" StretchDirection="DownOnly">
+                    <StackPanel Orientation="Horizontal" x:Name="StepsHost" Margin="4"/>
+                </Viewbox>
             </Border>
 
             <!-- 分：选中步骤详情 -->

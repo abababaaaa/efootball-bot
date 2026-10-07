@@ -290,18 +290,19 @@ public partial class GraphWindow : Window
             StepsHost.Children.Add(_cards[^1].Card);
         }
 
-        // 总收尾：回环徽章
+        // 总收尾：回环徽章（短文字保单页显示，完整说明放 ToolTip）
         if (ModeLoop.TryGetValue(_mode, out var loop))
         {
             StepsHost.Children.Add(MakeArrowText());
             var badge = new Border
             {
-                Padding = new Thickness(14, 8, 14, 8),
-                CornerRadius = new CornerRadius(18),
-                BorderThickness = new Thickness(1.5, 1.5, 1.5, 1.5),
+                Padding = new Thickness(10, 6, 10, 6),
+                CornerRadius = new CornerRadius(14),
+                BorderThickness = new Thickness(1.5),
+                ToolTip = loop.Text,
                 Child = new TextBlock
                 {
-                    Text = loop.Text,
+                    Text = $"↺ 回{char.ConvertFromUtf32(0x2460 + loop.StepNo - 1)}",
                     FontSize = 12,
                     VerticalAlignment = VerticalAlignment.Center,
                 },
@@ -321,7 +322,7 @@ public partial class GraphWindow : Window
         var number = char.ConvertFromUtf32(0x2460 + index); // ①②③…
         var card = new Border
         {
-            Padding = new Thickness(14, 8, 14, 8),
+            Padding = new Thickness(10, 6, 10, 6),
             CornerRadius = new CornerRadius(10),
             BorderThickness = new Thickness(1.5),
             Cursor = Cursors.Hand,
@@ -331,8 +332,8 @@ public partial class GraphWindow : Window
                 Orientation = Orientation.Horizontal,
                 Children =
                 {
-                    new TextBlock { Text = number + " ", FontSize = 13, FontWeight = FontWeights.Bold },
-                    new TextBlock { Text = step.Title, FontSize = 13, FontWeight = FontWeights.SemiBold,
+                    new TextBlock { Text = number, FontSize = 12, FontWeight = FontWeights.Bold, VerticalAlignment = VerticalAlignment.Center },
+                    new TextBlock { Text = " " + step.Title, FontSize = 12, FontWeight = FontWeights.SemiBold,
                                     VerticalAlignment = VerticalAlignment.Center },
                 },
             },
@@ -347,8 +348,8 @@ public partial class GraphWindow : Window
     private static TextBlock MakeArrowText() => new()
     {
         Text = "→",
-        FontSize = 14,
-        Margin = new Thickness(6, 0, 6, 0),
+        FontSize = 12,
+        Margin = new Thickness(3, 0, 3, 0),
         VerticalAlignment = VerticalAlignment.Center,
     };
 
