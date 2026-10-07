@@ -234,6 +234,107 @@ public static class FrameAnalyzer
     }
 
     /// <summary>
+    /// 检测顶部「AI 代打」机器人图标（黑圆底 + 白色机器人头）。
+    /// 有该图标 = 比赛进行中且 AI 正在操作，按 A 安全（会被游戏忽略）。
+    /// 国际服固定在右上角；国服位置不固定且偶有错版，故整个顶部条带全宽小格扫描。
+    /// 判定特征：
+    /// 1. 单格「近中性黑」占比≥0.20（通道极差≤28、max≤75，天然排除深蓝计分牌）
+    ///    且「近白」占比≥0.30（min≥150、极差≤70）；
+    /// 2. 真机实测图标在小格网格上形成 6 个相邻命中格的紧凑团簇，
+    ///    而观众暗部+白广告牌等干扰只有 1 个孤立格——要求 8 邻接连通团簇≥3 格。
+    /// 返回最大团簇的分数加权中心（帧归一化）。
+    /// </summary>
+    public static bool FindAiControlIcon(FrameData f, out double cx, out double cy)
+    {
+        cx = 0; cy = 0;
+        if (f.Bgra.Length == 0) return false;
+
+        const double cellW = 0.032, cellH = 0.06;
+        const double stepX = 0.016, stepY = 0.015;
+        const int cols = (int)((1.0 - cellW) / stepX) + 1;
+        const int rows = (int)((0.165 - cellH) / stepY) + 1;
+
+        var b = f.Bgra;
+        var hit = new double?[rows, cols];
+
+        for (int r = 0; r < rows; r++)
+        {
+            double y0 = 0.005 + r * stepY;
+            int py = (int)(y0 * f.Height), ph = (int)(cellH * f.Height);
+            for (int cIdx = 0; cIdx < cols; cIdx++)
+            {
+                double x0 = cIdx * stepX;
+                int px = (int)(x0 * f.Width), pw = (int)(cellW * f.Width);
+                long dark = 0, white = 0, n = 0;
+                for (int yy = py; yy < py + ph; yy += 2)
+                {
+                    int row = yy * f.Width * 4;
+                    for (int xx = px; xx < px + pw; xx += 2)
+                    {
+                        int i = row + xx * 4;
+                        int rr = b[i + 2], gg = b[i + 1], bb = b[i];
+                        int mx = Math.Max(rr, Math.Max(gg, bb));
+                        int mn = Math.Min(rr, Math.Min(gg, bb));
+                        n++;
+                        if (mx <= 75 && mx - mn <= 28) dark++;
+                        else if (mn >= 150 && mx - mn <= 70) white++;
+                    }
+                }
+                if (n == 0) continue;
+
+                double darkRatio = dark / (double)n;
+                double whiteRatio = white / (double)n;
+                if (darkRatio >= 0.20 && whiteRatio >= 0.30)
+                    hit[r, cIdx] = darkRatio * whiteRatio;
+            }
+        }
+
+        // 8 邻接连通团簇（BFS），取格数最多的团簇
+        var visited = new bool[rows, cols];
+        List<(int R, int C, double Score)>? best = null;
+        for (int r = 0; r < rows; r++)
+        for (int cIdx = 0; cIdx < cols; cIdx++)
+        {
+            if (!hit[r, cIdx].HasValue || visited[r, cIdx]) continue;
+
+            var comp = new List<(int R, int C, double Score)>();
+            var queue = new Queue<(int R, int C)>();
+            queue.Enqueue((r, cIdx));
+            visited[r, cIdx] = true;
+            while (queue.Count > 0)
+            {
+                var (cr, cc) = queue.Dequeue();
+                comp.Add((cr, cc, hit[cr, cc]!.Value));
+                for (int dr = -1; dr <= 1; dr++)
+                for (int dc = -1; dc <= 1; dc++)
+                {
+                    if (dr == 0 && dc == 0) continue;
+                    int nr = cr + dr, nc = cc + dc;
+                    if (nr < 0 || nr >= rows || nc < 0 || nc >= cols) continue;
+                    if (visited[nr, nc] || !hit[nr, nc].HasValue) continue;
+                    visited[nr, nc] = true;
+                    queue.Enqueue((nr, nc));
+                }
+            }
+            if (comp.Count >= 3 && (best is null || comp.Count > best.Count))
+                best = comp;
+        }
+
+        if (best is null) return false;
+
+        double wSum = 0, xAcc = 0, yAcc = 0;
+        foreach (var (r, cIdx, s) in best)
+        {
+            wSum += s;
+            xAcc += (cIdx * stepX + cellW / 2) * s;
+            yAcc += (0.005 + r * stepY + cellH / 2) * s;
+        }
+        cx = xAcc / wSum;
+        cy = yAcc / wSum;
+        return true;
+    }
+
+    /// <summary>
     /// 检测右下角蓝色「推进」大按钮（赛前/中场/全场/结果/奖励等流程页的
     /// 「下一步 / 确定 / OK / 跳过」，国际服国服样式一致，不依赖文字）。
     /// 搜索区限定右下 x 0.77~0.995、y 0.88~0.995；蓝色判定同 ButtonBlueRatio
@@ -261,6 +362,49 @@ public static class FrameAnalyzer
                 if (bb - rr >= 45 && bb - gg >= 25 && bb >= 90) blue++;
             }
             if (n > 0 && blue / (double)n >= 0.22)
+            {
+                if (top < 0) top = y;
+                bottom = y;
+            }
+        }
+        if (top >= 0 && bottom - top >= spanNeeded)
+        {
+            cy = (top + bottom) / 2.0 / f.Height;
+            return true;
+        }
+        cy = 0;
+        return false;
+    }
+
+    /// <summary>
+    /// 检测弹窗中部的蓝色确认按钮（主页/商店等页面上的模态弹窗，
+    /// 如「物品已过期」的 OK 按钮位于屏幕中央 y≈0.69，不在右下角）。
+    /// 搜索区 x 0.25~0.75、y 0.55~0.85；行蓝占比≥0.25 且纵向跨度≥0.025 屏高。
+    /// 仅用于"模态弹窗"的辅助判定；商店列表等非弹窗场景不应依赖此结果直接按键。
+    /// </summary>
+    public static bool FindBlueDialogButton(FrameData f, out double cy)
+    {
+        if (f.Bgra.Length == 0) { cy = 0; return false; }
+        int xFrom = (int)(0.25 * f.Width);
+        int xTo = (int)(0.75 * f.Width);
+        int yFrom = (int)(0.55 * f.Height);
+        int yTo = (int)(0.85 * f.Height);
+        int spanNeeded = (int)(0.025 * f.Height);
+        var b = f.Bgra;
+
+        int top = -1, bottom = -1;
+        for (int y = yFrom; y < yTo; y += 2)
+        {
+            int blue = 0, n = 0;
+            int row = y * f.Width * 4;
+            for (int x = xFrom; x < xTo; x += 2)
+            {
+                int i = row + x * 4;
+                int rr = b[i + 2], gg = b[i + 1], bb = b[i];
+                n++;
+                if (bb - rr >= 45 && bb - gg >= 25 && bb >= 90) blue++;
+            }
+            if (n > 0 && blue / (double)n >= 0.25)
             {
                 if (top < 0) top = y;
                 bottom = y;

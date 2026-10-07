@@ -106,6 +106,14 @@ public sealed class MyLeagueStateMachine
     {
         var text = obs.Ocr.JoinedText;
 
+        // 最高优先级：顶部 AI 代打图标 = 正常比赛中（国际服/国服通用，位置全顶条带扫描；
+        // 有图标时 AI 正在操作，按 A 安全，且可纠正探针因左上角图标/文字变化导致的误判）
+        if (FrameAnalyzer.FindAiControlIcon(obs.Frame, out double iconX, out double iconY))
+        {
+            _engine.LogInternal($"检测到 AI 代打图标（{iconX:F2},{iconY:F2}），判定比赛中", LogLevel.Debug);
+            return State.InMatch;
+        }
+
         // 弹窗优先判断
         if (text.Contains("选择赛事等级") || text.Contains("选择AI难度"))
             return State.DifficultySelect;
@@ -113,7 +121,7 @@ public sealed class MyLeagueStateMachine
         if (text.Contains("确认") && text.Contains("关键比赛") && !text.Contains("选择赛事等级"))
             return State.ConfirmDialog;
 
-        if (text.Contains("物品使用中"))
+        if (text.Contains("物品使用中") || text.Contains("已过期") || text.Contains("获取新物品"))
             return State.Dialog;
 
         if (obs.Screen == GameScreen.Dialog)
@@ -121,7 +129,13 @@ public sealed class MyLeagueStateMachine
 
         // 页面判断
         if (obs.Screen == GameScreen.MyLeagueHome)
+        {
+            // 回到主页优先清弹窗：主页上覆盖模态弹窗（如物品已过期）时探针可能仍判主页，
+            // 用弹窗中部蓝色确认按钮作为独立视觉信号
+            if (FrameAnalyzer.FindBlueDialogButton(obs.Frame, out _))
+                return State.Dialog;
             return State.MyLeagueHome;
+        }
 
         if (obs.Screen == GameScreen.Schedule)
             return State.Schedule;
@@ -474,24 +488,58 @@ public sealed class MyLeagueStateMachine
         await Task.Delay(2000, ct);
     }
 
-    /// <summary>通用弹窗：按 A 或 B 关闭。</summary>
+    /// <summary>
+    /// 通用弹窗处理（每次回到主页优先执行）：
+    /// 1. PressButtonAsync 找 OK/确定/确认/下一步，蓝焦点不在目标上则自动移动（上下双按钮也适用）；
+    /// 2. OCR 漏识按钮词时：看到蓝色确认按钮直接 A（单按钮弹窗）；
+    /// 3. 上下双按钮且默认焦点在下层（无蓝按钮可见）：先上移再尝试点击。
+    /// </summary>
     private async Task HandleDialogAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
     {
-        var text = obs.Ocr.JoinedText;
+        string[] targets = { "ok", "确定", "确认", "下一步", "yes" };
 
-        // "物品使用中"弹窗：点击 OK
-        if (text.Contains("物品使用中"))
+        // 1. 指针感知点击：识别按钮词 → 蓝/青焦点检测 → 移动 → A
+        if (await _engine.Actions.PressButtonAsync(targets, ct))
         {
-            _engine.LogInternal("物品使用中弹窗：点击 OK", LogLevel.Info);
-            await _engine.Pad.Confirm();
-            await Task.Delay(1500, ct);
+            _engine.LogInternal("弹窗：确认按钮已点击", LogLevel.Info);
+            await Task.Delay(900, ct);
             return;
         }
 
-        // 其他弹窗：按 A 关闭
-        _engine.LogInternal("通用弹窗：按 A 关闭", LogLevel.Info);
-        await _engine.Pad.Confirm();
-        await Task.Delay(1000, ct);
+        var fresh = await _engine.ObserveAsync(ct);
+
+        // 2. 单按钮弹窗：蓝色确认按钮已聚焦（OCR 可能漏识文字），直接 A
+        if (FrameAnalyzer.FindBlueDialogButton(fresh.Frame, out double dcy)
+            || FrameAnalyzer.FindBlueAdvanceButton(fresh.Frame, out _))
+        {
+            _engine.LogInternal($"弹窗：检测到蓝色确认按钮（y={dcy:F2}），直接按 A", LogLevel.Info);
+            await _engine.Pad.Confirm();
+            await Task.Delay(900, ct);
+            return;
+        }
+
+        // 3. 上下双按钮弹窗，默认焦点在下层：先上移，再识别点击
+        _engine.LogInternal("弹窗：未见蓝色确认按钮，按 Up 移到上层确认项", LogLevel.Info);
+        await _engine.Pad.Dpad(PadDir.Up);
+        await Task.Delay(600, ct);
+
+        if (await _engine.Actions.PressButtonAsync(targets, ct))
+        {
+            _engine.LogInternal("弹窗：上移后确认按钮已点击", LogLevel.Info);
+            await Task.Delay(900, ct);
+            return;
+        }
+
+        // 上移后蓝按钮出现或仍是单按钮：兜底 A
+        fresh = await _engine.ObserveAsync(ct);
+        if (FrameAnalyzer.FindBlueDialogButton(fresh.Frame, out _)
+            || FrameAnalyzer.FindBlueAdvanceButton(fresh.Frame, out _)
+            || fresh.Screen == GameScreen.Dialog)
+        {
+            _engine.LogInternal("弹窗：上移后按 A 确认", LogLevel.Info);
+            await _engine.Pad.Confirm();
+            await Task.Delay(900, ct);
+        }
     }
 
     /// <summary>检查我的联赛主页"使用的物品"面板。</summary>
