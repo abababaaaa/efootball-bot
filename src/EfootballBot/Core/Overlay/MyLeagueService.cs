@@ -621,17 +621,17 @@ public sealed class MyLeagueStateMachine
         return false;
     }
 
-    // ---- 我的联赛主页 → 兑换积分：试探反馈式导航 ----
+    // ---- 我的联赛主页 → 兑换积分：审核驱动导航 ----
     // 主页卡片布局（用户实测）：
     //   行0：前往比赛(左) / i(右)
     //   行1：赛程表（视觉整行）
     //   行2：兑换积分(左) / 赛季纪录(右)
     //   行3：赛事信息(左) / 建议(右)
-    // 实测「赛程表 Right」落点不固定（有时直接到兑换积分，有时到赛季纪录——
-    // 游戏会记忆上次的列位置），故不做固定方向序列：
-    // 锚定「前往比赛」（Up×3+Left 纯夹紧，唯一保留的固定部分）→ Down 到整行
-    // 「赛程表」→ 反复「横移一格 → A 试探 → 落地页双词验证」，进错页 B 退回后
-    // 换向再试。只有 OCR 双词确认才返回 true。
+    // 实测「赛程表 Right」落点随机（有时直接到兑换积分，有时到赛季纪录，随机器/次而变），
+    // 固定方向序列不可行。流程：锚定「前往比赛」→ Down 到赛程表 → 每步移动后用
+    // FocusCardDetector 二次审核焦点卡——确认焦点在「兑换积分」才按 A 进入；
+    // 审核到其他卡则按卡名智能走一步再审核；审核不到焦点才允许 A 试探兜底（进错页
+    // B 退回）。只有落地页 OCR 双词确认才返回 true。
 
     private const int MenuMoveMs = 450;
 
@@ -702,9 +702,10 @@ public sealed class MyLeagueStateMachine
     }
 
     /// <summary>
-    /// 导航到兑换积分落地页（试探反馈式）。落点不固定，不预设方向序列：
-    /// 锚定前往比赛 → Down 到赛程表 → 循环「横移一格 → A 试探 → 双词验证」，
-    /// 进错页 B 退回主页后换向再试。只有 OCR 确认到达「我的联赛积分」页才返回 true。
+    /// 导航到兑换积分落地页（审核驱动）。落点随机，不预设方向序列：
+    /// 锚定前往比赛 → Down 到赛程表 → 循环「二次审核焦点卡 → 确认是兑换积分才按 A，
+    /// 是其他卡则按卡名走一步再审核」。审核不到焦点才 A 试探兜底。
+    /// 只有 OCR 确认到达「我的联赛积分」页才返回 true。
     /// </summary>
     private async Task<bool> NavigateToExchangeAsync(CancellationToken ct)
     {
@@ -723,68 +724,150 @@ public sealed class MyLeagueStateMachine
                 }
             }
 
-            _engine.LogInternal($"导航兑换积分（第 {attempt}/3 轮）：锚定前往比赛 → 下到赛程表 → A 试探探索", LogLevel.Info);
+            _engine.LogInternal($"导航兑换积分（第 {attempt}/3 轮）：锚定前往比赛 → 下到赛程表 → 逐步审核", LogLevel.Info);
             await AnchorToGoToMatchAsync(ct);
             await _engine.Pad.Dpad(PadDir.Down);
             await Task.Delay(MenuMoveMs, ct);
 
-            // 赛程表 Right 落点不固定：先 Right，A 后按结果自适应换向
-            bool moveRight = true;
-            for (int probe = 0; probe < 4; probe++)
+            for (int probe = 0; probe < 6; probe++)
             {
                 ct.ThrowIfCancellationRequested();
-                await _engine.Pad.Dpad(moveRight ? PadDir.Right : PadDir.Left);
-                await Task.Delay(MenuMoveMs, ct);
-
-                _engine.LogInternal($"试探：{(moveRight ? "右" : "左")}移后按 A（第 {probe + 1}/4 次）", LogLevel.Info);
-                await _engine.Pad.Confirm();
-                await Task.Delay(2600, ct);
-
                 obs = await _engine.ObserveAsync(ct);
-                if (IsExchangeLandingPage(obs.Ocr.JoinedText))
-                {
-                    _engine.LogInternal("已进入兑换积分页（我的联赛积分）", LogLevel.Success);
-                    return true;
-                }
 
-                // 保险：绝不允许试探把流程带进比赛（PreMatch 等），立即退出交给上层处理
+                // 保险：绝不允许流程被带进比赛（PreMatch 等），立即退出交给上层处理
                 if (obs.Screen is GameScreen.PreMatch or GameScreen.InMatch
                     or GameScreen.HalfTime or GameScreen.FullTime)
                 {
-                    _engine.LogInternal($"试探误入比赛流程（探针 {obs.Screen}），终止导航", LogLevel.Error);
+                    _engine.LogInternal($"导航误入比赛流程（探针 {obs.Screen}），终止", LogLevel.Error);
                     await _engine.Pad.Back();
                     await Task.Delay(1300, ct);
                     return false;
                 }
 
-                if (IsHomePage(obs))
+                if (!IsHomePage(obs))
                 {
-                    // A 没进任何子页（按键被吞/焦点不在可点卡上）：下一轮再向右换位
-                    _engine.LogInternal("按 A 后仍在主页，焦点可能未移动，改向右探索", LogLevel.Warn);
-                    moveRight = true;
+                    if (!await RecoverToHomeAsync(ct, maxActions: 4))
+                    {
+                        _engine.LogInternal("导航途中无法退回主页，本轮道具购买终止", LogLevel.Error);
+                        return false;
+                    }
+                    obs = await _engine.ObserveAsync(ct);
+                }
+
+                // 二次审核：焦点卡确认
+                var card = FocusCardDetector.Detect(obs.Frame, obs.Ocr);
+                string desc = card is null
+                    ? "未识别到焦点卡"
+                    : $"{card.Name}（{card.CX:F2},{card.CY:F2} conf {card.Confidence:F2}）";
+                _engine.LogInternal($"焦点审核：{desc}", LogLevel.Info);
+
+                if (card?.IsExchange == true)
+                {
+                    // 审核确认焦点在「兑换积分」→ 按 A → 落地页双词验证
+                    _engine.LogInternal("审核确认焦点在「兑换积分」，按 A 进入", LogLevel.Success);
+                    await _engine.Pad.Confirm();
+                    await Task.Delay(2600, ct);
+                    obs = await _engine.ObserveAsync(ct);
+                    if (IsExchangeLandingPage(obs.Ocr.JoinedText))
+                    {
+                        _engine.LogInternal("已进入兑换积分页（我的联赛积分）", LogLevel.Success);
+                        return true;
+                    }
+                    string badPreview = obs.Ocr.JoinedText.Length > 40
+                        ? obs.Ocr.JoinedText[..40] : obs.Ocr.JoinedText;
+                    _engine.LogInternal($"按 A 后非兑换积分页（OCR：{badPreview}），退回主页重审", LogLevel.Warn);
+                    await _engine.Pad.Back();
+                    await Task.Delay(1300, ct);
+                    if (!await RecoverToHomeAsync(ct, maxActions: 4))
+                    {
+                        _engine.LogInternal("误入页面后无法退回主页，本轮道具购买终止", LogLevel.Error);
+                        return false;
+                    }
                     continue;
                 }
 
-                // 进了子页但不是兑换积分（如赛季纪录/赛程表详情）：B 退回主页，焦点保持原卡
-                string preview = obs.Ocr.JoinedText.Length > 40
-                    ? obs.Ocr.JoinedText[..40] : obs.Ocr.JoinedText;
-                _engine.LogInternal($"试探进入非目标页（OCR：{preview}），退回主页换向重试", LogLevel.Warn);
-                await _engine.Pad.Back();
-                await Task.Delay(1300, ct);
-                if (!await RecoverToHomeAsync(ct, maxActions: 4))
+                if (card is not null && card.Name is not ("unknown" or "eFootball联赛" or "我的联赛" or "活动"))
                 {
-                    _engine.LogInternal("误入页面后无法退回主页，本轮道具购买终止", LogLevel.Error);
-                    return false;
+                    // 审核到明确的我的联赛主页卡片：按卡名智能走一步，下一步再审核
+                    var steps = StepTowardExchange(card);
+                    _engine.LogInternal($"焦点在「{card.Name}」，走 {string.Join("·", steps)} 后再审", LogLevel.Info);
+                    foreach (var dir in steps)
+                    {
+                        await _engine.Pad.Dpad(dir);
+                        await Task.Delay(MenuMoveMs, ct);
+                    }
+                    continue;
                 }
 
-                // 换向：刚才落点若是行2右卡（赛季纪录），Left 回行2左卡；反之亦然
-                moveRight = !moveRight;
+                if (card is not null)
+                {
+                    // unknown/非主页卡：按坐标粗调（行优先，再列）
+                    PadDir dir = card.CY > 0.60 ? PadDir.Up
+                        : card.CY < 0.30 ? PadDir.Down
+                        : card.CX > 0.55 ? PadDir.Left
+                        : PadDir.Right;
+                    _engine.LogInternal($"焦点卡未命名（{card.CX:F2},{card.CY:F2}），按坐标 {(dir == PadDir.Up ? "上" : dir == PadDir.Down ? "下" : dir == PadDir.Left ? "左" : "右")} 调整", LogLevel.Warn);
+                    await _engine.Pad.Dpad(dir);
+                    await Task.Delay(MenuMoveMs, ct);
+                    continue;
+                }
+
+                // 完全审核不到焦点卡：A 试探兜底（进错页 B 退回，不盲信）
+                _engine.LogInternal("审核不到焦点卡，A 试探后按结果处理", LogLevel.Warn);
+                await _engine.Pad.Confirm();
+                await Task.Delay(2600, ct);
+                obs = await _engine.ObserveAsync(ct);
+                if (IsExchangeLandingPage(obs.Ocr.JoinedText))
+                {
+                    _engine.LogInternal("试探已进入兑换积分页（我的联赛积分）", LogLevel.Success);
+                    return true;
+                }
+                if (obs.Screen is GameScreen.PreMatch or GameScreen.InMatch
+                    or GameScreen.HalfTime or GameScreen.FullTime)
+                {
+                    _engine.LogInternal($"试探误入比赛流程（探针 {obs.Screen}），终止", LogLevel.Error);
+                    await _engine.Pad.Back();
+                    await Task.Delay(1300, ct);
+                    return false;
+                }
+                if (!IsHomePage(obs))
+                {
+                    string preview = obs.Ocr.JoinedText.Length > 40
+                        ? obs.Ocr.JoinedText[..40] : obs.Ocr.JoinedText;
+                    _engine.LogInternal($"试探进入非目标页（OCR：{preview}），退回主页", LogLevel.Warn);
+                    await _engine.Pad.Back();
+                    await Task.Delay(1300, ct);
+                    if (!await RecoverToHomeAsync(ct, maxActions: 4))
+                    {
+                        _engine.LogInternal("误入页面后无法退回主页，本轮道具购买终止", LogLevel.Error);
+                        return false;
+                    }
+                }
+                else
+                {
+                    _engine.LogInternal("试探后仍在主页（按键未生效），下轮重审", LogLevel.Warn);
+                }
             }
         }
 
-        _engine.LogInternal("3 轮试探均未进入兑换积分页", LogLevel.Warn);
+        _engine.LogInternal("3 轮审核导航均未进入兑换积分页", LogLevel.Warn);
         return false;
     }
+
+    /// <summary>按当前焦点卡名给出向「兑换积分」走一步的方向（每步走完都会再审核）。</summary>
+    private static IEnumerable<PadDir> StepTowardExchange(FocusCard card) => card.Name switch
+    {
+        // 行2右卡 → 左移一格到兑换积分
+        "赛季纪录" => new[] { PadDir.Left },
+        // 行1整行 → 右移到行2（落点随机，下一步审核决定是否再左移）
+        "赛程表" => new[] { PadDir.Right },
+        // 行0 → 下到赛程表再右
+        "前往比赛" or "i" => new[] { PadDir.Down, PadDir.Right },
+        // 行3 → 上移一层，下一步审核定位
+        "赛事信息" or "建议" => new[] { PadDir.Up },
+        // 兜底：按坐标行优先调整
+        _ => new[] { card.CY > 0.60 ? PadDir.Up : PadDir.Down },
+    };
 
     /// <summary>
     /// 在兑换积分落地页进入「我的联赛物品」商店并购买缺失物品，购买后验证已退回主页。

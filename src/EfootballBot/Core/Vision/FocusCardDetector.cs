@@ -26,7 +26,8 @@ public static class FocusCardDetector
 
     private static readonly (string Name, string[] Keys)[] Titles =
     {
-        ("兑换积分", new[] { "兑换积分", "兑换稹分", "兑换" }),
+        // 实测 OCR 会把「换」识成繁体「換」（兑換积分），必须带异体键
+        ("兑换积分", new[] { "兑换积分", "兑换稹分", "兑换", "兑換", "兌换", "兌換" }),
         ("前往比赛", new[] { "前往比赛", "前往比賽" }),
         ("赛季纪录", new[] { "赛季纪录", "賽季紀錄", "赛季记录", "賽季記錄" }),
         ("建议",     new[] { "建议", "建議" }),
