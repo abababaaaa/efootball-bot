@@ -40,7 +40,7 @@ public static class SurveyRunner
 
     private sealed record Edge(int From, string Key, int To);
 
-    private static readonly (string Key, Action<Pad> Act)[] DpadKeys =
+    private static readonly (string Key, Func<Pad, Task> Act)[] DpadKeys =
     {
         ("Down", p => p.Dpad(PadDir.Down)),
         ("Right", p => p.Dpad(PadDir.Right)),
@@ -48,7 +48,7 @@ public static class SurveyRunner
         ("Left", p => p.Dpad(PadDir.Left)),
     };
 
-    private static readonly (string Key, Action<Pad> Act)[] ButtonKeys =
+    private static readonly (string Key, Func<Pad, Task> Act)[] ButtonKeys =
     {
         ("RB", p => p.RB()),
         ("LB", p => p.LB()),
@@ -163,7 +163,7 @@ public static class SurveyRunner
                     }
 
                     Console.Write($"[屏{current.Id:00}] 按 {key} … ");
-                    act(pad);
+                    await act(pad);
                     usedKey = key;
 
                     var obs2 = await ObserveAsync(1800);
@@ -200,7 +200,7 @@ public static class SurveyRunner
 
                 // 本屏候选试尽：按 B 回退
                 Console.WriteLine($"[屏{current.Id:00}] 候选试尽，按 B 回退");
-                pad.Back();
+                await pad.Back();
                 var back = await ObserveAsync(1800);
                 var (nb, isNewB) = Record(back);
                 if (isNewB)
@@ -221,7 +221,7 @@ public static class SurveyRunner
                 {
                     edges.Add(new Edge(current.Id, "B", -1));
                     // B 无效：再试一次，仍无效则出栈
-                    pad.Back();
+                    await pad.Back();
                     var back2 = await ObserveAsync(1800);
                     var (nb2, _) = Record(back2);
                     if (nb2.Id != current.Id)
@@ -250,7 +250,7 @@ public static class SurveyRunner
                 if (n.ProbeScreen == "InMatch" || FrameAnalyzer.FindAiControlIcon(obs.Frame, out _, out _))
                 { trace.AppendLine("回退途中出现比赛画面，停止按键"); break; }
                 trace.AppendLine($"回退：屏{n.Id:00} 按 B");
-                pad.Back();
+                await pad.Back();
             }
         }
         finally
