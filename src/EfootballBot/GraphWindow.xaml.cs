@@ -1,320 +1,464 @@
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
-using System.Windows.Shapes;
+using System.Text;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Vision;
 
 namespace EfootballBot;
 
 /// <summary>
-/// 实时图谱窗口：按模块分组的线性流程链。
-/// 每个模块一条从左到右的主流水线，支线节点挂在父节点下方，回环走底部 U 形线，
-/// 覆盖层（加载/弹窗/断线/未知）单独一行徽章。当前页绿色脉冲，走过的路径留灰。
+/// 实时图谱窗口：总分总结构。
+/// 总：顶部编号步骤链（① 启动评估 → ② 寻路进入 → …），当前步骤绿色脉冲；
+/// 分：点击任一步骤卡片，中部展开该步骤细看（目的/画面/动作/验证/失败处理）；
+/// 总：底部实时判定依据（当前画面、探针候选、导航、比赛阶段）。
+/// 画面事件按 GameScreen → 步骤映射驱动高亮；手动点击后 8 秒内不自动跳转详情。
 /// </summary>
 public partial class GraphWindow : Window
 {
-    private sealed class GraphNode
+    /// <summary>流程步骤定义（一个步骤 = 一组画面 + 细看说明）。</summary>
+    private sealed class StepDef
     {
-        public Border Card = null!;
-        public double CX, CY, HW, HH;
-        public bool Overlay;
+        public string Title = "";
+        public string Goal = "";
+        public string[] Screens = Array.Empty<string>();
+        public string[] Actions = Array.Empty<string>();
+        public string[] Verify = Array.Empty<string>();
+        public string[] Fallback = Array.Empty<string>();
+        public GameScreen[] Map = Array.Empty<GameScreen>();
     }
 
-    private sealed class GraphEdge
-    {
-        public Shape Line = null!;   // Line 或 Polyline（回环）
-        public Polygon Arrow = null!;
-    }
-
-    private readonly Dictionary<GameScreen, GraphNode> _nodes = new();
-    private readonly Dictionary<(GameScreen, GameScreen), GraphEdge> _edges = new();
-    private readonly Queue<(GameScreen, GameScreen)> _trail = new();
-    private GameScreen? _current;
-    private (GameScreen, GameScreen)? _activeEdgeKey;
+    private readonly List<(StepDef Step, Border Card)> _cards = new();
+    private readonly Dictionary<GameScreen, StepDef> _screenMap = new();
+    private StepDef? _currentStep;
+    private StepDef? _selectedStep;
+    private DateTime _manualSelectAt = DateTime.MinValue;
     private string _mode = "myleague";
     private bool _suppressModeEvent;
-
-    private const double NodeW = 88, NodeH = 44;      // 主链卡片
-    private const double SubW = 80, SubH = 34;        // 支线/覆盖层卡片
-    private const double ChainY = 14;                  // 主链行 y
-    private const double LoopY = 72;                   // 回环线最低点 y
-    private const double SubY = 88;                    // 支线行 y
-    private const double OverlayY = 152;               // 覆盖层行 y
-
-    // ---------------- 模块流程定义 ----------------
-
-    /// <summary>各模块的主流水线（严格线性，从左到右）。</summary>
-    private static readonly Dictionary<string, GameScreen[]> ModeChains = new()
-    {
-        ["myleague"] = new[]
-        {
-            GameScreen.TitleScreen, GameScreen.Home, GameScreen.MatchHub, GameScreen.MyLeagueHome,
-            GameScreen.PreMatch, GameScreen.InMatch, GameScreen.HalfTime, GameScreen.FullTime,
-            GameScreen.Result, GameScreen.Rewards,
-        },
-        ["intlweekly"] = new[]
-        {
-            GameScreen.TitleScreen, GameScreen.Home, GameScreen.MatchHub, GameScreen.EventHub,
-            GameScreen.PreMatch, GameScreen.InMatch, GameScreen.HalfTime, GameScreen.FullTime,
-            GameScreen.CampaignBoard,
-        },
-        ["cndaily"] = new[]
-        {
-            GameScreen.TitleScreen, GameScreen.Home, GameScreen.EventHub, GameScreen.ChallengeList,
-            GameScreen.ChallengeHome, GameScreen.PreMatch, GameScreen.InMatch, GameScreen.FullTime,
-            GameScreen.Result, GameScreen.Rewards,
-        },
-    };
-
-    /// <summary>各模块的支线节点（挂在父节点下方第二行）。</summary>
-    private static readonly Dictionary<string, (GameScreen Parent, GameScreen[] Subs)[]> ModeBranches = new()
-    {
-        ["myleague"] = new[]
-        {
-            (GameScreen.MyLeagueHome, new[]
-            {
-                GameScreen.Schedule, GameScreen.Shop, GameScreen.ShopConfirm,
-                GameScreen.ActivityDetail, GameScreen.KeyMatchBadge,
-            }),
-        },
-        ["intlweekly"] = new[]
-        {
-            (GameScreen.EventHub, new[] { GameScreen.EventInfo, GameScreen.NoEvent }),
-        },
-        ["cndaily"] = new[]
-        {
-            (GameScreen.ChallengeList, new[] { GameScreen.ActivityDetail }),
-            (GameScreen.ChallengeHome, new[] { GameScreen.DailyRewards, GameScreen.EventSettings }),
-        },
-    };
-
-    /// <summary>各模块的回环边（走底部 U 形线回到主链前段）。</summary>
-    private static readonly Dictionary<string, (GameScreen From, GameScreen To)[]> ModeLoops = new()
-    {
-        ["myleague"] = new[] { (GameScreen.Rewards, GameScreen.MyLeagueHome) },
-        ["intlweekly"] = new[] { (GameScreen.CampaignBoard, GameScreen.EventHub) },
-        ["cndaily"] = new[] { (GameScreen.Rewards, GameScreen.ChallengeList) },
-    };
-
-    /// <summary>覆盖层徽章（所有模块通用，任何时候可能叠加出现）。</summary>
-    private static readonly GameScreen[] Overlays =
-    {
-        GameScreen.Loading, GameScreen.Dialog, GameScreen.Disconnected, GameScreen.Unknown,
-    };
 
     public GraphWindow()
     {
         InitializeComponent();
-        BuildGraph();
+        BuildSteps();
     }
 
-    /// <summary>切换模块（挂机启动时自动跟随，也可手动点 Tab）。重建画布。</summary>
+    // ---------------- 步骤定义（总分总的"分"） ----------------
+
+    /// <summary>我的联赛模块：完整八个步骤 + 回环。</summary>
+    private static StepDef[] LeagueSteps() => new[]
+    {
+        new StepDef
+        {
+            Title = "启动评估",
+            Goal = "点击开始后先观察识别当前游戏内状态（什么画面/比赛阶段/流程），再决定入口，绝不盲目寻路。",
+            Screens = new[] { "任意启动画面（探针+OCR+AI图标+遮罩综合判定）" },
+            Actions = new[] { "观察一帧 → 输出启动状态报告（状态/探针/证据）", "未知画面等 2.5 秒二次确认，仍不明才进入寻路" },
+            Verify = new[] { "比赛流程（赛前/比赛中/中场/全场结束/结果/奖励）→ 状态机从当前阶段直接接管", "我的联赛内部页面（主页/赛程表/兑换积分/商店/弹窗）→ 状态机直接接管" },
+            Fallback = new[] { "完全未识别 → 步骤② 寻路", "比赛中误判被赛后门控/afterMatchEnd 词表否决" },
+            Map = Array.Empty<GameScreen>(),
+        },
+        new StepDef
+        {
+            Title = "寻路进入",
+            Goal = "把画面从任意外部位置（标题/主菜单/活动页）导航到我的联赛主页。已在联赛内则跳过。",
+            Screens = new[] { "标题画面", "主页", "比赛菜单", "活动详情" },
+            Actions = new[] { "B 逐层退出 + 方向导航 + 页面验证，逐步推进" },
+            Verify = new[] { "到达：探针 MyLeagueHome 且主页双卡词齐（前往比赛+赛程表）" },
+            Fallback = new[] { "导航超时/未到达 → 状态机从当前页面接管兜底" },
+            Map = new[] { GameScreen.TitleScreen, GameScreen.Home, GameScreen.MatchHub, GameScreen.ActivityDetail },
+        },
+        new StepDef
+        {
+            Title = "主页检查",
+            Goal = "回到我的联赛主页后先清弹窗、再检查道具是否齐全——检查没跑完绝不允许开赛。",
+            Screens = new[] { "我的联赛主页", "赛程表", "各类弹窗（物品过期/奖励/确认）" },
+            Actions = new[] { "弹窗：移光标到确认按钮再点击（识别到 OK/确定先移过去）", "首轮道具检查：RsFlick Right 切「使用的物品」面板 → 逐项判定缺口" },
+            Verify = new[] { "主页判定：前往比赛+赛程表双词齐 且 无弹窗遮罩", "边沿触发：上一轮不是主页 → 重置检查状态重新查" },
+            Fallback = new[] { "检查失败重试 ≤3 次；画面被搅乱 → 状态机重新判页", "缺道具 → 步骤④ 兑换积分" },
+            Map = new[] { GameScreen.MyLeagueHome, GameScreen.Schedule, GameScreen.Dialog },
+        },
+        new StepDef
+        {
+            Title = "兑换积分",
+            Goal = "从主页进入兑换积分购买缺失道具。导航全程审核焦点卡，确认无误才点击。",
+            Screens = new[] { "我的联赛主页（焦点审核）", "兑换积分落地页（我的联赛积分+租借球员）", "商店（我的联赛物品）", "购买确认" },
+            Actions = new[] { "锚定「前往比赛」（Up×3+Left 纯夹紧）→ Down 到赛程表", "循环审核：FocusCardDetector 识别焦点卡 → 确认「兑换积分」才按 A", "商店内：焦点移至目标物品（杰出=Down×2 / 4倍经验=Down×5 / 主教练强化=Down×12）→ A → 确认" },
+            Verify = new[] { "落地页双词验证：我的联赛积分+租借球员（OCR 异体字折叠）", "商店页验证：我的联赛物品/进入商店" },
+            Fallback = new[] { "进错页按 B 退回主页重试 ≤3 次；绝不用「页面有变化」当成功", "主页闸门：画面已是干净主页时终止一切推进防误点前往比赛" },
+            Map = new[] { GameScreen.Shop, GameScreen.ShopConfirm },
+        },
+        new StepDef
+        {
+            Title = "开赛流程",
+            Goal = "道具齐全后从主页进入比赛，直到比赛正式开始。",
+            Screens = new[] { "我的联赛主页（前往比赛）", "赛前准备页（开始比赛/难度/首发阵容）", "关键比赛徽章" },
+            Actions = new[] { "锚定高光回「前往比赛」（Up×3+Left）→ A", "难度确认 → 首发阵容页（比赛开始时显示的内容）→ 蓝按钮开始比赛" },
+            Verify = new[] { "PreMatch 必须命中赛前专属词（开始比赛/选择比赛难度/比赛条件/选手操作/首发阵容）", "蓝按钮检测（y≈0.93/0.98）先移光标再点击" },
+            Fallback = new[] { "探针判 PreMatch 但无专属词 → 不采信（防主页残留词误判开赛）" },
+            Map = new[] { GameScreen.PreMatch, GameScreen.KeyMatchBadge },
+        },
+        new StepDef
+        {
+            Title = "比赛中",
+            Goal = "AI 代打自动踢完上下半场，收集比赛信息并防卡死。",
+            Screens = new[] { "比赛中", "中场" },
+            Actions = new[] { "AI 代打：检测顶栏蓝横幅（RT），丢失时重发指令", "跳过比赛：HUD「跳过比赛」绿勾像素检测", "智能启停：进球/死线/比分驱动节奏 A 与方向" },
+            Verify = new[] { "OCR 间隔自适应（赛中词变化驱动轮询快慢）" },
+            Fallback = new[] { "中场自动继续下半场" },
+            Map = new[] { GameScreen.InMatch, GameScreen.HalfTime },
+        },
+        new StepDef
+        {
+            Title = "全场结算",
+            Goal = "比赛结束画面：锚定左上「下一步」逐步推进，走完整场结算链。",
+            Screens = new[] { "全场结束（下一步/建议/球员评价）", "比赛结果" },
+            Actions = new[] { "每轮 上×2+左×1 夹紧回「下一步」初始位 → A 推进（RS 翻页/球员评价/经验页）" },
+            Verify = new[] { "左列双卡专属词（下一步+建议+球员评价共现）强判 FullTime" },
+            Fallback = new[] { "此页面及之后一律忽略 AI 图标、绝不记为比赛中（智能启停同受控）" },
+            Map = new[] { GameScreen.FullTime, GameScreen.Result },
+        },
+        new StepDef
+        {
+            Title = "赛后奖励",
+            Goal = "奖励/经验页推进 → 清赛后弹窗 → 回主页，循环回步骤③重新检查道具。",
+            Screens = new[] { "奖励页", "赛后过渡（回放/弹窗/获得积分/收件箱）" },
+            Actions = new[] { "奖励页推进 → 赛后过渡门控：无词画面有蓝按钮按 A 跳过、无则等待", "弹窗显式识别：移光标到确认按钮再点击" },
+            Verify = new[] { "回主页验证（前往比赛+赛程表）→ 门控复位，道具检查重新开始" },
+            Fallback = new[] { "门控期间一律不判比赛中（图标与探针 hold 不采信）；3 分钟超时兜底" },
+            Map = new[] { GameScreen.Rewards, GameScreen.Loading },
+        },
+    };
+
+    /// <summary>国际服活动模块：七步。</summary>
+    private static StepDef[] WeeklySteps() => new[]
+    {
+        new StepDef
+        {
+            Title = "启动评估", Goal = "点击开始先观察识别当前画面状态，再决定入口。",
+            Screens = new[] { "任意启动画面" },
+            Actions = new[] { "观察一帧 → 按状态分流；未知二次确认后才寻路" },
+            Verify = new[] { "外部画面 → 寻路；活动页/比赛 → 直接接管" }, Fallback = Array.Empty<string>(),
+            Map = Array.Empty<GameScreen>(),
+        },
+        new StepDef
+        {
+            Title = "寻路进入", Goal = "导航到国际服活动中心。",
+            Screens = new[] { "标题画面", "主页", "比赛菜单" },
+            Actions = new[] { "B 逐层退出 + 方向导航 + 页面验证" },
+            Verify = new[] { "到达活动中心（EventHub）" }, Fallback = Array.Empty<string>(),
+            Map = new[] { GameScreen.TitleScreen, GameScreen.Home, GameScreen.MatchHub },
+        },
+        new StepDef
+        {
+            Title = "活动检查", Goal = "进入活动中心确认目标活动与入口。",
+            Screens = new[] { "活动中心", "活动详情", "无活动" },
+            Actions = new[] { "确认活动入口 → 进入赛事" },
+            Verify = new[] { "活动信息词验证" }, Fallback = new[] { "无活动 → 结束本轮" },
+            Map = new[] { GameScreen.EventHub, GameScreen.EventInfo, GameScreen.NoEvent, GameScreen.ActivityDetail },
+        },
+        new StepDef
+        {
+            Title = "开赛流程", Goal = "难度确认与开赛。",
+            Screens = new[] { "赛前准备页" },
+            Actions = new[] { "确认难度 → 开始比赛" },
+            Verify = new[] { "PreMatch 专属词" }, Fallback = Array.Empty<string>(),
+            Map = new[] { GameScreen.PreMatch, GameScreen.KeyMatchBadge },
+        },
+        new StepDef
+        {
+            Title = "比赛中", Goal = "AI 代打自动踢完比赛。",
+            Screens = new[] { "比赛中", "中场" },
+            Actions = new[] { "蓝横幅/跳过绿勾/智能启停" },
+            Verify = new[] { "OCR 间隔自适应" }, Fallback = new[] { "中场自动继续" },
+            Map = new[] { GameScreen.InMatch, GameScreen.HalfTime },
+        },
+        new StepDef
+        {
+            Title = "全场结算", Goal = "全场结束/结果推进。",
+            Screens = new[] { "全场结束", "比赛结果" },
+            Actions = new[] { "锚定「下一步」→ A 推进" },
+            Verify = new[] { "赛后词优先于 AI 图标" }, Fallback = Array.Empty<string>(),
+            Map = new[] { GameScreen.FullTime, GameScreen.Result },
+        },
+        new StepDef
+        {
+            Title = "活动奖励", Goal = "活动板块（CampaignBoard）领奖后回活动中心循环。",
+            Screens = new[] { "活动板块" },
+            Actions = new[] { "推进领奖 → 回活动中心" },
+            Verify = new[] { "回到 EventHub 验证" }, Fallback = Array.Empty<string>(),
+            Map = new[] { GameScreen.CampaignBoard, GameScreen.Rewards, GameScreen.Loading },
+        },
+    };
+
+    /// <summary>国服每日模块：七步。</summary>
+    private static StepDef[] CnSteps() => new[]
+    {
+        new StepDef
+        {
+            Title = "启动评估", Goal = "点击开始先观察识别当前画面状态，再决定入口。",
+            Screens = new[] { "任意启动画面" },
+            Actions = new[] { "观察一帧 → 按状态分流；未知二次确认后才寻路" },
+            Verify = new[] { "外部画面 → 寻路；挑战页/比赛 → 直接接管" }, Fallback = Array.Empty<string>(),
+            Map = Array.Empty<GameScreen>(),
+        },
+        new StepDef
+        {
+            Title = "寻路进入", Goal = "导航到国服每日挑战列表。",
+            Screens = new[] { "标题画面", "主页", "活动中心" },
+            Actions = new[] { "B 逐层退出 + 方向导航 + 页面验证" },
+            Verify = new[] { "到达挑战列表（ChallengeList）" }, Fallback = Array.Empty<string>(),
+            Map = new[] { GameScreen.TitleScreen, GameScreen.Home, GameScreen.EventHub },
+        },
+        new StepDef
+        {
+            Title = "挑战检查", Goal = "确认每日挑战目标与奖励状态。",
+            Screens = new[] { "挑战列表", "挑战主页", "每日奖励" },
+            Actions = new[] { "领取已达成奖励 → 选择可打挑战" },
+            Verify = new[] { "挑战页词验证" }, Fallback = new[] { "无可打挑战 → 结束" },
+            Map = new[] { GameScreen.ChallengeList, GameScreen.ChallengeHome, GameScreen.DailyRewards, GameScreen.ActivityDetail },
+        },
+        new StepDef
+        {
+            Title = "开赛流程", Goal = "赛事设置确认与开赛。",
+            Screens = new[] { "赛事设置", "赛前准备页" },
+            Actions = new[] { "确认设置 → 开始比赛" },
+            Verify = new[] { "PreMatch 专属词" }, Fallback = Array.Empty<string>(),
+            Map = new[] { GameScreen.EventSettings, GameScreen.PreMatch, GameScreen.KeyMatchBadge },
+        },
+        new StepDef
+        {
+            Title = "比赛中", Goal = "AI 代打自动踢完比赛。",
+            Screens = new[] { "比赛中", "中场" },
+            Actions = new[] { "蓝横幅/跳过绿勾/智能启停" },
+            Verify = new[] { "OCR 间隔自适应" }, Fallback = new[] { "中场自动继续" },
+            Map = new[] { GameScreen.InMatch, GameScreen.HalfTime },
+        },
+        new StepDef
+        {
+            Title = "全场结算", Goal = "全场结束/结果推进。",
+            Screens = new[] { "全场结束", "比赛结果" },
+            Actions = new[] { "锚定「下一步」→ A 推进" },
+            Verify = new[] { "赛后词优先于 AI 图标" }, Fallback = Array.Empty<string>(),
+            Map = new[] { GameScreen.FullTime, GameScreen.Result },
+        },
+        new StepDef
+        {
+            Title = "奖励回环", Goal = "领奖后回挑战列表继续下一个挑战。",
+            Screens = new[] { "奖励页" },
+            Actions = new[] { "推进领奖 → 回挑战列表" },
+            Verify = new[] { "回到 ChallengeList 验证" }, Fallback = Array.Empty<string>(),
+            Map = new[] { GameScreen.Rewards, GameScreen.Loading },
+        },
+    };
+
+    private static readonly Dictionary<string, Func<StepDef[]>> ModeSteps = new()
+    {
+        ["myleague"] = LeagueSteps,
+        ["intlweekly"] = WeeklySteps,
+        ["cndaily"] = CnSteps,
+    };
+
+    /// <summary>回环说明（总收尾）：模块 → 循环回哪一步。</summary>
+    private static readonly Dictionary<string, (int StepNo, string Text)> ModeLoop = new()
+    {
+        ["myleague"] = (3, "↺ 每场比赛结束回到「③ 主页检查」，重新清弹窗+查道具，再开下一场（直到目标场次）"),
+        ["intlweekly"] = (3, "↺ 每场结束回「③ 活动检查」，继续下一个活动赛事"),
+        ["cndaily"] = (3, "↺ 每场结束回「③ 挑战检查」，继续下一个每日挑战"),
+    };
+
+    // ---------------- 构建（总） ----------------
+
+    private void BuildSteps()
+    {
+        StepsHost.Children.Clear();
+        DetailHost.Children.Clear();
+        _cards.Clear();
+        _screenMap.Clear();
+        _currentStep = null;
+        _selectedStep = null;
+
+        var steps = ModeSteps[_mode]();
+        for (int i = 0; i < steps.Length; i++)
+        {
+            var step = steps[i];
+            foreach (var s in step.Map) _screenMap[s] = step;
+            _cards.Add((step, MakeStepCard(i, step)));
+
+            if (i > 0) StepsHost.Children.Add(MakeArrowText());
+            StepsHost.Children.Add(_cards[^1].Card);
+        }
+
+        // 总收尾：回环徽章
+        if (ModeLoop.TryGetValue(_mode, out var loop))
+        {
+            StepsHost.Children.Add(MakeArrowText());
+            var badge = new Border
+            {
+                Padding = new Thickness(14, 8, 14, 8),
+                CornerRadius = new CornerRadius(18),
+                BorderThickness = new Thickness(1.5, 1.5, 1.5, 1.5),
+                Child = new TextBlock
+                {
+                    Text = loop.Text,
+                    FontSize = 12,
+                    VerticalAlignment = VerticalAlignment.Center,
+                },
+            };
+            badge.SetResourceReference(Border.BackgroundProperty, "CardBg");
+            badge.SetResourceReference(Border.BorderBrushProperty, "ModuleDot");
+            badge.SetResourceReference(TextBlock.ForegroundProperty, "TextSecondary");
+            StepsHost.Children.Add(badge);
+        }
+
+        // 默认展开第一步
+        SelectStep(steps[0], manual: false);
+    }
+
+    private Border MakeStepCard(int index, StepDef step)
+    {
+        var number = char.ConvertFromUtf32(0x2460 + index); // ①②③…
+        var card = new Border
+        {
+            Padding = new Thickness(14, 8, 14, 8),
+            CornerRadius = new CornerRadius(10),
+            BorderThickness = new Thickness(1.5),
+            Cursor = Cursors.Hand,
+            Tag = step,
+            Child = new StackPanel
+            {
+                Orientation = Orientation.Horizontal,
+                Children =
+                {
+                    new TextBlock { Text = number + " ", FontSize = 13, FontWeight = FontWeights.Bold },
+                    new TextBlock { Text = step.Title, FontSize = 13, FontWeight = FontWeights.SemiBold,
+                                    VerticalAlignment = VerticalAlignment.Center },
+                },
+            },
+        };
+        card.SetResourceReference(Border.BackgroundProperty, "CardBg");
+        card.SetResourceReference(Border.BorderBrushProperty, "CardBorder");
+        card.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimary");
+        card.MouseLeftButtonUp += (_, _) => SelectStep(step, manual: true);
+        return card;
+    }
+
+    private static TextBlock MakeArrowText() => new()
+    {
+        Text = "→",
+        FontSize = 14,
+        Margin = new Thickness(6, 0, 6, 0),
+        VerticalAlignment = VerticalAlignment.Center,
+    };
+
+    // ---------------- 分：详情展开 ----------------
+
+    private void SelectStep(StepDef step, bool manual)
+    {
+        _selectedStep = step;
+        if (manual) _manualSelectAt = DateTime.Now;
+
+        // 卡片样式：选中加亮；当前运行步骤绿脉冲
+        foreach (var (s, card) in _cards)
+        {
+            bool selected = s == step;
+            card.BorderBrush = (Brush)FindResource(selected ? "AccentGlow" : "CardBorder");
+            card.BorderThickness = new Thickness(selected ? 2.2 : 1.5);
+            card.SetResourceReference(Border.BackgroundProperty, selected ? "AccentLight" : "CardBg");
+        }
+
+        DetailHost.Children.Clear();
+        var sb = new StringBuilder();
+        sb.AppendLine($"〔{step.Title}〕{step.Goal}");
+        AddSection(sb, "画面", step.Screens);
+        AddSection(sb, "动作", step.Actions);
+        AddSection(sb, "验证", step.Verify);
+        AddSection(sb, "失败处理", step.Fallback);
+
+        var head = new TextBlock
+        {
+            Text = sb.ToString(),
+            FontSize = 12.5,
+            LineHeight = 21,
+            TextWrapping = TextWrapping.Wrap,
+        };
+        head.SetResourceReference(TextBlock.ForegroundProperty, "TextPrimary");
+        DetailHost.Children.Add(head);
+    }
+
+    private static void AddSection(StringBuilder sb, string title, string[] items)
+    {
+        if (items is not { Length: > 0 }) return;
+        sb.Append(title).Append("：");
+        foreach (var it in items) sb.AppendLine().Append("　· ").Append(it);
+        sb.AppendLine();
+    }
+
+    // ---------------- 驱动（总） ----------------
+
+    /// <summary>切换模块（挂机启动时自动跟随）。重建步骤链。</summary>
     public void SetMode(string mode)
     {
-        if (!ModeChains.ContainsKey(mode)) return;
+        if (!ModeSteps.ContainsKey(mode)) return;
         _mode = mode;
         _suppressModeEvent = true;
         TabModeLeague.IsChecked = mode == "myleague";
         TabModeWeekly.IsChecked = mode == "intlweekly";
         TabModeCn.IsChecked = mode == "cndaily";
         _suppressModeEvent = false;
-        BuildGraph();
+        BuildSteps();
     }
 
     private void ModeTab_Checked(object sender, RoutedEventArgs e)
     {
-        // XAML 加载期 IsChecked=True 会提前触发本事件，此时 Canvas 字段尚未解析赋值，必须守卫
-        if (_suppressModeEvent || Canvas is null) return;
+        // XAML 加载期 IsChecked=True 会提前触发本事件，此时字段尚未解析赋值，必须守卫
+        if (_suppressModeEvent || StepsHost is null) return;
         if (TabModeLeague.IsChecked == true) _mode = "myleague";
         else if (TabModeWeekly.IsChecked == true) _mode = "intlweekly";
         else if (TabModeCn.IsChecked == true) _mode = "cndaily";
-        BuildGraph();
+        BuildSteps();
     }
 
-    // ---------------- 构建 ----------------
-
-    private void BuildGraph()
+    /// <summary>画面事件驱动：更新当前画面、按映射高亮当前步骤（8 秒内不覆盖手动选择）。</summary>
+    public void OnScreen(GameScreen screen, double score, string? evidence)
     {
-        Canvas.Children.Clear();
-        _nodes.Clear();
-        _edges.Clear();
-        _trail.Clear();
-        _current = null;
-        _activeEdgeKey = null;
+        string name = BotEngine.ScreenName(screen);
+        TxtCurrent.Text = $"当前画面：{name}（{score:F1}）";
+        DotCurrent.Fill = (Brush)FindResource("AccentGlow");
 
-        var chain = ModeChains[_mode];
-
-        // 主链节点（线性一排）
-        for (int i = 0; i < chain.Length; i++)
-            _nodes[chain[i]] = MakeNode(chain[i], 10 + i * (NodeW + 16), ChainY, NodeW, NodeH, false);
-
-        // 支线节点（父节点下方第二行，从父的 x 起向右排）
-        if (ModeBranches.TryGetValue(_mode, out var branches))
+        var step = _screenMap.TryGetValue(screen, out var st) ? st : null;
+        if (!ReferenceEquals(_currentStep, step))
         {
-            foreach (var (parent, subs) in branches)
+            if (_currentStep is not null) PulseStop(_cards.First(c => ReferenceEquals(c.Step, _currentStep)).Card);
+            _currentStep = step;
+            if (step is not null)
             {
-                if (!_nodes.TryGetValue(parent, out var p)) continue;
-                double sx = p.CX - SubW / 2;
-                foreach (var sub in subs)
-                {
-                    _nodes[sub] = MakeNode(sub, sx, SubY, SubW, SubH, false);
-                    sx += SubW + 10;
-                }
+                var card = _cards.First(c => ReferenceEquals(c.Step, step)).Card;
+                card.BorderBrush = (Brush)FindResource("AccentGlow");
+                PulseStart(card);
+                // 手动点击 8 秒内不自动跳详情，避免用户正看别处被打断
+                if ((DateTime.Now - _manualSelectAt).TotalSeconds > 8 || _selectedStep is null)
+                    SelectStep(step, manual: false);
             }
         }
+    }
 
-        // 覆盖层徽章行
-        double ox = 10;
-        foreach (var ov in Overlays)
+    /// <summary>开始新场景时重置（清高亮，回到默认展开第一步）。</summary>
+    public void ResetGraph()
+    {
+        if (_currentStep is not null)
+            PulseStop(_cards.First(c => ReferenceEquals(c.Step, _currentStep)).Card);
+        _currentStep = null;
+        foreach (var (_, card) in _cards)
         {
-            _nodes[ov] = MakeNode(ov, ox, OverlayY, SubW, SubH, true);
-            ox += SubW + 10;
+            card.SetResourceReference(Border.BackgroundProperty, "CardBg");
+            card.SetResourceReference(Border.BorderBrushProperty, "CardBorder");
+            card.BorderThickness = new Thickness(1.5);
         }
-
-        // 先画边（下层），再画卡片（上层遮挡中段）
-        var pendingCards = new List<(GameScreen S, GraphNode N)>();
-        foreach (var kv in _nodes) pendingCards.Add((kv.Key, kv.Value));
-
-        // 主链相邻连线
-        for (int i = 0; i < chain.Length - 1; i++)
-            AddEdge(chain[i], chain[i + 1], straight: true);
-
-        // 支线：父 → 子
-        if (branches is not null)
-            foreach (var (parent, subs) in branches)
-                foreach (var sub in subs)
-                    AddEdge(parent, sub, straight: true);
-
-        // 回环：底部 U 形线
-        if (ModeLoops.TryGetValue(_mode, out var loops))
-            foreach (var (from, to) in loops)
-                AddEdge(from, to, straight: false);
-
-        // 画卡片
-        foreach (var (s, n) in pendingCards)
-        {
-            Canvas.SetLeft(n.Card, n.CX - n.HW);
-            Canvas.SetTop(n.Card, n.CY - n.HH);
-            Canvas.Children.Add(n.Card);
-        }
-    }
-
-    private GraphNode MakeNode(GameScreen s, double x, double y, double w, double h, bool overlay)
-    {
-        var title = new TextBlock
-        {
-            Text = BotEngine.ScreenName(s),
-            FontSize = overlay || h == SubH ? 10 : 12,
-            FontWeight = overlay ? FontWeights.Normal : FontWeights.SemiBold,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            VerticalAlignment = VerticalAlignment.Center,
-            TextTrimming = TextTrimming.CharacterEllipsis,
-        };
-        title.SetResourceReference(TextBlock.ForegroundProperty,
-            overlay ? "TextSecondary" : "TextPrimary");
-        var card = new Border
-        {
-            Width = w,
-            Height = h,
-            CornerRadius = new CornerRadius(overlay ? h / 2 : 8),
-            BorderThickness = new Thickness(1.5),
-            Child = title,
-        };
-        card.SetResourceReference(Border.BackgroundProperty, "CardBg");
-        card.SetResourceReference(Border.BorderBrushProperty, overlay ? "TextMuted" : "CardBorder");
-        return new GraphNode
-        {
-            Card = card,
-            CX = x + w / 2, CY = y + h / 2,
-            HW = w / 2, HH = h / 2,
-            Overlay = overlay,
-        };
-    }
-
-    private void AddEdge(GameScreen from, GameScreen to, bool straight)
-    {
-        if (!_nodes.TryGetValue(from, out var f) || !_nodes.TryGetValue(to, out var t)) return;
-        GraphEdge edge = straight ? BuildStraightEdge(f, t) : BuildLoopEdge(f, t);
-        _edges[(from, to)] = edge;
-        Canvas.Children.Add(edge.Line);
-        Canvas.Children.Add(edge.Arrow);
-    }
-
-    /// <summary>直线边：源中心 → 目标卡片边界 + 箭头。</summary>
-    private GraphEdge BuildStraightEdge(GraphNode from, GraphNode to)
-    {
-        double dx = to.CX - from.CX, dy = to.CY - from.CY;
-        double len = Math.Sqrt(dx * dx + dy * dy);
-        if (len < 1e-6) len = 1;
-        double ux = dx / len, uy = dy / len;
-        var sp = RectEdgePoint(from.CX, from.CY, from.HW, from.HH, ux, uy);
-        var tp = RectEdgePoint(to.CX, to.CY, to.HW, to.HH, -ux, -uy);
-
-        var line = new Line { X1 = sp.X, Y1 = sp.Y, X2 = tp.X, Y2 = tp.Y };
-        var arrow = MakeArrow(tp, ux, uy);
-        var edge = new GraphEdge { Line = line, Arrow = arrow };
-        SetEdgeDefault(edge);
-        return edge;
-    }
-
-    /// <summary>回环边：从源卡底部向下 → 水平 → 向上回到目标卡底部的 U 形线。</summary>
-    private GraphEdge BuildLoopEdge(GraphNode from, GraphNode to)
-    {
-        double yBottom = from.CY + from.HH;
-        var poly = new Polyline();
-        poly.Points.Add(new Point(from.CX, yBottom));
-        poly.Points.Add(new Point(from.CX, LoopY));
-        poly.Points.Add(new Point(to.CX, LoopY));
-        poly.Points.Add(new Point(to.CX, to.CY + to.HH));
-        // 箭头朝上（指向目标卡底部）
-        var arrow = MakeArrow(new Point(to.CX, to.CY + to.HH), 0, -1);
-        var edge = new GraphEdge { Line = poly, Arrow = arrow };
-        SetEdgeDefault(edge);
-        return edge;
-    }
-
-    private static Polygon MakeArrow(Point tip, double ux, double uy)
-    {
-        double px = -uy, py = ux;
-        var baseC = new Point(tip.X - ux * 9, tip.Y - uy * 9);
-        var arrow = new Polygon();
-        arrow.Points.Add(tip);
-        arrow.Points.Add(new Point(baseC.X + px * 3.5, baseC.Y + py * 3.5));
-        arrow.Points.Add(new Point(baseC.X - px * 3.5, baseC.Y - py * 3.5));
-        return arrow;
-    }
-
-    private static Point RectEdgePoint(double cx, double cy, double hw, double hh, double ux, double uy)
-    {
-        double kx = Math.Abs(ux) < 1e-6 ? double.MaxValue : hw / Math.Abs(ux);
-        double ky = Math.Abs(uy) < 1e-6 ? double.MaxValue : hh / Math.Abs(uy);
-        double k = Math.Min(kx, ky);
-        return new Point(cx + ux * k, cy + uy * k);
-    }
-
-    // ---------------- 状态样式 ----------------
-
-    private void SetEdgeDefault(GraphEdge e)
-    {
-        var b = (Brush)FindResource("ModuleDot");
-        e.Line.Stroke = b; e.Line.StrokeThickness = 1.0;
-        e.Arrow.Fill = b;
-    }
-
-    private void SetEdgeTrail(GraphEdge e)
-    {
-        var b = (Brush)FindResource("TextMuted");
-        e.Line.Stroke = b; e.Line.StrokeThickness = 1.5;
-        e.Arrow.Fill = b;
-    }
-
-    private void SetEdgeActive(GraphEdge e)
-    {
-        var b = (Brush)FindResource("AccentGlow");
-        e.Line.Stroke = b; e.Line.StrokeThickness = 2.5;
-        e.Arrow.Fill = b;
+        TxtCurrent.Text = "当前画面：—";
+        TxtDetail.Text = "判定依据：—";
+        DotCurrent.Fill = (Brush)FindResource("EnvDotIdle");
     }
 
     private static void PulseStart(Border b)
@@ -330,74 +474,7 @@ public partial class GraphWindow : Window
         b.Opacity = 1.0;
     }
 
-    // ---------------- 驱动 ----------------
-
-    /// <summary>画面事件驱动图谱：更新当前页高亮、路径轨迹、判定依据。</summary>
-    public void OnScreen(GameScreen screen, double score, string? evidence)
-    {
-        string name = BotEngine.ScreenName(screen);
-        TxtCurrent.Text = $"当前画面：{name}（{score:F1}）";
-        TxtDetail.Text = $"判定依据：{(string.IsNullOrWhiteSpace(evidence) ? "—" : evidence)}";
-        DotCurrent.Fill = (Brush)FindResource("AccentGlow");
-
-        if (!_nodes.ContainsKey(screen) || _current == screen) return;
-
-        if (_current is GameScreen prev && _nodes.TryGetValue(prev, out var prevNode))
-        {
-            if (_activeEdgeKey is { } aek && _edges.TryGetValue(aek, out var prevEdge))
-                SetEdgeTrail(prevEdge);
-
-            var key = (prev, screen);
-            if (_edges.TryGetValue(key, out var edge))
-            {
-                SetEdgeActive(edge);
-                _activeEdgeKey = key;
-                _trail.Enqueue(key);
-                while (_trail.Count > 20)
-                {
-                    var old = _trail.Dequeue();
-                    if (old != _activeEdgeKey && !_trail.Contains(old)
-                        && _edges.TryGetValue(old, out var oe))
-                        SetEdgeDefault(oe);
-                }
-            }
-            else _activeEdgeKey = null;
-
-            PulseStop(prevNode.Card);
-            prevNode.Card.BorderBrush = (Brush)FindResource("TextMuted");
-            prevNode.Card.BorderThickness = new Thickness(1.5);
-            prevNode.Card.SetResourceReference(Border.BackgroundProperty, "CardBg");
-        }
-
-        var node = _nodes[screen];
-        node.Card.BorderBrush = (Brush)FindResource("AccentGlow");
-        node.Card.BorderThickness = new Thickness(2.5);
-        node.Card.SetResourceReference(Border.BackgroundProperty, "AccentLight");
-        PulseStart(node.Card);
-        _current = screen;
-    }
-
-    /// <summary>开始新场景时重置（保留当前模块选择，清空轨迹与高亮）。</summary>
-    public void ResetGraph()
-    {
-        _trail.Clear();
-        _activeEdgeKey = null;
-        if (_current is GameScreen cur && _nodes.TryGetValue(cur, out var n))
-            PulseStop(n.Card);
-        _current = null;
-        foreach (var node in _nodes.Values)
-        {
-            node.Card.SetResourceReference(Border.BorderBrushProperty, node.Overlay ? "TextMuted" : "CardBorder");
-            node.Card.BorderThickness = new Thickness(1.5);
-            node.Card.SetResourceReference(Border.BackgroundProperty, "CardBg");
-        }
-        foreach (var e in _edges.Values) SetEdgeDefault(e);
-        TxtCurrent.Text = "当前画面：—";
-        TxtDetail.Text = "判定依据：—";
-        DotCurrent.Fill = (Brush)FindResource("EnvDotIdle");
-    }
-
-    // ---------------- 可视化事件处理骨架（Worker→GUI 管道事件消费） ----------------
+    // ---------------- 可视化事件处理（Worker→GUI 管道事件消费，保持接口不变） ----------------
 
     /// <summary>探针 Top-5 候选事件：更新底部详情栏展示候选页面与分数。</summary>
     public void OnProbe(string topCandidatesJson)
@@ -415,13 +492,13 @@ public partial class GraphWindow : Window
         }
     }
 
-    /// <summary>导航寻路事件：高亮路径（已由 OnScreen 串联轨迹处理，此处仅记录详情）。</summary>
+    /// <summary>导航寻路事件。</summary>
     public void OnNav(string from, string to)
     {
         TxtDetail.Text = $"导航：{from} → {to}";
     }
 
-    /// <summary>比赛阶段切换事件：在顶部当前页旁显示当前比赛阶段。</summary>
+    /// <summary>比赛阶段切换事件。</summary>
     public void OnFlow(string stage, string? deadline)
     {
         var dl = string.IsNullOrEmpty(deadline) ? "" : $"（死线 {DateTime.Parse(deadline):HH:mm:ss}）";
