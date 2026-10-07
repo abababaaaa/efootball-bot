@@ -64,7 +64,7 @@ public sealed class MyLeagueStateMachine
                 break;
 
             // ---- 比赛全流程（赛前开始点 / 比赛中 / 中场 / 全场 / 结果 / 奖励）----
-            // 通用模块：右下角蓝色推进按钮最高优先级，无按钮则等待（AI 代打 / 过场播放）
+            // 通用模块：右下角蓝色推进按钮立即响应；无按钮时按挂机节奏随机轻按 A
             case State.PreMatch:
             case State.InMatch:
             case State.HalfTime:
@@ -73,9 +73,8 @@ public sealed class MyLeagueStateMachine
             case State.Rewards:
             {
                 _wasInMatch = true; // 标记正在/曾在比赛流程，回到主页后需重新检查消耗品
-                var phase = await _matchFlow.RunOnceAsync(ct);
-                // 比赛/过场等待时拉长轮询间隔，降低 OCR 开销
-                delayMs = phase == MatchPhase.Waiting ? 3000 : 600;
+                var (_, matchDelay) = await _matchFlow.RunOnceAsync(idleTapEnabled: true, ct);
+                delayMs = matchDelay;
                 break;
             }
 
@@ -92,9 +91,9 @@ public sealed class MyLeagueStateMachine
             default:
             {
                 // 未知画面兜底：左上角队徽/文字变化会导致探针判错，
-                // 但右下角蓝色推进按钮是跨页面稳定锚点，照样尝试推进
-                var fallbackPhase = await _matchFlow.RunOnceAsync(ct);
-                delayMs = fallbackPhase == MatchPhase.Waiting ? 1200 : 600;
+                // 右下角蓝色推进按钮是跨页面稳定锚点，照样尝试推进；但不做节奏盲按
+                var (_, fallbackDelay) = await _matchFlow.RunOnceAsync(idleTapEnabled: false, ct);
+                delayMs = fallbackDelay;
                 break;
             }
         }
