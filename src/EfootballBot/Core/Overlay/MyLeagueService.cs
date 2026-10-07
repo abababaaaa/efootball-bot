@@ -171,12 +171,22 @@ public sealed class MyLeagueStateMachine
         // 页面判断
         if (obs.Screen == GameScreen.MyLeagueHome)
         {
+            // 探针误判防线（实测：赛前阵容/列队画面仅凭弱词命中 3.5 分误判主页，
+            // 导致物品检查必然失败连环重试直至停机、或在错误画面盲点「前往比赛」）：
+            // 主页必须「前往比赛」+「赛程表」双卡词同时在场，词不齐一律不认，
+            // 落到后续分支（多为 Unknown 兜底：有蓝按钮按 A 推进过场，无按钮等待）
+            bool homeWords = text.Contains("前往比赛") && text.Contains("赛程表");
+            if (!homeWords)
+            {
+                _engine.LogInternal($"探针判主页但双卡词不齐（OCR 前 30 字：{text[..Math.Min(30, text.Length)]}），按误判丢弃", LogLevel.Warn);
+            }
             // 回到主页优先清弹窗：主页上覆盖模态弹窗（如物品已过期）时探针可能仍判主页。
             // 必须同时满足「浅色弹窗遮罩 + 中部蓝按钮」，避免深色主页 UI 被误判成弹窗后永远进不了主页
-            if (FrameAnalyzer.HasModalOverlay(obs.Frame)
+            else if (FrameAnalyzer.HasModalOverlay(obs.Frame)
                 && FrameAnalyzer.FindBlueDialogButton(obs.Frame, out _))
                 return State.Dialog;
-            return State.MyLeagueHome;
+            else
+                return State.MyLeagueHome;
         }
 
         if (obs.Screen == GameScreen.Schedule)
