@@ -72,7 +72,6 @@ public sealed class MyLeagueStateMachine
             case State.Result:
             case State.Rewards:
             {
-                _wasInMatch = true; // 标记正在/曾在比赛流程，回到主页后需重新检查消耗品
                 var (_, matchDelay) = await _matchFlow.RunOnceAsync(idleTapEnabled: true, ct);
                 delayMs = matchDelay;
                 break;
@@ -98,6 +97,7 @@ public sealed class MyLeagueStateMachine
             }
         }
 
+        _lastState = state;
         return (state, delayMs);
     }
 
@@ -110,8 +110,19 @@ public sealed class MyLeagueStateMachine
         // 有图标时 AI 正在操作，按 A 安全，且可纠正探针因左上角图标/文字变化导致的误判）
         if (FrameAnalyzer.FindAiControlIcon(obs.Frame, out double iconX, out double iconY))
         {
-            _engine.LogInternal($"检测到 AI 代打图标（{iconX:F2},{iconY:F2}），判定比赛中", LogLevel.Debug);
-            return State.InMatch;
+            // 右侧顶栏图标区（实测真图标 cx≈0.935）无条件采信；
+            // 左侧命中只可能是「国服错版」，必须探针也判比赛类页面——
+            // 否则主页左上队徽等黑白元素会被误判成比赛中，导致道具检查被整体跳过
+            bool leftSideAccepted = iconX < 0.80
+                && obs.Screen is GameScreen.PreMatch or GameScreen.InMatch
+                    or GameScreen.HalfTime or GameScreen.FullTime
+                    or GameScreen.Result or GameScreen.Rewards;
+            if (iconX >= 0.80 || leftSideAccepted)
+            {
+                _engine.LogInternal($"检测到 AI 代打图标（{iconX:F2},{iconY:F2}，探针 {obs.Screen}），判定比赛中", LogLevel.Debug);
+                return State.InMatch;
+            }
+            _engine.LogInternal($"顶栏左侧疑似图标（{iconX:F2},{iconY:F2}）但探针判 {obs.Screen}，忽略", LogLevel.Debug);
         }
 
         // 弹窗优先判断
@@ -130,9 +141,10 @@ public sealed class MyLeagueStateMachine
         // 页面判断
         if (obs.Screen == GameScreen.MyLeagueHome)
         {
-            // 回到主页优先清弹窗：主页上覆盖模态弹窗（如物品已过期）时探针可能仍判主页，
-            // 用弹窗中部蓝色确认按钮作为独立视觉信号
-            if (FrameAnalyzer.FindBlueDialogButton(obs.Frame, out _))
+            // 回到主页优先清弹窗：主页上覆盖模态弹窗（如物品已过期）时探针可能仍判主页。
+            // 必须同时满足「浅色弹窗遮罩 + 中部蓝按钮」，避免深色主页 UI 被误判成弹窗后永远进不了主页
+            if (FrameAnalyzer.HasModalOverlay(obs.Frame)
+                && FrameAnalyzer.FindBlueDialogButton(obs.Frame, out _))
                 return State.Dialog;
             return State.MyLeagueHome;
         }
@@ -171,12 +183,14 @@ public sealed class MyLeagueStateMachine
     /// <summary>我的联赛主页：检查物品、进入比赛。</summary>
     private async Task HandleMyLeagueHomeAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
     {
-        // 一场比赛结束回到主页：消耗品（4x经验/杰出状态/教练强化）每场都要重新检查
-        if (_wasInMatch)
+        // 边沿触发：只要本轮「刚回到主页」（上一轮是弹窗/比赛/商店/赛程表/未知等任意非主页状态），
+        // 就重新走「清弹窗→查道具」流程。不依赖探针是否识别出比赛状态，
+        // 赛后经 Unknown 兜底一路推进回主页也能保证重新检查消耗品。
+        if (_lastState != State.MyLeagueHome)
         {
-            _wasInMatch = false;
             _itemsChecked = false;
-            _engine.LogInternal("检测到一场比赛结束，重新检查消耗品", LogLevel.Info);
+            _itemCheckFails = 0;
+            _engine.LogInternal($"刚回到我的联赛主页（上一状态：{_lastState}），开始道具检查", LogLevel.Info);
         }
 
         // 1. 检查物品：必须确认成功才放行；失败下一轮重试，连续失败超上限则停机（绝不裸奔开赛）
@@ -287,7 +301,8 @@ public sealed class MyLeagueStateMachine
     private const int MaxItemCheckFails = 8;
     private bool _itemsChecked = false;
     private int _itemCheckFails = 0;
-    private bool _wasInMatch = false;
+    /// <summary>上一轮状态机状态，用于「刚回到主页」边沿触发道具检查。</summary>
+    private State _lastState = State.Unknown;
 
     /// <summary>赛程表：选择比赛。</summary>
     private async Task HandleScheduleAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)

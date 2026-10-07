@@ -377,6 +377,35 @@ public static class FrameAnalyzer
     }
 
     /// <summary>
+    /// 检测屏幕中部的模态弹窗浅色遮罩（eFootball 弹窗主体为浅灰白大块，
+    /// 如「物品已过期」；主页/商店等正常页面是深色底）。
+    /// 搜索区 x 0.20~0.80、y 0.18~0.88；近白浅灰像素（min≥160、max≤245、极差≤28）
+    /// 占比≥0.22 即判为有弹窗遮罩。用于约束 FindBlueDialogButton，防止主页深色 UI 误判。
+    /// </summary>
+    public static bool HasModalOverlay(FrameData f)
+    {
+        if (f.Bgra.Length == 0) return false;
+        int xFrom = (int)(0.20 * f.Width), xTo = (int)(0.80 * f.Width);
+        int yFrom = (int)(0.18 * f.Height), yTo = (int)(0.88 * f.Height);
+        long light = 0, n = 0;
+        var b = f.Bgra;
+        for (int y = yFrom; y < yTo; y += 2)
+        {
+            int row = y * f.Width * 4;
+            for (int x = xFrom; x < xTo; x += 2)
+            {
+                int i = row + x * 4;
+                int rr = b[i + 2], gg = b[i + 1], bb = b[i];
+                int mx = Math.Max(rr, Math.Max(gg, bb));
+                int mn = Math.Min(rr, Math.Min(gg, bb));
+                n++;
+                if (mn >= 160 && mx <= 245 && mx - mn <= 28) light++;
+            }
+        }
+        return n > 0 && light / (double)n >= 0.22;
+    }
+
+    /// <summary>
     /// 检测弹窗中部的蓝色确认按钮（主页/商店等页面上的模态弹窗，
     /// 如「物品已过期」的 OK 按钮位于屏幕中央 y≈0.69，不在右下角）。
     /// 搜索区 x 0.25~0.75、y 0.55~0.85；行蓝占比≥0.25 且纵向跨度≥0.025 屏高。
