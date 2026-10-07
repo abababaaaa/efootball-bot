@@ -1,6 +1,7 @@
 using System.IO;
 using System.Text;
 using EfootballBot.Core.Bot;
+using EfootballBot.Core.System;
 
 namespace EfootballBot.Core.Logging;
 
@@ -16,8 +17,8 @@ public sealed class FileLogger : IDisposable
     /// <summary>当前活跃日志文件完整路径。</summary>
     public string CurrentLogPath { get; private set; } = "";
 
-    /// <summary>logs 目录（AppContext.BaseDirectory\logs）。</summary>
-    public static string LogDir => Path.Combine(AppContext.BaseDirectory, "logs");
+    /// <summary>logs 目录（exe 同级 logs\；单文件发布时 exe 在临时解压目录之外，日志不写进 %TEMP%）。</summary>
+    public static string LogDir => AppPaths.LogDir;
 
     private StreamWriter? _writer;
     private readonly object _lock = new();

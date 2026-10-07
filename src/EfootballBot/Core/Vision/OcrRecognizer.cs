@@ -312,26 +312,25 @@ internal sealed class RapidV6OcrBackend : IOcrBackend
 
     public RapidV6OcrBackend()
     {
-        string modelRoot = Path.Combine(AppContext.BaseDirectory, "models");
-        string detPath = Path.Combine(modelRoot, "v6", "PP-OCRv6_det_small.onnx");
-        string recPath = Path.Combine(modelRoot, "v6", "PP-OCRv6_rec_small.onnx");
-        string keysPath = Path.Combine(modelRoot, "v6", "ppocrv6_small_dict.txt");
-        string clsPath = Path.Combine(modelRoot, "v5", "ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx");
-
-        var missing = new[] { detPath, recPath, keysPath, clsPath }
-            .Where(p => !File.Exists(p))
-            .Select(p => Path.GetRelativePath(AppContext.BaseDirectory, p))
-            .ToList();
-        if (missing.Count > 0)
-            throw new InvalidOperationException(
-                "PP-OCRv6 模型文件缺失：" + string.Join("、", missing) +
-                "。请重新下载完整版程序（models 目录需与 exe 同级），或在设置中把 OCR 引擎切回「Windows 内置 OCR」。");
+        // 单文件发布时模型在临时解压目录；普通发布在 exe 同级 models，FindBundledFile 两种都兼容
+        string detPath = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "PP-OCRv6_det_small.onnx")
+            ?? throw ModelMissing("models/v6/PP-OCRv6_det_small.onnx");
+        string recPath = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "PP-OCRv6_rec_small.onnx")
+            ?? throw ModelMissing("models/v6/PP-OCRv6_rec_small.onnx");
+        string keysPath = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "ppocrv6_small_dict.txt")
+            ?? throw ModelMissing("models/v6/ppocrv6_small_dict.txt");
+        string clsPath = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v5", "ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx")
+            ?? throw ModelMissing("models/v5/ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx");
 
         _ocr = new RapidOcrNet.RapidOcr();
         _ocr.InitModels(detPath, clsPath, recPath, keysPath);
         // PPOCRv6 预处理（短边自适应 736、不加白边）；游戏界面文字不会倒置，跳过 180° 分类
         _options = RapidOcrOptions.PPOCRv6 with { DoAngle = false };
     }
+
+    private static InvalidOperationException ModelMissing(string rel) => new(
+        "PP-OCRv6 模型文件缺失：" + rel +
+        "。请重新下载完整版程序（models 目录需与 exe 同级），或在设置中把 OCR 引擎切回「Windows 内置 OCR」。");
 
     public Task<OcrResult> RecognizeAsync(FrameData frame, CancellationToken ct = default)
         => Task.Run(() =>

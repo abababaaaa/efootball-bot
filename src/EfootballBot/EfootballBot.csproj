@@ -22,6 +22,17 @@
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
+  <!-- 默认发布形态：单个自包含 exe（方便携带）；模型与原生库内嵌、首启自解压到 %TEMP%。
+       只影响 dotnet publish，不影响普通 build/调试（如需旧的文件夹发布，命令行加 -p:PublishSingleFile=false） -->
+  <PropertyGroup Condition="'$(PublishSingleFile)' != 'false'">
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- 主窗口 / exe 图标（Resource 供 WPF 窗口 Icon 引用，ApplicationIcon 供 exe 资源） -->
     <Resource Include="app.ico" />
@@ -56,5 +67,14 @@
   <ItemGroup>
     <InternalsVisibleTo Include="EfootballBot.Tests" />
   </ItemGroup>
+
+  <!-- RapidOcrNet 的 build target 在 Publish 后无条件把 models/v5 松散复制到发布目录；
+       v5 四个模型已收入项目 models/v5（单文件发布时随 models\** 内嵌进 exe）。
+       单文件发布时删除这份重复的松散副本，保证输出目录只有一个 exe；普通文件夹发布保留。 -->
+  <Target Name="RemoveDuplicateV5ModelsFromSingleFile" AfterTargets="CopyModelsPublish"
+          Condition="'$(PublishSingleFile)' == 'true'">
+    <!-- v5 包副本删除；v6 由项目 Content 内嵌不松散输出，models 目录在单文件发布下不应存在，整体删除 -->
+    <RemoveDir Directories="$(PublishDir)models" Condition="Exists('$(PublishDir)models')" />
+  </Target>
 
 </Project>
