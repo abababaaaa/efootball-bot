@@ -200,6 +200,14 @@ public static class WorkerProgram
                     }
                     StopPreviewLoop();
                 }
+                else if (msg.Cmd == "pause")
+                {
+                    engine?.SetPaused(true);
+                }
+                else if (msg.Cmd == "resume")
+                {
+                    engine?.SetPaused(false);
+                }
                 else if (msg.Cmd == "preview")
                 {
                     previewOn = msg.On == true;

@@ -47,6 +47,7 @@ public static class PipeProtocol
 
     public static Msg CmdStart(string mode) => new() { Cmd = "start", Mode = mode };
     public static Msg CmdStop() => new() { Cmd = "stop" };
+    public static Msg CmdPause(bool on) => new() { Cmd = on ? "pause" : "resume" };
     public static Msg CmdPreview(bool on) => new() { Cmd = "preview", On = on };
     public static Msg CmdReloadConfig() => new() { Cmd = "reloadConfig" };
     public static Msg CmdPing() => new() { Cmd = "ping" };

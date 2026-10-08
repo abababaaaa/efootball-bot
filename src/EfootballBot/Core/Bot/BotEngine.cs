@@ -40,6 +40,25 @@ public sealed class BotEngine : IDisposable
     public readonly OcrRecognizer Ocr;
     public readonly ObservationService Observation;
     private readonly ProbeEngine _probeEngine;
+
+    // 暂停标志：置位后主循环不再观察/操作，且立即清空手柄输出防残留半按状态
+    private volatile bool _paused;
+
+    /// <summary>暂停/继续场景循环（幂等）。暂停即刻复位虚拟手柄，恢复后从下一轮观察继续。</summary>
+    public void SetPaused(bool on)
+    {
+        if (_paused == on) return;
+        _paused = on;
+        if (on)
+        {
+            try { Pad360.ResetAll(); } catch { }
+            LogInternal("已暂停：手柄已复位，暂停观察与操作", LogLevel.Warn);
+        }
+        else
+        {
+            LogInternal("已继续", LogLevel.Info);
+        }
+    }
     public readonly PageGraph Graph;
     public readonly NavigationService Navigation;
     public readonly BotStats Stats = new();
@@ -141,6 +160,8 @@ public sealed class BotEngine : IDisposable
                         var stateMachine = new MyLeagueStateMachine(this);
                         while (!token.IsCancellationRequested)
                         {
+                            // 暂停：不再观察/操作，只轮询等待恢复或取消
+                            if (_paused) { await Task.Delay(400, token); continue; }
                             var (state, delayMs) = await stateMachine.RunOnceAsync(token);
                             await Task.Delay(delayMs, token);
                         }

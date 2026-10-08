@@ -260,6 +260,9 @@ public sealed class WorkerHost : IDisposable
     /// <summary>发送预览开关命令。</summary>
     public Task SendPreviewAsync(bool on) => SendAsync(PipeProtocol.CmdPreview(on));
 
+    /// <summary>暂停/继续场景循环（暂停时 Worker 清空手柄输出并停止观察与操作）。</summary>
+    public Task SendPauseAsync(bool on) => SendAsync(PipeProtocol.CmdPause(on));
+
     /// <summary>枚举 \\.\pipe\ 判断 Worker 管道是否已存在（避免在服务器未监听时空连产生幽灵句柄）。</summary>
     private static bool PipeExists(string pipeName)
     {

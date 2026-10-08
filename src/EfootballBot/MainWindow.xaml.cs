@@ -158,10 +158,13 @@ public partial class MainWindow : Window
 
         if (host.IsRunning)
         {
+            // UI 反馈必须前置：StopAsync 要发 stop 并等 Worker 退出（最长 5s+Kill），
+            // 放在后面会让"停止"按钮看起来卡死几秒
             _hotkey.Unregister();
-            await host.StopAsync();
             AppendLog("正在停止…", LogLevel.Info);
             ResetButtons();
+            await host.StopAsync();
+            AppendLog("已停止。", LogLevel.Info);
             // AutoCloseWhenDone：等待几秒让日志落盘，然后关闭
             if (_cfg.AutoCloseWhenDone)
             {
@@ -197,12 +200,18 @@ public partial class MainWindow : Window
             SetStartButtonsEnabled(false);
             TabLeague.IsEnabled = TabWeekly.IsEnabled = TabCnTour.IsEnabled = false;
             GraphReset(mode!);
+            // 立即反馈：Worker 冷启动握手最长 30s，期间按钮必须显示"启动中…"而非无响应
+            btn.Content = "启动中…";
+            AppendLog("正在启动 Worker（首次冷启动需解压，可能 10 秒以上）…", LogLevel.Info);
             await host.StartAsync(mode!);
             if (host.IsRunning)
             {
                 btn.Content = "停止";
                 btn.Style = (Style)FindResource("DangerBtn");
                 btn.IsEnabled = true;
+                BtnPause.IsEnabled = true;
+                _paused = false;
+                BtnPause.Content = "暂停";
                 _statsTimer.Start();
                 if (!_previewOn) BtnPreview_Click(btn, new RoutedEventArgs()); // 自动开预览
 
@@ -246,6 +255,27 @@ public partial class MainWindow : Window
         BtnWeekly.IsEnabled = enabled;
     }
 
+    // 暂停状态（仅 GUI 侧镜像，真实状态在 Worker 引擎；停止时复位）
+    private bool _paused;
+
+    private async void BtnPause_Click(object sender, RoutedEventArgs e)
+    {
+        var host = _workerHost;
+        if (host is not { IsRunning: true }) return;
+        bool next = !_paused;
+        try
+        {
+            await host.SendPauseAsync(next);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"暂停命令发送失败：{ex.Message}", LogLevel.Error);
+            return;
+        }
+        _paused = next;
+        BtnPause.Content = _paused ? "继续" : "暂停";
+    }
+
     private void ResetButtons()
     {
         BtnMyLeague.Content = "开始";
@@ -255,6 +285,9 @@ public partial class MainWindow : Window
         BtnCnDaily.Style = (Style)FindResource("PrimaryBtn");
         BtnWeekly.Style = (Style)FindResource("PrimaryBtn");
         SetStartButtonsEnabled(true);
+        BtnPause.IsEnabled = false;
+        _paused = false;
+        BtnPause.Content = "暂停";
         RbCn.IsEnabled = RbIntl.IsEnabled = true;
         TabLeague.IsEnabled = TabWeekly.IsEnabled = TabCnTour.IsEnabled = true;
         _statsTimer.Stop();
