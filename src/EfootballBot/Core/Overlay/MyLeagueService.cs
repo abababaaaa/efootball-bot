@@ -1,4 +1,4 @@
-using EfootballBot.Core.Bot;
+﻿using EfootballBot.Core.Bot;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Match;
 using EfootballBot.Core.Vision;
@@ -36,9 +36,6 @@ public sealed class MyLeagueStateMachine
         Dialog,             // 通用弹窗
     }
 
-    /// <summary>启动时评估当前画面所处状态（状态/比赛阶段/流程），供引擎决定入口动作。</summary>
-    public State DetectCurrentState(EfootballBot.Core.Bot.Observation obs) => DetectState(obs);
-
     /// <summary>执行一轮状态机：观察 → 判断 → 操作。返回状态与建议轮询间隔（毫秒）。</summary>
     public async Task<(State State, int DelayMs)> RunOnceAsync(CancellationToken ct)
     {
@@ -47,18 +44,6 @@ public sealed class MyLeagueStateMachine
         int delayMs = 600;
 
         _engine.LogInternal($"状态机：{state}（{obs.Screen}）", LogLevel.Debug);
-
-        // 主页闸门：画面已是干净主页（主页双卡词齐 + 无弹窗遮罩）时，绝不允许任何比赛
-        // 推进状态执行。「下一步/前往比赛」等转场残留词会把主页误判成 PreMatch/FullTime，
-        // 随后的节奏 A/锚定点击会命中主页默认高光「前往比赛」直接开赛，错过道具检查；
-        // 赛后「下一步」点完回主页的最后一按同理。闸住后从主页流程重新开始（含道具检查）
-        if ((state is State.PreMatch or State.InMatch or State.HalfTime
-                or State.Result or State.Rewards or State.FullTime)
-            && IsHomePage(obs))
-        {
-            _engine.LogInternal("画面已是干净主页，终止比赛推进（防误点「前往比赛」错过道具检查）", LogLevel.Info);
-            state = State.MyLeagueHome;
-        }
 
         switch (state)
         {
@@ -75,11 +60,12 @@ public sealed class MyLeagueStateMachine
                 await HandleConfirmDialogAsync(obs, ct);
                 break;
 
-            // ---- 比赛全流程（赛前开始点 / 比赛中 / 中场 / 结果 / 奖励）----
+            // ---- 比赛全流程（赛前开始点 / 比赛中 / 中场 / 全场 / 结果 / 奖励）----
             // 通用模块：右下角蓝色推进按钮立即响应；无按钮时按挂机节奏随机轻按 A
             case State.PreMatch:
             case State.InMatch:
             case State.HalfTime:
+            case State.FullTime:
             case State.Result:
             case State.Rewards:
             {
@@ -87,11 +73,6 @@ public sealed class MyLeagueStateMachine
                 delayMs = matchDelay;
                 break;
             }
-
-            // 全场结束终点页：比赛流程的结束点，专用处理（锚定「下一步」再点击）
-            case State.FullTime:
-                await HandleFullTimeAsync(obs, ct);
-                break;
 
             case State.Exchange:
                 await HandleExchangeAsync(obs, ct);
@@ -122,25 +103,9 @@ public sealed class MyLeagueStateMachine
     {
         var text = obs.Ocr.JoinedText;
 
-        // 赛后过渡超时兜底：FullTime 之后 3 分钟仍未回主页（卡死/用户手动开新赛），解除门控
-        if (_postMatchFlow && DateTime.Now - _postMatchSince > TimeSpan.FromMinutes(3))
-        {
-            _postMatchFlow = false;
-            _engine.LogInternal("赛后过渡超时（3 分钟），解除「不判比赛中」门控", LogLevel.Warn);
-        }
-
         // 最高优先级：顶部 AI 代打图标 = 正常比赛中（国际服/国服通用，位置全顶条带扫描；
         // 有图标时 AI 正在操作，按 A 安全，且可纠正探针因左上角图标/文字变化导致的误判）
-        // 例外 1：全场结束终点页及其后（RS 翻页/回放/弹窗/回主页）顶栏可能残留 AI 图标，
-        //         出现赛后/菜单特征词时一律忽略——这些页面绝不允许记为比赛中（智能启停/统计同理）
-        // 例外 2：赛后过渡标记期间（FullTime 已处理、尚未回主页），无词的回放/列队过场
-        //         也不得凭图标判回比赛中——正是它们与主页帧横跳打断道具检查
-        bool afterMatchEnd = text.Contains("球员评价")
-            || text.Contains("下一步") || text.Contains("下ー步")
-            || text.Contains("最佳球员") || text.Contains("球员经验")
-            || text.Contains("获得奖励") || text.Contains("前往比赛")
-            || text.Contains("赛程表") || text.Contains("比赛计划");
-        if (!_postMatchFlow && !afterMatchEnd && FrameAnalyzer.FindAiControlIcon(obs.Frame, out double iconX, out double iconY))
+        if (FrameAnalyzer.FindAiControlIcon(obs.Frame, out double iconX, out double iconY))
         {
             // 右侧顶栏图标区（实测真图标 cx≈0.935）无条件采信；
             // 左侧命中只可能是「国服错版」，必须探针也判比赛类页面——
@@ -157,16 +122,14 @@ public sealed class MyLeagueStateMachine
             _engine.LogInternal($"顶栏左侧疑似图标（{iconX:F2},{iconY:F2}）但探针判 {obs.Screen}，忽略", LogLevel.Debug);
         }
 
-        // 弹窗优先判断（含赛后奖励弹窗：联赛积分/收件箱/过期提醒等）
+        // 弹窗优先判断
         if (text.Contains("选择赛事等级") || text.Contains("选择AI难度"))
             return State.DifficultySelect;
 
         if (text.Contains("确认") && text.Contains("关键比赛") && !text.Contains("选择赛事等级"))
             return State.ConfirmDialog;
 
-        if (text.Contains("物品使用中") || text.Contains("已过期") || text.Contains("获取新物品")
-            || text.Contains("获得的活动积分") || text.Contains("距离下个奖励")
-            || text.Contains("送到收件箱") || text.Contains("收到我的联赛积分"))
+        if (text.Contains("物品使用中") || text.Contains("已过期") || text.Contains("获取新物品"))
             return State.Dialog;
 
         if (obs.Screen == GameScreen.Dialog)
@@ -195,22 +158,9 @@ public sealed class MyLeagueStateMachine
             return State.Schedule;
 
         if (obs.Screen == GameScreen.PreMatch)
-        {
-            // 赛前页必须命中专属词才采信：「下一步/前往比赛/难度」是跨页词，
-            // 主页/赛后转场残留词会单独喂够 PreMatch 分数，随后节奏 A 命中主页默认
-            // 高光「前往比赛」直接开赛，错过道具检查（真机 17:03 实录）
-            bool preMatchSpecific = text.Contains("开始比赛") || text.Contains("选择比赛难度")
-                || text.Contains("比赛条件") || text.Contains("选手操作")
-                || text.Contains("首发阵容") || text.Contains("matchconditions")
-                || text.Contains("playeroperations") || text.Contains("difficulty");
-            if (preMatchSpecific)
-                return State.PreMatch;
-            _engine.LogInternal("探针判 PreMatch 但无赛前专属词，不采信（防主页被误判开赛）", LogLevel.Debug);
-        }
+            return State.PreMatch;
 
-        // 赛后过渡期间：探针/hold 的「比赛中」一律不采信（FullTime 之后不应存在比赛中），
-        // 落到后续分支——弹窗词→Dialog、主页→道具检查、无词过场→Unknown 兜底按蓝按钮跳过
-        if (!_postMatchFlow && obs.Screen == GameScreen.InMatch)
+        if (obs.Screen == GameScreen.InMatch)
             return State.InMatch;
 
         if (obs.Screen == GameScreen.HalfTime)
@@ -245,7 +195,6 @@ public sealed class MyLeagueStateMachine
         {
             _itemsChecked = false;
             _itemCheckFails = 0;
-            _postMatchFlow = false;
             _engine.LogInternal($"刚回到我的联赛主页（上一状态：{_lastState}），开始道具检查", LogLevel.Info);
         }
 
@@ -295,46 +244,6 @@ public sealed class MyLeagueStateMachine
     private int _itemCheckFails = 0;
     /// <summary>上一轮状态机状态，用于「刚回到主页」边沿触发道具检查。</summary>
     private State _lastState = State.Unknown;
-
-    /// <summary>
-    /// 全场结束终点页之后的赛后过渡标记。实测 FullTime 点「下一步」后要经过回放/列队
-    /// 过场和多个奖励弹窗才回主页，期间顶栏 AI 图标残留、画面无 OCR 词，会被 AI 图标
-    /// /探针 hold 反复判回「比赛中」，与主页帧横跳并打断道具检查（智能启停/统计同样乱）。
-    /// true 期间状态机一律不判「比赛中」：回放过场由兜底逻辑按蓝色推进按钮跳过，
-    /// 弹窗走 Dialog 流程，直到真正回到主页复位；3 分钟超时兜底防卡死。
-    /// </summary>
-    private bool _postMatchFlow = false;
-    private DateTime _postMatchSince = DateTime.MinValue;
-
-    /// <summary>
-    /// 全场结束终点页（比赛流程结束点，RS 第 1 屏）：左列固定双卡「下一步」(上,白) /
-    /// 「建议」(下,黑)。比分/球员名/队名/队徽全部可变，不作识别与操作依据。
-    /// 焦点可能因 RS 翻页或上一屏遗留而漂移——高光不在「下一步」即为错误状态：
-    /// 每轮先 上×2+左×1 夹紧回左上初始位（高光已在「下一步」上时全部为无害夹紧输入），
-    /// 再按 A 点击「下一步」推进到下一屏；连续多轮推进直到离开本页组。
-    /// </summary>
-    private async Task HandleFullTimeAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
-    {
-        // 从本页起进入赛后过渡：回放/列队过场与奖励弹窗期间一律不判「比赛中」，
-        // 直到真正回到我的联赛主页（道具检查开始时复位）
-        if (!_postMatchFlow)
-        {
-            _postMatchFlow = true;
-            _postMatchSince = DateTime.Now;
-            _engine.LogInternal("进入赛后过渡：在回到主页前不再判定比赛中", LogLevel.Info);
-        }
-
-        _engine.LogInternal("全场结束：锚定高光到「下一步」并点击推进", LogLevel.Info);
-        for (int i = 0; i < 2; i++)
-        {
-            await _engine.Pad.Dpad(PadDir.Up);
-            await Task.Delay(MenuMoveMs, ct);
-        }
-        await _engine.Pad.Dpad(PadDir.Left);
-        await Task.Delay(MenuMoveMs, ct);
-        await _engine.Pad.Confirm();
-        await Task.Delay(2000, ct);
-    }
 
     /// <summary>赛程表：选择比赛。</summary>
     private async Task HandleScheduleAsync(EfootballBot.Core.Bot.Observation obs, CancellationToken ct)
@@ -629,16 +538,6 @@ public sealed class MyLeagueStateMachine
     /// </summary>
     private async Task<bool> EnsureItemsAsync(CancellationToken ct)
     {
-        // 前置强验证：画面必须是干净的主页（无弹窗遮罩）。实测赛后过渡中主页帧与
-        // 回放/弹窗帧交错，画面中途跳走时盲目 RsFlick 会把流程搅乱，快速失败交给
-        // 状态机先处理跳变画面（弹窗/过场），下一轮再重试检查
-        var homeObs = await _engine.ObserveAsync(ct);
-        if (!IsHomePage(homeObs))
-        {
-            _engine.LogInternal($"道具检查：画面已不是主页（探针 {homeObs.Screen}），本轮跳过待重试", LogLevel.Warn);
-            return false;
-        }
-
         // 切换到"使用的物品"面板
         if (!await SwitchToUsedItemsPanelAsync(ct))
         {
