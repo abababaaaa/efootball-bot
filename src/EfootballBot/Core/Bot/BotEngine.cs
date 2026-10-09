@@ -121,11 +121,13 @@ public sealed class BotEngine : IDisposable
     public async Task StartAsync(string mode)
     {
         if (IsRunning) return;
-        // 感知观察不操作游戏：跳过虚拟手柄连接与 HidHide 隔离，真实手柄可正常使用
+        // 场景模式（cndaily=国服日常 / intl=国际服我的联赛）需接管虚拟手柄（B 键逃生依赖）；
+        // observe 纯观察不操作游戏：跳过虚拟手柄连接与 HidHide 隔离，真实手柄可正常使用
+        bool scenarioMode = mode is "cndaily" or "intl";
         CancellationToken token;
         try
         {
-            token = await PrepareSessionAsync(mode == "cndaily" ? CnProcessName : null, connectPad: false);
+            token = await PrepareSessionAsync(mode == "cndaily" ? CnProcessName : null, connectPad: scenarioMode);
         }
         catch
         {
@@ -136,15 +138,15 @@ public sealed class BotEngine : IDisposable
             throw;
         }
 
-        // 观察模式（无场景插件）用不到 30fps：节流到 300ms，
+        // 纯观察（无场景插件）用不到 30fps：节流到 300ms，
         // 消除全速逐帧的 SoftwareBitmap 拷贝 + CPU 降采样开销（LOH 高速churn）
-        if (Scenario is null)
+        if (!scenarioMode)
             Observation.ApplyCaptureThrottle(300);
 
         // 感知管线（YOLO 模型缺失时仅 OCR，不阻塞启动）
         _perception ??= PerceptionPipeline.Create(_cfg, _factory, LogInternal);
-        // 大重置：YOLO 就位后场景体系重建——国服日常先跑"我的联赛"框架
-        Scenario = mode == "cndaily" ? new MyLeagueScenario(this, LogInternal) : null;
+        // 大重置：YOLO 就位后场景体系重建——cndaily=国服日常 / intl=国际服"我的联赛"
+        Scenario = scenarioMode ? new MyLeagueScenario(this, LogInternal) : null;
         LogInternal(
             $"引擎就绪（模式：{mode}）—— EP={_factory.ActiveProvider}，" +
             (_perception.YoloEnabled ? $"YOLO 已启用（{_perception.YoloLabel}）" : "YOLO 未启用（仅 OCR 观察）") +

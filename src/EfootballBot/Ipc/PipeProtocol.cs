@@ -24,7 +24,7 @@ public static class PipeProtocol
     {
         // 命令（GUI→Worker）
         public string? Cmd { get; set; }          // start | stop | preview | reloadConfig | ping
-        public string? Mode { get; set; }         // start: observe / cndaily
+        public string? Mode { get; set; }         // start: observe / cndaily / intl
         public bool? On { get; set; }             // preview: true/false
 
         // 事件（Worker→GUI）

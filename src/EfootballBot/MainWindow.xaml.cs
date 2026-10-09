@@ -143,6 +143,9 @@ public partial class MainWindow : Window
     private async void BtnStartIntl_Click(object sender, RoutedEventArgs e)
         => await ToggleScenarioAsync(BtnStartIntl, "observe");
 
+    private async void BtnStartMyLeague_Click(object sender, RoutedEventArgs e)
+        => await ToggleScenarioAsync(BtnStartMyLeague, "intl");
+
     private async void BtnStartCn_Click(object sender, RoutedEventArgs e)
         => await ToggleScenarioAsync(BtnStartCn, "cndaily");
 
@@ -243,6 +246,7 @@ public partial class MainWindow : Window
 
     private void SetStartButtonsEnabled(bool enabled)
     {
+        BtnStartMyLeague.IsEnabled = enabled;
         BtnStartIntl.IsEnabled = enabled;
         BtnStartCn.IsEnabled = enabled;
     }
@@ -270,14 +274,16 @@ public partial class MainWindow : Window
 
     private void ResetButtons()
     {
+        BtnStartMyLeague.Content = "开始";
         BtnStartIntl.Content = "开始";
         BtnStartCn.Content = "开始";
+        BtnStartMyLeague.Style = (Style)FindResource("PrimaryBtn");
         BtnStartIntl.Style = (Style)FindResource("PrimaryBtn");
         BtnStartCn.Style = (Style)FindResource("PrimaryBtn");
         SetStartButtonsEnabled(true);
         BtnPause.IsEnabled = false;
         _paused = false;
-        BtnPause.Content = "暂停";
+        BtnPause.Content = "未开始";
         RbCn.IsEnabled = RbIntl.IsEnabled = true;
         _statsTimer.Stop();
     }
