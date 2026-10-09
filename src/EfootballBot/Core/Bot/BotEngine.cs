@@ -3,6 +3,7 @@ using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Inference;
 using EfootballBot.Core.Input;
+using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Observation;
 using EfootballBot.Core.System;
 using EfootballBot.Core.Vision;
@@ -142,12 +143,17 @@ public sealed class BotEngine : IDisposable
 
         // 感知管线（YOLO 模型缺失时仅 OCR，不阻塞启动）
         _perception ??= PerceptionPipeline.Create(_cfg, _factory, LogInternal);
+        // 大重置：YOLO 就位后场景体系重建——国服日常先跑"我的联赛"框架
+        Scenario = mode == "cndaily" ? new MyLeagueScenario(this, LogInternal) : null;
         LogInternal(
             $"引擎就绪（模式：{mode}）—— EP={_factory.ActiveProvider}，" +
-            (_perception.YoloEnabled ? $"YOLO 已启用（{_perception.YoloLabel}）" : "YOLO 未启用（仅 OCR 观察）"),
+            (_perception.YoloEnabled ? $"YOLO 已启用（{_perception.YoloLabel}）" : "YOLO 未启用（仅 OCR 观察）") +
+            (Scenario is not null ? $"，场景：{Scenario.Name}" : ""),
             LogLevel.Success);
-        if (!_perception.YoloEnabled)
-            LogInternal("场景将在 YOLO 模型（models/yolo/yolo26n.onnx）就位后重建，当前为感知观察模式", LogLevel.Warn);
+        if (Scenario is not null && !_perception.YoloEnabled)
+            LogInternal("YOLO 模型缺失，场景决策将大量退化为等待模式", LogLevel.Warn);
+        else if (Scenario is null)
+            LogInternal("当前为感知观察模式（无场景插件）", LogLevel.Info);
         if (_cfg.FrameDump.Enabled)
             LogInternal($"训练数据采集已开启：每 {_cfg.FrameDump.IntervalMs / 1000.0:F0} 秒存帧至 captures\\（exe 同级目录）", LogLevel.Info);
 
