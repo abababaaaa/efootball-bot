@@ -64,6 +64,7 @@ internal static class CaptureInterop
     // ---- D3D11 ----
     public const uint D3D11_SDK_VERSION = 7;
     public const int D3D_DRIVER_TYPE_HARDWARE = 0;
+    public const int D3D_DRIVER_TYPE_UNKNOWN = 0;
     public const int D3D_DRIVER_TYPE_WARP = 5;
     public const uint D3D11_CREATE_DEVICE_BGRA_SUPPORT = 0x20;
 
@@ -94,6 +95,84 @@ internal static class CaptureInterop
         out nint context);
 
     public static readonly Guid IDXGIDeviceGuid = new("54EC77FA-1377-44E6-8C32-88FD5F44C84C");
+
+    // ---- DXGI 适配器枚举：捕获必须绑定真实 GPU（虚拟 WARP 适配器上 WGC 帧池会崩 DWM）----
+    [DllImport("dxgi.dll", CallingConvention = CallingConvention.StdCall)]
+    private static extern int CreateDXGIFactory1(ref Guid iid, out nint factory);
+
+    private static readonly Guid IDXGIFactory1Guid = new("770AAE78-F26F-4DBA-A829-E25E7A275DCF");
+
+    [StructLayout(LayoutKind.Sequential)]
+    private unsafe struct DXGI_ADAPTER_DESC
+    {
+        public fixed ushort Description[128];
+        public uint VendorId;
+        public uint DeviceId;
+        public uint SubSysId;
+        public uint Revision;
+        public nuint DedicatedVideoMemory;
+        public nuint DedicatedSystemMemory;
+        public nuint SharedSystemMemory;
+        public uint LuidLowPart;
+        public int LuidHighPart;
+        public uint Flags;
+    }
+
+    /// <summary>
+    /// 枚举 DXGI 适配器，选出最适合捕获的真实硬件适配器：跳过 WARP 软件设备
+    /// （GameViewer / MuMu 等虚拟显示适配器是 WARP 设备，在其上创建 WGC 帧池
+    /// 会在 dwm.exe 的 d3d10warp.dll 里确定性崩溃 → 系统卡死黑屏），取显存最大者。
+    /// 返回 0 表示没有可用硬件适配器（调用方走 D3D_DRIVER_TYPE_HARDWARE 默认路径）。
+    /// 返回的适配器指针由调用方 Marshal.Release。
+    /// </summary>
+    public static unsafe (nint Adapter, string Name) PickHardwareAdapter()
+    {
+        Guid iid = IDXGIFactory1Guid;
+        int hr = CreateDXGIFactory1(ref iid, out nint factory);
+        if (hr != 0) return (0, "");
+        try
+        {
+            var vtbl = *(void***)factory;
+            var enumAdapters = (delegate* unmanaged[Stdcall]<nint, uint, nint*, int>)vtbl[7];
+            var getDesc = (delegate* unmanaged[Stdcall]<nint, DXGI_ADAPTER_DESC*, int>)vtbl[8];
+
+            const uint DXGI_ADAPTER_FLAG_SOFTWARE = 2;
+            nint best = 0;
+            nuint bestMem = 0;
+            string bestName = "";
+            for (uint i = 0; ; i++)
+            {
+                nint adapter;
+                if (enumAdapters(factory, i, &adapter) != 0) break; // DXGI_ERROR_NOT_FOUND
+                DXGI_ADAPTER_DESC desc = default;
+                if (getDesc(adapter, &desc) == 0)
+                {
+                    string name = "";
+                    unsafe
+                    {
+                        var span = new ReadOnlySpan<char>(desc.Description, 128);
+                        int len = span.IndexOf('\0');
+                        name = new string(len < 0 ? span : span[..len]);
+                    }
+                    bool software = (desc.Flags & DXGI_ADAPTER_FLAG_SOFTWARE) != 0;
+                    if (!software && desc.DedicatedVideoMemory > bestMem)
+                    {
+                        if (best != 0) Marshal.Release(best);
+                        best = adapter;
+                        bestMem = desc.DedicatedVideoMemory;
+                        bestName = name;
+                        continue;
+                    }
+                }
+                Marshal.Release(adapter);
+            }
+            return (best, bestName);
+        }
+        finally
+        {
+            Marshal.Release(factory);
+        }
+    }
 
     /// <summary>从原生 D3D11 设备创建 WinRT IDirect3DDevice。</summary>
     public static IDirect3DDevice CreateDirect3DDevice(nint d3dDevice)

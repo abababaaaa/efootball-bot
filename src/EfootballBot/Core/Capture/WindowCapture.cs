@@ -131,6 +131,18 @@ public sealed class WindowCapture : ICaptureProvider
                 Step("③ CreateForWindow 并包装 GraphicsCaptureItem");
                 nint itemPtr = CaptureInterop.CreateItemForWindow(interop, hwnd);
                 var item = WinRT.MarshalInspectable<GraphicsCaptureItem>.FromAbi(itemPtr);
+                try
+                {
+                    // 帧池尺寸必须与捕获内容一致：客户区尺寸（如 1280×720）≠ 捕获内容
+                    // （含窗口边框阴影，如 1282×752）。用错误值建池会启动即重建帧池
+                    // （WGC 重建在高负载/多适配器环境下是 DWM 崩溃放大点）。
+                    var frameSize = item.Size;
+                    _size = ClampSize(frameSize.Width, frameSize.Height);
+                }
+                finally
+                {
+                    Marshal.Release(itemPtr);
+                }
 
                 Step("④ 创建帧池 (CreateFreeThreaded)");
                 _pool = Direct3D11CaptureFramePool.CreateFreeThreaded(
@@ -144,7 +156,7 @@ public sealed class WindowCapture : ICaptureProvider
                 _session = _pool.CreateCaptureSession(item);
                 _session.StartCapture();
                 _running = true;
-                Step("⑥ 捕获已开始");
+                Step($"⑥ 捕获已开始（{_size.Width}×{_size.Height}）");
             }
             finally
             {
@@ -195,9 +207,20 @@ public sealed class WindowCapture : ICaptureProvider
 
     private void CreateDevice()
     {
+        // 系统存在虚拟显示适配器（GameViewer/MuMu 等远程/模拟器工具的 WARP 软件设备）时，
+        // 默认适配器可能落在虚拟设备上——WGC 帧池建在其上会触发 dwm.exe (d3d10warp.dll)
+        // 确定性崩溃（系统卡死黑屏）。必须显式枚举并绑定真实硬件 GPU。
+        nint adapter = 0;
+        string adapterName = "";
+        try
+        {
+            (adapter, adapterName) = CaptureInterop.PickHardwareAdapter();
+        }
+        catch { /* 枚举失败走默认路径 */ }
+
         int hr = CaptureInterop.D3D11CreateDevice(
-            nint.Zero,
-            CaptureInterop.D3D_DRIVER_TYPE_HARDWARE,
+            adapter,
+            adapter != 0 ? CaptureInterop.D3D_DRIVER_TYPE_UNKNOWN : CaptureInterop.D3D_DRIVER_TYPE_HARDWARE,
             nint.Zero,
             CaptureInterop.D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             nint.Zero, 0,
@@ -205,6 +228,12 @@ public sealed class WindowCapture : ICaptureProvider
             out _d3dDevicePtr,
             out _,
             out _d3dContextPtr);
+        if (adapter != 0)
+        {
+            Marshal.Release(adapter);
+            if (hr == 0)
+                Step($"[捕获] D3D11 设备绑定硬件 GPU：{adapterName}");
+        }
         if (hr != 0)
         {
             // 兜底：WARP 软渲染设备
@@ -219,6 +248,7 @@ public sealed class WindowCapture : ICaptureProvider
                 out _,
                 out _d3dContextPtr);
             if (hr != 0) throw new InvalidOperationException($"创建 D3D11 设备失败: 0x{hr:X}");
+            Step("[捕获] 硬件 GPU 不可用，已回退 WARP 软渲染设备");
         }
         _winrtDevice = CaptureInterop.CreateDirect3DDevice(_d3dDevicePtr);
     }
