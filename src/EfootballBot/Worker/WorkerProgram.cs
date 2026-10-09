@@ -168,6 +168,9 @@ public static class WorkerProgram
                     }
                     catch (Exception ex)
                     {
+                        // 启动失败的引擎里可能残留已开启的捕获会话等资源，整套释放防僵尸抓帧
+                        engine?.Dispose();
+                        engine = null;
                         await SendAsync(PipeProtocol.EvLog("Error", $"启动失败：{ex.Message}"));
                         await SendAsync(PipeProtocol.EvExited($"启动失败：{ex.Message}"));
                     }
@@ -228,11 +231,14 @@ public static class WorkerProgram
 
             if (console) Console.WriteLine("[Worker] GUI 断开，等待重连…");
 
-            // 管道断开后停止场景（避免无头 Worker 空跑）
-            if (engine is { IsRunning: true })
+            // 管道断开后停止场景（避免无头 Worker 空跑）。
+            // 引擎一律整套释放：即使场景未在运行，捕获会话等资源也不能留（防僵尸抓帧）。
+            if (engine is not null)
             {
                 engine.Stop();
-                if (console) Console.WriteLine("[Worker] 因 GUI 断开而停止场景");
+                engine.Dispose();
+                engine = null;
+                if (console) Console.WriteLine("[Worker] 因 GUI 断开而停止并释放引擎");
             }
             StopPreviewLoop();
             readCts.Cancel();

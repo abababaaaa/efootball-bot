@@ -28,7 +28,6 @@ public partial class MainWindow
         // 设置面板
         ChkAutoClose.IsChecked = _cfg.AutoCloseWhenDone;
         ChkMinimizeTray.IsChecked = false;
-        ChkPeriodicGc.IsChecked = _cfg.PeriodicGc;
         ChkFrameDump.IsChecked = _cfg.FrameDump.Enabled;
 
         // OCR 引擎（枚举顺序 RapidV6=0 / Windows=1，与下拉项一致）
@@ -87,7 +86,6 @@ public partial class MainWindow
     {
         // 设置面板
         _cfg.AutoCloseWhenDone = ChkAutoClose.IsChecked == true;
-        _cfg.PeriodicGc = ChkPeriodicGc.IsChecked == true;
         _cfg.FrameDump.Enabled = ChkFrameDump.IsChecked == true;
         _cfg.OcrEngine = CmbOcrEngine.SelectedIndex == 1 ? OcrEngineKind.Windows : OcrEngineKind.RapidV6;
 

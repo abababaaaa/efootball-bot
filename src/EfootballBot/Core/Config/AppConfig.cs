@@ -237,7 +237,6 @@ public sealed class AppConfig
     public bool AutoCloseWhenDone { get; set; } = false;
 
     // —— 设置面板：性能 / 内存 ——
-    public bool PeriodicGc { get; set; } = true;
     public int PreviewIntervalMs { get; set; } = 300;
 
     // —— 设置面板：日志 ——

@@ -121,7 +121,24 @@ public sealed class BotEngine : IDisposable
     {
         if (IsRunning) return;
         // 感知观察不操作游戏：跳过虚拟手柄连接与 HidHide 隔离，真实手柄可正常使用
-        var token = await PrepareSessionAsync(mode == "cndaily" ? CnProcessName : null, connectPad: false);
+        CancellationToken token;
+        try
+        {
+            token = await PrepareSessionAsync(mode == "cndaily" ? CnProcessName : null, connectPad: false);
+        }
+        catch
+        {
+            // 启动中途失败（如找不到窗口/捕获异常）：捕获会话可能已开启，必须停掉，
+            // 否则 Worker 空闲却在后台全速抓帧（僵尸捕获），DWM/CPU 持续被压
+            try { Capture.Stop(); } catch { }
+            try { _dxgi?.Stop(); } catch { }
+            throw;
+        }
+
+        // 观察模式（无场景插件）用不到 30fps：节流到 300ms，
+        // 消除全速逐帧的 SoftwareBitmap 拷贝 + CPU 降采样开销（LOH 高速churn）
+        if (Scenario is null)
+            Observation.ApplyCaptureThrottle(300);
 
         // 感知管线（YOLO 模型缺失时仅 OCR，不阻塞启动）
         _perception ??= PerceptionPipeline.Create(_cfg, _factory, LogInternal);
@@ -161,6 +178,15 @@ public sealed class BotEngine : IDisposable
                         }
                     }
                     catch (OperationCanceledException) { throw; }
+                    catch (CaptureUnrecoverableException ex)
+                    {
+                        // 后台监察熔断：捕获链路短时间内反复中断（典型：WGC 反复触发 DWM 崩溃黑屏），
+                        // 停止重试，防止"重建→崩溃→再重建"死亡循环把整个系统拖垮
+                        Stats.LastError = ex.Message;
+                        LogInternal(ex.Message, LogLevel.Error);
+                        EmitStats();
+                        return;
+                    }
                     catch (Exception ex)
                     {
                         // 系统级瞬时故障（如 DWM 崩溃重启导致捕获会话失效、设备丢失）：
@@ -324,6 +350,10 @@ public sealed class BotEngine : IDisposable
     {
         try { _cts?.Cancel(); } catch { }
         try { Pad360.ResetAll(); } catch { }
+        // 显式停止捕获会话：挂机停止后不再后台抓帧。
+        // 长时间运行的 WGC 捕获会使 dwm.exe 内存累积膨胀，空闲期必须断开。
+        try { Capture.Stop(); } catch { }
+        try { _dxgi?.Stop(); } catch { }
         _lastObs = null;
         // 注意：此处不断开虚拟手柄。手柄一旦被游戏看到「断开→重连」，
         // eFootball 会把光标停靠到顶部头部的「手柄归属」图标上，重连设备的
@@ -443,4 +473,10 @@ public sealed class BotEngine : IDisposable
         try { Pad360.Dispose(); } catch { }
         GC.SuppressFinalize(this);
     }
+}
+
+/// <summary>后台监察熔断异常：捕获链路短时间内反复中断，继续重试只会拖垮系统（典型：WGC 反复触发 DWM 崩溃黑屏）。主循环收到后直接停止任务，不再自愈重试。</summary>
+public sealed class CaptureUnrecoverableException : Exception
+{
+    public CaptureUnrecoverableException(string message) : base(message) { }
 }

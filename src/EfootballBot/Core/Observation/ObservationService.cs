@@ -1,4 +1,3 @@
-using System.Runtime;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
@@ -23,7 +22,7 @@ public sealed class ObservationService : IDisposable
     private FrameData? _lastOcrFrame;
     private OcrResult _lastOcr = OcrResult.Empty;
     private long _lastOcrTick;
-    private DateTime _gcLastRun = DateTime.Now;
+    private readonly List<DateTime> _rebuildTimes = new();
 
     /// <summary>帧陈旧阈值：节流 2000ms/帧，10s 无新帧判定捕获中断。</summary>
     private const int StaleFrameMs = 10_000;
@@ -121,7 +120,9 @@ public sealed class ObservationService : IDisposable
         }
     }
 
-    /// <summary>整套停止并重建捕获（同窗口、按当前客户区尺寸）。两次重建至少间隔 10s。</summary>
+    /// <summary>整套停止并重建捕获（同窗口、按当前客户区尺寸）。两次重建至少间隔 10s。
+    /// 3 分钟内重建 ≥3 次 → 熔断抛出 CaptureUnrecoverableException：
+    /// 捕获链路系统性异常（典型：WGC 会话反复触发 DWM 崩溃黑屏），继续重建只会拖垮整个系统。</summary>
     private async Task RestartCaptureAsync(CancellationToken ct)
     {
         if ((DateTime.Now - _lastCaptureRestart).TotalSeconds < 10)
@@ -130,6 +131,21 @@ public sealed class ObservationService : IDisposable
             return;
         }
         _lastCaptureRestart = DateTime.Now;
+
+        lock (_rebuildTimes)
+        {
+            _rebuildTimes.RemoveAll(t => (DateTime.Now - t).TotalMinutes >= 3);
+            _rebuildTimes.Add(DateTime.Now);
+            if (_rebuildTimes.Count >= 3)
+            {
+                _rebuildTimes.Clear();
+                throw new CaptureUnrecoverableException(
+                    "画面捕获 3 分钟内反复中断 3 次，已熔断停止，避免持续崩溃拖垮系统（黑屏/卡死）。" +
+                    "常见原因：DWM 或显卡驱动异常（事件查看器可查 dwm.exe 崩溃记录）。" +
+                    "建议：重启电脑 / 用 DDU 干净重装显卡驱动；或到设置中切换 DXGI 捕获模式再试。");
+            }
+        }
+
         LogInternal("画面捕获中断（10s 无新帧，可能在最小化/全屏切换/设备丢失），重建捕获会话…", LogLevel.Warn);
 
         _frame = null;
@@ -161,17 +177,6 @@ public sealed class ObservationService : IDisposable
         var f = await WaitForFreshFrameAsync(ct);
 
         long now = Environment.TickCount64;
-
-        // 定期 GC（每 5 分钟，仅当配置开启时）
-        if (_cfg.PeriodicGc && (DateTime.Now - _gcLastRun).TotalMinutes >= 5)
-        {
-            _gcLastRun = DateTime.Now;
-            LogInternal("执行定期内存整理（GC.Collect Aggressive）…", LogLevel.Debug);
-            GCSettings.LargeObjectHeapCompactionMode = GCLargeObjectHeapCompactionMode.CompactOnce;
-            GC.Collect(2, GCCollectionMode.Aggressive, true, true);
-            GC.WaitForPendingFinalizers();
-            LogInternal($"GC 完成。Gen0={GC.CollectionCount(0)} Gen1={GC.CollectionCount(1)} Gen2={GC.CollectionCount(2)} Mem={GC.GetTotalMemory(false):N0}", LogLevel.Debug);
-        }
 
         if (now - _lastOcrTick < ocrIntervalMs && _lastOcrFrame is not null)
             return (_lastOcrFrame, _lastOcr);
