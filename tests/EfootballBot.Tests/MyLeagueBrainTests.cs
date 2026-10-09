@@ -5,136 +5,142 @@ using Xunit;
 
 namespace EfootballBot.Tests;
 
+// 我的联赛决策大脑（全手柄版）：Classify（YOLO+OCR）与 Decide（纯手柄动作）纯函数单测
 public class MyLeagueBrainTests
 {
-    private static YoloDetection Det(string cls, float score) => new(cls, 0, score, 0.1, 0.1, 0.1, 0.1);
+    private static YoloDetection Det(string cls, float score)
+        => new(cls, 0, score, 0.4, 0.4, 0.2, 0.1);
 
     private static OcrResult Ocr(params (string text, double x, double y)[] words)
     {
-        var list = words.Select(w => new OcrWord(w.text, w.x, w.y, 0.10, 0.03)).ToArray();
+        var list = words.Select(w => new OcrWord(w.text, w.x, w.y, 0.1, 0.03)).ToList();
         return new OcrResult(list, 1, 1);
     }
 
     // ---------------- Classify ----------------
 
     [Fact]
-    public void Classify_MainMenu() =>
-        Assert.Equal(MlScreen.MainMenu, MyLeagueBrain.Classify(new[] { Det("main_menu", 0.8f) }));
-
-    [Fact]
-    public void Classify_ItemList_RequiresTwoRowsAndBack()
+    public void Classify_MainMenu()
     {
-        var dets = new YoloDetection[]
-        {
-            Det("item_row", 0.9f), Det("item_row", 0.85f), Det("btn_back", 0.9f),
-        };
-        Assert.Equal(MlScreen.ItemList, MyLeagueBrain.Classify(dets));
+        var dets = new[] { Det("main_menu", 0.9f), Det("player_card", 0.8f) };
+        Assert.Equal(MyLeagueBrain.Classify(dets, OcrResult.Empty), MlScreen.MainMenu);
     }
 
     [Fact]
-    public void Classify_SingleRow_NotItemList()
+    public void Classify_ItemList_NeedsTwoRowsAndBack()
     {
-        var dets = new YoloDetection[] { Det("item_row", 0.9f), Det("btn_back", 0.9f) };
-        Assert.Equal(MlScreen.LeaguePage, MyLeagueBrain.Classify(dets));
+        var dets = new[] { Det("item_row", 0.9f), Det("item_row", 0.8f), Det("btn_back", 0.9f) };
+        Assert.Equal(MlScreen.ItemList, MyLeagueBrain.Classify(dets, OcrResult.Empty));
     }
 
     [Fact]
-    public void Classify_HasConfirm_TakesPrecedenceOverBack() =>
-        Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(
-            new[] { Det("btn_confirm", 0.6f), Det("btn_back", 0.9f) }));
-
-    [Fact]
-    public void Classify_LowScoreIgnored() =>
-        Assert.Equal(MlScreen.Unknown, MyLeagueBrain.Classify(new[] { Det("main_menu", 0.3f) }));
-
-    [Fact]
-    public void Classify_EmptyDetections_Unknown() =>
-        Assert.Equal(MlScreen.Unknown, MyLeagueBrain.Classify(Array.Empty<YoloDetection>()));
-
-    // ---------------- Decide：主菜单 ----------------
-
-    [Fact]
-    public void Decide_MainMenu_ClicksMyLeagueEntry()
+    public void Classify_SingleRow_IsNotItemList()
     {
-        var ocr = Ocr(("我的联赛", 0.30, 0.50));
-        var action = MyLeagueBrain.Decide(MlScreen.MainMenu, Array.Empty<YoloDetection>(), ocr, 0);
-        Assert.Equal(MlActionKind.ClickMyLeague, action.Kind);
-        Assert.Equal(0.35, action.X, 5);   // 行中心 = x + w/2
-        Assert.Equal(0.515, action.Y, 5);  // y + h/2
+        var dets = new[] { Det("item_row", 0.9f), Det("btn_back", 0.9f) };
+        // 单行不足列表特征 → 落入 LeaguePage（仅返回按钮可见）
+        Assert.Equal(MlScreen.LeaguePage, MyLeagueBrain.Classify(dets, OcrResult.Empty));
     }
 
     [Fact]
-    public void Decide_MainMenu_NoEntry_Waits()
+    public void Classify_HasConfirm_BeatsLeaguePage()
     {
-        var action = MyLeagueBrain.Decide(MlScreen.MainMenu, Array.Empty<YoloDetection>(), OcrResult.Empty, 0);
+        var dets = new[] { Det("btn_confirm", 0.9f), Det("btn_back", 0.8f) };
+        Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(dets, OcrResult.Empty));
+    }
+
+    [Fact]
+    public void Classify_LowScore_Ignored()
+    {
+        var dets = new[] { Det("main_menu", 0.3f), Det("btn_confirm", 0.3f) };
+        Assert.Equal(MlScreen.Unknown, MyLeagueBrain.Classify(dets, OcrResult.Empty));
+    }
+
+    [Fact]
+    public void Classify_MatchHub_ByOcr_WithoutExit()
+    {
+        // 比赛页无 YOLO 特征：OCR 含"我的联赛"且无主菜单"退出游戏"
+        var ocr = Ocr(("我的联赛", 0.3, 0.2), ("赛季目标", 0.6, 0.5));
+        Assert.Equal(MlScreen.MatchHub, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_MainMenuOcr_WithExit_IsNotMatchHub()
+    {
+        // 主菜单特有"退出游戏"，即使 OCR 含"我的联赛"（banner 文字）也不算比赛页
+        var ocr = Ocr(("我的联赛", 0.3, 0.5), ("退出游戏", 0.8, 0.75));
+        Assert.Equal(MlScreen.Unknown, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_Empty_IsUnknown()
+    {
+        Assert.Equal(MlScreen.Unknown, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), OcrResult.Empty));
+    }
+
+    // ---------------- Decide ----------------
+
+    [Fact]
+    public void Decide_MainMenu_EnterMatchNavigation()
+    {
+        var action = MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, 0);
+        Assert.Equal(MlActionKind.PadEnterMatch, action.Kind);
+    }
+
+    [Fact]
+    public void Decide_MainMenu_Stuck_Waits()
+    {
+        var action = MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, MyLeagueBrain.StuckStreak);
         Assert.Equal(MlActionKind.Wait, action.Kind);
     }
 
     [Fact]
-    public void Decide_MainMenu_Stuck_BackOff() =>
-        Assert.Equal(MlActionKind.Wait,
-            MyLeagueBrain.Decide(MlScreen.MainMenu, Array.Empty<YoloDetection>(),
-                Ocr(("我的联赛", 0.3, 0.5)), MyLeagueBrain.StuckStreak).Kind);
-
-    // ---------------- Decide：物品列表 ----------------
-
-    [Fact]
-    public void Decide_ItemList_ClicksBestRow()
+    public void Decide_MatchHub_ConfirmsDefaultFocus()
     {
-        var dets = new YoloDetection[]
-        {
-            new("item_row", 5, 0.80f, 0.40, 0.30, 0.74, 0.15),
-            new("item_row", 5, 0.92f, 0.40, 0.46, 0.74, 0.15),
-        };
-        var action = MyLeagueBrain.Decide(MlScreen.ItemList, dets, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.ClickItem, action.Kind);
-        Assert.Equal(0.77, action.X, 5);  // 0.40 + 0.74/2
-        Assert.Equal(0.535, action.Y, 5); // 0.46 + 0.15/2（高分行）
+        var action = MyLeagueBrain.Decide(MlScreen.MatchHub, OcrResult.Empty, 0);
+        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
     }
 
-    // ---------------- Decide：确认按钮 ----------------
-
     [Fact]
-    public void Decide_HasConfirm_ClicksButtonCenter()
+    public void Decide_ItemList_ConfirmsFocusedRow()
     {
-        var dets = new YoloDetection[] { new("btn_confirm", 2, 0.88f, 0.78, 0.90, 0.19, 0.07) };
-        var action = MyLeagueBrain.Decide(MlScreen.HasConfirm, dets, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.ClickPoint, action.Kind);
-        Assert.Equal(0.875, action.X, 5);
-        Assert.Equal(0.935, action.Y, 5);
+        var action = MyLeagueBrain.Decide(MlScreen.ItemList, OcrResult.Empty, 0);
+        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
     }
 
-    // ---------------- Decide：联赛页 ----------------
+    [Fact]
+    public void Decide_HasConfirm_Confirms()
+    {
+        var action = MyLeagueBrain.Decide(MlScreen.HasConfirm, OcrResult.Empty, 0);
+        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+    }
 
     [Fact]
-    public void Decide_LeaguePage_ClicksNextStep()
+    public void Decide_LeaguePage_NextStep_Confirms()
     {
         var ocr = Ocr(("下一步", 0.80, 0.91));
-        var action = MyLeagueBrain.Decide(MlScreen.LeaguePage, Array.Empty<YoloDetection>(), ocr, 0);
-        Assert.Equal(MlActionKind.ClickPoint, action.Kind);
-        Assert.Equal(0.85, action.X, 5);
+        var action = MyLeagueBrain.Decide(MlScreen.LeaguePage, ocr, 0);
+        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        Assert.Contains("下一步", action.Target);
     }
 
     [Fact]
     public void Decide_LeaguePage_NoButton_Waits()
     {
-        var action = MyLeagueBrain.Decide(MlScreen.LeaguePage, Array.Empty<YoloDetection>(), OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.Wait, action.Kind);
-    }
-
-    // ---------------- Decide：无特征界面 ----------------
-
-    [Fact]
-    public void Decide_Unknown_WaitsBeforeEscape()
-    {
-        var action = MyLeagueBrain.Decide(MlScreen.Unknown, Array.Empty<YoloDetection>(), OcrResult.Empty, 3);
+        var action = MyLeagueBrain.Decide(MlScreen.LeaguePage, OcrResult.Empty, 0);
         Assert.Equal(MlActionKind.Wait, action.Kind);
     }
 
     [Fact]
-    public void Decide_Unknown_EscapeWithBackAtStreak6()
+    public void Decide_Unknown_EarlyStreak_Waits()
     {
-        var action = MyLeagueBrain.Decide(MlScreen.Unknown, Array.Empty<YoloDetection>(), OcrResult.Empty, 6);
+        var action = MyLeagueBrain.Decide(MlScreen.Unknown, OcrResult.Empty, 3);
+        Assert.Equal(MlActionKind.Wait, action.Kind);
+    }
+
+    [Fact]
+    public void Decide_Unknown_EscapeStreak_GamepadBack()
+    {
+        var action = MyLeagueBrain.Decide(MlScreen.Unknown, OcrResult.Empty, MyLeagueBrain.UnknownEscapeStreak);
         Assert.Equal(MlActionKind.GamepadBack, action.Kind);
     }
 }

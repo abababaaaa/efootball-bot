@@ -1,18 +1,17 @@
 using EfootballBot.Core.Input;
-using EfootballBot.Core.Vision.Yolo;
 
 namespace EfootballBot.Core.Bot.Scenarios.MyLeague;
 
 /// <summary>
 /// 我的联赛挂机场景（大重置第一个框架）：感知（YOLO 6 类 + OCR）→ MyLeagueBrain 决策
-/// → 后台鼠标点击按钮（先移光标再点击）/ 手柄 B 逃生。
-/// 骨架流程：主菜单找"我的联赛"入口 → 物品列表浏览 → 确认弹窗/下一步推进 → 比赛画面等待。
+/// → 全程模拟手柄操作（Dpad 导航 / A 确认 / B 逃生）。
+/// 骨架流程：主菜单"比赛"卡片 → 比赛页进"我的联赛" → 签领奖励一路确认推进 → 比赛画面等待。
+/// 国际服游戏不响应 PostMessage 后台鼠标，因此不使用鼠标，全部手柄输入。
 /// </summary>
 public sealed class MyLeagueScenario : IScenario
 {
     private readonly BotEngine _engine;
     private readonly Action<string, LogLevel> _log;
-    private readonly BackgroundMouse _mouse = new();
 
     private MlScreen _lastScreen = MlScreen.Unknown;
     private int _streak;
@@ -28,7 +27,7 @@ public sealed class MyLeagueScenario : IScenario
     public async Task<int> RunOnceAsync(CancellationToken ct)
     {
         var obs = await _engine.ObserveAsync(ct);
-        var screen = MyLeagueBrain.Classify(obs.Detections);
+        var screen = MyLeagueBrain.Classify(obs.Detections, obs.Ocr);
 
         if (screen == _lastScreen)
         {
@@ -41,28 +40,29 @@ public sealed class MyLeagueScenario : IScenario
             _log($"[我的联赛] 界面：{screen}", LogLevel.Info);
         }
 
-        var action = MyLeagueBrain.Decide(screen, obs.Detections, obs.Ocr, _streak);
+        var action = MyLeagueBrain.Decide(screen, obs.Ocr, _streak);
 
         switch (action.Kind)
         {
+            case MlActionKind.PadEnterMatch:
+                // 主菜单 → 底部卡片行 → 最左"比赛" → A（到头多按无害，v1 盲导航）
+                _log("[我的联赛] 主菜单导航：下→左×6→A 进比赛页", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
+                await _engine.Pad.DpadRepeat(PadDir.Left, 6);
+                await _engine.Pad.Confirm();
+                break;
+
+            case MlActionKind.PadConfirm:
+                _log($"[我的联赛] 手柄 A：{action.Target}", LogLevel.Info);
+                await _engine.Pad.Confirm();
+                break;
+
             case MlActionKind.GamepadBack:
                 _log("[我的联赛] 无特征界面连续多轮，按 B 逃生", LogLevel.Warn);
                 await _engine.Pad.Back();
                 break;
 
             case MlActionKind.Wait:
-                break;
-
-            default:
-                var win = _engine.Window;
-                if (win is null || obs.Frame.Width == 0)
-                {
-                    _log("[我的联赛] 窗口/帧不可用，跳过本轮点击", LogLevel.Warn);
-                    return 1000;
-                }
-                // YOLO 框/OCR 行中心（归一化）→ 后台点击（内置 移动→按下→抬起）
-                await _mouse.ClickNormalizedAsync(win.Handle, action.X, action.Y,
-                    obs.Frame.Width, obs.Frame.Height, ct: ct);
                 break;
         }
         return action.WaitMs;

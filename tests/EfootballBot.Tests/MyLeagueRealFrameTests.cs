@@ -29,61 +29,48 @@ public class MyLeagueRealFrameTests
         var data = new byte[byteCount];
         System.Runtime.InteropServices.Marshal.Copy(bgra.Data, data, 0, byteCount);
         var dets = det.Detect(new FrameData(data, mat.Width, mat.Height, 0));
-        return (MyLeagueBrain.Classify(dets), dets);
+        return (MyLeagueBrain.Classify(dets, OcrResult.Empty), dets);
     }
 
+    private static YoloDetector CreateDetector() => new(
+        Path.Combine(AppContext.BaseDirectory, "models", "yolo", "yolo26n.onnx"),
+        Path.Combine(AppContext.BaseDirectory, "models", "yolo", "classes.txt"),
+        new OnnxSessionFactory("CPU"));
+
     [Fact]
-    public void ItemListFrame_ClassifiesItemList_ClicksTopItemRow()
+    public void ItemListFrame_ClassifiesItemList_ConfirmsFocusedRow()
     {
         if (!ValDataExists) return;
-        using var det = new YoloDetector(
-            Path.Combine(AppContext.BaseDirectory, "models", "yolo", "yolo26n.onnx"),
-            Path.Combine(AppContext.BaseDirectory, "models", "yolo", "classes.txt"),
-            new OnnxSessionFactory("CPU"));
-        var (screen, dets) = ClassifyFrame(det, "225603_680.jpg");
+        using var det = CreateDetector();
+        var (screen, _) = ClassifyFrame(det, "225603_680.jpg");
         Assert.Equal(MlScreen.ItemList, screen);
 
-        var action = MyLeagueBrain.Decide(screen, dets, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.ClickItem, action.Kind);
-        // 点的是最高分 item_row 的中心：坐标必须落在画面内
-        Assert.InRange(action.X, 0, 1);
-        Assert.InRange(action.Y, 0, 1);
-        var best = dets.Where(d => d.ClassName == "item_row").OrderByDescending(d => d.Score).First();
-        Assert.Equal(best.X + best.W / 2, action.X, 3);
-        Assert.Equal(best.Y + best.H / 2, action.Y, 3);
+        var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, 0);
+        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
     }
 
     [Fact]
-    public void MainMenuFrame_ClassifiesMainMenu_WaitsWithoutOcrEntry()
+    public void MainMenuFrame_ClassifiesMainMenu_EntersMatchCard()
     {
         if (!ValDataExists) return;
-        using var det = new YoloDetector(
-            Path.Combine(AppContext.BaseDirectory, "models", "yolo", "yolo26n.onnx"),
-            Path.Combine(AppContext.BaseDirectory, "models", "yolo", "classes.txt"),
-            new OnnxSessionFactory("CPU"));
-        var (screen, dets) = ClassifyFrame(det, "224710_125.jpg");
+        using var det = CreateDetector();
+        var (screen, _) = ClassifyFrame(det, "224710_125.jpg");
         Assert.Equal(MlScreen.MainMenu, screen);
 
-        // OCR 未命中"我的联赛"→ 等待而非乱点
-        var action = MyLeagueBrain.Decide(screen, dets, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.Wait, action.Kind);
+        // 全手柄版：主菜单直接执行 复合导航（下→左×6→A）
+        var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, 0);
+        Assert.Equal(MlActionKind.PadEnterMatch, action.Kind);
     }
 
     [Fact]
-    public void ConfirmDialogFrame_ClassifiesHasConfirm_ClicksConfirmButton()
+    public void ConfirmDialogFrame_ClassifiesHasConfirm_ConfirmsByPad()
     {
         if (!ValDataExists) return;
-        using var det = new YoloDetector(
-            Path.Combine(AppContext.BaseDirectory, "models", "yolo", "yolo26n.onnx"),
-            Path.Combine(AppContext.BaseDirectory, "models", "yolo", "classes.txt"),
-            new OnnxSessionFactory("CPU"));
-        var (screen, dets) = ClassifyFrame(det, "233412_804.jpg");
+        using var det = CreateDetector();
+        var (screen, _) = ClassifyFrame(det, "233412_804.jpg");
         Assert.Equal(MlScreen.HasConfirm, screen);
 
-        var action = MyLeagueBrain.Decide(screen, dets, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.ClickPoint, action.Kind);
-        // 标注真值：btn_confirm 中心 (0.874, 0.936)
-        Assert.Equal(0.874, action.X, 2);
-        Assert.Equal(0.936, action.Y, 2);
+        var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, 0);
+        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
     }
 }
