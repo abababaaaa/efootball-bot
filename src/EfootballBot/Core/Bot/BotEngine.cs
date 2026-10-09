@@ -120,7 +120,8 @@ public sealed class BotEngine : IDisposable
     public async Task StartAsync(string mode)
     {
         if (IsRunning) return;
-        var token = await PrepareSessionAsync(mode == "cndaily" ? CnProcessName : null);
+        // 感知观察不操作游戏：跳过虚拟手柄连接与 HidHide 隔离，真实手柄可正常使用
+        var token = await PrepareSessionAsync(mode == "cndaily" ? CnProcessName : null, connectPad: false);
 
         // 感知管线（YOLO 模型缺失时仅 OCR，不阻塞启动）
         _perception ??= PerceptionPipeline.Create(_cfg, _factory, LogInternal);
@@ -186,10 +187,11 @@ public sealed class BotEngine : IDisposable
         EmitStats();
     }
 
-    /// <summary>会话初始化：驱动检测 → 找窗口 → 启动捕获 → 接手柄 → 建取消令牌。</summary>
-    private async Task<CancellationToken> PrepareSessionAsync(string? processName = null)
+    /// <summary>会话初始化：驱动检测 → 找窗口 → 启动捕获 → 接手柄 → 建取消令牌。
+    /// 感知观察模式传 connectPad=false：不连接虚拟手柄、不做 slot0 冲突检测、不触发 HidHide 隔离，真实手柄可直接使用。</summary>
+    private async Task<CancellationToken> PrepareSessionAsync(string? processName = null, bool connectPad = true)
     {
-        if (!VirtualGamepad360.IsDriverInstalled())
+        if (connectPad && !VirtualGamepad360.IsDriverInstalled())
             throw new InvalidOperationException("未检测到 ViGEmBus 驱动，请先在“环境检测”中安装。");
 
         processName ??= GameWindow.GlobalProcessName;
@@ -220,9 +222,16 @@ public sealed class BotEngine : IDisposable
 
         Observation.Window = _window;
 
-        Pad360.Connect();
-        _ = Task.Run(EnsureHidHideIsolation); // 静默检查虚拟手柄黑名单覆盖（不阻塞启动）
-        LogInternal($"虚拟手柄已连接（XInput 玩家 {Pad360.UserIndex + 1}）", LogLevel.Success);
+        if (connectPad)
+        {
+            Pad360.Connect();
+            _ = Task.Run(EnsureHidHideIsolation); // 静默检查虚拟手柄黑名单覆盖（不阻塞启动）
+            LogInternal($"虚拟手柄已连接（XInput 玩家 {Pad360.UserIndex + 1}）", LogLevel.Success);
+        }
+        else
+        {
+            LogInternal("感知观察模式：不接管手柄，真实手柄可直接使用", LogLevel.Info);
+        }
 
         Stats.StartedAt = DateTime.Now;
         _cts = new CancellationTokenSource();
