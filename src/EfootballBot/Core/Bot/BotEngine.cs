@@ -138,10 +138,9 @@ public sealed class BotEngine : IDisposable
             throw;
         }
 
-        // 纯观察（无场景插件）用不到 30fps：节流到 300ms，
-        // 消除全速逐帧的 SoftwareBitmap 拷贝 + CPU 降采样开销（LOH 高速churn）
-        if (!scenarioMode)
-            Observation.ApplyCaptureThrottle(300);
+        // 所有模式统一节流到 300ms（场景决策周期 ≥2s，300ms 感知粒度足够）：
+        // 全速 30fps 逐帧 SoftwareBitmap 拷贝 + CPU 降采样（LOH 高速churn）会打满 CPU 卡死系统
+        Observation.ApplyCaptureThrottle(300);
 
         // 感知管线（YOLO 模型缺失时仅 OCR，不阻塞启动）
         _perception ??= PerceptionPipeline.Create(_cfg, _factory, LogInternal);
