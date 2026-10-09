@@ -1,0 +1,6 @@
+player_card
+btn_back
+btn_confirm
+coin_bar
+main_menu
+item_row

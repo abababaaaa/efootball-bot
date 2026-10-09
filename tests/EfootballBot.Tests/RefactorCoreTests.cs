@@ -140,7 +140,7 @@ public class YoloModelSmokeTests
 
         Assert.Equal("Cpu", factory.ActiveProvider);
         Assert.Contains("640×640", detector.ModelLabel);
-        Assert.Contains("80类", detector.ModelLabel);
+        Assert.Contains("6类", detector.ModelLabel);
 
         // 全零帧跑一次前向：验证 letterbox → 推理 → 输出解析全链路不抛异常
         var frame = new FrameData(new byte[1280 * 720 * 4], 1280, 720, 0);

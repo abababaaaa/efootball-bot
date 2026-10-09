@@ -1,0 +1,11 @@
+path: .
+train: images/train
+val: images/val
+
+names:
+  0: player_card
+  1: btn_back
+  2: btn_confirm
+  3: coin_bar
+  4: main_menu
+  5: item_row
