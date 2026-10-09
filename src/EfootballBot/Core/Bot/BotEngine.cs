@@ -137,27 +137,45 @@ public sealed class BotEngine : IDisposable
         {
             try
             {
+                int failStreak = 0;
                 while (!token.IsCancellationRequested)
                 {
-                    // 暂停：不再观察/操作，只轮询等待恢复或取消
-                    if (_paused) { await Task.Delay(400, token); continue; }
+                    try
+                    {
+                        // 暂停：不再观察/操作，只轮询等待恢复或取消
+                        if (_paused) { await Task.Delay(400, token); continue; }
 
-                    await ObserveAsync(token);
+                        await ObserveAsync(token);
 
-                    int delayMs = 300;
-                    if (Scenario is not null)
-                        delayMs = await Scenario.RunOnceAsync(token);
-                    await Task.Delay(delayMs, token);
+                        int delayMs = 300;
+                        if (Scenario is not null)
+                            delayMs = await Scenario.RunOnceAsync(token);
+                        await Task.Delay(delayMs, token);
+
+                        if (failStreak > 0)
+                        {
+                            failStreak = 0;
+                            Stats.LastError = "";
+                            EmitStats();
+                        }
+                    }
+                    catch (OperationCanceledException) { throw; }
+                    catch (Exception ex)
+                    {
+                        // 系统级瞬时故障（如 DWM 崩溃重启导致捕获会话失效、设备丢失）：
+                        // 指数退避重试而非终止任务，黑屏恢复后挂机自动继续
+                        failStreak = Math.Min(failStreak + 1, 10);
+                        int backoffMs = Math.Min(1000 << (failStreak - 1), 8000);
+                        Stats.LastError = ex.Message;
+                        LogInternal($"观察循环异常（连续第 {failStreak} 次，{backoffMs / 1000.0:F0}s 后重试）：{ex.Message}", LogLevel.Warn);
+                        await Task.Delay(backoffMs, token);
+                    }
                 }
+                LogInternal("已停止。", LogLevel.Info);
             }
             catch (OperationCanceledException)
             {
                 LogInternal("已停止。", LogLevel.Info);
-            }
-            catch (Exception ex)
-            {
-                Stats.LastError = ex.Message;
-                LogInternal($"运行异常：{ex}", LogLevel.Error);
             }
             finally
             {

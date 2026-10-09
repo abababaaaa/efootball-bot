@@ -134,7 +134,7 @@ public sealed class ObservationService : IDisposable
 
         _frame = null;
         _lastOcrFrame = null;
-        _provider.Stop();
+        try { _provider.Stop(); } catch { } // 会话已失效时 Stop 可能抛异常，兜住走重建
         await Task.Delay(500, ct);
 
         var (w, h) = GameWindow.GetClientSize(Window!.Handle);
