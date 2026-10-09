@@ -20,6 +20,8 @@
 
   <ItemGroup>
     <None Include="TestData\*.png" CopyToOutputDirectory="PreserveNewest" />
+    <!-- 官方 yolo26n 模型随测试输出分发（模型加载冒烟测试用） -->
+    <None Include="..\..\src\EfootballBot\models\yolo\**\*.*" Link="models\yolo\%(RecursiveDir)%(Filename)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

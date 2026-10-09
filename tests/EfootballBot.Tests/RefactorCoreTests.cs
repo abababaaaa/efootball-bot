@@ -1,3 +1,4 @@
+using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Inference;
 using EfootballBot.Core.Vision.Yolo;
@@ -120,6 +121,32 @@ public class YoloPostProcessTests
         Assert.Equal(290f, y0, 2);
         Assert.Equal(410f, x1, 2);
         Assert.Equal(310f, y1, 2);
+    }
+}
+
+// ---------------- 官方 yolo26n 模型加载冒烟（模型未分发时自动跳过） ----------------
+
+public class YoloModelSmokeTests
+{
+    [Fact]
+    public void OfficialYolo26n_LoadsAndRunsForward()
+    {
+        string modelPath = Path.Combine(AppContext.BaseDirectory, "models", "yolo", "yolo26n.onnx");
+        if (!File.Exists(modelPath)) return; // 模型未随测试输出分发时跳过
+
+        string classesPath = Path.Combine(AppContext.BaseDirectory, "models", "yolo", "classes.txt");
+        var factory = new OnnxSessionFactory("CPU");
+        using var detector = new YoloDetector(modelPath, classesPath, factory);
+
+        Assert.Equal("Cpu", factory.ActiveProvider);
+        Assert.Contains("640×640", detector.ModelLabel);
+        Assert.Contains("80类", detector.ModelLabel);
+
+        // 全零帧跑一次前向：验证 letterbox → 推理 → 输出解析全链路不抛异常
+        var frame = new FrameData(new byte[1280 * 720 * 4], 1280, 720, 0);
+        var dets = detector.Detect(frame);
+        Assert.NotNull(dets);
+        Assert.Empty(dets);
     }
 }
 
