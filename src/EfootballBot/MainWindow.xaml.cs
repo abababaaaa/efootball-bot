@@ -95,7 +95,7 @@ public partial class MainWindow : Window
 
     /// <summary>当前左侧选中的模块对应的游戏进程名。</summary>
     private string ActiveProcessName =>
-        RbCn.IsChecked == true ? CnConfig.ProcessName : GameWindow.GlobalProcessName;
+        RbCn.IsChecked == true ? BotEngine.CnProcessName : GameWindow.GlobalProcessName;
 
     private bool IsCnSelected => RbCn.IsChecked == true;
 
@@ -113,15 +113,13 @@ public partial class MainWindow : Window
                 AppendLog(msg, Enum.TryParse<LogLevel>(lv, out var l) ? l : LogLevel.Info));
         };
         _workerHost.StatsChanged += s => Dispatcher.BeginInvoke(UpdateStats);
-        // Worker 发 GameScreen 枚举名；GUI 本地化为中文并驱动图谱面板
+        // Worker 发感知摘要文本（"OCR N 词 / 检测 N 框"）+ 证据列表
         _workerHost.ScreenObserved += (screen, score, evidence) => Dispatcher.BeginInvoke(() =>
         {
-            var gs = Enum.TryParse<GameScreen>(screen, out var parsed) ? parsed : GameScreen.Unknown;
-            TxtScreen.Text = $"当前画面：{BotEngine.ScreenName(gs)}（{score:F1}）";
-            GraphOnScreen(gs, score, evidence);
+            TxtScreen.Text = $"感知：{screen}（{score:F0}）";
+            if (!string.IsNullOrEmpty(evidence))
+                TxtScreen.Text += $"  {evidence}";
         });
-        _workerHost.ProbeUpdated += json => Dispatcher.BeginInvoke(() => _graphWindow?.OnProbe(json));
-        _workerHost.Navigated += (from, to) => Dispatcher.BeginInvoke(() => _graphWindow?.OnNav(from, to));
         _workerHost.PreviewReceived += pngB64 => Dispatcher.BeginInvoke(() => ShowPreviewPng(pngB64));
         _workerHost.Exited += reason => Dispatcher.BeginInvoke(() =>
         {
@@ -142,14 +140,11 @@ public partial class MainWindow : Window
 
     // ---------------- 开始 / 停止 ----------------
 
-    private async void BtnMyLeague_Click(object sender, RoutedEventArgs e)
-        => await ToggleScenarioAsync(BtnMyLeague, "myleague");
+    private async void BtnStartIntl_Click(object sender, RoutedEventArgs e)
+        => await ToggleScenarioAsync(BtnStartIntl, "observe");
 
-    private async void BtnCnDaily_Click(object sender, RoutedEventArgs e)
-        => await ToggleScenarioAsync(BtnCnDaily, "cndaily");
-
-    private async void BtnWeekly_Click(object sender, RoutedEventArgs e)
-        => await ToggleScenarioAsync(BtnWeekly, "intlweekly");
+    private async void BtnStartCn_Click(object sender, RoutedEventArgs e)
+        => await ToggleScenarioAsync(BtnStartCn, "cndaily");
 
     private async Task ToggleScenarioAsync(Button btn, string? mode)
     {
@@ -198,8 +193,6 @@ public partial class MainWindow : Window
         {
             SaveUiToConfig();
             SetStartButtonsEnabled(false);
-            TabLeague.IsEnabled = TabWeekly.IsEnabled = TabCnTour.IsEnabled = false;
-            GraphReset(mode!);
             // 立即反馈：Worker 冷启动握手最长 30s，期间按钮必须显示"启动中…"而非无响应
             btn.Content = "启动中…";
             AppendLog("正在启动 Worker（首次冷启动需解压，可能 10 秒以上）…", LogLevel.Info);
@@ -250,9 +243,8 @@ public partial class MainWindow : Window
 
     private void SetStartButtonsEnabled(bool enabled)
     {
-        BtnMyLeague.IsEnabled = enabled;
-        BtnCnDaily.IsEnabled = enabled;
-        BtnWeekly.IsEnabled = enabled;
+        BtnStartIntl.IsEnabled = enabled;
+        BtnStartCn.IsEnabled = enabled;
     }
 
     // 暂停状态（仅 GUI 侧镜像，真实状态在 Worker 引擎；停止时复位）
@@ -278,18 +270,15 @@ public partial class MainWindow : Window
 
     private void ResetButtons()
     {
-        BtnMyLeague.Content = "开始";
-        BtnCnDaily.Content = "开始";
-        BtnWeekly.Content = "开始";
-        BtnMyLeague.Style = (Style)FindResource("PrimaryBtn");
-        BtnCnDaily.Style = (Style)FindResource("PrimaryBtn");
-        BtnWeekly.Style = (Style)FindResource("PrimaryBtn");
+        BtnStartIntl.Content = "开始";
+        BtnStartCn.Content = "开始";
+        BtnStartIntl.Style = (Style)FindResource("PrimaryBtn");
+        BtnStartCn.Style = (Style)FindResource("PrimaryBtn");
         SetStartButtonsEnabled(true);
         BtnPause.IsEnabled = false;
         _paused = false;
         BtnPause.Content = "暂停";
         RbCn.IsEnabled = RbIntl.IsEnabled = true;
-        TabLeague.IsEnabled = TabWeekly.IsEnabled = TabCnTour.IsEnabled = true;
         _statsTimer.Stop();
     }
 
@@ -335,7 +324,6 @@ public partial class MainWindow : Window
         _previewTimer.Stop();
         _statsTimer.Stop();
         _hotkey.Dispose();
-        _graphWindow?.Close();
         _workerHost?.Dispose();
         FileLogger.Instance.Dispose();
         base.OnClosing(e);

@@ -1,12 +1,14 @@
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Vision;
+using EfootballBot.Core.Vision.Yolo;
 
 namespace EfootballBot.Core.Bot;
 
-public sealed record Observation(FrameData Frame, OcrResult Ocr, GameScreen Screen, double Score, IReadOnlyList<string> Evidence)
+/// <summary>一次观察结果：帧 + OCR + YOLO 检测。</summary>
+public sealed record Observation(FrameData Frame, OcrResult Ocr, IReadOnlyList<YoloDetection> Detections)
 {
-    public bool Is(GameScreen s) => Screen == s;
-    public bool AnyOf(params GameScreen[] ss) => ss.Contains(Screen);
+    public static readonly Observation Empty = new(
+        new FrameData(Array.Empty<byte>(), 0, 0, 0), OcrResult.Empty, Array.Empty<YoloDetection>());
 }
 
 public enum LogLevel { Info, Success, Warn, Error, Debug }

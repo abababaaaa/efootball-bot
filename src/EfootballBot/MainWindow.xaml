@@ -169,20 +169,6 @@
                             <TextBlock Text="日志历史" VerticalAlignment="Center" Margin="10,0,0,0"/>
                         </StackPanel>
                     </Button>
-                    <Button x:Name="BtnGraph" Style="{StaticResource NavToolBtn}" Click="BtnGraph_Click">
-                        <StackPanel Orientation="Horizontal">
-                            <Grid Width="15" Height="15">
-                                <Path Stretch="Uniform" StrokeThickness="1.7"
-                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                      Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"
-                                      Data="M9 7.2h6 M7.2 9v6 M9 16.8h6"/>
-                                <Path Stretch="Uniform"
-                                      Fill="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"
-                                      Data="M9.2 7.2a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z M18.8 7.2a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z M18.8 16.8a2 2 0 1 1-4 0 2 2 0 0 1 4 0Z"/>
-                            </Grid>
-                            <TextBlock Text="图谱" VerticalAlignment="Center" Margin="10,0,0,0"/>
-                        </StackPanel>
-                    </Button>
 
                     <!-- 环境检测 -->
                     <TextBlock Text="环境检测" Style="{StaticResource SectionLabel}" Margin="4,16,0,8"/>
@@ -264,132 +250,43 @@
                 </Grid>
             </Border>
 
-            <!-- 国际服功能分段（国服时隐藏） -->
-            <Border x:Name="IntlTabsBar" Grid.Row="1" HorizontalAlignment="Left" Margin="1,0,0,12"
-                    Background="{DynamicResource TrackBg}" CornerRadius="10" Padding="3">
-                <StackPanel Orientation="Horizontal">
-                    <RadioButton x:Name="TabLeague" Content="我的联赛" Style="{StaticResource SegTab}"
-                                 Margin="0,0,2,0" IsChecked="True" Checked="IntlTab_Checked"/>
-                    <RadioButton x:Name="TabWeekly" Content="周活动" Style="{StaticResource SegTab}"
-                                 Checked="IntlTab_Checked"/>
-                </StackPanel>
-            </Border>
-
-            <!-- 国服功能分段（国服时可见） -->
-            <Border x:Name="CnTabsBar" Grid.Row="1" HorizontalAlignment="Left" Margin="1,0,0,12"
-                    Visibility="Collapsed"
-                    Background="{DynamicResource TrackBg}" CornerRadius="10" Padding="3">
-                <StackPanel Orientation="Horizontal">
-                    <RadioButton x:Name="TabCnTour" Content="巡回赛" Style="{StaticResource SegTab}"
-                                 IsChecked="True"/>
-                </StackPanel>
-            </Border>
-
-            <!-- ===== 国际服功能卡（三 Pane 叠放） ===== -->
+            <!-- ===== 国际服功能卡（感知观察） ===== -->
             <Border x:Name="PanelIntl" Grid.Row="2" Style="{StaticResource Card}" Margin="0">
                 <Grid>
-                    <!-- 我的联赛 -->
-                    <Grid x:Name="PaneLeague">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal">
-                                <Ellipse Width="9" Height="9" Fill="{DynamicResource AccentGlow}"
-                                         VerticalAlignment="Center" Margin="0,0,9,1"/>
-                                <TextBlock Text="我的联赛" FontSize="16.5" FontWeight="Bold"/>
-                            </StackPanel>
-                            <TextBlock Text="自动进出我的联赛，AI 代打，可自动购买联赛道具"
-                                       Foreground="{DynamicResource TextSecondary}" FontSize="12"
-                                       TextWrapping="Wrap" Margin="0,9,0,0"/>
-                            <StackPanel Margin="0,16,0,0">
-                                <CheckBox x:Name="ChkOnlyKey" Content="只踢关键比赛（未实现）" IsChecked="False" IsEnabled="False"/>
-                                <CheckBox x:Name="ChkBuy4x" Content="自动购买 4 倍经验道具" IsChecked="False"/>
-                                <CheckBox x:Name="ChkBuyCond" Content="自动购买杰出状态道具" IsChecked="False"/>
-                                <CheckBox x:Name="ChkBuyMgr" Content="自动购买教练强化道具" IsChecked="False"/>
-                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                    <TextBlock Text="目标场次（0=不限）" Style="{StaticResource FieldLabel}"/>
-                                    <TextBox x:Name="TxtTarget" Width="68" Margin="10,0,0,0" Text="0"/>
-                                </StackPanel>
-                                <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                    <TextBlock Text="比赛难度" Style="{StaticResource FieldLabel}"/>
-                                    <ComboBox x:Name="CmbDifficulty" Width="116" Margin="10,0,0,0" SelectedIndex="6">
-                                        <ComboBoxItem Content="新手"/>
-                                        <ComboBoxItem Content="业余"/>
-                                        <ComboBoxItem Content="标准"/>
-                                        <ComboBoxItem Content="职业"/>
-                                        <ComboBoxItem Content="顶尖球员"/>
-                                        <ComboBoxItem Content="超级球星"/>
-                                        <ComboBoxItem Content="传奇"/>
-                                    </ComboBox>
-                                </StackPanel>
-                            </StackPanel>
-                            <Border Background="{DynamicResource Surface2}" CornerRadius="7"
-                                    HorizontalAlignment="Left" Margin="0,18,0,0" Padding="10,6">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="停止热键" FontSize="11" Foreground="{DynamicResource TextMuted}"
-                                               VerticalAlignment="Center"/>
-                                    <TextBlock x:Name="TxtLeagueHotkey" Text="Ctrl+Shift+Q"
-                                               Foreground="{DynamicResource AccentGlow}" FontSize="11"
-                                               FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
-                                </StackPanel>
-                            </Border>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal">
+                            <Ellipse Width="9" Height="9" Fill="{DynamicResource AccentGlow}"
+                                     VerticalAlignment="Center" Margin="0,0,9,1"/>
+                            <TextBlock Text="感知观察" FontSize="16.5" FontWeight="Bold"/>
                         </StackPanel>
-                        <Button x:Name="BtnMyLeague" Grid.Column="1" Content="开始"
-                                Style="{StaticResource PrimaryBtn}" Width="104" Height="40" FontSize="14"
-                                VerticalAlignment="Top" Margin="16,4,0,0" Click="BtnMyLeague_Click"/>
-                    </Grid>
-
-                    <!-- 周活动 -->
-                    <Grid x:Name="PaneWeekly" Visibility="Collapsed">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="Auto"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel>
+                        <TextBlock Text="捕获游戏画面 → OCR 文字识别 + YOLO 目标检测（模型就位后自动启用）→ 实时感知摘要与预览。业务场景将在 YOLO 模型就位后基于检测/识别结果重建。"
+                                   Foreground="{DynamicResource TextSecondary}" FontSize="12"
+                                   TextWrapping="Wrap" Margin="0,9,0,0"/>
+                        <Border Background="{DynamicResource Surface2}" CornerRadius="7"
+                                HorizontalAlignment="Left" Margin="0,18,0,0" Padding="10,6">
                             <StackPanel Orientation="Horizontal">
-                                <Ellipse Width="9" Height="9" Fill="#FFA05AE0"
-                                         VerticalAlignment="Center" Margin="0,0,9,1"/>
-                                <TextBlock Text="周活动" FontSize="16.5" FontWeight="Bold"/>
+                                <TextBlock Text="停止热键" FontSize="11" Foreground="{DynamicResource TextMuted}"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock x:Name="TxtIntlHotkey" Text="Ctrl+Shift+Q"
+                                           Foreground="{DynamicResource AccentGlow}" FontSize="11"
+                                           FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
                             </StackPanel>
-                            <TextBlock Text="自动进入对阵AI，从最左逐个清挑战/巡回活动；巡回赛自动设置赛事等级、自动控制开、弹性关"
-                                       Foreground="{DynamicResource TextSecondary}" FontSize="12"
-                                       TextWrapping="Wrap" Margin="0,9,0,0"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-                                <TextBlock Text="赛事等级" Style="{StaticResource FieldLabel}"/>
-                                <ComboBox x:Name="CmbWeeklyDiff" Width="116" Margin="10,0,0,0" SelectedIndex="6">
-                                    <ComboBoxItem Content="新手"/>
-                                    <ComboBoxItem Content="业余"/>
-                                    <ComboBoxItem Content="标准"/>
-                                    <ComboBoxItem Content="职业"/>
-                                    <ComboBoxItem Content="顶尖球员"/>
-                                    <ComboBoxItem Content="超级球星"/>
-                                    <ComboBoxItem Content="传奇"/>
-                                </ComboBox>
-                            </StackPanel>
-                            <Border Background="{DynamicResource Surface2}" CornerRadius="7"
-                                    HorizontalAlignment="Left" Margin="0,18,0,0" Padding="10,6">
-                                <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="停止热键" FontSize="11" Foreground="{DynamicResource TextMuted}"
-                                               VerticalAlignment="Center"/>
-                                    <TextBlock x:Name="TxtWeeklyHotkey" Text="Ctrl+Shift+Q"
-                                               Foreground="{DynamicResource AccentGlow}" FontSize="11"
-                                               FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
-                                </StackPanel>
-                            </Border>
-                        </StackPanel>
-                        <Button x:Name="BtnWeekly" Grid.Column="1" Content="开始"
-                                Style="{StaticResource PrimaryBtn}" Width="104" Height="40" FontSize="14"
-                                VerticalAlignment="Top" Margin="16,4,0,0" Click="BtnWeekly_Click"/>
-                    </Grid>
+                        </Border>
+                    </StackPanel>
+                    <Button x:Name="BtnStartIntl" Grid.Column="1" Content="开始"
+                            Style="{StaticResource PrimaryBtn}" Width="104" Height="40" FontSize="14"
+                            VerticalAlignment="Top" Margin="16,4,0,0" Click="BtnStartIntl_Click"/>
                 </Grid>
             </Border>
 
             <!-- ===== 国服面板 ===== -->
             <Border x:Name="PanelCn" Grid.Row="2" Style="{StaticResource Card}" Margin="0" Visibility="Collapsed">
                 <StackPanel>
-                    <!-- 巡回赛功能 -->
+                    <!-- 感知观察功能 -->
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -399,15 +296,11 @@
                             <StackPanel Orientation="Horizontal">
                                 <Ellipse Width="9" Height="9" Fill="#FFE0A14C"
                                          VerticalAlignment="Center" Margin="0,0,9,1"/>
-                                <TextBlock Text="国服巡回赛" FontSize="16.5" FontWeight="Bold"/>
+                                <TextBlock Text="国服感知观察" FontSize="16.5" FontWeight="Bold"/>
                             </StackPanel>
-                            <TextBlock Text="自动进入比赛活动 → 对阵电脑巡回赛，难度继承上次，循环刷赛"
+                            <TextBlock Text="捕获「实况足球在线」画面 → OCR + YOLO 目标检测（模型就位后自动启用）→ 实时感知摘要与预览。业务场景将在 YOLO 模型就位后重建。"
                                        Foreground="{DynamicResource TextSecondary}" FontSize="12"
                                        TextWrapping="Wrap" Margin="0,9,0,0"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
-                                <TextBlock Text="场次上限（0=不限）" Style="{StaticResource FieldLabel}"/>
-                                <TextBox x:Name="TxtCnDailyLoop" Width="68" Margin="10,0,0,0" Text="0"/>
-                            </StackPanel>
                             <Border Background="{DynamicResource Surface2}" CornerRadius="7"
                                     HorizontalAlignment="Left" Margin="0,18,0,0" Padding="10,6">
                                 <StackPanel Orientation="Horizontal">
@@ -419,9 +312,9 @@
                                 </StackPanel>
                             </Border>
                         </StackPanel>
-                        <Button x:Name="BtnCnDaily" Grid.Column="1" Content="开始"
+                        <Button x:Name="BtnStartCn" Grid.Column="1" Content="开始"
                                 Style="{StaticResource PrimaryBtn}" Width="104" Height="40" FontSize="14"
-                                VerticalAlignment="Top" Margin="16,4,0,0" Click="BtnCnDaily_Click"/>
+                                VerticalAlignment="Top" Margin="16,4,0,0" Click="BtnStartCn_Click"/>
                     </Grid>
 
                     <!-- 使用提示（内嵌凹槽卡） -->

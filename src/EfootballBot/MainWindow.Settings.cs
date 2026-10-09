@@ -25,17 +25,6 @@ public partial class MainWindow
 
     private void LoadConfigToUi()
     {
-        ChkOnlyKey.IsChecked = _cfg.MyLeague.OnlyKeyMatches;
-        ChkBuy4x.IsChecked = _cfg.MyLeague.Buy4xExp;
-        ChkBuyCond.IsChecked = _cfg.MyLeague.BuyExcellentCondition;
-        ChkBuyMgr.IsChecked = _cfg.MyLeague.BuyManagerBoost;
-        TxtTarget.Text = _cfg.MyLeague.TargetMatches.ToString();
-        TxtCnDailyLoop.Text = _cfg.Cn.DailyLoopLimit.ToString();
-        foreach (ComboBoxItem item in CmbDifficulty.Items)
-            if ((string)item.Content == _cfg.MyLeague.Difficulty) { CmbDifficulty.SelectedItem = item; break; }
-        foreach (ComboBoxItem item in CmbWeeklyDiff.Items)
-            if ((string)item.Content == _cfg.Weekly.Difficulty) { CmbWeeklyDiff.SelectedItem = item; break; }
-
         // 设置面板
         ChkAutoClose.IsChecked = _cfg.AutoCloseWhenDone;
         ChkMinimizeTray.IsChecked = false;
@@ -95,19 +84,6 @@ public partial class MainWindow
 
     private void SaveUiToConfig()
     {
-        _cfg.MyLeague.OnlyKeyMatches = ChkOnlyKey.IsChecked == true;
-        _cfg.MyLeague.Buy4xExp = ChkBuy4x.IsChecked == true;
-        _cfg.MyLeague.BuyExcellentCondition = ChkBuyCond.IsChecked == true;
-        _cfg.MyLeague.BuyManagerBoost = ChkBuyMgr.IsChecked == true;
-        if (int.TryParse(TxtTarget.Text, out int t) && t >= 0)
-            _cfg.MyLeague.TargetMatches = t;
-        if (int.TryParse(TxtCnDailyLoop.Text, out int cdl) && cdl >= 0)
-            _cfg.Cn.DailyLoopLimit = cdl;
-        if (CmbDifficulty.SelectedItem is ComboBoxItem d)
-            _cfg.MyLeague.Difficulty = (string)d.Content;
-        if (CmbWeeklyDiff.SelectedItem is ComboBoxItem wd)
-            _cfg.Weekly.Difficulty = (string)wd.Content;
-
         // 设置面板
         _cfg.AutoCloseWhenDone = ChkAutoClose.IsChecked == true;
         _cfg.PeriodicGc = ChkPeriodicGc.IsChecked == true;

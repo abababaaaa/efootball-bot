@@ -20,7 +20,7 @@ public static class WorkerProgram
     public static async Task<int> RunAsync(string[] args)
     {
         // 解析参数：--worker <mode> [--pipe <name>] [--console]
-        string mode = args.Length > 1 ? args[1] : "myleague";
+        string mode = args.Length > 1 ? args[1] : "observe";
         bool console = args.Contains("--console");
 
         int pid = Environment.ProcessId;
@@ -64,29 +64,10 @@ public static class WorkerProgram
             };
             e.StatsChanged += s =>
                 _ = SendAsync(PipeProtocol.EvStats(s.MatchesDone, s.KeyMatches, s.Forfeited, s.StartedAt, s.LastError));
-            // 画面判定事件（替代旧 Observed，载荷更精简：仅 screen/score/evidence）
+            // 感知摘要事件（Screen 已是摘要文本："OCR N 词 / 检测 N 框"）
             e.ScreenChanged += s =>
-                _ = SendAsync(PipeProtocol.EvScreen(s.Screen.ToString(), s.Score,
+                _ = SendAsync(PipeProtocol.EvScreen(s.Screen, s.Score,
                     string.Join(",", s.Evidence)));
-            // 探针 Top-5 候选：序列化为 JSON 字符串发给 GUI 图谱面板
-            e.ProbeUpdated += p =>
-            {
-                try
-                {
-                    var json = System.Text.Json.JsonSerializer.Serialize(
-                        p.TopCandidates.Select(c => new
-                        {
-                            screen = c.Screen.ToString(),
-                            score = c.RawScore,
-                            evidence = string.Join(",", c.Evidence),
-                        }));
-                    _ = SendAsync(PipeProtocol.EvProbe(json));
-                }
-                catch { /* 序列化失败不影响主流程 */ }
-            };
-            // 导航寻路路径
-            e.NavPathFound += n =>
-                _ = SendAsync(PipeProtocol.EvNav(n.From, n.To));
             e.Capture.StepLog += s =>
             {
                 if (console) Console.WriteLine($"[cap] {s}");

@@ -187,19 +187,11 @@ public sealed class ObservationService : IDisposable
     // ---------------- 捕获节流 ----------------
 
     /// <summary>
-    /// 按画面状态调整捕获帧间隔（背压节流，降低全屏 DWM 负载）：
-    /// 比赛中 2000ms；加载/未知 500ms；其余全速 33ms。
+    /// 按场景状态调整捕获帧间隔（背压节流，降低全屏 DWM 负载）。
+    /// 传 0 恢复全速（33ms 跳帧）。
     /// </summary>
-    public void ApplyCaptureThrottle(GameScreen screen)
-    {
-        int ms = screen switch
-        {
-            GameScreen.InMatch => 2000,
-            GameScreen.Loading or GameScreen.Unknown => 500,
-            _ => 33,
-        };
-        _provider.SetMinFrameInterval(ms);
-    }
+    public void ApplyCaptureThrottle(int minFrameIntervalMs)
+        => _provider.SetMinFrameInterval(minFrameIntervalMs <= 0 ? 33 : minFrameIntervalMs);
 
     private void LogInternal(string msg, LogLevel lv) => Log?.Invoke(msg, lv);
 

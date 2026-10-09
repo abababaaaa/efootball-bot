@@ -46,6 +46,14 @@
     <PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
     <!-- PP-OCRv6 本地离线 OCR（ONNX Runtime，包自带 v5 检测/方向分类模型） -->
     <PackageReference Include="RapidOcrNet" Version="4.2.0" />
+    <!-- 推理引擎：统一 1.29.0（RapidOcrNet 4.2.0 程序集级硬性要求 ORT >= 1.29.0，决策门触发：
+         Microsoft.ML.OnnxRuntime.DirectML 原生包停更于 1.24.4 无法共存 → 实际走 CPU EP。
+         OnnxSessionFactory 保留 CUDA→DirectML→CPU 降级链：无 DML 原生库时运行时探测失败自动落 CPU，
+         后续接入 Windows ML EP 或更换 OCR 后端即可恢复 GPU 加速，代码无需改动。 -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.29.0" />
+    <!-- 图像处理：YOLO letterbox 预处理 / 检测框叠加（4.10.0 元数据包未在源上发布，实际版本为 4.10.0.20240615） -->
+    <PackageReference Include="OpenCvSharp4" Version="4.10.0.20240615" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240615" />
   </ItemGroup>
 
   <ItemGroup>

@@ -88,54 +88,27 @@ public sealed class TimingConfig
     }
 }
 
-public sealed class MyLeagueConfig
+/// <summary>ONNX Runtime 推理执行提供者配置。</summary>
+public sealed class InferenceConfig
 {
+    /// <summary>优先执行提供者：Auto（CUDA→DirectML→CPU 依次探测）/ CUDA / DML / CPU。</summary>
+    public string PreferredProvider { get; set; } = "Auto";
+}
+
+/// <summary>YOLO 目标检测配置。</summary>
+public sealed class YoloConfig
+{
+    /// <summary>模型就位（models/yolo/yolo26n.onnx）时是否启用目标检测。</summary>
     public bool Enabled { get; set; } = true;
-    public bool Buy4xExp { get; set; } = false;
-    public bool BuyExcellentCondition { get; set; } = false;
-    public bool BuyManagerBoost { get; set; } = false;
-    public bool OnlyKeyMatches { get; set; } = false;  // 普通比赛自动弃权，只踢关键比赛
-    public int TargetMatches { get; set; } = 0;        // 0 = 不限
-    public bool SetAiControl { get; set; } = true;     // 赛前确认选手操作为 AI
-    public string Difficulty { get; set; } = "传奇";   // 我的联赛赛事等级（游戏内 7 档）：新手/业余/标准/职业/顶尖球员/超级球星/传奇
+
+    /// <summary>检测置信度阈值。</summary>
+    public double ScoreThreshold { get; set; } = 0.25;
+
+    /// <summary>NMS IoU 阈值（仅非端到端导出格式使用）。</summary>
+    public double NmsIou { get; set; } = 0.45;
 }
 
-public sealed class DailyConfig
-{
-    public bool Enabled { get; set; }
-    public bool ClaimLoginRewards { get; set; } = true; // 进入时清扫弹窗奖励
-    public bool PlayAiEvents { get; set; } = true;      // 循环打对战 AI 活动
-    public bool PlayDailyMinigame { get; set; }         // 每日小游戏
-    public int TargetMatches { get; set; } = 0;
-}
-
-/// <summary>国际服周活动全清配置（比赛 → 活动 → 对阵AI 全部活动）。</summary>
-public sealed class WeeklyConfig
-{
-    public bool Enabled { get; set; } = true;
-    public string Difficulty { get; set; } = "传奇";   // 巡回活动赛事等级（游戏内 7 档）：新手/业余/标准/职业/顶尖球员/超级球星/传奇
-    public int MaxEvents { get; set; } = 12;          // 单次遍历活动卡数安全上限
-}
-
-/// <summary>国服（网易 eFootballOnline）配置。</summary>
-public sealed class CnConfig
-{
-    /// <summary>国服游戏进程名（窗口标题：实况足球在线）。</summary>
-    public const string ProcessName = "eFootballOnline";
-
-    public bool Enabled { get; set; } = true;
-    public bool ClaimLoginRewards { get; set; } = true; // 进入时清扫登录/弹窗奖励
-    public int DailyLoopLimit { get; set; } = 0;        // 日常活动循环场次上限，0 = 不限
-}
-
-/// <summary>国际服排队执行配置：日常跑完后是否自动接我的联赛。</summary>
-public sealed class QueueConfig
-{
-    public bool AutoChainMyLeague { get; set; } = false; // 日常跑完是否自动接联赛
-    public int DailyLoopLimit { get; set; } = 0;         // 日常活动最多跑几轮，0 = 不限
-}
-
-/// <summary>用户向导学习到的屏幕识别数据（补充默认锚点）。</summary>
+/// <summary>全局停止热键配置。</summary>
 public sealed class HotkeyConfig
 {
     /// <summary>虚拟键码（VK），默认 Q。</summary>
@@ -230,12 +203,6 @@ public sealed class HidHideConfig
     }
 }
 
-public sealed class ScreenCalibration
-{
-    public List<string> LearnedKeywords { get; set; } = new();
-    public string? SnapshotFile { get; set; }
-}
-
 public sealed class AppConfig
 {
     public string Theme { get; set; } = "Dark"; // Dark / Light / DeepBlue
@@ -248,14 +215,10 @@ public sealed class AppConfig
     /// <summary>画面捕获后端：WGC 窗口捕获（默认，支持后台挂机/窗口被遮挡）或 DXGI（高性能但窗口须可见）。</summary>
     public CaptureMode CaptureMode { get; set; } = CaptureMode.Wgc;
     public TimingConfig Timing { get; set; } = new();
-    public MyLeagueConfig MyLeague { get; set; } = new();
-    public DailyConfig Daily { get; set; } = new();
-    public WeeklyConfig Weekly { get; set; } = new();
-    public CnConfig Cn { get; set; } = new();
-    public QueueConfig Queue { get; set; } = new();
-    /// <summary>全页面智能寻路预算（M0 导航框架）。</summary>
-    public NavConfig Nav { get; set; } = new();
-    public Dictionary<string, ScreenCalibration> Calibration { get; set; } = new();
+
+    // —— 推理（ONNX Runtime EP 降级 + YOLO 目标检测）——
+    public InferenceConfig Inference { get; set; } = new();
+    public YoloConfig Yolo { get; set; } = new();
 
     // —— 设置面板：结束行为 ——
     public bool AutoCloseWhenDone { get; set; } = false;
@@ -281,9 +244,6 @@ public sealed class AppConfig
     // —— 手柄隔离（HidHide）——
     public HidHideConfig HidHide { get; set; } = new();
 
-    public ScreenCalibration? Calib(GameScreen s)
-        => Calibration.TryGetValue(s.ToString(), out var c) ? c : null;
-
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         WriteIndented = true,
@@ -295,7 +255,6 @@ public sealed class AppConfig
         Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) + "\\EfootballBot";
 
     public static string ConfigPath => ConfigDir + "\\config.json";
-    public static string CalibDir => ConfigDir + "\\calibration";
 
     public static AppConfig Load()
     {
@@ -318,15 +277,4 @@ public sealed class AppConfig
         Directory.CreateDirectory(ConfigDir);
         File.WriteAllText(ConfigPath, JsonSerializer.Serialize(this, JsonOpts));
     }
-}
-
-/// <summary>智能寻路预算配置。</summary>
-public sealed class NavConfig
-{
-    /// <summary>单次导航最大跳数（每跳 = 执行一条边）。</summary>
-    public int MaxHops { get; set; } = 25;
-    /// <summary>Unknown 页面 B 键步进预算，耗尽即停机。</summary>
-    public int UnknownBudget { get; set; } = 6;
-    /// <summary>单次导航总超时（分钟）。</summary>
-    public int TimeoutMinutes { get; set; } = 10;
 }

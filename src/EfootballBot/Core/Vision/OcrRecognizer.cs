@@ -323,6 +323,8 @@ internal sealed class RapidV6OcrBackend : IOcrBackend
             ?? throw ModelMissing("models/v5/ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx");
 
         _ocr = new RapidOcrNet.RapidOcr();
+        // RapidOcrNet 4.2.0 自管 InferenceSession（CPU，不接受外部 SessionOptions）；
+        // GPU 加速仅覆盖 YOLO 检测（OnnxSessionFactory），OCR 走包内默认 CPU 会话
         _ocr.InitModels(detPath, clsPath, recPath, keysPath);
         // PPOCRv6 预处理（短边自适应 736、不加白边）；游戏界面文字不会倒置，跳过 180° 分类
         _options = RapidOcrOptions.PPOCRv6 with { DoAngle = false };

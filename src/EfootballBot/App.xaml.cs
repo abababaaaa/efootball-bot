@@ -7,9 +7,7 @@ using System.Windows.Media.Imaging;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
-using EfootballBot.Core.Graph;
 using EfootballBot.Core.Input;
-using EfootballBot.Core.Probe;
 using EfootballBot.Core.System;
 using EfootballBot.Core.Vision;
 
@@ -26,15 +24,6 @@ public partial class App : Application
             {
                 try { Console.OutputEncoding = System.Text.Encoding.UTF8; await RunDumpAsync(args); }
                 catch (Exception ex) { Console.WriteLine($"DUMP FAIL: {ex}"); }
-                Shutdown();
-            };
-        }
-        else if (args.Length > 0 && args[0] == "--survey")
-        {
-            Startup += async (_, _) =>
-            {
-                try { Console.OutputEncoding = System.Text.Encoding.UTF8; await EfootballBot.Core.Survey.SurveyRunner.RunAsync(args); }
-                catch (Exception ex) { Console.WriteLine($"SURVEY FAIL: {ex}"); }
                 Shutdown();
             };
         }
@@ -231,8 +220,8 @@ public partial class App : Application
 
     /// <summary>
     /// 离线帧自检：EfootballBot --check-frame &lt;png&gt; [cropY=0] [cropH=0] [frameW=1296] [frameH=759]
-    /// 加载 PNG（可选纵向裁剪）→ 缩放为标准整窗帧 → 用真实 OCR 输出关键词 + RT 横幅 + 跳过比赛判定。
-    /// 用于改完探针/帧分析逻辑后离线验证，无需操作游戏。
+    /// 加载 PNG（可选纵向裁剪）→ 缩放为标准整窗帧 → 用真实 OCR 输出关键词。
+    /// 用于改完 OCR 逻辑后离线验证，无需操作游戏。
     /// </summary>
     private static async Task RunCheckFrameAsync(string[] args)
     {
@@ -255,38 +244,6 @@ public partial class App : Application
         foreach (var wd in ocr.Words.OrderBy(x => x.Y).ThenBy(x => x.X))
             Console.WriteLine($"[{wd.X:F3},{wd.Y:F3} {wd.W:F3}x{wd.H:F3}] {wd.Text} => {OcrText.Norm(wd.Text)}");
         Console.WriteLine($"JoinedText = {ocr.JoinedText}");
-
-        var probeResult = new ProbeEngine(PageCatalog.Pages)
-            .Classify(new Observation(frame, ocr, GameScreen.Unknown, 0, Array.Empty<string>()));
-        Console.WriteLine($"探针页面={probeResult.Screen}（证据：{string.Join(",", probeResult.Evidence.Take(4))}）");
-
-        Console.WriteLine($"RT蓝横幅={FrameAnalyzer.FindRtBanner(frame, out double bannerCy)}（cy={bannerCy:F3}）");
-        Console.WriteLine($"蓝色推进按钮={FrameAnalyzer.FindBlueAdvanceButton(frame, out double advCy)}（cy={advCy:F3}）");
-        Console.WriteLine($"AI代打图标={FrameAnalyzer.FindAiControlIcon(frame, out double aiCx, out double aiCy)}（cx={aiCx:F3}, cy={aiCy:F3}）");
-        Console.WriteLine($"弹窗中部蓝按钮={FrameAnalyzer.FindBlueDialogButton(frame, out double dlgCy)}（cy={dlgCy:F3}）");
-        Console.WriteLine($"模态弹窗遮罩={FrameAnalyzer.HasModalOverlay(frame)}");
-        var skipCheckRoi = new NormRect(0.945, 0.021, 0.050, 0.110);
-        int skipGreen = FrameAnalyzer.CountBrightGreen(frame, skipCheckRoi);
-        var hudWords = ocr.Words
-            .Where(w => w.CenterX > 0.78 && w.CenterY < 0.14)
-            .OrderBy(w => w.CenterY)
-            .ToList();
-        var hudLines = new List<List<OcrWord>>();
-        foreach (var w in hudWords)
-        {
-            var line = hudLines.LastOrDefault();
-            if (line is not null && Math.Abs(w.CenterY - line.Average(x => x.CenterY)) <= 0.02)
-                line.Add(w);
-            else
-                hudLines.Add(new List<OcrWord> { w });
-        }
-        var hudSb = new StringBuilder();
-        foreach (var line in hudLines.OrderBy(l => l.Average(x => x.CenterY)))
-            foreach (var w in line.OrderBy(x => x.CenterX))
-                hudSb.Append(OcrText.Norm(w.Text));
-        string hudJoined = hudSb.ToString();
-        bool hudSkip = hudJoined.Contains("跳过比赛");
-        Console.WriteLine($"跳过比赛绿勾={hudSkip && skipGreen >= 100}（HUD含跳过比赛={hudSkip}，亮绿像素={skipGreen}，阈值100）");
     }
 
     private static FrameData LoadFrame(string pngPath, int cropY, int cropH, int frameW, int frameH)
@@ -328,7 +285,7 @@ public partial class App : Application
     {
         int count = args.Length > 1 && int.TryParse(args[1], out int c) ? Math.Max(1, c) : 1;
         int gap = args.Length > 2 && int.TryParse(args[2], out int g) ? g : 1500;
-        string procName = args.Length > 3 ? args[3] : CnConfig.ProcessName;
+        string procName = args.Length > 3 ? args[3] : BotEngine.CnProcessName;
         string? actions = args.Length > 4 ? args[4] : null;
 
         string outDir = Path.Combine(Directory.GetCurrentDirectory(), "dump");

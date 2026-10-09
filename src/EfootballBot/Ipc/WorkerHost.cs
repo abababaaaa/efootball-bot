@@ -23,9 +23,7 @@ public sealed class WorkerHost : IDisposable
 
     public event Action<string, string>? Log;           // level, msg
     public event Action<BotStats>? StatsChanged;
-    public event Action<string, double, string?>? ScreenObserved; // screenName, score, evidence
-    public event Action<string>? ProbeUpdated;          // top-5 candidates JSON
-    public event Action<string, string>? Navigated;     // from, to
+    public event Action<string, double, string?>? ScreenObserved; // 感知摘要文本, 评分, 证据
     public event Action<string>? PreviewReceived;       // pngBase64
     public event Action<string>? Exited;                // reason
     public event Action? Disconnected;                  // 管道断开 / 进程退出
@@ -172,13 +170,6 @@ public sealed class WorkerHost : IDisposable
                         break;
                     case "screen":
                         ScreenObserved?.Invoke(msg.Screen ?? "未知", msg.Score, msg.Evidence);
-                        break;
-                    case "probe":
-                        if (!string.IsNullOrEmpty(msg.Probe))
-                            ProbeUpdated?.Invoke(msg.Probe);
-                        break;
-                    case "nav":
-                        Navigated?.Invoke(msg.Text ?? "", msg.Screen ?? "");
                         break;
                     case "preview":
                         if (!string.IsNullOrEmpty(msg.Png))

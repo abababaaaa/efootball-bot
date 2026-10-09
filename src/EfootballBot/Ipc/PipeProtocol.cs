@@ -7,8 +7,8 @@ namespace EfootballBot.Ipc;
 
 /// <summary>
 /// GUI 壳 ↔ Worker 子进程 的命名管道协议（JSON Lines，一行一条 UTF-8 JSON）。
-/// 命令方向 GUI→Worker：start/stop/preview/reloadConfig/ping
-/// 事件方向 Worker→GUI：log/stats/screen/nav/preview/pong/exited
+/// 命令方向 GUI→Worker：start/stop/pause/resume/preview/reloadConfig/ping
+/// 事件方向 Worker→GUI：log/stats/screen/preview/pong/exited
 /// </summary>
 public static class PipeProtocol
 {
@@ -24,17 +24,16 @@ public static class PipeProtocol
     {
         // 命令（GUI→Worker）
         public string? Cmd { get; set; }          // start | stop | preview | reloadConfig | ping
-        public string? Mode { get; set; }         // start: myleague / intlweekly / cndaily
+        public string? Mode { get; set; }         // start: observe / cndaily
         public bool? On { get; set; }             // preview: true/false
 
         // 事件（Worker→GUI）
-        public string? Ev { get; set; }           // log | stats | screen | probe | nav | preview | pong | exited
+        public string? Ev { get; set; }           // log | stats | screen | preview | pong | exited
         public string? Level { get; set; }        // log: Info/Success/Warn/Error/Debug
-        public string? Text { get; set; }         // log.msg / exited.reason / nav.from
-        public string? Screen { get; set; }       // screen.screen / nav.to
+        public string? Text { get; set; }         // log.msg / exited.reason
+        public string? Screen { get; set; }       // screen: 感知摘要文本
         public double Score { get; set; }         // screen.score
         public string? Evidence { get; set; }     // screen.evidence
-        public string? Probe { get; set; }        // probe: top-5 candidates JSON
         public string? Png { get; set; }          // preview: base64 PNG
         public int Matches { get; set; }          // stats
         public int KeyMatches { get; set; }
@@ -55,8 +54,6 @@ public static class PipeProtocol
     public static Msg EvLog(string level, string msg) => new() { Ev = "log", Level = level, Text = msg };
     public static Msg EvScreen(string screen, double score, string? evidence)
         => new() { Ev = "screen", Screen = screen, Score = score, Evidence = evidence };
-    public static Msg EvProbe(string topJson) => new() { Ev = "probe", Probe = topJson };
-    public static Msg EvNav(string from, string to) => new() { Ev = "nav", Text = from, Screen = to };
     public static Msg EvPreview(string pngBase64) => new() { Ev = "preview", Png = pngBase64 };
     public static Msg EvPong() => new() { Ev = "pong" };
     public static Msg EvExited(string reason) => new() { Ev = "exited", Text = reason };

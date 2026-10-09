@@ -38,15 +38,6 @@ public partial class MainWindow
             RunEnvChecks();
     }
 
-    /// <summary>国际服功能分段切换：只显示所选功能的详情面板。</summary>
-    private void IntlTab_Checked(object sender, RoutedEventArgs e)
-    {
-        // XAML 初始化期（IsChecked=True 内联设置）控件可能尚未全部就绪
-        if (PaneLeague == null || PaneWeekly == null) return;
-        PaneLeague.Visibility = TabLeague.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-        PaneWeekly.Visibility = TabWeekly.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-    }
-
     // ---------------- 主题选择 ----------------
 
     /// <summary>显示主题选择覆盖层，current 为当前生效主题（高亮选中）。</summary>
@@ -215,10 +206,6 @@ public partial class MainWindow
 
         // 底部实时日志卡：仅在游戏模块显示
         LogCard.Visibility = isGame && _cfg.ShowRuntimeLog ? Visibility.Visible : Visibility.Collapsed;
-
-        // Tab 分段栏：仅游戏模式显示
-        IntlTabsBar.Visibility = isGame && !IsCnSelected ? Visibility.Visible : Visibility.Collapsed;
-        if (CnTabsBar != null) CnTabsBar.Visibility = isGame && IsCnSelected ? Visibility.Visible : Visibility.Collapsed;
 
         // 切换到日志查看器时刷新文件列表
         if (isLog) RefreshLogFileList();
