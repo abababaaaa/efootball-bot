@@ -390,7 +390,8 @@ public sealed class BotEngine : IDisposable
 
         // 帧池会复用数组：先在观察线程拷贝像素，后台任务只做编码写盘
         var pixels = (byte[])f.Bgra.Clone();
-        string dir = Path.Combine(AppContext.BaseDirectory, "captures", DateTime.Now.ToString("yyyyMMdd"));
+        // exe 真实目录（AppContext.BaseDirectory 在单文件自解压下指向 %TEMP% 解压目录，不能用）
+        string dir = Path.Combine(AppPaths.ExeDir, "captures", DateTime.Now.ToString("yyyyMMdd"));
         _ = Task.Run(() =>
         {
             try
