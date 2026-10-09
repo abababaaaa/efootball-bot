@@ -1,10 +1,12 @@
-﻿using EfootballBot.Core.Capture;
+﻿using System.IO;
+using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Inference;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Observation;
 using EfootballBot.Core.System;
 using EfootballBot.Core.Vision;
+using SkiaSharp;
 
 namespace EfootballBot.Core.Bot;
 
@@ -76,6 +78,7 @@ public sealed class BotEngine : IDisposable
     private Task? _loop;
     private Observation? _lastObs;
     private long _lastOcrDumpTick;
+    private long _lastFrameDumpTick;
     private GameWindowInfo? _window;
 
     public event Action<string, LogLevel>? Log;
@@ -127,6 +130,8 @@ public sealed class BotEngine : IDisposable
             LogLevel.Success);
         if (!_perception.YoloEnabled)
             LogInternal("场景将在 YOLO 模型（models/yolo/yolo26n.onnx）就位后重建，当前为感知观察模式", LogLevel.Warn);
+        if (_cfg.FrameDump.Enabled)
+            LogInternal($"训练数据采集已开启：每 {_cfg.FrameDump.IntervalMs / 1000.0:F0} 秒存帧至 captures\\（exe 同级目录）", LogLevel.Info);
 
         _loop = Task.Run(async () =>
         {
@@ -316,6 +321,7 @@ public sealed class BotEngine : IDisposable
         var dets = await _perception!.DetectAsync(f, ct);
         var obs = new Observation(f, ocr, dets);
         _lastObs = obs;
+        DumpFrame(f);
 
         // ---------------- 事件派发 ----------------
         bool yoloOn = _perception.YoloEnabled;
@@ -351,6 +357,45 @@ public sealed class BotEngine : IDisposable
     }
 
     // ---------------- 杂项 ----------------
+
+    /// <summary>
+    /// 训练数据采集：按间隔把观察帧存为 JPG（exe 同级 captures\日期\HHmmss_fff.jpg），
+    /// 后台任务执行不阻塞观察循环；失败静默（采集不影响挂机）。仅新帧触发，间隔内重复画面跳过。
+    /// </summary>
+    private void DumpFrame(FrameData f)
+    {
+        var cfg = _cfg.FrameDump;
+        if (!cfg.Enabled || cfg.IntervalMs < 2000) return;
+        long now = Environment.TickCount64;
+        if (now - _lastFrameDumpTick < cfg.IntervalMs) return;
+        _lastFrameDumpTick = now;
+
+        // 帧池会复用数组：先在观察线程拷贝像素，后台任务只做编码写盘
+        var pixels = (byte[])f.Bgra.Clone();
+        string dir = Path.Combine(AppContext.BaseDirectory, "captures", DateTime.Now.ToString("yyyyMMdd"));
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                Directory.CreateDirectory(dir);
+                var info = new SKImageInfo(f.Width, f.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
+                unsafe
+                {
+                    fixed (byte* p = pixels)
+                    {
+                        // InstallPixels 零拷贝借用拷贝出的数组（fixed 固定），编码结束前不释放
+                        using var bmp = new SKBitmap();
+                        if (!bmp.InstallPixels(info, (nint)p, info.RowBytes)) return;
+                        using var img = SKImage.FromBitmap(bmp);
+                        using var data = img.Encode(SKEncodedImageFormat.Jpeg, 85);
+                        using var fs = File.Create(Path.Combine(dir, $"{DateTime.Now:HHmmss_fff}.jpg"));
+                        data.SaveTo(fs);
+                    }
+                }
+            }
+            catch { /* 存帧失败静默 */ }
+        });
+    }
 
     public void LogInternal(string msg, LogLevel lv)
     {

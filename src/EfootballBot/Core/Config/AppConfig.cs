@@ -108,6 +108,16 @@ public sealed class YoloConfig
     public double NmsIou { get; set; } = 0.45;
 }
 
+/// <summary>训练数据采集配置：把观察帧按间隔存为 JPG（captures\日期\），供 YOLO 标注训练用。</summary>
+public sealed class FrameDumpConfig
+{
+    /// <summary>是否开启自动存帧。</summary>
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>存帧间隔毫秒（≥2000，过密会产生大量近似重复帧）。</summary>
+    public int IntervalMs { get; set; } = 10000;
+}
+
 /// <summary>全局停止热键配置。</summary>
 public sealed class HotkeyConfig
 {
@@ -219,6 +229,9 @@ public sealed class AppConfig
     // —— 推理（ONNX Runtime EP 降级 + YOLO 目标检测）——
     public InferenceConfig Inference { get; set; } = new();
     public YoloConfig Yolo { get; set; } = new();
+
+    // —— 训练数据采集 ——
+    public FrameDumpConfig FrameDump { get; set; } = new();
 
     // —— 设置面板：结束行为 ——
     public bool AutoCloseWhenDone { get; set; } = false;
