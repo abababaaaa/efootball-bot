@@ -222,8 +222,8 @@ public sealed class AppConfig
     public OcrEngineKind OcrEngine { get; set; } = OcrEngineKind.RapidV6;
     public bool AutoLaunchGame { get; set; }
     public bool KeepGameOnTop { get; set; } = false; // 兜底模式：游戏窗口置顶（不激活）
-    /// <summary>画面捕获后端：DXGI 桌面复制（默认，高性能；窗口须可见，不能遮挡/最小化）或 WGC 窗口捕获（支持后台/遮挡）。</summary>
-    public CaptureMode CaptureMode { get; set; } = CaptureMode.Dxgi;
+    /// <summary>画面捕获后端：WGC 窗口捕获（默认，支持后台挂机/窗口被遮挡；已绑定真实 GPU 适配器）或 DXGI 桌面复制（高性能但窗口须可见）。</summary>
+    public CaptureMode CaptureMode { get; set; } = CaptureMode.Wgc;
     public TimingConfig Timing { get; set; } = new();
 
     // —— 推理（ONNX Runtime EP 降级 + YOLO 目标检测）——
