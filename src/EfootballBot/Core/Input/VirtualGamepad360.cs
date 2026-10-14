@@ -53,6 +53,9 @@ public sealed class VirtualGamepad360 : IDisposable
         catch { return false; }
     }
 
+    /// <summary>XInput 玩家 1（slot 0）当前是否被占用。</summary>
+    public static bool IsSlot0Occupied() => XInputGetState(0, out _) == 0;
+
     /// <summary>
     /// eFootball 菜单只响应 XInput Player 1（slot 0）。
     /// 连接前若真实手柄已占用 slot 0，虚拟手柄必然落到 slot 1+，输入被游戏忽略。
@@ -60,7 +63,7 @@ public sealed class VirtualGamepad360 : IDisposable
     /// </summary>
     public static string? SlotZeroOccupiedMessage(bool slot0Connected)
         => slot0Connected
-            ? "检测到真实手柄已占用 XInput Player 1（slot 0）。eFootball 菜单只响应 Player 1，虚拟手柄会被分到 slot 2+ 导致输入无效。请先拔下或关闭真实手柄，再点击开始挂机。"
+            ? "检测到 XInput 玩家 1（slot 0）仍被真实手柄占用（自动禁用未生效：提权计划任务未注册或授权被拒）。请重启本程序并在授权窗口点「是」，或先拔下/关闭真实手柄，再点击开始挂机。"
             : null;
 
     public void Connect()

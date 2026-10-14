@@ -119,8 +119,9 @@ public static class Updater
     {
         try
         {
-            // 每次用唯一临时目录（Guid），避免和上次残留文件冲突
-            string tempDir = Path.Combine(Path.GetTempPath(), "EfootballBotUpdate", Guid.NewGuid().ToString("N"));
+            // 每次用唯一临时目录（Guid），避免和上次残留文件冲突。
+            // 临时下载放 exe 旁 data\tmp\（2026-10-11 用户要求：所有操作收在程序目录内）
+            string tempDir = Path.Combine(AppPaths.TempDir, "update", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(tempDir);
             string zipPath = Path.Combine(tempDir, "update.zip");
 

@@ -23,7 +23,8 @@ public sealed class WindowCapture : ICaptureProvider
     private readonly object _gate = new();
     private nint _hwnd;
     private nint _d3dDevicePtr;
-    private nint _d3dContextPtr;
+    /// <summary>SharpDX 设备包装（持有 D3D11 设备生命周期；NativePointer 供 GpuVideoScaler/WGC 用）。</summary>
+    private SharpDX.Direct3D11.Device? _sharpDevice;
     private IDirect3DDevice? _winrtDevice;
     private Direct3D11CaptureFramePool? _pool;
     private GraphicsCaptureSession? _session;
@@ -112,55 +113,69 @@ public sealed class WindowCapture : ICaptureProvider
         lock (_gate)
         {
             if (_running) return;
-            _hwnd = hwnd;
-            // 帧池必须按内容原始尺寸建：WGC 小帧池会裁切左上角而不是缩放
-            // （超宽全屏 3440×1440 建 1720×720 池只能拿到左上 1/4 画面）。
-            // 降采样在取帧后于 CPU 侧做，输出帧仍为高≤720。
-            _size = ClampSize(width, height);
-            var capped = CapSize(width, height);
-            if (capped.Width != _size.Width || capped.Height != _size.Height)
-                Step($"[捕获] 原始 {_size.Width}×{_size.Height}：全尺寸采集，输出降采样到 {capped.Width}×{capped.Height}");
-
-            Step("① 创建 D3D11 设备");
-            CreateDevice();
-
-            Step("② 获取捕获工厂 (IGraphicsCaptureItemInterop)");
-            nint interop = CaptureInterop.GetCaptureItemInteropPtr();
             try
             {
-                Step("③ CreateForWindow 并包装 GraphicsCaptureItem");
-                nint itemPtr = CaptureInterop.CreateItemForWindow(interop, hwnd);
-                var item = WinRT.MarshalInspectable<GraphicsCaptureItem>.FromAbi(itemPtr);
+                _hwnd = hwnd;
+                // 帧池必须按内容原始尺寸建：WGC 小帧池会裁切左上角而不是缩放
+                // （超宽全屏 3440×1440 建 1720×720 池只能拿到左上 1/4 画面）。
+                // 降采样在取帧后于 CPU 侧做，输出帧仍为高≤720。
+                _size = ClampSize(width, height);
+                var capped = CapSize(width, height);
+                if (capped.Width != _size.Width || capped.Height != _size.Height)
+                    Step($"[捕获] 原始 {_size.Width}×{_size.Height}：全尺寸采集，输出降采样到 {capped.Width}×{capped.Height}");
+
+                Step("① 创建 D3D11 设备");
+                CreateDevice();
+
+                Step("② 获取捕获工厂 (IGraphicsCaptureItemInterop)");
+                nint interop = CaptureInterop.GetCaptureItemInteropPtr();
                 try
                 {
-                    // 帧池尺寸必须与捕获内容一致：客户区尺寸（如 1280×720）≠ 捕获内容
-                    // （含窗口边框阴影，如 1282×752）。用错误值建池会启动即重建帧池
-                    // （WGC 重建在高负载/多适配器环境下是 DWM 崩溃放大点）。
-                    var frameSize = item.Size;
-                    _size = ClampSize(frameSize.Width, frameSize.Height);
+                    Step("③ CreateForWindow 并包装 GraphicsCaptureItem");
+                    nint itemPtr = CaptureInterop.CreateItemForWindow(interop, hwnd);
+                    var item = WinRT.MarshalInspectable<GraphicsCaptureItem>.FromAbi(itemPtr);
+                    try
+                    {
+                        // 帧池尺寸必须与捕获内容一致：客户区尺寸（如 1280×720）≠ 捕获内容
+                        // （含窗口边框阴影，如 1282×752）。用错误值建池会启动即重建帧池
+                        // （WGC 重建在高负载/多适配器环境下是 DWM 崩溃放大点）。
+                        var frameSize = item.Size;
+                        _size = ClampSize(frameSize.Width, frameSize.Height);
+                    }
+                    finally
+                    {
+                        Marshal.Release(itemPtr);
+                    }
+
+                    Step("④ 创建帧池 (CreateFreeThreaded)");
+                    _pool = Direct3D11CaptureFramePool.CreateFreeThreaded(
+                        _winrtDevice,
+                        DirectXPixelFormat.B8G8R8A8UIntNormalized,
+                        2,
+                        _size);
+                    _pool.FrameArrived += OnFrameArrived;
+
+                    Step("⑤ 创建捕获会话");
+                    _session = _pool.CreateCaptureSession(item);
+                    _session.StartCapture();
+                    _running = true;
+                    Step($"⑥ 捕获已开始（{_size.Width}×{_size.Height}）");
                 }
                 finally
                 {
-                    Marshal.Release(itemPtr);
+                    Marshal.Release(interop);
                 }
-
-                Step("④ 创建帧池 (CreateFreeThreaded)");
-                _pool = Direct3D11CaptureFramePool.CreateFreeThreaded(
-                    _winrtDevice,
-                    DirectXPixelFormat.B8G8R8A8UIntNormalized,
-                    2,
-                    _size);
-                _pool.FrameArrived += OnFrameArrived;
-
-                Step("⑤ 创建捕获会话");
-                _session = _pool.CreateCaptureSession(item);
-                _session.StartCapture();
-                _running = true;
-                Step($"⑥ 捕获已开始（{_size.Width}×{_size.Height}）");
             }
-            finally
+            catch
             {
-                Marshal.Release(interop);
+                // 启动中途失败：释放已创建的半套资源，保证下次 Start 干净重来
+                // （Stop 有 !_running 短路，不会清理这些）
+                try { _session?.Dispose(); } catch { }
+                try { _pool?.Dispose(); } catch { }
+                _session = null;
+                _pool = null;
+                FreeDevice();
+                throw;
             }
         }
     }
@@ -207,49 +222,44 @@ public sealed class WindowCapture : ICaptureProvider
 
     private void CreateDevice()
     {
-        // 系统存在虚拟显示适配器（GameViewer/MuMu 等远程/模拟器工具的 WARP 软件设备）时，
-        // 默认适配器可能落在虚拟设备上——WGC 帧池建在其上会触发 dwm.exe (d3d10warp.dll)
-        // 确定性崩溃（系统卡死黑屏）。必须显式枚举并绑定真实硬件 GPU。
-        nint adapter = 0;
-        string adapterName = "";
-        try
+        // 两级尝试：显式硬件适配器（显存最大，如独显）→ 默认硬件适配器；任一成功即用。
+        // WARP 软渲染绝不尝试——WGC 帧池建在 WARP 设备上会确定性触发 dwm.exe (d3d10warp.dll)
+        // 崩溃（系统卡死黑屏）。设备创建走 SharpDX：手写 CreateDXGIFactory1/D3D11CreateDevice
+        // P/Invoke 在实机探测中分别恒返 E_NOINTERFACE / E_INVALIDARG（2026-10-11），
+        // 曾使显式 GPU 绑定永远落空、WGC 在所有机器上启动失败。
+        var adapter = CaptureInterop.PickHardwareAdapter(out var adapterName, out var pickedForOutputs);
+        bool boundExplicit = false;
+        if (adapter is not null)
         {
-            (adapter, adapterName) = CaptureInterop.PickHardwareAdapter();
+            try
+            {
+                var dev = new SharpDX.Direct3D11.Device(adapter,
+                    SharpDX.Direct3D11.DeviceCreationFlags.BgraSupport);
+                _sharpDevice = dev;
+                boundExplicit = true;
+                Step(pickedForOutputs
+                    ? $"[捕获] D3D11 设备绑定硬件 GPU：{adapterName}（显存最大的独显无显示输出，为保帧流改绑有输出的显卡）"
+                    : $"[捕获] D3D11 设备绑定硬件 GPU：{adapterName}");
+            }
+            catch (Exception ex)
+            {
+                Step($"[捕获] 绑定硬件 GPU {adapterName} 失败（{ex.Message}），改试默认适配器");
+            }
+            finally { adapter.Dispose(); }
         }
-        catch { /* 枚举失败走默认路径 */ }
 
-        int hr = CaptureInterop.D3D11CreateDevice(
-            adapter,
-            adapter != 0 ? CaptureInterop.D3D_DRIVER_TYPE_UNKNOWN : CaptureInterop.D3D_DRIVER_TYPE_HARDWARE,
-            nint.Zero,
-            CaptureInterop.D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-            nint.Zero, 0,
-            CaptureInterop.D3D11_SDK_VERSION,
-            out _d3dDevicePtr,
-            out _,
-            out _d3dContextPtr);
-        if (adapter != 0)
+        if (!boundExplicit)
         {
-            Marshal.Release(adapter);
-            if (hr == 0)
-                Step($"[捕获] D3D11 设备绑定硬件 GPU：{adapterName}");
+            // 默认硬件适配器；无硬件 GPU 时直接抛出（无硬件则创建失败），由引擎降级链改走 DXGI/GDI
+            var dev = new SharpDX.Direct3D11.Device(
+                SharpDX.Direct3D.DriverType.Hardware,
+                SharpDX.Direct3D11.DeviceCreationFlags.BgraSupport);
+            _sharpDevice = dev;
+            Step("[捕获] D3D11 设备使用默认硬件适配器");
         }
-        if (hr != 0)
-        {
-            // 兜底：WARP 软渲染设备
-            hr = CaptureInterop.D3D11CreateDevice(
-                nint.Zero,
-                CaptureInterop.D3D_DRIVER_TYPE_WARP,
-                nint.Zero,
-                CaptureInterop.D3D11_CREATE_DEVICE_BGRA_SUPPORT,
-                nint.Zero, 0,
-                CaptureInterop.D3D11_SDK_VERSION,
-                out _d3dDevicePtr,
-                out _,
-                out _d3dContextPtr);
-            if (hr != 0) throw new InvalidOperationException($"创建 D3D11 设备失败: 0x{hr:X}");
-            Step("[捕获] 硬件 GPU 不可用，已回退 WARP 软渲染设备");
-        }
+
+        var device = _sharpDevice ?? throw new InvalidOperationException("D3D11 设备创建失败");
+        _d3dDevicePtr = device.NativePointer;
         _winrtDevice = CaptureInterop.CreateDirect3DDevice(_d3dDevicePtr);
     }
 
@@ -408,8 +418,10 @@ public sealed class WindowCapture : ICaptureProvider
             _winrtDevice.Dispose();
             _winrtDevice = null;
         }
-        if (_d3dContextPtr != 0) { Marshal.Release(_d3dContextPtr); _d3dContextPtr = 0; }
-        if (_d3dDevicePtr != 0) { Marshal.Release(_d3dDevicePtr); _d3dDevicePtr = 0; }
+        _d3dDevicePtr = 0;
+        // D3D 设备生命周期由 SharpDX 包装持有，Dispose 即释放（勿再对指针 Marshal.Release）
+        try { _sharpDevice?.Dispose(); } catch { }
+        _sharpDevice = null;
     }
 
     public void Dispose()

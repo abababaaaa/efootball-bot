@@ -62,11 +62,21 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// 预览帧由 Worker 推送 PNG base64 解码显示（ShowPreviewPng），
-    /// 此定时器仅作保活占位，防止最小化暂停逻辑误关预览状态。
+    /// 预览帧由 Worker 推送 PNG base64 解码显示（ShowPreviewPng）。
+    /// 本定时器兼作看门狗：开关挂机会重建 Worker 进程，新进程的预览推送是停着的——
+    /// 若开启状态下超过 4 秒没收到帧，自动重发开启命令，不再需要手动重启预览。
     /// </summary>
+    private DateTime _lastPreviewAt = DateTime.MinValue;
+    private DateTime _lastPreviewResend = DateTime.MinValue;
+
     private void UpdatePreviewFrame()
     {
-        // M1：预览帧由 Worker 通过 ev:preview 推送，无需本地拉取
+        if (!_previewOn || _workerHost is not { IsRunning: true }) return;
+        if ((DateTime.Now - _lastPreviewAt).TotalSeconds > 4 &&
+            (DateTime.Now - _lastPreviewResend).TotalSeconds > 4)
+        {
+            _lastPreviewResend = DateTime.Now;
+            _ = _workerHost.SendPreviewAsync(true);
+        }
     }
 }

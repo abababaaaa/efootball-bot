@@ -37,7 +37,7 @@ public static class PipeProtocol
         public string? Png { get; set; }          // preview: base64 PNG
         public int Matches { get; set; }          // stats
         public int KeyMatches { get; set; }
-        public int Forfeited { get; set; }
+        public int PlayersMaxed { get; set; }  /// 满级提示次数（弃权场次已移除）
         public string? StartedAt { get; set; }    // stats ISO
         public string? LastError { get; set; }
     }
@@ -57,13 +57,13 @@ public static class PipeProtocol
     public static Msg EvPreview(string pngBase64) => new() { Ev = "preview", Png = pngBase64 };
     public static Msg EvPong() => new() { Ev = "pong" };
     public static Msg EvExited(string reason) => new() { Ev = "exited", Text = reason };
-    public static Msg EvStats(int matches, int keyMatches, int forfeited, DateTime? startedAt, string? lastError)
+    public static Msg EvStats(int matches, int keyMatches, int playersMaxed, DateTime? startedAt, string? lastError)
         => new()
         {
             Ev = "stats",
             Matches = matches,
             KeyMatches = keyMatches,
-            Forfeited = forfeited,
+            PlayersMaxed = playersMaxed,
             StartedAt = startedAt?.ToString("o"),
             LastError = lastError,
         };

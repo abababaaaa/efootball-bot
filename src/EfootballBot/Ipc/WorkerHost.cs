@@ -4,6 +4,7 @@ using System.IO.Pipes;
 using System.Text;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Config;
+using EfootballBot.Core.System;
 
 namespace EfootballBot.Ipc;
 
@@ -162,7 +163,7 @@ public sealed class WorkerHost : IDisposable
                     case "stats":
                         _lastStats.MatchesDone = msg.Matches;
                         _lastStats.KeyMatches = msg.KeyMatches;
-                        _lastStats.Forfeited = msg.Forfeited;
+                        _lastStats.PlayersMaxed = msg.PlayersMaxed;
                         _lastStats.StartedAt = string.IsNullOrEmpty(msg.StartedAt)
                             ? null : DateTime.Parse(msg.StartedAt);
                         _lastStats.LastError = msg.LastError ?? "";
@@ -267,13 +268,12 @@ public sealed class WorkerHost : IDisposable
         catch { return false; }
     }
 
-    /// <summary>读取 Worker 崩溃日志（%APPDATA%\EfootballBot\worker-error.log），供错误消息附带。</summary>
+    /// <summary>读取 Worker 崩溃日志（exe 旁 data\worker-error.log），供错误消息附带。</summary>
     private static string ReadWorkerError()
     {
         try
         {
-            string p = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "EfootballBot", "worker-error.log");
+            string p = AppPaths.ErrorLogPath("worker-error.log");
             if (!File.Exists(p)) return "";
             // 只取最近的崩溃（文件可能被旧崩溃占着，超过 10 分钟前的忽略）
             if (DateTime.Now - File.GetLastWriteTime(p) > TimeSpan.FromMinutes(10)) return "";

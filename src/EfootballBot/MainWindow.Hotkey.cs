@@ -1,115 +1,165 @@
-using System.ComponentModel;
-using System.Diagnostics;
-using System.IO;
-using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
-using System.Windows.Input;
-using System.Windows.Media;
-using System.Windows.Media.Imaging;
-using System.Windows.Threading;
 using EfootballBot.Core.Bot;
-using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Input;
-using EfootballBot.Core.Logging;
-using EfootballBot.Core.System;
-using EfootballBot.Core.UI;
-using EfootballBot.Core.Vision;
 
 namespace EfootballBot;
 
 public partial class MainWindow
 {
-    // ---------------- 全局热键 ----------------
+    // ---------------- 全局热键（暂停/停止 + 恢复） ----------------
 
-    /// <summary>热键触发回调（UI 线程）。</summary>
-    private void Hotkey_Triggered()
+    /// <summary>主热键：运行中第一次按=暂停；暂停中再按=彻底停止。</summary>
+    private void Hotkey_PauseStop_Triggered()
     {
         if (_workerHost is not { IsRunning: true }) return;
-        AppendLog($"已通过快捷键「{_cfg.Hotkey.DisplayString()}」停止。", LogLevel.Success);
-        _hotkey.Unregister();
-        _ = _workerHost.StopAsync();
-        ResetButtons();
-    }
-
-    /// <summary>按键捕获 PreviewKeyDown：拦截修饰键+主键组合，防止文本框处理。</summary>
-    private void TxtHotkey_PreviewKeyDown(object sender, KeyEventArgs e)
-    {
-        e.Handled = true; // 阻止 TextBox 处理
-        CaptureHotkeyFromEvent(e);
-    }
-
-    private void TxtHotkey_KeyDown(object sender, KeyEventArgs e)
-    {
-        // PreviewKeyDown 已经捕获了，这里留空防止重复
-    }
-
-    /// <summary>从 KeyEventArgs 提取修饰键和主键，更新配置并刷新 UI。</summary>
-    private void CaptureHotkeyFromEvent(KeyEventArgs e)
-    {
-        Key key = e.Key == Key.System ? e.SystemKey : e.Key;
-
-        // 忽略单独的修饰键（Ctrl / Alt / Shift / Win 按下时 key 就是修饰键本身）
-        if (key == Key.LeftCtrl || key == Key.RightCtrl ||
-            key == Key.LeftAlt || key == Key.RightAlt ||
-            key == Key.LeftShift || key == Key.RightShift ||
-            key == Key.LWin || key == Key.RWin)
-            return;
-
-        // 忽略一些不适合作热键的按键
-        if (key == Key.Escape || key == Key.Tab || key == Key.Left || key == Key.Right ||
-            key == Key.Up || key == Key.Down || key == Key.Back || key == Key.Delete)
-            return;
-
-        // 必须至少有一个修饰键
-        if ((Keyboard.Modifiers & (ModifierKeys.Control | ModifierKeys.Alt | ModifierKeys.Shift | ModifierKeys.Windows)) == 0)
-            return;
-
-        int mods = 0;
-        if ((Keyboard.Modifiers & ModifierKeys.Control) != 0) mods |= 2;
-        if ((Keyboard.Modifiers & ModifierKeys.Shift) != 0) mods |= 4;
-        if ((Keyboard.Modifiers & ModifierKeys.Alt) != 0) mods |= 1;
-        if ((Keyboard.Modifiers & ModifierKeys.Windows) != 0) mods |= 8;
-
-        int vk = KeyInterop.VirtualKeyFromKey(key);
-        _cfg.Hotkey.VirtualKey = vk;
-        _cfg.Hotkey.Modifiers = mods;
-
-        // 同步到 UI 控件
-        TxtHotkey.Text = key.ToString();
-        ChkHotkeyCtrl.IsChecked = (mods & 2) != 0;
-        ChkHotkeyShift.IsChecked = (mods & 4) != 0;
-        ChkHotkeyAlt.IsChecked = (mods & 1) != 0;
-        ChkHotkeyWin.IsChecked = (mods & 8) != 0;
-
-        RefreshHotkeyUi();
-
-        // 如果引擎正在运行，立即重新注册
-        if (_workerHost is { IsRunning: true } && _cfg.Hotkey.Enabled)
+        if (_paused)
         {
-            try
-            {
-                if (!_hotkey.Register(_cfg.Hotkey))
-                    AppendLog("新热键注册失败（可能被占用）。", LogLevel.Warn);
-                else
-                    AppendLog($"热键已更新：{_cfg.Hotkey.DisplayString()}", LogLevel.Info);
-            }
-            catch (Exception ex)
-            {
-                AppendLog($"热键注册异常：{ex.Message}", LogLevel.Warn);
-            }
+            AppendLog($"已通过快捷键「{_cfg.Hotkey.DisplayString()}」停止。", LogLevel.Success);
+            _ = StopScenarioAsync();
+        }
+        else
+        {
+            AppendLog($"已通过快捷键「{_cfg.Hotkey.DisplayString()}」暂停。", LogLevel.Success);
+            _ = TogglePauseAsync();
         }
     }
 
-    /// <summary>把当前热键配置同步到模块面板的提示和预览文本（前缀文字 XAML 中已有，只赋值）。</summary>
+    /// <summary>恢复热键：从暂停恢复。</summary>
+    private void Hotkey_Resume_Triggered()
+    {
+        if (_workerHost is not { IsRunning: true } || !_paused) return;
+        AppendLog($"已通过快捷键「{_cfg.Hotkey.ResumeDisplayString()}」恢复。", LogLevel.Success);
+        _ = TogglePauseAsync();
+    }
+
+    /// <summary>统一暂停/恢复切换（GUI 按钮与热键共用），同步按钮文字与热键可视化。</summary>
+    private async Task TogglePauseAsync()
+    {
+        var host = _workerHost;
+        if (host is not { IsRunning: true }) return;
+        bool next = !_paused;
+        try
+        {
+            await host.SendPauseAsync(next);
+        }
+        catch (System.Exception ex)
+        {
+            AppendLog($"暂停命令发送失败：{ex.Message}", LogLevel.Error);
+            return;
+        }
+        _paused = next;
+        RefreshRunButtons();
+    }
+
+    /// <summary>统一停止（GUI 按钮与热键共用）。</summary>
+    private async Task StopScenarioAsync()
+    {
+        var host = _workerHost;
+        if (host is null) return;
+        _hotkey.Unregister();
+        AppendLog("正在停止…", LogLevel.Info);
+        ResetButtons();
+        await host.StopAsync();
+        AppendLog("已停止。", LogLevel.Info);
+        if (_cfg.AutoCloseWhenDone)
+        {
+            AppendLog("全部流程完毕，2 秒后自动关闭…", LogLevel.Success);
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+            timer.Tick += (_, _) => { timer.Stop(); Close(); };
+            timer.Start();
+        }
+    }
+
+    /// <summary>刷新运行控制按钮文字（含热键可视化）：停止/暂停/继续。多模块：仅当前运行的模块按钮显示"停止"。</summary>
+    private void RefreshRunButtons()
+    {
+        bool running = _workerHost is { IsRunning: true };
+        string ps = _cfg.Hotkey.Enabled ? _cfg.Hotkey.DisplayString() : "";
+        string rs = _cfg.Hotkey.Enabled ? _cfg.Hotkey.ResumeDisplayString() : "";
+        string stopText = string.IsNullOrEmpty(ps) ? "停止" : $"停止 ({ps})";
+
+        BtnStartMyLeague.Content = running && _activeStartBtn == BtnStartMyLeague ? stopText : "开始";
+        BtnStartWeekly.Content = running && _activeStartBtn == BtnStartWeekly ? stopText : "开始";
+        BtnStartCnWeekly.Content = running && _activeStartBtn == BtnStartCnWeekly ? stopText : "开始";
+
+        if (!running)
+            BtnPause.Content = "未开始";
+        else if (_paused)
+            BtnPause.Content = string.IsNullOrEmpty(rs) ? "继续" : $"继续 ({rs})";
+        else
+            BtnPause.Content = string.IsNullOrEmpty(ps) ? "暂停" : $"暂停 ({ps})";
+    }
+
+    /// <summary>把当前热键配置同步到设置页标签与运行按钮。</summary>
     private void RefreshHotkeyUi()
     {
-        string label = _cfg.Hotkey.Enabled
-            ? _cfg.Hotkey.DisplayString()
-            : "已禁用";
-        TxtIntlHotkey.Text = label;
-        TxtCnHotkey.Text = label;
-        TxtHotkeyPreview.Text = label;
+        if (LblHotkeyMain is null) return; // XAML 初始化顺序保护
+        LblHotkeyMain.Text = _cfg.Hotkey.Enabled ? _cfg.Hotkey.DisplayString() : "已禁用";
+        LblHotkeyResume.Text = _cfg.Hotkey.Enabled ? _cfg.Hotkey.ResumeDisplayString() : "已禁用";
+        RefreshRunButtons();
+    }
+
+    // ---------------- 记录键 ----------------
+
+    /// <summary>记录主热键（暂停/停止）：弹小窗捕获键盘任意键或鼠标键。</summary>
+    private void BtnRecordHotkeyMain_Click(object sender, RoutedEventArgs e)
+    {
+        var w = new HotkeyRecordWindow("记录 暂停/停止 热键") { Owner = this };
+        w.ShowDialog();
+        if (!w.Recorded) return;
+        _cfg.Hotkey.IsMouse = w.IsMouse;
+        _cfg.Hotkey.VirtualKey = w.Code;
+        _cfg.Hotkey.Modifiers = w.Modifiers;
+        _cfg.Save();
+        ReregisterIfRunning("暂停/停止");
+        RefreshHotkeyUi();
+    }
+
+    /// <summary>记录恢复热键。</summary>
+    private void BtnRecordHotkeyResume_Click(object sender, RoutedEventArgs e)
+    {
+        var w = new HotkeyRecordWindow("记录 恢复 热键") { Owner = this };
+        w.ShowDialog();
+        if (!w.Recorded) return;
+        _cfg.Hotkey.ResumeIsMouse = w.IsMouse;
+        _cfg.Hotkey.ResumeVirtualKey = w.Code;
+        _cfg.Hotkey.ResumeModifiers = w.Modifiers;
+        _cfg.Save();
+        ReregisterIfRunning("恢复");
+        RefreshHotkeyUi();
+    }
+
+    /// <summary>启用开关变化：立即保存并在运行中即时注册/注销。
+    /// 注意 XAML 的 IsChecked="True" 会在 InitializeComponent 期间触发本事件——
+    /// 此时 _cfg 尚未赋值，必须空守卫直接返回（加载赋值另有 _loadingConfig 屏蔽）。</summary>
+    private void ChkHotkeyEnabled_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingConfig || _cfg is null || ChkHotkeyEnabled is null) return;
+        _cfg.Hotkey.Enabled = ChkHotkeyEnabled.IsChecked == true;
+        _cfg.Save();
+        if (_workerHost is { IsRunning: true })
+        {
+            if (_cfg.Hotkey.Enabled) ReregisterIfRunning("热键");
+            else _hotkey.Unregister();
+        }
+        RefreshHotkeyUi();
+    }
+
+    private void ReregisterIfRunning(string what)
+    {
+        if (_workerHost is not { IsRunning: true } || !_cfg.Hotkey.Enabled) return;
+        try
+        {
+            if (!_hotkey.Register(_cfg.Hotkey))
+                AppendLog($"{what}热键注册失败。", LogLevel.Warn);
+            else
+                AppendLog($"{what}热键已更新：{_cfg.Hotkey.DisplayString()} / {_cfg.Hotkey.ResumeDisplayString()}", LogLevel.Info);
+        }
+        catch (System.Exception ex)
+        {
+            AppendLog($"{what}热键注册异常：{ex.Message}", LogLevel.Warn);
+        }
     }
 }

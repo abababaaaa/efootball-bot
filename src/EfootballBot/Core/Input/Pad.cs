@@ -8,30 +8,56 @@ public sealed class Pad
     private readonly VirtualGamepad360 _vg;
     private readonly TimingConfig _t;
     private readonly Random _rnd = new();
+    private readonly HumanPacer? _pace;
 
     public Pad(VirtualGamepad360 vg, TimingConfig timing)
     {
         _vg = vg;
         _t = timing;
+        _pace = timing.HumanPacingEnabled ? new HumanPacer() : null;
     }
 
     private int Jitter(int baseMs)
     {
+        if (_pace is not null) return _pace.Sample(baseMs);
         int j = Math.Max(0, Math.Min(200, _t.HumanJitterMs));
         int d = j == 0 ? 0 : _rnd.Next(-j, j + 1);
         return Math.Max(40, baseMs + d);
     }
 
+    /// <summary>小概率插入一次「犹豫」停顿（真人被手机/弹窗打断的瞬间），仅高频语义键。</summary>
+    private async Task MaybeHesitate()
+    {
+        if (_pace is null || !_pace.RollHesitation()) return;
+        await Task.Delay(_pace.HesitationMs());
+    }
+
     /// <summary>下一步 / 确认（手柄 A）。</summary>
-    public Task Confirm() => _vg.TapAsync(PadButton.A, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
+    public async Task Confirm()
+    {
+        await MaybeHesitate();
+        await _vg.TapAsync(PadButton.A, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
+    }
 
     /// <summary>返回（手柄 B）。</summary>
-    public Task Back() => _vg.TapAsync(PadButton.B, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
+    public async Task Back()
+    {
+        await MaybeHesitate();
+        await _vg.TapAsync(PadButton.B, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
+    }
 
     /// <summary>按任意指定按钮（供声明式导航图使用）。</summary>
-    public Task Press(PadButton b) => _vg.TapAsync(b, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
+    public async Task Press(PadButton b)
+    {
+        await MaybeHesitate();
+        await _vg.TapAsync(b, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
+    }
 
-    public Task Dpad(PadDir dir) => _vg.TapDpadAsync(dir, Jitter(_t.DpadHoldMs), Jitter(_t.TapGapMs));
+    public async Task Dpad(PadDir dir)
+    {
+        await MaybeHesitate();
+        await _vg.TapDpadAsync(dir, Jitter(_t.DpadHoldMs), Jitter(_t.TapGapMs));
+    }
 
     public Task X() => _vg.TapAsync(PadButton.X, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
     public Task Y() => _vg.TapAsync(PadButton.Y, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
@@ -77,11 +103,14 @@ public sealed class Pad
     /// <summary>
     /// 拟人随机等待（闭区间 [minMs, maxMs]），用于非必须立即的连点场景
     /// （比赛中挂机按 A、赛后弹窗确认），避免固定节奏被识别为脚本。
+    /// 拟人节奏开启时取对数正态簇状分布（真人操作成簇、有疏密），
+    /// 关闭时退回均匀分布。
     /// </summary>
     public Task HumanWait(int minMs, int maxMs, CancellationToken ct)
     {
         int lo = Math.Clamp(Math.Min(minMs, maxMs), 0, 600_000);
         int hi = Math.Clamp(Math.Max(minMs, maxMs), lo, 600_000);
-        return Task.Delay(_rnd.Next(lo, hi + 1), ct);
+        int ms = _pace is not null ? _pace.SampleRange(lo, hi) : _rnd.Next(lo, hi + 1);
+        return Task.Delay(ms, ct);
     }
 }

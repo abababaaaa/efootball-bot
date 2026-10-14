@@ -24,19 +24,14 @@ public partial class MainWindow : Window
 {
     private readonly AppConfig _cfg;
     private WorkerHost? _workerHost;
-    private readonly GlobalHotkey _hotkey = new();
+    private readonly Core.Input.SmartHotkey _hotkey = new();
     private readonly DispatcherTimer _previewTimer;
     private readonly DispatcherTimer _statsTimer;
     private bool _previewOn;
     private bool _starting;
     private string _pendingTheme = ThemeManager.Dark;
 
-    // 代码颜色改为运行时从 Application 资源读取（跟随主题）
-    private static Brush BrushOk => (Brush)Application.Current.Resources["AccentGlow"];
-    private static Brush BrushBad => (Brush)Application.Current.Resources["Danger"];
-    private static Brush BrushIdle => (Brush)Application.Current.Resources["EnvDotIdle"];
-    private static Brush BrushWarn => (Brush)Application.Current.Resources["Warning"];
-    private static Brush BrushLogInfo => (Brush)Application.Current.Resources["LogInfo"];
+    // 代码颜色统一在 MainWindow.Logs.cs 定义（运行时从 Application 资源读取，跟随主题）
 
     /// <summary>第二个实例尝试启动时，由单实例管道回调：恢复最小化并前置本窗口。</summary>
     public void BringToFront()
@@ -63,6 +58,8 @@ public partial class MainWindow : Window
 
         // 初始化文件日志（早于 BotEngine 创建，否则第一条日志会丢失）
         FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles, _cfg.LogRetentionDays);
+        AppendLog($"应用启动：v{typeof(MainWindow).Assembly.GetName().Version?.ToString(3)}，" +
+            $"{Environment.OSVersion.VersionString}", LogLevel.Info);
 
         // 启动后自动检查更新（不阻塞 UI）
         _ = AutoCheckUpdateOnStartupAsync();
@@ -86,11 +83,16 @@ public partial class MainWindow : Window
                 ShowThemeOverlay(_cfg.Theme);
             RunEnvChecks();
 
-            // 绑定全局热键到本窗口句柄
+            // 绑定全局热键（低级钩子：键盘任意键/鼠标键；主键=暂停→停止，恢复键=继续）
             _hotkey.Attach(this);
-            _hotkey.Triggered += () => Dispatcher.BeginInvoke(Hotkey_Triggered);
+            _hotkey.PauseStopTriggered += () => Dispatcher.BeginInvoke(Hotkey_PauseStop_Triggered);
+            _hotkey.ResumeTriggered += () => Dispatcher.BeginInvoke(Hotkey_Resume_Triggered);
             RefreshHotkeyUi();
         };
+
+        // 环境检测在 Loaded 事件里跑：构造到此结束即界面可用（v1.1.19 远程排障心跳，
+        // 区分"应用打开后卡死"与"正常打开"——后者日志必有此行）
+        AppendLog("主界面就绪。", LogLevel.Info);
     }
 
     /// <summary>当前左侧选中的模块对应的游戏进程名。</summary>
@@ -107,8 +109,7 @@ public partial class MainWindow : Window
         _workerHost = new WorkerHost();
         _workerHost.Log += (lv, msg) =>
         {
-            // 文件日志：Worker 转发的全部日志落盘（M1 桥接补回，等同旧 engine.Log 双订阅）
-            FileLogger.Instance.Write(msg, Enum.TryParse<LogLevel>(lv, out var fl) ? fl : LogLevel.Info);
+            // 落盘统一走 AppendLog（v1.1.19：GUI 侧日志全部进文件），此处只进 UI
             Dispatcher.BeginInvoke(() =>
                 AppendLog(msg, Enum.TryParse<LogLevel>(lv, out var l) ? l : LogLevel.Info));
         };
@@ -134,20 +135,146 @@ public partial class MainWindow : Window
             ResetButtons();
             _statsTimer.Stop();
             _hotkey.Unregister();
+            // Worker 非正常退出（更新重启/崩溃/强杀）可能没机会还原停靠的窗口：兜底还原
+            EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
+            // 崩溃残留的禁用真实手柄同样兜底恢复（下次启动挂机会重新禁用）
+            RestorePhysicalPadIfDisabled();
         });
         return _workerHost;
     }
 
     // ---------------- 开始 / 停止 ----------------
 
-    private async void BtnStartIntl_Click(object sender, RoutedEventArgs e)
-        => await ToggleScenarioAsync(BtnStartIntl, "observe");
+    // ---------------- 模块入口切换（中栏上层列表） ----------------
+
+    /// <summary>国际服模块入口切换：★赛前快捷设置 / 我的联赛 / 周活动（内容区随之切换，互不同时显示）。</summary>
+    private void RbPreMatch_Checked(object sender, RoutedEventArgs e) => SwitchIntlModule();
+
+    private void RbMyLeague_Checked(object sender, RoutedEventArgs e) => SwitchIntlModule();
+
+    private void RbWeekly_Checked(object sender, RoutedEventArgs e) => SwitchIntlModule();
+
+    private void SwitchIntlModule()
+    {
+        // InitializeComponent 按 XAML 顺序建控件：Checked 触发时其余内容区可能尚未创建
+        if (PreMatchContent is null || LeagueContent is null || WeeklyContent is null) return;
+        PreMatchContent.Visibility = RbPreMatch.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        LeagueContent.Visibility = RbMyLeague.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        WeeklyContent.Visibility = RbWeekly.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>国服模块入口切换（上层列表照抄国际服，分组独立：切服务器互不干扰选中态）。</summary>
+    private void RbCnPreMatch_Checked(object sender, RoutedEventArgs e) => SwitchCnModule();
+
+    private void RbCnLeague_Checked(object sender, RoutedEventArgs e) => SwitchCnModule();
+
+    private void RbCnWeekly_Checked(object sender, RoutedEventArgs e) => SwitchCnModule();
+
+    private void SwitchCnModule()
+    {
+        if (CnPreMatchContent is null || CnLeagueContent is null || CnWeeklyContent is null) return;
+        CnPreMatchContent.Visibility = RbCnPreMatch.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        CnLeagueContent.Visibility = RbCnLeague.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        CnWeeklyContent.Visibility = RbCnWeekly.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ---------------- 赛前快捷设置（一键打开游戏自带设置工具） ----------------
+
+    private void BtnOpenGameSettings_Click(object sender, RoutedEventArgs e)
+        => OpenGameSettingsTool(TxtPreMatchPath, intl: true, "国际服");
+
+    private void BtnOpenCnGameSettings_Click(object sender, RoutedEventArgs e)
+        => OpenGameSettingsTool(TxtCnPreMatchPath, intl: false, "国服");
+
+    private void BtnOpenGameDir_Click(object sender, RoutedEventArgs e)
+        => OpenGameDirectory(TxtPreMatchPath, intl: true, "国际服");
+
+    private void BtnOpenCnGameDir_Click(object sender, RoutedEventArgs e)
+        => OpenGameDirectory(TxtCnPreMatchPath, intl: false, "国服");
+
+    /// <summary>
+    /// 定位某服的 Settings.exe：运行中的游戏进程锚定 → 上次定位记忆（GamePaths）兜底，
+    /// 成功后写入记忆。两服严格隔离：国服不走 Steam 回退——Steam 库里是国际服的安装，
+    /// 国服游戏未启动时跌进去会打开国际服的设置工具（实机 2026-10-13 用户报告）。
+    /// </summary>
+    private string? LocateSettingsTool(bool intl)
+    {
+        var path = GameSettingsLocator.Locate(
+            intl ? GameWindow.GlobalProcessName : BotEngine.CnProcessName,
+            allowSteamFallback: intl);
+        if (path is null)
+        {
+            var saved = intl ? _cfg.GamePaths.IntlSettingsTool : _cfg.GamePaths.CnSettingsTool;
+            if (saved.Length > 0 && File.Exists(saved)) path = saved;
+        }
+        if (path is not null)
+        {
+            if (intl) _cfg.GamePaths.IntlSettingsTool = path;
+            else _cfg.GamePaths.CnSettingsTool = path;
+            _cfg.Save();
+        }
+        return path;
+    }
+
+    /// <summary>定位并启动游戏目录下的 Settings.exe，结果显示在模块内状态行并记日志。</summary>
+    private void OpenGameSettingsTool(TextBlock status, bool intl, string label)
+    {
+        try
+        {
+            var exe = LocateSettingsTool(intl);
+            if (exe is null)
+            {
+                status.Text = intl
+                    ? "未找到 Settings.exe——请先启动国际服游戏（保持运行）再点一次，或到游戏安装目录手动打开。"
+                    : "未找到国服 Settings.exe——请先启动国服游戏（保持运行）再点一次；定位成功一次后会记住路径，之后无需游戏在运行。";
+                AppendLog($"[赛前快捷设置] 未定位到{label}游戏设置工具（Settings.exe）：请先启动游戏再试，或到游戏安装目录手动打开。", LogLevel.Warn);
+                return;
+            }
+            status.Text = exe;
+            Process.Start(new ProcessStartInfo { FileName = exe, UseShellExecute = true });
+            AppendLog($"[赛前快捷设置] 已打开{label}游戏设置工具：{exe}", LogLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            status.Text = $"打开失败：{ex.Message}";
+            AppendLog($"[赛前快捷设置] 打开{label}设置工具失败：{ex.Message}", LogLevel.Error);
+        }
+    }
+
+    /// <summary>在资源管理器中打开游戏本体安装目录（借 Settings.exe 定位）。</summary>
+    private void OpenGameDirectory(TextBlock status, bool intl, string label)
+    {
+        try
+        {
+            string? dir = Path.GetDirectoryName(LocateSettingsTool(intl));
+            if (dir is null)
+            {
+                status.Text = $"未定位到{label}游戏安装目录——请先启动游戏再点一次。";
+                AppendLog($"[赛前快捷设置] 未定位到{label}游戏安装目录：请先启动游戏再试。", LogLevel.Warn);
+                return;
+            }
+            status.Text = dir;
+            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+            AppendLog($"[赛前快捷设置] 已打开{label}游戏目录：{dir}", LogLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            status.Text = $"打开失败：{ex.Message}";
+            AppendLog($"[赛前快捷设置] 打开{label}游戏目录失败：{ex.Message}", LogLevel.Error);
+        }
+    }
 
     private async void BtnStartMyLeague_Click(object sender, RoutedEventArgs e)
         => await ToggleScenarioAsync(BtnStartMyLeague, "intl");
 
+    private async void BtnStartWeekly_Click(object sender, RoutedEventArgs e)
+        => await ToggleScenarioAsync(BtnStartWeekly, "intlweekly");
+
     private async void BtnStartCn_Click(object sender, RoutedEventArgs e)
         => await ToggleScenarioAsync(BtnStartCn, "cndaily");
+
+    private async void BtnStartCnWeekly_Click(object sender, RoutedEventArgs e)
+        => await ToggleScenarioAsync(BtnStartCnWeekly, "cnweekly");
 
     private async Task ToggleScenarioAsync(Button btn, string? mode)
     {
@@ -156,35 +283,17 @@ public partial class MainWindow : Window
 
         if (host.IsRunning)
         {
-            // UI 反馈必须前置：StopAsync 要发 stop 并等 Worker 退出（最长 5s+Kill），
-            // 放在后面会让"停止"按钮看起来卡死几秒
-            _hotkey.Unregister();
-            AppendLog("正在停止…", LogLevel.Info);
-            ResetButtons();
-            await host.StopAsync();
-            AppendLog("已停止。", LogLevel.Info);
-            // AutoCloseWhenDone：等待几秒让日志落盘，然后关闭
-            if (_cfg.AutoCloseWhenDone)
-            {
-                AppendLog("全部流程完毕，2 秒后自动关闭…", LogLevel.Success);
-                var timer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-                timer.Tick += (_, _) =>
-                {
-                    timer.Stop();
-                    Close();
-                };
-                timer.Start();
-            }
+            await StopScenarioAsync();
             return;
         }
 
         // 开始前必须手动确认的两点：
-        // ① 真实手柄占用 XInput 玩家1 时虚拟手柄输入会被游戏忽略，挂机前需拔下/关闭；
+        // ① 真实手柄占用 XInput 玩家1 时会由挂机自动禁用释放（退出程序自动恢复）；
         // ② 全屏（尤其超宽）下定位与捕获均不稳定，720p 窗口模式是实测可靠配置。
         var confirm = System.Windows.MessageBox.Show(
             this,
             "开始前请确认两件事：\n\n" +
-            "① 关闭/拔下自己的真实手柄\n真实手柄会占用玩家 1，挂机用的虚拟手柄输入将被游戏忽略。\n\n" +
+            "① 真实手柄可以保持连接\n若它占用玩家 1，挂机会自动禁用它释放玩家 1（首次需一次管理员授权），关闭本程序后手柄自动恢复。\n\n" +
             "② 游戏最好以 720p 窗口模式运行\n无边框窗口 1280×720 最稳定；独占全屏下挂机无法窗口化且定位易失效。",
             "开始挂机前确认",
             MessageBoxButton.OKCancel,
@@ -196,30 +305,35 @@ public partial class MainWindow : Window
         {
             SaveUiToConfig();
             SetStartButtonsEnabled(false);
+
+            // 真实手柄占着玩家 1 而释放任务未就绪（未注册/指向旧路径）→ 现场补注册（一次 UAC）。
+            // 放在点击开始时做：用户此刻最期待授权弹窗，也避免每次启动都打扰。
+            await EnsurePadReleaseTasksAsync();
+
             // 立即反馈：Worker 冷启动握手最长 30s，期间按钮必须显示"启动中…"而非无响应
             btn.Content = "启动中…";
             AppendLog("正在启动 Worker（首次冷启动需解压，可能 10 秒以上）…", LogLevel.Info);
             await host.StartAsync(mode!);
             if (host.IsRunning)
             {
-                btn.Content = "停止";
+                _activeStartBtn = btn;
                 btn.Style = (Style)FindResource("DangerBtn");
                 btn.IsEnabled = true;
                 BtnPause.IsEnabled = true;
                 _paused = false;
-                BtnPause.Content = "暂停";
+                RefreshRunButtons(); // 按钮文字带热键可视化（停止/暂停）
                 _statsTimer.Start();
                 if (!_previewOn) BtnPreview_Click(btn, new RoutedEventArgs()); // 自动开预览
 
-                // 引擎启动后注册全局热键
+                // 引擎启动后注册全局热键（主键=暂停→停止，恢复键=继续）
                 if (_cfg.Hotkey.Enabled)
                 {
                     try
                     {
                         if (_hotkey.Register(_cfg.Hotkey))
-                            AppendLog($"全局热键已注册：{_cfg.Hotkey.DisplayString()}", LogLevel.Info);
+                            AppendLog($"全局热键已注册：{_cfg.Hotkey.DisplayString()}（暂停/停止）、{_cfg.Hotkey.ResumeDisplayString()}（恢复）", LogLevel.Info);
                         else
-                            AppendLog("全局热键注册失败（可能被其他程序占用）。", LogLevel.Warn);
+                            AppendLog("全局热键注册失败。", LogLevel.Warn);
                     }
                     catch (Exception ex)
                     {
@@ -236,6 +350,12 @@ public partial class MainWindow : Window
             if (ex.InnerException is not null)
                 detail += $"\n → 内部异常：{ex.InnerException.GetType().Name}: {ex.InnerException.Message}\n{ex.InnerException.StackTrace}";
             AppendLog($"启动失败：{detail}", LogLevel.Error);
+            // Worker 秒退/连不上时的高频原因提示（2026-10-13 用户案例：Worker 反复启动即死，
+            // 日志只见会话头）。这类环境的日志文件里往往查不到细节，先给用户可自查的动作。
+            if (detail.Contains("Worker 进程已退出") || detail.Contains("无法连接到 Worker"))
+                AppendLog("排查建议：①把本程序加入杀毒软件/安全管家白名单（安全软件可能拦截 Worker 子进程）" +
+                    "②右键 exe →属性→勾选「解除锁定」后确定 ③把整个程序文件夹解压到本地磁盘再运行" +
+                    "（不要在微信/QQ 的下载目录里直接双击运行）④换一个磁盘目录（如 D:\\efootball-bot）重放一份再试", LogLevel.Warn);
             ResetButtons();
         }
         finally
@@ -244,46 +364,72 @@ public partial class MainWindow : Window
         }
     }
 
+    /// <summary>
+    /// 「释放玩家 1」提权任务未就绪时的现场补注册：仅当真实手柄确实占着 slot 0 才弹 UAC
+    /// （RunHidHideJobAsync 会启动 runas 子进程）。注册后由 Worker 在挂机启动时静默触发。
+    /// </summary>
+    private async Task EnsurePadReleaseTasksAsync()
+    {
+        try
+        {
+            bool padHoldingSlot0 = VirtualGamepad360.IsSlot0Occupied()
+                && HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0;
+            if (!padHoldingSlot0 || await Task.Run(HidHideManager.TasksReady))
+                return;
+
+            AppendLog("首次使用需注册「释放玩家 1」系统任务，请在授权窗口点「是」…", LogLevel.Info);
+            var res = await RunHidHideJobAsync(new HidHideConfigJob.HidHideJobDto { Mode = "tasks" });
+            AppendLog(res.Success
+                ? "释放玩家 1 任务已就绪。"
+                : $"释放玩家 1 任务注册失败：{res.Error}", res.Success ? LogLevel.Info : LogLevel.Warn);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"释放任务就绪检查失败：{ex.Message}", LogLevel.Warn);
+        }
+    }
+
+    /// <summary>触发恢复被挂机禁用的真实手柄（静默提权任务；无记录且无被禁节点时不做任何事）。</summary>
+    private void RestorePhysicalPadIfDisabled()
+    {
+        try
+        {
+            if (PhysicalPadControl.HasPendingRestore() || PhysicalPadControl.HasDisabledGamepad())
+                HidHideManager.RunTaskSilently(HidHideManager.PadRestoreTaskName);
+        }
+        catch { /* 恢复失败不影响退出流程，下次启动兜底 */ }
+    }
+
     private void SetStartButtonsEnabled(bool enabled)
     {
         BtnStartMyLeague.IsEnabled = enabled;
-        BtnStartIntl.IsEnabled = enabled;
+        BtnStartWeekly.IsEnabled = enabled;
         BtnStartCn.IsEnabled = enabled;
+        BtnStartCnWeekly.IsEnabled = enabled;
     }
 
     // 暂停状态（仅 GUI 侧镜像，真实状态在 Worker 引擎；停止时复位）
     private bool _paused;
+    /// <summary>当前运行中的模块启动按钮（决定哪个显示"停止"）。</summary>
+    private Button? _activeStartBtn;
 
     private async void BtnPause_Click(object sender, RoutedEventArgs e)
-    {
-        var host = _workerHost;
-        if (host is not { IsRunning: true }) return;
-        bool next = !_paused;
-        try
-        {
-            await host.SendPauseAsync(next);
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"暂停命令发送失败：{ex.Message}", LogLevel.Error);
-            return;
-        }
-        _paused = next;
-        BtnPause.Content = _paused ? "继续" : "暂停";
-    }
+        => await TogglePauseAsync();
 
     private void ResetButtons()
     {
-        BtnStartMyLeague.Content = "开始";
-        BtnStartIntl.Content = "开始";
-        BtnStartCn.Content = "开始";
         BtnStartMyLeague.Style = (Style)FindResource("PrimaryBtn");
-        BtnStartIntl.Style = (Style)FindResource("PrimaryBtn");
+        BtnStartWeekly.Style = (Style)FindResource("PrimaryBtn");
+        BtnStartWeekly.Content = "开始";
+        BtnStartCn.Content = "开始";
         BtnStartCn.Style = (Style)FindResource("PrimaryBtn");
+        BtnStartCnWeekly.Content = "开始";
+        BtnStartCnWeekly.Style = (Style)FindResource("PrimaryBtn");
         SetStartButtonsEnabled(true);
         BtnPause.IsEnabled = false;
         _paused = false;
-        BtnPause.Content = "未开始";
+        _activeStartBtn = null;
+        RefreshRunButtons();
         RbCn.IsEnabled = RbIntl.IsEnabled = true;
         _statsTimer.Stop();
     }
@@ -294,7 +440,7 @@ public partial class MainWindow : Window
         if (s is null) return;
         StMatches.Text = s.MatchesDone.ToString();
         StKey.Text = s.KeyMatches.ToString();
-        StForfeit.Text = s.Forfeited.ToString();
+        StMaxed.Text = s.PlayersMaxed.ToString();
         StElapsed.Text = s.StartedAt is null ? "—" : (DateTime.Now - s.StartedAt.Value).ToString(@"hh\:mm\:ss");
         StError.Text = string.IsNullOrEmpty(s.LastError) ? "" : $"最近错误：{s.LastError}";
 
@@ -312,6 +458,7 @@ public partial class MainWindow : Window
     {
         try
         {
+            _lastPreviewAt = DateTime.Now;
             var bytes = Convert.FromBase64String(pngBase64);
             var bmp = new BitmapImage();
             bmp.BeginInit();
@@ -330,7 +477,12 @@ public partial class MainWindow : Window
         _previewTimer.Stop();
         _statsTimer.Stop();
         _hotkey.Dispose();
+        // 停靠中的游戏窗口还原兜底：Worker 被 Kill 等场景下引擎来不及 Stop
+        EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
+        // 先杀 Worker（虚拟手柄释放玩家 1 槽位），再恢复真实手柄——
+        // 顺序反了会把真实手柄顶到玩家 2。恢复由提权任务在进程退出后自行完成
         _workerHost?.Dispose();
+        RestorePhysicalPadIfDisabled();
         FileLogger.Instance.Dispose();
         base.OnClosing(e);
     }

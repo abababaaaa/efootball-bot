@@ -7,6 +7,7 @@ using System.Windows.Media.Imaging;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Logging;
+using EfootballBot.Core.System;
 using EfootballBot.Ipc;
 
 namespace EfootballBot.Worker;
@@ -31,8 +32,24 @@ public static class WorkerProgram
             : $"EfootballBot-Worker-{pid}";
 
         // 初始化文件日志（Worker 独立进程，需自己初始化）
-        var cfg = AppConfig.Load();
+        // 老版 %APPDATA%\EfootballBot 数据先迁移到 exe 旁 data\（幂等），配置/日志全在程序目录内
+        AppPaths.MigrateLegacyData();
+        AppConfig cfg;
+        try { cfg = AppConfig.Load(); }
+        catch (Exception ex)
+        {
+            // 配置损坏此前在日志初始化之前抛出 → Worker 秒退且零日志（v1.1.19 修复）：
+            // 先用默认配置把日志立起来，把异常写进会话文件再继续
+            FileLogger.Instance.Initialize(enabled: true, "Debug", maxFiles: 10, retentionDays: 7);
+            FileLogger.Instance.Write($"配置加载失败（用默认配置继续）：{ex.GetType().Name}: {ex.Message}", LogLevel.Error);
+            cfg = new AppConfig();
+        }
         FileLogger.Instance.Initialize(cfg.FileLogEnabled, cfg.FileLogLevel, cfg.MaxLogFiles, cfg.LogRetentionDays);
+        FileLogger.Instance.Write($"Worker 进程初始化完成（PID {pid}），创建管道服务器…", LogLevel.Info);
+
+        // 双显卡独显直连自愈（幂等）：正常流程 GUI 启动时已写入，本进程创建时即已按独显
+        // 运行；单独 --console 调试/旧 GUI 场景下兜底补写（下次进程生效）
+        try { GpuPreference.EnsureHighPerformance(); } catch { }
 
         if (console)
         {
@@ -63,7 +80,7 @@ public static class WorkerProgram
                 _ = SendAsync(PipeProtocol.EvLog(lv.ToString(), msg));
             };
             e.StatsChanged += s =>
-                _ = SendAsync(PipeProtocol.EvStats(s.MatchesDone, s.KeyMatches, s.Forfeited, s.StartedAt, s.LastError));
+                _ = SendAsync(PipeProtocol.EvStats(s.MatchesDone, s.KeyMatches, s.PlayersMaxed, s.StartedAt, s.LastError));
             // 感知摘要事件（Screen 已是摘要文本："OCR N 词 / 检测 N 框"）
             e.ScreenChanged += s =>
                 _ = SendAsync(PipeProtocol.EvScreen(s.Screen, s.Score,
@@ -80,6 +97,7 @@ public static class WorkerProgram
             previewCts?.Cancel();
             previewCts = new CancellationTokenSource();
             var ct = previewCts.Token;
+            long lastFrameStamp = -1;
             _ = Task.Run(async () =>
             {
                 while (!ct.IsCancellationRequested && previewOn)
@@ -87,8 +105,10 @@ public static class WorkerProgram
                     try
                     {
                         var f = engine?.LatestFrame;
-                        if (f is not null)
+                        // 帧去重：引擎停止/重建期间 LatestFrame 不更新，重复发同帧无意义
+                        if (f is not null && f.TimestampMs != lastFrameStamp)
                         {
+                            lastFrameStamp = f.TimestampMs;
                             // 降采样到 480×270 再编码 PNG base64
                             string b64 = EncodePreviewPng(f.Bgra, f.Width, f.Height);
                             await SendAsync(PipeProtocol.EvPreview(b64));
@@ -110,9 +130,18 @@ public static class WorkerProgram
         // 监听管道连接（循环，GUI 断开后等待重连）
         while (true)
         {
-            pipe = new NamedPipeServerStream(
-                pipeName, PipeDirection.InOut, 1,
-                PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            try
+            {
+                pipe = new NamedPipeServerStream(
+                    pipeName, PipeDirection.InOut, 1,
+                    PipeTransmissionMode.Byte, PipeOptions.Asynchronous);
+            }
+            catch (Exception ex)
+            {
+                // 管道创建失败此前直接炸出进程，日志只有一行会话头（v1.1.19 修复）：先落盘再抛
+                FileLogger.Instance.Write($"创建命名管道服务器失败（{pipeName}）：{ex.GetType().Name}: {ex.Message}", LogLevel.Error);
+                throw;
+            }
 
             try
             {
@@ -165,6 +194,9 @@ public static class WorkerProgram
                     {
                         await engine.StartAsync(msg.Mode);
                         if (console) Console.WriteLine($"[Worker] 场景已启动: {msg.Mode}");
+                        // 预览开关若处于开启状态：引擎重建后重新启动推送循环
+                        //（每次 start 都重建引擎，旧循环虽引用同一变量但重启更稳）
+                        if (previewOn) StartPreviewLoop();
                     }
                     catch (Exception ex)
                     {

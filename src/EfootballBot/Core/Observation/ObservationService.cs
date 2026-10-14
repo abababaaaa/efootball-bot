@@ -27,6 +27,9 @@ public sealed class ObservationService : IDisposable
     /// <summary>帧陈旧阈值：节流 2000ms/帧，10s 无新帧判定捕获中断。</summary>
     private const int StaleFrameMs = 10_000;
     private DateTime _lastCaptureRestart = DateTime.MinValue;
+    private DateTime _lastFreshFrameAt = DateTime.MinValue;   // 最近一次拿到新鲜画面（快速失败判据）
+    private DateTime _firstFreshAfterRestartAt = DateTime.MinValue; // 本轮重建后首个新鲜画面（会话寿命判据）
+    private int _fastStallCount; // 重建后会话寿命 <8s 的连续次数：重建出 1-2 帧即死的系统性不兼容（矿卡案例）
 
     /// <summary>当前游戏窗口（捕获自愈重建时使用）。</summary>
     public GameWindowInfo? Window { get; set; }
@@ -72,6 +75,19 @@ public sealed class ObservationService : IDisposable
         }
     }
 
+    /// <summary>引擎切换捕获后端（如熔断后降级 GDI）后调用：清空熔断/快速失败预算，
+    /// 让新后端从零计数，不被旧后端的失败记录连坐。</summary>
+    public void ResetCaptureHealth()
+    {
+        lock (_rebuildTimes) _rebuildTimes.Clear();
+        _fastStallCount = 0;
+        _lastCaptureRestart = DateTime.MinValue;
+        _lastFreshFrameAt = DateTime.MinValue;
+        _firstFreshAfterRestartAt = DateTime.MinValue;
+        _frame = null;
+        _lastOcrFrame = null;
+    }
+
     /// <summary>
     /// 仅切换帧事件订阅到另一个已管理的提供者，不停止/释放任何一方。
     /// 用于 DXGI↔常驻 WGC 实例之间的安全切换（生命周期由 BotEngine 管理）。
@@ -101,7 +117,10 @@ public sealed class ObservationService : IDisposable
 
             var f = _frame;
             if (f is not null && (DateTime.Now - _provider.LastFrameAt).TotalMilliseconds < StaleFrameMs)
+            {
+                MarkFreshFrame();
                 return f;
+            }
 
             // 宽限 2s：启动首帧 / 切屏过渡 / 重建后第一帧
             for (int i = 0; i < 20; i++)
@@ -109,21 +128,47 @@ public sealed class ObservationService : IDisposable
                 await Task.Delay(100, ct);
                 f = _frame;
                 if (f is not null && (DateTime.Now - _provider.LastFrameAt).TotalMilliseconds < StaleFrameMs)
+                {
+                    MarkFreshFrame();
                     return f;
+                }
             }
 
             // 窗口仍在（独占全屏/最小化也能查到）→ 重建捕获；窗口没了才是真终止
             if (Window is null || GameWindow.FindFirst(Window.ProcessName) is null)
                 throw new InvalidOperationException("游戏窗口已关闭，停止挂机。");
 
-            await RestartCaptureAsync(ct);
+            await RestartCaptureAsync(ct, DescribeFrameGap());
         }
     }
 
+    /// <summary>记录"刚拿到新鲜画面"。连续健康 ≥2 分钟自动清空熔断预算。</summary>
+    private void MarkFreshFrame()
+    {
+        var now = DateTime.Now;
+        if (_lastFreshFrameAt != DateTime.MinValue && (now - _lastFreshFrameAt).TotalSeconds >= 120)
+        {
+            lock (_rebuildTimes) _rebuildTimes.Clear();
+            _fastStallCount = 0;
+        }
+        if (_firstFreshAfterRestartAt == DateTime.MinValue)
+            _firstFreshAfterRestartAt = now;
+        _lastFreshFrameAt = now;
+    }
+
+    /// <summary>断帧归因：从未出过一帧 vs 最后一帧距今多久（重建日志可读性，矿机排障用）。</summary>
+    private string DescribeFrameGap() =>
+        _lastFreshFrameAt == DateTime.MinValue
+            ? "捕获已建立但迟迟没有产出画面"
+            : $"最后画面距今 {(DateTime.Now - _lastFreshFrameAt).TotalSeconds:F0}s";
+
     /// <summary>整套停止并重建捕获（同窗口、按当前客户区尺寸）。两次重建至少间隔 10s。
-    /// 3 分钟内重建 ≥3 次 → 熔断抛出 CaptureUnrecoverableException：
-    /// 捕获链路系统性异常（典型：WGC 会话反复触发 DWM 崩溃黑屏），继续重建只会拖垮整个系统。</summary>
-    private async Task RestartCaptureAsync(CancellationToken ct)
+    /// 熔断条件（满足其一）：3 分钟内重建 ≥3 次；或连续 3 次"快速失败"——重建出的会话
+    /// 寿命不足 8s 又断（2026-10-13 矿卡用户：重建后出 1-2 帧即死，等满 3 分钟毫无意义，
+    /// 快速熔断让引擎尽早降级 GDI）。
+    /// 熔断抛出 CaptureUnrecoverableException：捕获链路系统性异常（典型：WGC 会话反复
+    /// 触发 DWM 崩溃黑屏），继续重建只会拖垮整个系统。</summary>
+    private async Task RestartCaptureAsync(CancellationToken ct, string reason)
     {
         if ((DateTime.Now - _lastCaptureRestart).TotalSeconds < 10)
         {
@@ -132,21 +177,29 @@ public sealed class ObservationService : IDisposable
         }
         _lastCaptureRestart = DateTime.Now;
 
+        // 先归因上一轮会话（寿命是否不足 8s），再为新会话重置首帧时间戳
+        bool fastStall = _lastFreshFrameAt != DateTime.MinValue && (
+            _firstFreshAfterRestartAt == DateTime.MinValue ||   // 上一轮重建后至今一帧未见
+            (_lastFreshFrameAt - _firstFreshAfterRestartAt).TotalSeconds < 8);
+        if (fastStall) _fastStallCount++;
+        _firstFreshAfterRestartAt = DateTime.MinValue;
+
         lock (_rebuildTimes)
         {
             _rebuildTimes.RemoveAll(t => (DateTime.Now - t).TotalMinutes >= 3);
             _rebuildTimes.Add(DateTime.Now);
-            if (_rebuildTimes.Count >= 3)
+            if (_rebuildTimes.Count >= 3 || _fastStallCount >= 3)
             {
                 _rebuildTimes.Clear();
+                _fastStallCount = 0;
                 throw new CaptureUnrecoverableException(
-                    "画面捕获 3 分钟内反复中断 3 次，已熔断停止，避免持续崩溃拖垮系统（黑屏/卡死）。" +
-                    "常见原因：DWM 或显卡驱动异常（事件查看器可查 dwm.exe 崩溃记录）。" +
-                    "建议：重启电脑 / 用 DDU 干净重装显卡驱动；或到设置中切换 DXGI 捕获模式再试。");
+                    "画面捕获短时间内反复中断，已停止重建，避免持续崩溃拖垮系统（黑屏/卡死）。" +
+                    "常见原因：DWM 或显卡驱动异常（事件查看器可查 dwm.exe 崩溃记录）、" +
+                    "捕获绑定了无显示输出的显卡或虚拟显示环境。");
             }
         }
 
-        LogInternal("画面捕获中断（10s 无新帧，可能在最小化/全屏切换/设备丢失），重建捕获会话…", LogLevel.Warn);
+        LogInternal($"画面捕获中断（{reason}），重建捕获会话…", LogLevel.Warn);
 
         _frame = null;
         _lastOcrFrame = null;

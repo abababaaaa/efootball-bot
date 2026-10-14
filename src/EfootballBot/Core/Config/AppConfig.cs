@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using EfootballBot.Core.System;
 using EfootballBot.Core.Vision;
 
 namespace EfootballBot.Core.Config;
@@ -30,6 +31,12 @@ public sealed class TimingConfig
     // 非必须立即的连点（比赛中挂机按 A、赛后弹窗确认）使用闭区间随机等待，降低行为机械感
     public int IdleTapMinMs { get; set; } = 1000;
     public int IdleTapMaxMs { get; set; } = 4000;
+
+    /// <summary>
+    /// 拟人节奏：按键时长/间隔改用对数正态分布随机化（真人反应时间的经典分布），
+    /// 并按小概率插入「犹豫」停顿。关闭时退回固定值 ± HumanJitterMs 的均匀抖动。
+    /// </summary>
+    public bool HumanPacingEnabled { get; set; } = true;
 
     /// <summary>
     /// 解析秒数文本（支持小数）为毫秒并校验范围。
@@ -118,53 +125,70 @@ public sealed class FrameDumpConfig
     public int IntervalMs { get; set; } = 10000;
 }
 
-/// <summary>全局停止热键配置。</summary>
+/// <summary>全局热键配置（低级钩子实现：支持键盘任意键与鼠标键，可不带修饰键）。
+/// 主热键语义：第一次按=暂停，暂停中再按=彻底停止；恢复热键：从暂停恢复。</summary>
 public sealed class HotkeyConfig
 {
     /// <summary>虚拟键码（VK），默认 Q。</summary>
     public int VirtualKey { get; set; } = 0x51; // VK_Q
 
+    /// <summary>主热键是否为鼠标键（true 时 VirtualKey 为鼠标键码：1=左 2=右 4=中 5=X1 6=X2）。</summary>
+    public bool IsMouse { get; set; } = false;
+
     /// <summary>修饰键位：位掩码，Alt=1 Ctrl=2 Shift=4 Win=8。默认 Ctrl+Shift。</summary>
     public int Modifiers { get; set; } = 2 | 4; // Ctrl + Shift
 
-    /// <summary>是否启用全局停止热键。</summary>
+    /// <summary>是否启用全局热键。</summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>把配置格式化为可读字符串，如「Ctrl+Shift+Q」。</summary>
-    public string DisplayString()
-    {
-        // 用 System.Windows.Input.KeyInterop.VirtualKeyFromKey 对应的反向映射
-        // 我们只存储虚拟键码，显示时硬编码常用字符
-        var sb = new global::System.Text.StringBuilder();
-        if ((Modifiers & 8) != 0) sb.Append("Win+");
-        if ((Modifiers & 2) != 0) sb.Append("Ctrl+");
-        if ((Modifiers & 4) != 0) sb.Append("Shift+");
-        if ((Modifiers & 1) != 0) sb.Append("Alt+");
+    /// <summary>恢复热键虚拟键码，默认 R。</summary>
+    public int ResumeVirtualKey { get; set; } = 0x52; // VK_R
 
-        string keyName = VirtualKey switch
+    /// <summary>恢复热键是否为鼠标键。</summary>
+    public bool ResumeIsMouse { get; set; } = false;
+
+    /// <summary>恢复热键修饰键，默认 Ctrl+Shift。</summary>
+    public int ResumeModifiers { get; set; } = 2 | 4;
+
+    /// <summary>把一组键规格格式化为可读字符串，如「Ctrl+Shift+Q」「鼠标左键」。</summary>
+    public static string SpecDisplay(int code, int modifiers, bool isMouse)
+    {
+        if (isMouse)
         {
-            >= 0x41 and <= 0x5A => ((char)VirtualKey).ToString(), // A-Z
-            >= 0x30 and <= 0x39 => ((char)VirtualKey).ToString(), // 0-9
-            0x0D => "Enter",
-            0x1B => "Esc",
-            0x09 => "Tab",
-            0x73 => "F4",
-            0x74 => "F5",
-            0x75 => "F6",
-            0x76 => "F7",
-            0x77 => "F8",
-            0x78 => "F9",
-            0x79 => "F10",
-            0x7A => "F11",
-            0x7B => "F12",
-            0x70 => "F1",
-            0x71 => "F2",
-            0x72 => "F3",
-            _ => $"0x{VirtualKey:X2}",
-        };
-        sb.Append(keyName);
-        return sb.ToString();
+            var name = code switch { 1 => "鼠标左键", 2 => "鼠标右键", 4 => "鼠标中键", 5 => "鼠标侧键1", 6 => "鼠标侧键2", _ => $"鼠标键{code}" };
+            var sb = new global::System.Text.StringBuilder();
+            if ((modifiers & 8) != 0) sb.Append("Win+");
+            if ((modifiers & 2) != 0) sb.Append("Ctrl+");
+            if ((modifiers & 4) != 0) sb.Append("Shift+");
+            if ((modifiers & 1) != 0) sb.Append("Alt+");
+            sb.Append(name);
+            return sb.ToString();
+        }
+        var sb2 = new global::System.Text.StringBuilder();
+        if ((modifiers & 8) != 0) sb2.Append("Win+");
+        if ((modifiers & 2) != 0) sb2.Append("Ctrl+");
+        if ((modifiers & 4) != 0) sb2.Append("Shift+");
+        if ((modifiers & 1) != 0) sb2.Append("Alt+");
+        sb2.Append(KeyName(code));
+        return sb2.ToString();
     }
+
+    /// <summary>主热键（暂停/停止）显示。</summary>
+    public string DisplayString() => SpecDisplay(VirtualKey, Modifiers, IsMouse);
+
+    /// <summary>恢复热键显示。</summary>
+    public string ResumeDisplayString() => SpecDisplay(ResumeVirtualKey, ResumeModifiers, ResumeIsMouse);
+
+    private static string KeyName(int vk) => vk switch
+    {
+        >= 0x41 and <= 0x5A => ((char)vk).ToString(), // A-Z
+        >= 0x30 and <= 0x39 => ((char)vk).ToString(), // 0-9
+        >= 0x70 and <= 0x87 => $"F{vk - 0x6F}",       // F1-F24
+        0x0D => "Enter", 0x1B => "Esc", 0x09 => "Tab", 0x20 => "空格",
+        0x21 => "PageUp", 0x22 => "PageDown", 0x23 => "End", 0x24 => "Home",
+        0x2D => "Insert", 0x2E => "Delete",
+        _ => $"0x{vk:X2}",
+    };
 }
 
 /// <summary>自动更新配置（GitHub Releases）。</summary>
@@ -189,8 +213,14 @@ public sealed class HidHideConfig
     /// <summary>已应用隔离（虚拟手柄已加入黑名单）。默认开启：首次由提权子进程自动完成配置。</summary>
     public bool Enabled { get; set; } = true;
 
-    /// <summary>同时隐藏真实手柄（默认开；开启期间 HID 层应用看不到真实手柄，可随时关闭）。</summary>
+    /// <summary>
+    /// 挂机启动时自动禁用真实手柄以释放 XInput 玩家 1（设备管理器级禁用，
+    /// 关闭本程序后自动恢复）。注意 HidHide 黑名单路线对 XInput 无效（见 PhysicalPadControl）。
+    /// </summary>
     public bool HidePhysicalGamepad { get; set; } = true;
+
+    /// <summary>被禁用的真实手柄设备节点实例路径（pad-hide 提权任务先记录后禁用；恢复依据）。</summary>
+    public List<string> DisabledPadDevs { get; set; } = new();
 
     /// <summary>白名单游戏的完整镜像路径快照（应用隔离时快照，游戏未运行时无法更新）。</summary>
     public string GameImagePath { get; set; } = "";
@@ -211,6 +241,116 @@ public sealed class HidHideConfig
             HidePhysicalGamepad = true;
         }
     }
+}
+
+/// <summary>
+/// 我的联赛道具自动购买配置（名称与游戏内「我的联赛物品」页一一对应）。
+/// 经验值加成档位 2x/3x/4x；状态加成档位 普通+/好+/杰出。
+/// 每次挂机运行中满足一次即不再购买（道具有效场数覆盖多场比赛）。
+/// </summary>
+public sealed class MyLeagueConfig
+{
+    /// <summary>购买经验值加成。</summary>
+    public bool BuyExpBoost { get; set; } = false;
+
+    /// <summary>经验值加成档位：2x / 3x / 4x。</summary>
+    public string ExpBoostLevel { get; set; } = "2x";
+
+    /// <summary>购买教练强化。</summary>
+    public bool BuyCoachBoost { get; set; } = false;
+
+    /// <summary>购买状态加成。</summary>
+    public bool BuyConditionBoost { get; set; } = false;
+
+    /// <summary>状态加成档位：普通+ / 好+ / 杰出。</summary>
+    public string ConditionLevel { get; set; } = "普通+";
+
+    /// <summary>
+    /// 比赛难度（必选项，与游戏内「选择赛事等级」一一对应）：
+    /// 新手 / 业余 / 标准 / 职业 / 顶尖球员 / 超级球星 / 传奇。
+    /// </summary>
+    public string Difficulty { get; set; } = "新手";
+
+    /// <summary>球员满级提示开关：开启时检测"满级"字样，计数并在日志提醒换人。</summary>
+    public bool NotifyPlayerMaxLevel { get; set; } = true;
+
+    /// <summary>完成场次后自动停止（本次挂机累计，含关键比赛）。0 = 无限跑。</summary>
+    public int StopAfterMatches { get; set; } = 0;
+
+    /// <summary>完成关键比赛场次后自动停止（本次挂机累计）。0 = 无限跑。</summary>
+    public int StopAfterKeyMatches { get; set; } = 0;
+}
+
+/// <summary>游戏路径记忆（赛前快捷设置）：各服 Settings.exe 上次定位结果。
+/// 国服不走 Steam 回退，游戏未启动时靠这条记忆兜底（首次定位成功后落盘）。</summary>
+public sealed class GamePathsConfig
+{
+    /// <summary>国际服 Settings.exe 上次定位到的完整路径。</summary>
+    public string IntlSettingsTool { get; set; } = "";
+
+    /// <summary>国服 Settings.exe 上次定位到的完整路径。</summary>
+    public string CnSettingsTool { get; set; } = "";
+}
+
+/// <summary>
+/// 周活动挂机配置（国际服）。赛事等级与自动控制是活动设置浮层的核验项；
+/// 自动控制强制开、弹性自动控制强制关（硬编码，不设配置）。
+/// </summary>
+public sealed class WeeklyConfig
+{
+    /// <summary>赛事等级（7 档与游戏内「活动设置」下拉一致）。默认传奇（加成最高）。</summary>
+    public string EventLevel { get; set; } = "传奇";
+
+    /// <summary>完成场次后自动停止（本次挂机累计）。0 = 无限跑（默认：刷到主要奖励完成）。</summary>
+    public int StopAfterMatches { get; set; } = 0;
+}
+
+/// <summary>
+/// 国服周活动挂机配置（实况足球在线「比赛活动」，当前为冠军赛刷分）。
+/// 国服冠军赛无赛事等级/自动控制设置项，仅场次停止；全程固定 7 场
+/// （小组赛×3 + 1/8决赛 + 1/4决赛 + 半决赛 + 决赛）。
+/// </summary>
+public sealed class CnWeeklyConfig
+{
+    /// <summary>完成场次后自动停止（本次挂机累计）。0 = 无限跑（默认：打满冠军赛全程）。</summary>
+    public int StopAfterMatches { get; set; } = 0;
+}
+
+/// <summary>
+/// 后台停靠配置：挂机时把游戏窗口整体移到所有显示器之外（纯窗口坐标操作，
+/// 不碰游戏进程），主屏幕完全看不到、点击其他软件也不会跳出；停止挂机自动还原。
+/// 仅兼容 WGC/GDI 窗口捕获（DXGI 抓桌面区域，窗口不在屏幕上即失效）。
+/// </summary>
+public sealed class BackgroundParkingConfig
+{
+    /// <summary>是否启用后台停靠（挂机开始时停靠，停止时还原原位置）。</summary>
+    public bool Enabled { get; set; } = true;
+
+    /// <summary>看门狗校验间隔毫秒：游戏自行挪回窗口时重新移出屏幕。</summary>
+    public int WatchdogIntervalMs { get; set; } = 2500;
+}
+
+/// <summary>
+/// 作息调度配置：模拟真人作息——每天只在活跃时段挂机、每日累计时长上限、
+/// 启停时间每日随机漂移、运行中偶尔短暂离开。服务端行为检测的最强信号是
+/// 7×24 在线与恒定节奏，本调度器直接消除前者。
+/// </summary>
+public sealed class ScheduleConfig
+{
+    /// <summary>是否启用作息调度（关闭 = 引擎持续运行）。</summary>
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>每日活跃时段开始（HH:mm，本地时间）。支持跨午夜（如 22:00–02:00）。</summary>
+    public string StartTime { get; set; } = "09:00";
+
+    /// <summary>每日活跃时段结束（HH:mm）。</summary>
+    public string EndTime { get; set; } = "23:30";
+
+    /// <summary>每日累计挂机时长上限（小时，0 = 不限制）。</summary>
+    public double DailyCapHours { get; set; } = 6;
+
+    /// <summary>启停时间每日随机漂移幅度（分钟）：真人不会每天同一秒上线。</summary>
+    public int DriftMinutes { get; set; } = 20;
 }
 
 public sealed class AppConfig
@@ -249,12 +389,31 @@ public sealed class AppConfig
     // —— UI 偏好 ——
     public bool ShowRuntimeLog { get; set; } = true;
 
+    /// <summary>应用内运行日志显示过滤：All=全部 / Key=仅关键流程（Success 绿字）/ Warn=仅报错与提醒（Warn+Error）。仅影响 UI 显示，文件日志始终全量。</summary>
+    public string RuntimeLogFilter { get; set; } = "All";
+
     // —— 全局停止热键 ——
     public HotkeyConfig Hotkey { get; set; } = new();
     public UpdateConfig Update { get; set; } = new();
 
     // —— 手柄隔离（HidHide）——
     public HidHideConfig HidHide { get; set; } = new();
+
+    // —— 我的联赛道具 ——
+    public MyLeagueConfig MyLeague { get; set; } = new();
+
+    // —— 周活动（国际服）——
+    public WeeklyConfig Weekly { get; set; } = new();
+
+    // —— 周活动（国服，比赛活动冠军赛）——
+    public CnWeeklyConfig CnWeekly { get; set; } = new();
+
+    // —— 游戏路径记忆（赛前快捷设置）——
+    public GamePathsConfig GamePaths { get; set; } = new();
+
+    // —— 防检测（后台停靠 / 作息调度）——
+    public BackgroundParkingConfig BackgroundParking { get; set; } = new();
+    public ScheduleConfig Schedule { get; set; } = new();
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
@@ -263,8 +422,9 @@ public sealed class AppConfig
         DefaultIgnoreCondition = JsonIgnoreCondition.Never,
     };
 
-    public static string ConfigDir { get; } =
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData) + "\\EfootballBot";
+    /// <summary>配置目录：exe 旁 data\（原 %APPDATA%\EfootballBot，AppPaths.MigrateLegacyData 已迁移老数据）。
+    /// 配置跟程序文件夹走，拷贝文件夹即完整迁移，不在 C 盘用户目录留数据。</summary>
+    public static string ConfigDir { get; } = AppPaths.DataDir;
 
     public static string ConfigPath => ConfigDir + "\\config.json";
 

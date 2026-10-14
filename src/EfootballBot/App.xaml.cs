@@ -59,9 +59,9 @@ public partial class App : Application
                     // Worker 无人值守，异常必须落盘供 GUI 侧诊断
                     try
                     {
-                        File.WriteAllText(
-                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                                "EfootballBot", "worker-error.log"),
+                        string dir = AppPaths.DataDir;
+                        Directory.CreateDirectory(dir);
+                        File.WriteAllText(Path.Combine(dir, "worker-error.log"),
                             $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ex}");
                     }
                     catch { }
@@ -109,9 +109,9 @@ public partial class App : Application
                 {
                     try
                     {
-                        File.WriteAllText(
-                            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                                "EfootballBot", "hidhide-config-error.log"),
+                        string dir = AppPaths.DataDir;
+                        Directory.CreateDirectory(dir);
+                        File.WriteAllText(Path.Combine(dir, "hidhide-config-error.log"),
                             $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ex}");
                     }
                     catch { }
@@ -121,6 +121,27 @@ public partial class App : Application
         }
         else
             Startup += (_, _) => StartGui();
+
+        // GUI 未处理异常落盘（与 worker-error.log 对应），便于定位启动崩溃
+        DispatcherUnhandledException += (_, e) =>
+        {
+            WriteGuiError(e.Exception);
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            WriteGuiError(e.ExceptionObject as Exception ?? new Exception("未知异常"));
+    }
+
+    /// <summary>GUI 异常落盘到 exe 旁 data\gui-error.log（不在 C 盘用户目录留文件）。</summary>
+    internal static void WriteGuiError(Exception? ex)
+    {
+        try
+        {
+            string dir = AppPaths.DataDir;
+            Directory.CreateDirectory(dir);
+            File.AppendAllText(Path.Combine(dir, "gui-error.log"),
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ex}\r\n\r\n");
+        }
+        catch { }
     }
 
     // ================= 单实例（仅 GUI 模式；--dump/--slots 诊断命令不受限） =================
@@ -157,8 +178,18 @@ public partial class App : Application
             _pipeCts?.Cancel();
             _singleMutex?.ReleaseMutex();
         };
+        // 双显卡笔记本自动独显直连：必须先于 Worker 子进程创建写入——GPU 偏好在进程
+        // 创建时读取，GUI 写完后新起的 Worker 即按独显运行（2026-10-11 用户实测：
+        // 核显本不设高性能时捕获黑屏，图形设置→高性能恢复正常；此处自动化该操作）
+        try { GpuPreference.EnsureHighPerformance(); } catch { }
+        // 老版 %APPDATA%\EfootballBot 的持久数据（config 等）一次性搬到 exe 旁 data\，
+        // 所有数据收在程序文件夹内（2026-10-11 用户要求）
+        AppPaths.MigrateLegacyData();
         new MainWindow().Show();
         StartPipeServer();
+
+        // 上次非正常退出（强制关闭/更新重启/崩溃）可能把游戏窗口丢在屏幕外：启动即还原
+        EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
     }
 
     private void StartPipeServer()
@@ -311,7 +342,7 @@ public partial class App : Application
             if (!string.IsNullOrWhiteSpace(actions))
             {
                 bool needPad = actions.Split(',', StringSplitOptions.TrimEntries)
-                    .Any(t => t.ToUpperInvariant() is "L" or "R" or "U" or "D" or "A" or "B" or "X" or "Y" or "START");
+                    .Any(t => t.ToUpperInvariant() is "L" or "R" or "U" or "D" or "A" or "B" or "X" or "Y" or "START" or "RT");
                 if (needPad)
                 {
                     vg = new VirtualGamepad360();
@@ -402,6 +433,7 @@ public partial class App : Application
                 case "X": await pad.X(); break;
                 case "Y": await pad.Y(); break;
                 case "START": await pad.Start(); break;
+                case "RT": await pad.RT(); break;
                 default: Console.WriteLine($"[pad] 未知动作：{tok}"); break;
             }
         }

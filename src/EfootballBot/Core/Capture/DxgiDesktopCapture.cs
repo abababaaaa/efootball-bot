@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using SharpDX;
 using SharpDX.Direct3D;
@@ -41,6 +42,10 @@ public sealed class DxgiDesktopCapture : ICaptureProvider
 
     public event EventHandler? FrameUpdated;
 
+    /// <summary>诊断日志（适配器/输出绑定选择过程）。</summary>
+    public event Action<string>? StepLog;
+    private void Step(string s) => StepLog?.Invoke(s);
+
     public bool IsRunning => _running;
     public nint Hwnd => _hwnd;
     public DateTime LastFrameAt => _lastFrameAt;
@@ -77,46 +82,85 @@ public sealed class DxgiDesktopCapture : ICaptureProvider
 
     private void InitializeD3D()
     {
-        // 1. 创建 D3D11 设备（需要 BGRA 支持，桌面复制帧格式为 BGRA8）
-        _device = new SharpDX.Direct3D11.Device(DriverType.Hardware,
-            DeviceCreationFlags.BgraSupport);
-        _context = _device.ImmediateContext;
-
-        // 2. 找到游戏窗口所在的显示器
+        // 混合显卡笔记本（iGPU + RTX 独显）上，默认适配器未必拥有游戏窗口所在的显示器输出：
+        // DuplicateOutput 建在"非该输出属主"的适配器上会启动成功但帧全黑
+        // （2026-10-11 用户实机：RTX 3060 Laptop，DXGI 捕获画面全黑 → 感知全盲）。
+        // 因此逐 适配器×输出 现场取帧做黑帧校验，首个能出真实画面的组合胜出；
+        // 窗口所在显示器的组合优先尝试（正常机器一次命中，零额外开销）。
         nint hMonitor = MonitorFromWindow(_hwnd, MONITOR_DEFAULTTONEAREST);
 
-        // 3. 枚举 DXGI 输出，找到匹配 hMonitor 的 Output
-        using var dxgiDevice = _device.QueryInterface<SharpDX.DXGI.Device>();
-        using var adapter = dxgiDevice.Adapter;
-        Output? targetOutput = null;
-        foreach (var output in adapter.Outputs)
+        var candidates = new List<(SharpDX.DXGI.Adapter Adapter, Output Output)>();
+        using (var factory = new Factory1())
         {
-            var desc = output.Description;
-            if (desc.MonitorHandle == hMonitor)
+            foreach (var adapter in factory.Adapters)
             {
-                targetOutput = output;
-                break;
+                // WARP 绝不尝试：SharpDX AdapterDescription 不暴露 Flags，
+                // 用名称/厂商 ID 识别软件适配器（Microsoft Basic Render Driver、WARP 0x1414）
+                var desc = adapter.Description;
+                bool software = desc.Description.Contains("Basic", StringComparison.OrdinalIgnoreCase) ||
+                                desc.VendorId == 0x1414;
+                if (software) continue;
+                foreach (var output in adapter.Outputs)
+                {
+                    if (!output.Description.IsAttachedToDesktop) continue;
+                    if (output.Description.MonitorHandle == hMonitor)
+                        candidates.Insert(0, (adapter, output)); // 窗口所在输出优先
+                    else
+                        candidates.Add((adapter, output));
+                }
             }
         }
-        if (targetOutput is null)
-        {
-            // 兜底：用第一个已连接桌面的输出
-            targetOutput = adapter.Outputs.FirstOrDefault(o => o.Description.IsAttachedToDesktop);
-        }
-        if (targetOutput is null)
+        if (candidates.Count == 0)
             throw new InvalidOperationException("未找到可用的 DXGI 输出（显示器）。");
 
-        // 4. QueryInterface 到 Output5，调用 DuplicateOutput
-        using var output5 = targetOutput.QueryInterface<Output5>();
-        var outputDesc = targetOutput.Description;
+        Exception? lastError = null;
+        try
+        {
+            foreach (var (adapter, output) in candidates)
+            {
+                try
+                {
+                    if (TryInitializeOn(adapter, output)) return;
+                }
+                catch (Exception ex)
+                {
+                    Step($"候选输出复制失败：{ex.Message}，试下一个");
+                    lastError = ex;
+                }
+                ReleaseResources(); // 该候选失败/全黑：清掉半套资源，试下一个
+            }
+        }
+        finally
+        {
+            foreach (var (adapter, output) in candidates)
+            {
+                try { output.Dispose(); } catch { }
+                try { adapter.Dispose(); } catch { }
+            }
+        }
+        throw new InvalidOperationException(lastError is null
+            ? "DXGI 桌面复制在所有显示器输出上均不可用或全黑。"
+            : $"DXGI 桌面复制在所有显示器输出上均不可用或全黑：{lastError.Message}", lastError);
+    }
+
+    /// <summary>在指定 适配器×输出 上建设备与复制会话，并现场取帧校验非黑。
+    /// 成功时填充实例字段并返回 true；失败/全黑返回 false 或抛异常（由调用方清理重试）。</summary>
+    private bool TryInitializeOn(SharpDX.DXGI.Adapter adapter, Output output)
+    {
+        var device = new SharpDX.Direct3D11.Device(adapter, DeviceCreationFlags.BgraSupport);
+        _device = device;
+        _context = device.ImmediateContext;
+
+        var outputDesc = output.Description;
         _outputWidth = outputDesc.DesktopBounds.Right - outputDesc.DesktopBounds.Left;
         _outputHeight = outputDesc.DesktopBounds.Bottom - outputDesc.DesktopBounds.Top;
         // 桌面纹理原点对应该 output 的 DesktopBounds 左上角（副显示器可能为负坐标）
         _outputOffsetX = outputDesc.DesktopBounds.Left;
         _outputOffsetY = outputDesc.DesktopBounds.Top;
-        _duplication = output5.DuplicateOutput(_device);
 
-        // 5. 创建与桌面同尺寸的 Staging 纹理（CPU 可读，BGRA8）
+        using var output5 = output.QueryInterface<Output5>();
+        _duplication = output5.DuplicateOutput(device);
+
         var stagingDesc = new Texture2DDescription
         {
             Width = _outputWidth,
@@ -130,10 +174,66 @@ public sealed class DxgiDesktopCapture : ICaptureProvider
             CpuAccessFlags = CpuAccessFlags.Read,
             OptionFlags = ResourceOptionFlags.None,
         };
-        _stagingTexture = new Texture2D(_device, stagingDesc);
-
-        // 预先获取窗口在桌面坐标系中的 rect（捕获循环内每帧更新以处理窗口移动）
+        _stagingTexture = new Texture2D(device, stagingDesc);
         UpdateWindowRect();
+
+        // 现场取帧校验（≤1.5s）：全黑 = 该适配器不是此输出的属主，换下一个候选。
+        // 桌面有任意变化时首帧即到；静止桌面 AcquireNextFrame 首次调用也会返回当前整幅。
+        var duplication = _duplication;
+        for (int attempt = 0; attempt < 5; attempt++)
+        {
+            var result = duplication.TryAcquireNextFrame(300, out _, out var desktopResource);
+            if (result.Code == SharpDX.DXGI.ResultCode.WaitTimeout.Code) continue;
+            if (!result.Success) throw new SharpDXException(result);
+            try
+            {
+                using (desktopResource)
+                using (var d3dResource = desktopResource.QueryInterface<SharpDX.Direct3D11.Resource>())
+                {
+                    _context!.CopyResource(_stagingTexture, d3dResource);
+                    var dataBox = _context.MapSubresource(_stagingTexture, 0, MapMode.Read, SharpDX.Direct3D11.MapFlags.None);
+                    try
+                    {
+                        UpdateWindowRect();
+                        int winW = _windowRect.Right - _windowRect.Left;
+                        int winH = _windowRect.Bottom - _windowRect.Top;
+                        if (winW <= 0 || winH <= 0) continue;
+                        int srcX = _windowRect.Left - _outputOffsetX;
+                        int srcY = _windowRect.Top - _outputOffsetY;
+                        var raw = CropBgra(dataBox, _outputWidth, _outputHeight, srcX, srcY, winW, winH);
+                        if (!IsMostlyBlack(raw))
+                        {
+                            Step($"桌面复制绑定：{adapter.Description.Description}" +
+                                 $"（输出 {_outputWidth}×{_outputHeight}）");
+                            return true;
+                        }
+                    }
+                    finally
+                    {
+                        _context.UnmapSubresource(_stagingTexture, 0);
+                    }
+                }
+            }
+            finally
+            {
+                try { duplication.ReleaseFrame(); } catch { }
+            }
+        }
+        Step("候选输出复制画面全黑（适配器非该输出属主），换下一个输出");
+        return false; // 反复取帧全黑：属主不对，换下一个候选
+    }
+    /// <summary>采样判定一帧是否接近全黑（RGB 均 &lt;8 的采样点 ≥99%）。</summary>
+    private static bool IsMostlyBlack(byte[] bgra)
+    {
+        if (bgra.Length < 4) return true;
+        const int step = 97;
+        int total = 0, dark = 0;
+        for (int i = 0; i + 3 < bgra.Length; i += step * 4)
+        {
+            total++;
+            if (bgra[i] < 8 && bgra[i + 1] < 8 && bgra[i + 2] < 8) dark++;
+        }
+        return total > 0 && dark * 100 / total >= 99;
     }
 
     private void CaptureLoop()

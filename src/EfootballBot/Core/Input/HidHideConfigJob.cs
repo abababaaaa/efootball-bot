@@ -1,21 +1,26 @@
 using System.IO;
 using System.Text.Json;
+using EfootballBot.Core.System;
 
 namespace EfootballBot.Core.Input;
 
 /// <summary>
 /// --hidhide-config 子进程执行器（提权上下文）。
-/// 两种入口：
+/// 入口：
 ///   EfootballBot.exe --hidhide-config "&lt;job文件路径&gt;"  —— GUI 写入 job，本进程应用后把结果写回同文件
-///   EfootballBot.exe --hidhide-config sync              —— 计划任务触发：读 AppConfig 静默同步，结果写日志
+///   EfootballBot.exe --hidhide-config sync                   —— 计划任务触发：读 AppConfig 静默同步
+///   EfootballBot.exe --hidhide-config pad-hide               —— 计划任务触发：禁用真实手柄释放玩家 1
+///   EfootballBot.exe --hidhide-config pad-restore            —— 计划任务触发：恢复被禁用的真实手柄
+///   EfootballBot.exe --hidhide-config tasks                  —— 仅注册提权计划任务（不碰隔离状态）
 /// </summary>
 public static class HidHideConfigJob
 {
     public sealed class HidHideJobDto
     {
-        /// <summary>setup = 驱动未装时先下载安装再配置；apply = 仅配置；clear = 解除隔离。</summary>
+        /// <summary>setup = 驱动未装时先下载安装再配置；apply = 仅配置；clear = 解除隔离；tasks = 仅注册计划任务。</summary>
         public string Mode { get; set; } = "setup";
         public bool HideVigem { get; set; } = true;
+        /// <summary>已废弃（HidHide 黑名单对 XInput 无效，物理手柄改由 pad-hide 设备节点禁用管理）。保留字段仅为旧 job 文件兼容。</summary>
         public bool HidePhysical { get; set; }
         public string GameImagePath { get; set; } = "";
     }
@@ -33,14 +38,16 @@ public static class HidHideConfigJob
     }
 
     private static readonly string SyncLogPath =
-        Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-            "EfootballBot", "hidhide-sync.log");
+        Path.Combine(AppPaths.DataDir, "hidhide-sync.log");
 
-    public static int Run(string arg)
+    public static int Run(string arg) => arg switch
     {
-        if (arg == "sync") return RunSync();
-        return RunFileJob(arg);
-    }
+        "sync" => RunSync(),
+        "pad-hide" => RunPadHide(),
+        "pad-restore" => RunPadRestore(),
+        "tasks" => RunEnsureTasks(),
+        _ => RunFileJob(arg),
+    };
 
     private static int RunFileJob(string jobPath)
     {
@@ -50,22 +57,28 @@ public static class HidHideConfigJob
             var job = JsonSerializer.Deserialize<HidHideJobDto>(File.ReadAllText(jobPath))
                 ?? throw new InvalidDataException("job 文件内容无效");
 
-            HidHideManager.EnsureServiceStarted(); // DEMAND_START 服务重启后未加载时先拉起
-
-            if (job.Mode == "clear")
+            if (job.Mode == "tasks")
             {
+                result.Success = HidHideManager.EnsureTasksRegistered();
+                result.Message = result.Success
+                    ? "提权计划任务已注册（释放玩家 1 / 静默同步就绪）"
+                    : "计划任务注册失败（schtasks 返回非 0）";
+            }
+            else if (job.Mode == "clear")
+            {
+                HidHideManager.EnsureServiceStarted();
                 var (ok, err) = HidHideManager.ClearIsolation(
                     LoadAppliedSnapshot(), job.GameImagePath);
+                var restore = PhysicalPadControl.RestoreAll();
                 result.Success = ok;
                 result.Error = err;
                 if (ok)
-                {
-                    HidHideManager.DeleteSyncTask();
-                    result.Message = "隔离已关闭";
-                }
+                    result.Message = $"隔离已关闭；{restore.Message}";
             }
             else
             {
+                HidHideManager.EnsureServiceStarted(); // DEMAND_START 服务重启后未加载时先拉起
+
                 // setup：驱动未安装（或 IOCTL 打不开）时先静默下载安装
                 if (job.Mode == "setup" && !HidHideManager.IsDriverInstalled())
                 {
@@ -81,17 +94,17 @@ public static class HidHideConfigJob
                 }
 
                 var (ok, err, applied, resolved) = HidHideManager.ApplyIsolation(
-                    job.HideVigem, job.HidePhysical, job.GameImagePath);
+                    job.HideVigem, job.GameImagePath);
                 result.Success = ok;
                 result.Error = err;
                 result.AppliedBlacklist = applied;
                 result.ResolvedGameImagePath = resolved;
                 if (ok)
                 {
-                    bool taskOk = HidHideManager.EnsureSyncTaskRegistered();
+                    bool taskOk = HidHideManager.EnsureTasksRegistered();
                     result.Message = taskOk
                         ? $"手柄隔离已开启（黑名单已配置 {applied.Count} 项）"
-                        : $"手柄隔离已开启，但同步计划任务注册失败（实例变化时需重新开关一次）";
+                        : "手柄隔离已开启，但提权计划任务注册失败（真实手柄自动释放将不可用）";
                 }
             }
         }
@@ -124,19 +137,27 @@ public static class HidHideConfigJob
 
     private static int RunSync()
     {
-        // 计划任务上下文：读配置静默重写黑名单+白名单（只追加，幂等）
+        // 计划任务上下文（登录触发/挂机启动触发）：读配置静默重写黑名单+白名单（只追加，幂等）
         try
         {
             HidHideManager.EnsureServiceStarted(); // 重启电脑后 DEMAND_START 服务未加载时先拉起
+
+            // 恢复优先：确保上次挂机禁用的真实手柄已恢复（登录即还原，不依赖 GUI 启动）
+            var restore = PhysicalPadControl.RestoreAll();
+
             var appCfg = EfootballBot.Core.Config.AppConfig.Load();
             var cfg = appCfg.HidHide;
-            if (!cfg.Enabled) return 0;
+            if (!cfg.Enabled)
+            {
+                AppendSyncLog($"[sync {Now}] 隔离未启用，跳过；pad-restore: {restore.Message}");
+                return 0;
+            }
 
             var (ok, err, applied, resolved) = HidHideManager.ApplyIsolation(
-                hideVigem: true, hidePhysical: cfg.HidePhysicalGamepad, gameImagePath: cfg.GameImagePath);
+                hideVigem: true, gameImagePath: cfg.GameImagePath);
             if (ok)
             {
-                // 快照合并：applied 仅本次新增，物理手柄条目靠该快照在 clear 时回滚
+                // 快照合并：applied 仅本次新增，幂等重跑新增为 0 时不能清空（否则 clear 无法回滚）
                 var merged = HidHideManager.MergeInto(cfg.AppliedBlacklist, applied);
                 bool changed = merged.Count != cfg.AppliedBlacklist.Count;
                 if (changed) cfg.AppliedBlacklist = merged;
@@ -149,16 +170,46 @@ public static class HidHideConfigJob
                 }
                 if (changed) appCfg.Save();
             }
-            AppendSyncLog($"[sync {DateTime.Now:yyyy-MM-dd HH:mm:ss}] " +
-                (ok ? $"成功（托管 {applied.Count}：{string.Join(";", applied)}；game={resolved}）" : $"失败：{err}"));
+            AppendSyncLog($"[sync {Now}] " +
+                (ok ? $"成功（托管 {applied.Count}：{string.Join(";", applied)}；game={resolved}）" : $"失败：{err}") +
+                $"；pad-restore: {restore.Message}");
             return ok ? 0 : 1;
         }
         catch (Exception ex)
         {
-            AppendSyncLog($"[sync {DateTime.Now:yyyy-MM-dd HH:mm:ss}] 异常：{ex}");
+            AppendSyncLog($"[sync {Now}] 异常：{ex}");
             return 1;
         }
     }
+
+    private static int RunPadHide()
+    {
+        // ONLOGON 触发器也会启动本模式：无请求凭证＝非挂机启动，跳过以防误禁用
+        if (!PhysicalPadControl.ConsumeHideRequest())
+        {
+            AppendSyncLog($"[pad-hide {Now}] 无请求凭证，跳过");
+            return 0;
+        }
+        var (ok, msg) = PhysicalPadControl.DisableAll();
+        AppendSyncLog($"[pad-hide {Now}] {(ok ? "成功" : "失败")}：{msg}");
+        return ok ? 0 : 1;
+    }
+
+    private static int RunPadRestore()
+    {
+        var (ok, msg) = PhysicalPadControl.RestoreAll();
+        AppendSyncLog($"[pad-restore {Now}] {(ok ? "成功" : "失败")}：{msg}");
+        return ok ? 0 : 1;
+    }
+
+    private static int RunEnsureTasks()
+    {
+        bool ok = HidHideManager.EnsureTasksRegistered();
+        AppendSyncLog($"[tasks {Now}] {(ok ? "计划任务注册成功" : "计划任务注册失败")}");
+        return ok ? 0 : 1;
+    }
+
+    private static string Now => DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
 
     private static void AppendSyncLog(string line)
     {

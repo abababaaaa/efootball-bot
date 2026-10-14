@@ -84,6 +84,12 @@ public sealed class FileLogger : IDisposable
                 _writer.WriteLine($"session: \"{filename}\"");
                 _writer.WriteLine($"pid: {Environment.ProcessId}");
                 _writer.WriteLine($"started: \"{DateTime.Now:yyyy-MM-dd HH:mm:ss}\"");
+                // 环境自述：用户回传日志时一眼定位版本与系统，不再靠猜
+                //（2026-10-13 logs.rar 全是空白会话，连用户跑的哪个版本都无法确认）
+                _writer.WriteLine(EscapeYamlScalar("version", typeof(FileLogger).Assembly.GetName().Version?.ToString(3) ?? "?"));
+                _writer.WriteLine(EscapeYamlScalar("os", Environment.OSVersion.VersionString));
+                _writer.WriteLine(EscapeYamlScalar("exe", Environment.ProcessPath ?? ""));
+                _writer.WriteLine(EscapeYamlScalar("cmd", Environment.CommandLine));
                 _writer.WriteLine("logs:");
                 WriteYamlLine(LogLevel.Info, $"=== 日志会话开始：{filename} ===");
                 _writer.Flush();
@@ -91,6 +97,10 @@ public sealed class FileLogger : IDisposable
             catch { }
         }
     }
+
+    /// <summary>YAML 双引号标量转义（反斜杠/引号；路径与命令行必含反斜杠）。</summary>
+    private static string EscapeYamlScalar(string key, string value) =>
+        $"{key}: \"{value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", " ").Replace("\n", " ")}\"";
 
     /// <summary>写一条日志，级别低于 minLevel 的跳过。线程安全。</summary>
     public void Write(string message, LogLevel level)

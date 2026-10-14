@@ -21,6 +21,58 @@ namespace EfootballBot;
 
 public partial class MainWindow
 {
+    /// <summary>比赛难度选项（与游戏内「选择赛事等级」一一对应，顺序=游戏列表行序）。</summary>
+    private static readonly string[] MyLeagueDifficulties =
+        { "新手", "业余", "标准", "职业", "顶尖球员", "超级球星", "传奇" };
+
+    /// <summary>场次计数停止固定档位（索引=下拉序，0=无限跑）；索引 6 = 自定义（读输入框）。</summary>
+    private static readonly int[] StopAfterPresets = { 0, 1, 3, 5, 10, 20 };
+
+    /// <summary>把计数值映射到下拉/自定义输入框（非预设值进自定义并回填数字）。</summary>
+    private static void LoadStopAfterUi(ComboBox cmb, TextBox txt, int value)
+    {
+        int idx = Array.IndexOf(StopAfterPresets, value);
+        if (idx >= 0)
+        {
+            cmb.SelectedIndex = idx;
+            txt.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            cmb.SelectedIndex = StopAfterPresets.Length; // 自定义
+            txt.Text = value.ToString();
+            txt.Visibility = Visibility.Visible;
+        }
+    }
+
+    /// <summary>下拉+自定义输入框 → 计数值。自定义输入非法/非正数回退 0（无限）。</summary>
+    private static int SaveStopAfterUi(ComboBox cmb, TextBox txt)
+    {
+        if (cmb.SelectedIndex >= 0 && cmb.SelectedIndex < StopAfterPresets.Length)
+            return StopAfterPresets[cmb.SelectedIndex];
+        return int.TryParse(txt.Text.Trim(), out int v) && v > 0 ? v : 0;
+    }
+
+    /// <summary>选「自定义」时显示手动输入框（两个下拉共用，按容器内位置配对）。
+    /// 注意：XAML 解析给 SelectedIndex 赋初值时本事件即触发，此时同级控件可能尚未创建——
+    /// 必须从 sender 自己的容器就地找配对输入框，引用 x:Name 字段会 NullReferenceException
+    /// （实机 2026-10-11 v1.1.8：启动即崩，gui-error.log 可查）。</summary>
+    private void CmbStopAfter_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox cmb || cmb.Parent is not StackPanel panel) return;
+        int i = panel.Children.IndexOf(cmb);
+        for (int j = i + 1; j < panel.Children.Count; j++)
+        {
+            if (panel.Children[j] is TextBox txt)
+            {
+                txt.Visibility = cmb.SelectedIndex == StopAfterPresets.Length
+                    ? Visibility.Visible
+                    : Visibility.Collapsed;
+                return;
+            }
+        }
+    }
+
     // ---------------- 配置 ----------------
 
     private void LoadConfigToUi()
@@ -29,6 +81,9 @@ public partial class MainWindow
         ChkAutoClose.IsChecked = _cfg.AutoCloseWhenDone;
         ChkMinimizeTray.IsChecked = false;
         ChkFrameDump.IsChecked = _cfg.FrameDump.Enabled;
+        int[] dumpMsValues = { 2000, 5000, 10000, 30000, 60000 };
+        int dumpIdx = Array.IndexOf(dumpMsValues, _cfg.FrameDump.IntervalMs);
+        CmbFrameDumpInterval.SelectedIndex = dumpIdx >= 0 ? dumpIdx : 2; // 缺省 10 秒
 
         // OCR 引擎（枚举顺序 RapidV6=0 / Windows=1，与下拉项一致）
         CmbOcrEngine.SelectedIndex = _cfg.OcrEngine == OcrEngineKind.Windows ? 1 : 0;
@@ -49,6 +104,44 @@ public partial class MainWindow
         TxtIdleMax.Text = FormatIdleSeconds(_cfg.Timing.IdleTapMaxMs);
         _loadingConfig = false;
 
+        // 防检测保护（★重要设定）
+        ChkBackgroundParking.IsChecked = _cfg.BackgroundParking.Enabled;
+        ChkHumanPacing.IsChecked = _cfg.Timing.HumanPacingEnabled;
+        _loadingConfig = true;
+        ChkScheduleEnabled.IsChecked = _cfg.Schedule.Enabled;
+        TxtScheduleStart.Text = _cfg.Schedule.StartTime;
+        TxtScheduleEnd.Text = _cfg.Schedule.EndTime;
+        TxtScheduleCap.Text = _cfg.Schedule.DailyCapHours.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+        TxtScheduleDrift.Text = _cfg.Schedule.DriftMinutes.ToString();
+        _loadingConfig = false;
+        TxtScheduleError.Visibility = Visibility.Collapsed;
+
+        // 我的联赛道具
+        ChkBuyExpBoost.IsChecked = _cfg.MyLeague.BuyExpBoost;
+        string[] expLevels = { "2x", "3x", "4x" };
+        int expIdx = Array.IndexOf(expLevels, _cfg.MyLeague.ExpBoostLevel);
+        CmbExpBoostLevel.SelectedIndex = expIdx >= 0 ? expIdx : 0;
+        ChkBuyCoachBoost.IsChecked = _cfg.MyLeague.BuyCoachBoost;
+        ChkBuyConditionBoost.IsChecked = _cfg.MyLeague.BuyConditionBoost;
+        string[] condLevels = { "普通+", "好+", "杰出" };
+        int condIdx = Array.IndexOf(condLevels, _cfg.MyLeague.ConditionLevel);
+        CmbConditionLevel.SelectedIndex = condIdx >= 0 ? condIdx : 0;
+        int diffIdx = Array.IndexOf(MyLeagueDifficulties, _cfg.MyLeague.Difficulty);
+        CmbDifficulty.SelectedIndex = diffIdx >= 0 ? diffIdx : 0;
+        ChkMaxLevelNotify.IsChecked = _cfg.MyLeague.NotifyPlayerMaxLevel;
+
+        // 场次计数停止（0=无限；预设 1/3/5/10/20，其他值进自定义输入框）
+        LoadStopAfterUi(CmbStopAfterMatches, TxtStopAfterMatches, _cfg.MyLeague.StopAfterMatches);
+        LoadStopAfterUi(CmbStopAfterKeyMatches, TxtStopAfterKeyMatches, _cfg.MyLeague.StopAfterKeyMatches);
+
+        // 周活动（国际服）：赛事等级默认传奇（索引 6）；场次停止同款档位
+        int weeklyLevelIdx = Array.IndexOf(MyLeagueDifficulties, _cfg.Weekly.EventLevel);
+        CmbWeeklyLevel.SelectedIndex = weeklyLevelIdx >= 0 ? weeklyLevelIdx : 6;
+        LoadStopAfterUi(CmbWeeklyStopAfter, TxtWeeklyStopAfter, _cfg.Weekly.StopAfterMatches);
+
+        // 周活动（国服）：场次停止
+        LoadStopAfterUi(CmbCnWeeklyStopAfter, TxtCnWeeklyStopAfter, _cfg.CnWeekly.StopAfterMatches);
+
         // 日志设置
         ChkFileLog.IsChecked = _cfg.FileLogEnabled;
         TxtMaxLogFiles.Text = _cfg.MaxLogFiles.ToString();
@@ -59,13 +152,16 @@ public partial class MainWindow
 
         ChkShowRuntimeLog.IsChecked = _cfg.ShowRuntimeLog;
 
-        // 热键配置 → UI
+        // 运行日志显示过滤档（仅 UI 显示，文件日志不受影响）
+        _runtimeLogFilter = _cfg.RuntimeLogFilter is "Key" or "Warn" ? _cfg.RuntimeLogFilter : "All";
+        _loadingConfig = true;
+        CmbRuntimeLogFilter.SelectedIndex = _runtimeLogFilter switch { "Key" => 1, "Warn" => 2, _ => 0 };
+        _loadingConfig = false;
+
+        // 热键（记录式配置，加载时只同步开关，键位显示由 RefreshHotkeyUi 负责）
+        _loadingConfig = true;
         ChkHotkeyEnabled.IsChecked = _cfg.Hotkey.Enabled;
-        ChkHotkeyCtrl.IsChecked = (_cfg.Hotkey.Modifiers & 2) != 0;
-        ChkHotkeyShift.IsChecked = (_cfg.Hotkey.Modifiers & 4) != 0;
-        ChkHotkeyAlt.IsChecked = (_cfg.Hotkey.Modifiers & 1) != 0;
-        ChkHotkeyWin.IsChecked = (_cfg.Hotkey.Modifiers & 8) != 0;
-        TxtHotkey.Text = _cfg.Hotkey.DisplayString().Split('+').LastOrDefault() ?? "?";
+        _loadingConfig = false;
 
         // 自动更新
         TxtCurrentVersion.Text = "v" + Updater.CurrentVersion;
@@ -87,6 +183,11 @@ public partial class MainWindow
         // 设置面板
         _cfg.AutoCloseWhenDone = ChkAutoClose.IsChecked == true;
         _cfg.FrameDump.Enabled = ChkFrameDump.IsChecked == true;
+        if (CmbFrameDumpInterval.SelectedIndex >= 0)
+        {
+            int[] dumpMs = { 2000, 5000, 10000, 30000, 60000 };
+            _cfg.FrameDump.IntervalMs = dumpMs[CmbFrameDumpInterval.SelectedIndex];
+        }
         _cfg.OcrEngine = CmbOcrEngine.SelectedIndex == 1 ? OcrEngineKind.Windows : OcrEngineKind.RapidV6;
 
         if (CmbOcrInterval.SelectedIndex >= 0)
@@ -104,51 +205,61 @@ public partial class MainWindow
         // 挂机节奏兜底（导航离开/点开始时）：成功随末尾统一保存，失败保留旧值
         ApplyIdleTap(persist: false);
 
-        _cfg.FileLogEnabled = ChkFileLog.IsChecked == true;
-        if (int.TryParse(TxtMaxLogFiles.Text, out int mf) && mf >= 1 && mf <= 50)
-            _cfg.MaxLogFiles = mf;
-        if (int.TryParse(TxtLogRetentionDays.Text, out int rd) && rd >= 1 && rd <= 365)
-            _cfg.LogRetentionDays = rd;
-        if (CmbFileLogLevel.SelectedItem is ComboBoxItem li)
-            _cfg.FileLogLevel = (string)li.Content;
+        // 防检测保护（★重要设定）
+        _cfg.BackgroundParking.Enabled = ChkBackgroundParking.IsChecked == true;
+        _cfg.Timing.HumanPacingEnabled = ChkHumanPacing.IsChecked == true;
+        _cfg.Schedule.Enabled = ChkScheduleEnabled.IsChecked == true;
+        ApplySchedule(persist: false);
+
+        // 我的联赛道具
+        _cfg.MyLeague.BuyExpBoost = ChkBuyExpBoost.IsChecked == true;
+        if (CmbExpBoostLevel.SelectedIndex >= 0)
+            _cfg.MyLeague.ExpBoostLevel = new[] { "2x", "3x", "4x" }[CmbExpBoostLevel.SelectedIndex];
+        _cfg.MyLeague.BuyCoachBoost = ChkBuyCoachBoost.IsChecked == true;
+        _cfg.MyLeague.BuyConditionBoost = ChkBuyConditionBoost.IsChecked == true;
+        if (CmbConditionLevel.SelectedIndex >= 0)
+            _cfg.MyLeague.ConditionLevel = new[] { "普通+", "好+", "杰出" }[CmbConditionLevel.SelectedIndex];
+        if (CmbDifficulty.SelectedIndex >= 0)
+            _cfg.MyLeague.Difficulty = MyLeagueDifficulties[CmbDifficulty.SelectedIndex];
+        _cfg.MyLeague.NotifyPlayerMaxLevel = ChkMaxLevelNotify.IsChecked == true;
+        _cfg.MyLeague.StopAfterMatches = SaveStopAfterUi(CmbStopAfterMatches, TxtStopAfterMatches);
+        _cfg.MyLeague.StopAfterKeyMatches = SaveStopAfterUi(CmbStopAfterKeyMatches, TxtStopAfterKeyMatches);
+
+        // 周活动（国际服）
+        if (CmbWeeklyLevel.SelectedIndex >= 0)
+            _cfg.Weekly.EventLevel = MyLeagueDifficulties[CmbWeeklyLevel.SelectedIndex];
+        _cfg.Weekly.StopAfterMatches = SaveStopAfterUi(CmbWeeklyStopAfter, TxtWeeklyStopAfter);
+
+        // 周活动（国服）
+        _cfg.CnWeekly.StopAfterMatches = SaveStopAfterUi(CmbCnWeeklyStopAfter, TxtCnWeeklyStopAfter);
+
+        // 文件日志配置：只有真变了才重新初始化。SaveUiToConfig 在每次点开始时都会执行，
+        // 无条件 Initialize 会新建会话文件，把"应用启动/主界面就绪"留在上一个文件里
+        // （用户回传的"日志只有一行"半数由此而来，v1.1.19 修复）
+        bool newFileLogEnabled = ChkFileLog.IsChecked == true;
+        int newMaxLogFiles = int.TryParse(TxtMaxLogFiles.Text, out int mf) && mf >= 1 && mf <= 50 ? mf : _cfg.MaxLogFiles;
+        int newRetention = int.TryParse(TxtLogRetentionDays.Text, out int rd) && rd >= 1 && rd <= 365 ? rd : _cfg.LogRetentionDays;
+        string newFileLogLevel = CmbFileLogLevel.SelectedItem is ComboBoxItem li ? (string)li.Content : _cfg.FileLogLevel;
+        bool logCfgChanged = newFileLogEnabled != _cfg.FileLogEnabled
+            || newMaxLogFiles != _cfg.MaxLogFiles
+            || newRetention != _cfg.LogRetentionDays
+            || newFileLogLevel != _cfg.FileLogLevel;
+        _cfg.FileLogEnabled = newFileLogEnabled;
+        _cfg.MaxLogFiles = newMaxLogFiles;
+        _cfg.LogRetentionDays = newRetention;
+        _cfg.FileLogLevel = newFileLogLevel;
 
         _cfg.ShowRuntimeLog = ChkShowRuntimeLog.IsChecked == true;
         // 实时生效：如果当前在游戏模块，直接切换 LogCard 可见性
         if (_currentNav == NavMode.Game)
             LogCard.Visibility = _cfg.ShowRuntimeLog ? Visibility.Visible : Visibility.Collapsed;
 
-        // 热键 UI → 配置
+        // 热键：键位由记录弹窗直接写配置并保存，这里只同步启用开关
         _cfg.Hotkey.Enabled = ChkHotkeyEnabled.IsChecked == true;
-        int mods = 0;
-        if (ChkHotkeyAlt.IsChecked == true) mods |= 1;
-        if (ChkHotkeyCtrl.IsChecked == true) mods |= 2;
-        if (ChkHotkeyShift.IsChecked == true) mods |= 4;
-        if (ChkHotkeyWin.IsChecked == true) mods |= 8;
-        _cfg.Hotkey.Modifiers = mods;
-        // VirtualKey 在按键捕获时已经直接更新到 _cfg.Hotkey.VirtualKey，这里不需额外处理
 
-        // 如果引擎正在运行，尝试重新注册热键（新配置）
-        if (_workerHost is { IsRunning: true } && _cfg.Hotkey.Enabled)
-        {
-            try
-            {
-                if (!_hotkey.Register(_cfg.Hotkey))
-                    AppendLog("热键注册失败（可能被其他程序占用），已跳过。", LogLevel.Warn);
-            }
-            catch (Exception ex)
-            {
-                AppendLog($"热键注册异常：{ex.Message}", LogLevel.Warn);
-            }
-        }
-        else if (_workerHost?.IsRunning != true)
-        {
-            // 未运行时先注销（等启动时再注册）
-            _hotkey.Unregister();
-        }
-        RefreshHotkeyUi();
-
-        // 文件日志配置变更 → 重新初始化
-        FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles, _cfg.LogRetentionDays);
+        // 文件日志配置变更 → 重新初始化（仅当上面检测到真变更）
+        if (logCfgChanged)
+            FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles, _cfg.LogRetentionDays);
 
         // 自动更新（仓库地址已硬编码，不持久化）
         _cfg.Update.CheckOnStartup = ChkCheckOnStartup.IsChecked == true;
@@ -157,6 +268,9 @@ public partial class MainWindow
 
         // 手柄隔离（Enabled/GameImagePath/AppliedBlacklist 由开关提权动作维护，此处只同步复选框）
         _cfg.HidHide.HidePhysicalGamepad = ChkHidePhysical.IsChecked == true;
+        // DisabledPadDevs 由提权任务独占维护：保存前从磁盘回读，
+        // 避免 GUI 陈旧快照清掉记录导致退出时手柄无法恢复
+        try { _cfg.HidHide.DisabledPadDevs = AppConfig.Load().HidHide.DisabledPadDevs; } catch { }
 
         _cfg.Save();
     }
@@ -200,6 +314,82 @@ public partial class MainWindow
         TxtIdleMin.BorderBrush = (System.Windows.Media.Brush)FindResource("Danger");
         TxtIdleMax.BorderBrush = (System.Windows.Media.Brush)FindResource("Danger");
         return false;
+    }
+
+    // ---------------- 防检测保护（★重要设定） ----------------
+
+    /// <summary>作息调度字段变更（TextChanged）：校验并立即保存，失败保留旧值并红框提示。</summary>
+    private void ScheduleField_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        // InitializeComponent 按 XAML 顺序建控件，错误提示框在输入框之后，加载期可能尚未创建
+        if (TxtScheduleError is null || _loadingConfig) return;
+        ApplySchedule(persist: true);
+    }
+
+    /// <summary>
+    /// 校验并应用作息调度字段：时段 HH:mm（支持跨午夜）、每日上限 0~24 小时（0=不限）、
+    /// 启停漂移 0~120 分钟。成功写入配置；失败红框+错误提示、保留旧值。
+    /// </summary>
+    private bool ApplySchedule(bool persist)
+    {
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        // 拆开解析再合并：&& 短路会让编译器无法确定 out 变量已赋值。
+        // 时段兼容 9:30 / 09:30 / 9:05 等写法，保存时统一归一化为 HH:mm。
+        string[] timeFormats = { @"hh\:mm", @"h\:mm", @"h\:m" };
+        bool okStart = TimeSpan.TryParseExact(TxtScheduleStart.Text.Trim(), timeFormats, null, out var start);
+        bool okEnd = TimeSpan.TryParseExact(TxtScheduleEnd.Text.Trim(), timeFormats, null, out var end);
+        bool okCap = double.TryParse(TxtScheduleCap.Text.Trim(), System.Globalization.NumberStyles.Float, ci, out double cap)
+                     && cap is >= 0 and <= 24;
+        bool okDrift = int.TryParse(TxtScheduleDrift.Text.Trim(), out int drift) && drift is >= 0 and <= 120;
+        bool ok = okStart && okEnd && okCap && okDrift;
+
+        if (!ok)
+        {
+            TxtScheduleError.Text = "格式无效：时段需为 HH:mm（如 09:30 / 22:00），上限 0~24 小时，漂移 0~120 分钟";
+            TxtScheduleError.Visibility = Visibility.Visible;
+            return false;
+        }
+
+        TxtScheduleError.Visibility = Visibility.Collapsed;
+        _cfg.Schedule.StartTime = start.ToString(@"hh\:mm");
+        _cfg.Schedule.EndTime = end.ToString(@"hh\:mm");
+        _cfg.Schedule.DailyCapHours = cap;
+        _cfg.Schedule.DriftMinutes = drift;
+        if (persist) _cfg.Save();
+        return true;
+    }
+
+    // ---------------- 设置页一级分类切换 ----------------
+
+    /// <summary>五个分类模块（仿游戏内活动入口）切换二级页可见性。</summary>
+    private void SettingsTab_Checked(object sender, RoutedEventArgs e)
+    {
+        // InitializeComponent 按 XAML 顺序建控件：首个 RadioButton 的 Checked 触发时其余元素可能尚未创建
+        if (SetTabImportant is null || SetTabDisplay is null || SetTabInput is null
+            || SetTabDaily is null || SetTabAbout is null) return;
+
+        SetTabImportant.Visibility = RbSetImportant.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SetTabDisplay.Visibility = RbSetDisplay.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SetTabInput.Visibility = RbSetInput.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SetTabDaily.Visibility = RbSetDaily.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SetTabAbout.Visibility = RbSetAbout.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ---------------- 训练数据采集（存帧） ----------------
+
+    /// <summary>打开 exe 同级 captures\ 目录（不存在则先创建，便于空目录也能打开）。</summary>
+    private void BtnOpenCaptures_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string dir = Path.Combine(Core.System.AppPaths.ExeDir, "captures");
+            Directory.CreateDirectory(dir);
+            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"打开存帧目录失败：{ex.Message}", LogLevel.Warn);
+        }
     }
 
     // ================= 自动更新事件 =================
@@ -318,7 +508,7 @@ public partial class MainWindow
             {
                 // 非管理员：UAC 提权重新运行自身离线执行，结果写临时文件后读回
                 TxtGitHubStatus.Text = "需要管理员权限，请在弹出的授权窗口确认…";
-                string report = Path.Combine(Path.GetTempPath(), $"ghopt_{Guid.NewGuid():N}.txt");
+                string report = Path.Combine(AppPaths.TempDir, $"ghopt_{Guid.NewGuid():N}.txt");
                 Process.Start(new ProcessStartInfo
                 {
                     FileName = Environment.ProcessPath!,
@@ -414,11 +604,11 @@ public partial class MainWindow
         if (_loadingConfig) return;
         _cfg.HidHide.HidePhysicalGamepad = ChkHidePhysical.IsChecked == true;
         _cfg.Save();
-        // 不立即弹 UAC：下次启动挂机时由计划任务 sync 静默生效；需要立即生效可关再开主开关
-        if (_cfg.HidHide.Enabled && TxtHidHideStatus is not null)
+        // 不立即弹 UAC：启动挂机时由提权任务静默禁用/恢复
+        if (TxtHidHideStatus is not null)
             TxtHidHideStatus.Text = ChkHidePhysical.IsChecked == true
-                ? "真实手柄将在下次启动挂机时一并隐藏"
-                : "真实手柄隐藏将在下次启动挂机时关闭";
+                ? "真实手柄将在下次启动挂机时自动禁用（释放玩家 1，退出程序自动恢复）"
+                : "真实手柄不再自动禁用：占用玩家 1 时挂机将无法启动";
     }
 
     /// <summary>查询 HidHide 状态并刷新开关下方状态行；默认开启且未就绪时自动触发一次提权配置。</summary>
@@ -467,7 +657,7 @@ public partial class MainWindow
     /// </summary>
     private async Task<HidHideConfigJob.HidHideResultDto> RunHidHideJobAsync(HidHideConfigJob.HidHideJobDto job)
     {
-        string jobPath = Path.Combine(Path.GetTempPath(), $"hidhide_{Guid.NewGuid():N}.json");
+        string jobPath = Path.Combine(AppPaths.TempDir, $"hidhide_{Guid.NewGuid():N}.json");
         File.WriteAllText(jobPath, System.Text.Json.JsonSerializer.Serialize(job));
 
         Process child;
@@ -532,8 +722,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            string hint = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-                "EfootballBot", "hidhide-config-error.log");
+            string hint = AppPaths.ErrorLogPath("hidhide-config-error.log");
             AppendLog(exited
                 ? $"子进程未写回有效结果，可能启动即崩溃，详见 {hint}（{ex.Message}）"
                 : $"结果文件读取失败：{ex.Message}", LogLevel.Warn);
@@ -580,7 +769,6 @@ public partial class MainWindow
             {
                 Mode = on ? "setup" : "clear",
                 HideVigem = true,
-                HidePhysical = _cfg.HidHide.HidePhysicalGamepad,
                 GameImagePath = _cfg.HidHide.GameImagePath,
             };
 

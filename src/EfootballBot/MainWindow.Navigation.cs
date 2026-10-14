@@ -143,6 +143,45 @@ public partial class MainWindow
             AppendLog(cn
                 ? "未找到国服游戏窗口（eFootballOnline / 实况足球在线），请先启动游戏（无需置顶）。"
                 : "未找到 eFootball 游戏窗口，请先启动游戏（无需置顶）。", LogLevel.Warn);
+
+        // 手柄环境自愈：shim 指向当前 exe + 遗留任务迁移 + 崩溃残留的禁用手柄恢复
+        _ = EnsurePadEnvironmentAsync();
+    }
+
+    /// <summary>
+    /// 启动自愈（后台，不阻塞 UI）：
+    /// ① 重写提权任务 shim 指向当前 exe（程序移动/更新后任务动作恒有效）；
+    /// ② 任务缺失/指向旧路径且真实手柄正占着玩家 1 → 自动补注册（一次 UAC）；
+    /// ③ 上次挂机禁用的真实手柄未恢复（程序被强杀）→ 静默触发恢复任务。
+    /// </summary>
+    private async Task EnsurePadEnvironmentAsync()
+    {
+        try
+        {
+            HidHideManager.WriteShimScripts();
+
+            bool padHoldingSlot0 = await Task.Run(() =>
+                VirtualGamepad360.IsSlot0Occupied()
+                && HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0);
+            if (padHoldingSlot0 && !await Task.Run(HidHideManager.TasksReady))
+            {
+                AppendLog("检测到「释放玩家 1」系统任务未就绪（未注册或指向旧路径），正在补注册，请在授权窗口点「是」…", LogLevel.Info);
+                var res = await RunHidHideJobAsync(new HidHideConfigJob.HidHideJobDto { Mode = "tasks" });
+                AppendLog(res.Success
+                    ? "释放玩家 1 任务已就绪。"
+                    : $"释放玩家 1 任务注册失败：{res.Error}", res.Success ? LogLevel.Info : LogLevel.Warn);
+            }
+
+            if (await Task.Run(PhysicalPadControl.HasPendingRestore))
+            {
+                AppendLog("检测到上次挂机禁用的真实手柄未恢复，正在自动恢复…", LogLevel.Info);
+                HidHideManager.RunTaskSilently(HidHideManager.PadRestoreTaskName);
+            }
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"手柄环境自检异常：{ex.Message}", LogLevel.Warn);
+        }
     }
 
     private void BtnRecheck_Click(object sender, RoutedEventArgs e) => RunEnvChecks();

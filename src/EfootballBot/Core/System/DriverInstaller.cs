@@ -27,7 +27,9 @@ public sealed class DriverInstaller
 
     public async Task<DriverSetupResult> InstallAsync(CancellationToken ct = default)
     {
-        string dir = Path.Combine(Path.GetTempPath(), "EfootballBot");
+        // 安装包释放/日志放 exe 旁 data\tmp\（2026-10-11 用户要求：所有操作收在程序目录内）
+        string dir = AppPaths.TempDir;
+        Directory.CreateDirectory(dir);
         string exe = Path.Combine(dir, SetupExeName);
         string logPath = Path.Combine(dir, SetupLogName);
 
@@ -155,7 +157,7 @@ public sealed class DriverInstaller
     {
         try
         {
-            string logPath = Path.Combine(Path.GetTempPath(), "EfootballBot", SetupLogName);
+            string logPath = Path.Combine(AppPaths.TempDir, SetupLogName);
             if (!File.Exists(logPath))
             {
                 return "";
