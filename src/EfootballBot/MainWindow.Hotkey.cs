@@ -82,6 +82,7 @@ public partial class MainWindow
 
         BtnStartMyLeague.Content = running && _activeStartBtn == BtnStartMyLeague ? stopText : "开始";
         BtnStartWeekly.Content = running && _activeStartBtn == BtnStartWeekly ? stopText : "开始";
+        BtnStartAiLadder.Content = running && _activeStartBtn == BtnStartAiLadder ? stopText : "开始";
         BtnStartCnWeekly.Content = running && _activeStartBtn == BtnStartCnWeekly ? stopText : "开始";
 
         if (!running)

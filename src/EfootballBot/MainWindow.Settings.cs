@@ -142,6 +142,11 @@ public partial class MainWindow
         // 周活动（国服）：场次停止
         LoadStopAfterUi(CmbCnWeeklyStopAfter, TxtCnWeeklyStopAfter, _cfg.CnWeekly.StopAfterMatches);
 
+        // AI天梯联赛（国际服）：达到组别停止（索引 0=不启用，1~10 对应 组别10~组别1）+ 场次停止
+        int aiDiv = _cfg.AiLadder.StopAtDivision;
+        CmbAiStopAtDivision.SelectedIndex = aiDiv is >= 1 and <= 10 ? 11 - aiDiv : 0;
+        LoadStopAfterUi(CmbAiStopAfterMatches, TxtAiStopAfterMatches, _cfg.AiLadder.StopAfterMatches);
+
         // 日志设置
         ChkFileLog.IsChecked = _cfg.FileLogEnabled;
         TxtMaxLogFiles.Text = _cfg.MaxLogFiles.ToString();
@@ -232,6 +237,12 @@ public partial class MainWindow
 
         // 周活动（国服）
         _cfg.CnWeekly.StopAfterMatches = SaveStopAfterUi(CmbCnWeeklyStopAfter, TxtCnWeeklyStopAfter);
+
+        // AI天梯联赛（国际服）：索引 1~10 对应 组别10~组别1（10 最低、1 最高）
+        _cfg.AiLadder.StopAtDivision = CmbAiStopAtDivision.SelectedIndex is >= 1 and <= 10
+            ? 11 - CmbAiStopAtDivision.SelectedIndex
+            : 0;
+        _cfg.AiLadder.StopAfterMatches = SaveStopAfterUi(CmbAiStopAfterMatches, TxtAiStopAfterMatches);
 
         // 文件日志配置：只有真变了才重新初始化。SaveUiToConfig 在每次点开始时都会执行，
         // 无条件 Initialize 会新建会话文件，把"应用启动/主界面就绪"留在上一个文件里

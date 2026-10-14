@@ -293,6 +293,19 @@ public sealed class GamePathsConfig
 }
 
 /// <summary>
+/// 国际服 AI 天梯联赛（eFootball™联赛·对阵AI类别）挂机配置。
+/// 组别 10 最低、1 最高；「达到组别停止」按主页左上角组别数字判定（数字 ≤ 设定值即达标）。
+/// </summary>
+public sealed class AiLadderConfig
+{
+    /// <summary>达到该组别后自动停止（1~10；0 = 不启用，一直打到完成场次或手动停止）。</summary>
+    public int StopAtDivision { get; set; } = 0;
+
+    /// <summary>完成场次后自动停止（本次挂机累计，无关键比赛概念）。0 = 无限跑。</summary>
+    public int StopAfterMatches { get; set; } = 0;
+}
+
+/// <summary>
 /// 周活动挂机配置（国际服）。赛事等级与自动控制是活动设置浮层的核验项；
 /// 自动控制强制开、弹性自动控制强制关（硬编码，不设配置）。
 /// </summary>
@@ -404,6 +417,9 @@ public sealed class AppConfig
 
     // —— 周活动（国际服）——
     public WeeklyConfig Weekly { get; set; } = new();
+
+    // —— AI天梯联赛（国际服，eFootball™联赛·对阵AI类别）——
+    public AiLadderConfig AiLadder { get; set; } = new();
 
     // —— 周活动（国服，比赛活动冠军赛）——
     public CnWeeklyConfig CnWeekly { get; set; } = new();

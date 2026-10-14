@@ -276,6 +276,10 @@
                         <RadioButton x:Name="RbWeekly" GroupName="IntlModule" Content="周活动"
                                      Style="{StaticResource ModuleRadio}" Margin="22,0,0,0"
                                      Checked="RbWeekly_Checked"/>
+                        <RadioButton x:Name="RbAiLadder" GroupName="IntlModule" Content="AI天梯联赛"
+                                     Style="{StaticResource ModuleRadio}" Margin="22,0,0,0"
+                                     ToolTip="国际服 eFootball™联赛·对阵AI类别：组别循环冲级，可设达到组别停止"
+                                     Checked="RbAiLadder_Checked"/>
                     </StackPanel>
 
                     <!-- 赛前快捷设置内容（按入口选中切换显示）：一键打开游戏自带设置工具 -->
@@ -484,6 +488,72 @@
                         </StackPanel>
                         <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0"
                                    Text="0（无限）= 刷到主要奖励完成或手动停止。达到设定场次（本次挂机累计）即自动停止并还原窗口。"/>
+                    </StackPanel>
+
+                    <!-- AI天梯联赛内容（按入口选中切换显示）：eFootball™联赛·对阵AI类别 -->
+                    <StackPanel x:Name="AiLadderContent" Visibility="Collapsed">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Width="9" Height="9" Fill="#FF4CA6E0"
+                                             VerticalAlignment="Center" Margin="0,0,9,1"/>
+                                    <TextBlock Text="AI天梯联赛挂机（国际服）" FontSize="16.5" FontWeight="Bold"/>
+                                </StackPanel>
+                                <TextBlock Text="自动跑国际服「eFootball™联赛·对阵AI类别」：比赛页进 eFootball™联赛（卡片图片会变，按槽位扫描+文字验证）→ 选对阵AI类别（卡片角标数字/颜色会变，不作判定）→ 前往比赛 → 比赛结束弹窗自动推进 → 回组别主页循环。可选「达到组别停止」检测主页左上角组别数字；完成场次停止与我的联赛一致（无关键比赛）。比赛中流程与我的联赛共用。需连接虚拟手柄，开始前请断开真实手柄。"
+                                           Foreground="{DynamicResource TextSecondary}" FontSize="12"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0"/>
+                            </StackPanel>
+                            <Button x:Name="BtnStartAiLadder" Grid.Column="1" Content="开始"
+                                    Style="{StaticResource PrimaryBtn}" Width="210" Height="40" FontSize="14"
+                                    VerticalAlignment="Top" Margin="16,4,0,0" Click="BtnStartAiLadder_Click"/>
+                        </Grid>
+
+                        <!-- 达到组别停止（可选；不启用=一直刷） -->
+                        <StackPanel Orientation="Horizontal" Margin="2,16,0,0">
+                            <TextBlock Text="达到组别停止" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="CmbAiStopAtDivision" Width="110" Margin="12,0,0,0" SelectedIndex="0"
+                                      VerticalAlignment="Center"
+                                      ToolTip="检测组别主页左上角的「组别X」数字：达到该组别或更高（数字更小）即自动停止">
+                                <ComboBoxItem Content="不启用"/>
+                                <ComboBoxItem Content="组别10"/>
+                                <ComboBoxItem Content="组别9"/>
+                                <ComboBoxItem Content="组别8"/>
+                                <ComboBoxItem Content="组别7"/>
+                                <ComboBoxItem Content="组别6"/>
+                                <ComboBoxItem Content="组别5"/>
+                                <ComboBoxItem Content="组别4"/>
+                                <ComboBoxItem Content="组别3"/>
+                                <ComboBoxItem Content="组别2"/>
+                                <ComboBoxItem Content="组别1"/>
+                            </ComboBox>
+                        </StackPanel>
+                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0"
+                                   Text="组别 10 最低、1 最高。达到设定组别（含更高）即自动停止并还原窗口；不启用则一直打到完成场次或手动停止。"/>
+
+                        <!-- 完成场次停止（0=无限跑） -->
+                        <StackPanel Orientation="Horizontal" Margin="2,14,0,0">
+                            <TextBlock Text="完成场次停止" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="CmbAiStopAfterMatches" Width="96" Margin="12,0,0,0" SelectedIndex="0"
+                                      VerticalAlignment="Center" SelectionChanged="CmbStopAfter_SelectionChanged">
+                                <ComboBoxItem Content="0（无限）"/>
+                                <ComboBoxItem Content="1"/>
+                                <ComboBoxItem Content="3"/>
+                                <ComboBoxItem Content="5"/>
+                                <ComboBoxItem Content="10"/>
+                                <ComboBoxItem Content="20"/>
+                                <ComboBoxItem Content="自定义"/>
+                            </ComboBox>
+                            <TextBox x:Name="TxtAiStopAfterMatches" Width="52" Margin="8,0,0,0" VerticalAlignment="Center"
+                                     Visibility="Collapsed" Text="1" ToolTip="完成多少场后停止（正整数）"/>
+                            <TextBlock Text="场" FontSize="12" VerticalAlignment="Center" Margin="4,0,0,0"
+                                       Foreground="{DynamicResource TextMuted}"/>
+                        </StackPanel>
+                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0"
+                                   Text="0（无限）= 一直挂机不自动停。达到设定场次（本次挂机累计）即自动停止并还原窗口；自定义请输入正整数。"/>
                     </StackPanel>
                 </StackPanel>
             </Border>

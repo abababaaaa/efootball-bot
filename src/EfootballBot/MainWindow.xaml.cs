@@ -152,20 +152,23 @@ public partial class MainWindow : Window
 
     // ---------------- 模块入口切换（中栏上层列表） ----------------
 
-    /// <summary>国际服模块入口切换：★赛前快捷设置 / 我的联赛 / 周活动（内容区随之切换，互不同时显示）。</summary>
+    /// <summary>国际服模块入口切换：★赛前快捷设置 / 我的联赛 / 周活动 / AI天梯联赛（内容区随之切换，互不同时显示）。</summary>
     private void RbPreMatch_Checked(object sender, RoutedEventArgs e) => SwitchIntlModule();
 
     private void RbMyLeague_Checked(object sender, RoutedEventArgs e) => SwitchIntlModule();
 
     private void RbWeekly_Checked(object sender, RoutedEventArgs e) => SwitchIntlModule();
 
+    private void RbAiLadder_Checked(object sender, RoutedEventArgs e) => SwitchIntlModule();
+
     private void SwitchIntlModule()
     {
         // InitializeComponent 按 XAML 顺序建控件：Checked 触发时其余内容区可能尚未创建
-        if (PreMatchContent is null || LeagueContent is null || WeeklyContent is null) return;
+        if (PreMatchContent is null || LeagueContent is null || WeeklyContent is null || AiLadderContent is null) return;
         PreMatchContent.Visibility = RbPreMatch.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         LeagueContent.Visibility = RbMyLeague.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         WeeklyContent.Visibility = RbWeekly.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        AiLadderContent.Visibility = RbAiLadder.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
     }
 
     /// <summary>国服模块入口切换（上层列表照抄国际服，分组独立：切服务器互不干扰选中态）。</summary>
@@ -274,6 +277,9 @@ public partial class MainWindow : Window
 
     private async void BtnStartWeekly_Click(object sender, RoutedEventArgs e)
         => await ToggleScenarioAsync(BtnStartWeekly, "intlweekly");
+
+    private async void BtnStartAiLadder_Click(object sender, RoutedEventArgs e)
+        => await ToggleScenarioAsync(BtnStartAiLadder, "intlladder");
 
     private async void BtnStartCn_Click(object sender, RoutedEventArgs e)
         => await ToggleScenarioAsync(BtnStartCn, "cndaily");
@@ -409,6 +415,7 @@ public partial class MainWindow : Window
     {
         BtnStartMyLeague.IsEnabled = enabled;
         BtnStartWeekly.IsEnabled = enabled;
+        BtnStartAiLadder.IsEnabled = enabled;
         BtnStartCn.IsEnabled = enabled;
         BtnStartCnWeekly.IsEnabled = enabled;
     }
@@ -426,6 +433,8 @@ public partial class MainWindow : Window
         BtnStartMyLeague.Style = (Style)FindResource("PrimaryBtn");
         BtnStartWeekly.Style = (Style)FindResource("PrimaryBtn");
         BtnStartWeekly.Content = "开始";
+        BtnStartAiLadder.Content = "开始";
+        BtnStartAiLadder.Style = (Style)FindResource("PrimaryBtn");
         BtnStartCn.Content = "开始";
         BtnStartCn.Style = (Style)FindResource("PrimaryBtn");
         BtnStartCnWeekly.Content = "开始";
