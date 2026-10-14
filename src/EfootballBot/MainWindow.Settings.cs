@@ -392,6 +392,65 @@ public partial class MainWindow
         }
     }
 
+    // ================= 一键诊断（原 DiagReport.bat 内置版） =================
+
+    /// <summary>诊断报告输出根目录：data\DiagReport\（数据全部收在程序目录内）。</summary>
+    private static string DiagRoot => Path.Combine(Core.System.AppPaths.DataDir, "DiagReport");
+
+    private bool _diagBusy;
+
+    private async void BtnDiagReport_Click(object sender, RoutedEventArgs e)
+    {
+        if (_diagBusy) return;
+        _diagBusy = true;
+        BtnDiagReport.IsEnabled = false;
+        TxtDiagStatus.Text = "正在收集系统信息…（约 1~2 分钟，请勿关闭程序）";
+        var progress = new Progress<string>(s => TxtDiagStatus.Text = s);
+        try
+        {
+            string result = await Task.Run(() => Core.System.DiagReporter.CollectAsync(s => ((IProgress<string>)progress).Report(s)));
+            TxtDiagStatus.Text = $"完成：{result}";
+            AppendLog($"诊断报告已生成：{result}", LogLevel.Info);
+            OpenDiagResult(result);
+        }
+        catch (Exception ex)
+        {
+            TxtDiagStatus.Text = $"生成失败：{ex.Message}";
+            AppendLog($"生成诊断报告失败：{ex}", LogLevel.Error);
+        }
+        finally
+        {
+            _diagBusy = false;
+            BtnDiagReport.IsEnabled = true;
+        }
+    }
+
+    private void BtnOpenDiagFolder_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            Directory.CreateDirectory(DiagRoot);
+            Process.Start(new ProcessStartInfo { FileName = DiagRoot, UseShellExecute = true });
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"打开诊断目录失败：{ex.Message}", LogLevel.Warn);
+        }
+    }
+
+    /// <summary>在资源管理器中定位生成的 zip（打包失败返回目录时直接打开该目录）。</summary>
+    private static void OpenDiagResult(string result)
+    {
+        try
+        {
+            if (File.Exists(result))
+                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{result}\"") { UseShellExecute = true });
+            else
+                Process.Start(new ProcessStartInfo { FileName = result, UseShellExecute = true });
+        }
+        catch { /* 打不开不提示，路径已在状态栏显示 */ }
+    }
+
     // ================= 自动更新事件 =================
 
     private UpdateInfo? _pendingUpdate;
