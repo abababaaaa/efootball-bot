@@ -157,6 +157,8 @@ public partial class App : Application
 
     private void StartGui()
     {
+        // 崩溃自动抓 minidump（原生 + 托管兜底），反馈包自动附带
+        Core.System.CrashReporter.Install("gui");
         _singleMutex = new Mutex(initiallyOwned: true, SingleMutexName, out bool createdNew);
         if (!createdNew)
         {

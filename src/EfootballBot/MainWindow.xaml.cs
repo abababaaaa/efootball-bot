@@ -93,6 +93,11 @@ public partial class MainWindow : Window
         // 环境检测在 Loaded 事件里跑：构造到此结束即界面可用（v1.1.19 远程排障心跳，
         // 区分"应用打开后卡死"与"正常打开"——后者日志必有此行）
         AppendLog("主界面就绪。", LogLevel.Info);
+
+        // 上次运行如有崩溃转储，启动时提醒用户生成反馈包（dump 本体在 data\crash\，只留最近 3 份）
+        var crashNotice = CrashReporter.RecentDumpNotice(TimeSpan.FromDays(2));
+        if (crashNotice is not null)
+            AppendLog(crashNotice, LogLevel.Warn);
     }
 
     /// <summary>当前左侧选中的模块对应的游戏进程名。</summary>

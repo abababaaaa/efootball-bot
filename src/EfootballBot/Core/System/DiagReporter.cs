@@ -27,9 +27,10 @@ public static class DiagReporter
     public static async Task<string> CollectAsync(Action<string>? progress = null, CancellationToken ct = default)
     {
         string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
+        string ver = typeof(Updater).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
         string root = Path.Combine(AppPaths.DataDir, "DiagReport");
-        string dir = Path.Combine(root, $"DiagReport_{ts}");
-        string zip = Path.Combine(root, $"DiagReport_{ts}.zip");
+        string dir = Path.Combine(root, $"反馈包_{ts}");
+        string zip = Path.Combine(root, $"反馈包_v{ver}_{ts}.zip");
         Directory.CreateDirectory(dir);
 
         var report = new StringBuilder();
@@ -183,8 +184,12 @@ if ($steam) {
         Head("SECTION 16 - APP FOLDER (bot logs/config copied; onnxruntime versions)");
         report.AppendLine(CopyAppFiles(dir, report));
 
+        Head("SECTION 17 - RECENT CRASH DUMPS (auto-captured by CrashReporter)");
+        progress?.Invoke("附带最近崩溃记录…");
+        report.AppendLine(CopyCrashDumps(dir, report));
+
         progress?.Invoke("等待 dxdiag 完成…");
-        Head("SECTION 17 - DXDIAG (full dxdiag.txt attached separately in this folder)");
+        Head("SECTION 18 - DXDIAG (full dxdiag.txt attached separately in this folder)");
         report.AppendLine(await WaitDxdiagAsync(dx, dxPath, ct));
 
         report.AppendLine();
@@ -243,6 +248,44 @@ if ($steam) {
                 : $"{n} | not present");
         }
         return $"app files copied: {copied}";
+    }
+
+    /// <summary>附带最近崩溃 dump（最多 2 份，单份 ≤100MB——QQ 群文件友好），返回结果说明。</summary>
+    private static string CopyCrashDumps(string dir, StringBuilder report)
+    {
+        try
+        {
+            var crashDir = Path.Combine(AppPaths.DataDir, "crash");
+            if (!Directory.Exists(crashDir)) return "(no crash dump folder — no crashes recorded)";
+            var dumps = Directory.GetFiles(crashDir, "*.dmp")
+                .Select(f => new FileInfo(f))
+                .OrderByDescending(f => f.LastWriteTime)
+                .Take(2)
+                .ToList();
+            if (dumps.Count == 0) return "(no crash dumps)";
+
+            string dst = Path.Combine(dir, "app_crash");
+            Directory.CreateDirectory(dst);
+            int copied = 0;
+            var notes = new List<string>();
+            foreach (var d in dumps)
+            {
+                if (d.Length > 100 * 1024 * 1024)
+                {
+                    notes.Add($"{d.Name} skipped (over 100MB)");
+                    continue;
+                }
+                try { File.Copy(d.FullName, Path.Combine(dst, d.Name), true); copied++; }
+                catch (Exception ex) { notes.Add($"{d.Name} copy failed: {ex.Message}"); }
+            }
+            report.AppendLine($"crash dumps on disk: newest {dumps[0].Name} ({dumps[0].Length / 1024 / 1024} MB, {dumps[0].LastWriteTime:yyyy-MM-dd HH:mm})");
+            foreach (var n in notes) report.AppendLine(n);
+            return $"crash dumps copied: {copied} -> app_crash\\";
+        }
+        catch (Exception ex)
+        {
+            return $"(crash dump copy failed: {ex.Message})";
+        }
     }
 
     private static IEnumerable<string> EnumerateFilesSafe(string root, string[] patterns, string[] excludeDirs)

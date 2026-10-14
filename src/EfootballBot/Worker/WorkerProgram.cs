@@ -20,6 +20,9 @@ public static class WorkerProgram
 {
     public static async Task<int> RunAsync(string[] args)
     {
+        // 崩溃自动抓 minidump，越早装越好（挂机中 Worker 被原生崩溃打死是最常见的事故）
+        CrashReporter.Install("worker");
+
         // 解析参数：--worker <mode> [--pipe <name>] [--console]
         string mode = args.Length > 1 ? args[1] : "observe";
         bool console = args.Contains("--console");

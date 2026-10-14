@@ -931,9 +931,9 @@
                                 <TextBlock Text="诊断报告" Style="{StaticResource H2}"/>
                             </StackPanel>
                             <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520"
-                                       Text="一键收集系统环境信息（显卡与驱动、虚拟手柄栈、系统错误日志、Steam 位置，附带本程序日志与配置），打包成一个 zip 发到群里即可远程排查。全程只读，不改动系统任何设置。生成约需 1~2 分钟。"/>
+                                       Text="出问题点这里：一键收集系统环境信息（显卡与驱动、虚拟手柄栈、系统错误日志、Steam 位置）+ 本程序日志配置 + 自动记录的崩溃转储，打包成一个 zip 发到群里即可远程排查。全程只读，不改动系统任何设置。生成约需 1~2 分钟。"/>
                             <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
-                                <Button x:Name="BtnDiagReport" Content="生成诊断报告" Style="{StaticResource GhostBtn}"
+                                <Button x:Name="BtnDiagReport" Content="生成反馈包" Style="{StaticResource GhostBtn}"
                                         Padding="14,7" Click="BtnDiagReport_Click"/>
                                 <Button x:Name="BtnOpenDiagFolder" Content="打开报告目录" Style="{StaticResource GhostBtn}"
                                         Padding="14,7" Margin="10,0,0,0" Click="BtnOpenDiagFolder_Click"/>
