@@ -697,9 +697,12 @@ public sealed class BotEngine : IDisposable
             EmitStats();
         }
 
-        // 周期性输出 OCR 原文（Debug 级：比赛中 YOLO 无检测是常态，Warn 会刷屏）
+        // 周期性输出 OCR 原文（Debug 级：比赛中 YOLO 无检测是常态，Warn 会刷屏）。
+        // 零检测帧 5s 一条（过场/比赛画面）；有检测帧 30s 一条——此前只在零检测时输出，
+        // 带按钮框的弹窗帧（如关键比赛弹窗）恰恰永远没有 OCR 线索，远程排障抓瞎
+        // （2026-10-15 关键比赛弹窗反馈包实测）。
         long now = Environment.TickCount64;
-        if (now - _lastOcrDumpTick > 5000 && (!yoloOn || dets.Count == 0))
+        if (now - _lastOcrDumpTick > (dets.Count == 0 ? 5000 : 30000))
         {
             _lastOcrDumpTick = now;
             var words = ocr.MergedWords.Take(25).Select(w => w.Text);

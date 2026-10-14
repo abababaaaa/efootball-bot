@@ -130,8 +130,11 @@ public static class MyLeagueBrain
             return MlScreen.DifficultyPage;
 
         // 关键比赛弹窗（预告 P2「下一场是关键比赛」/ 固定难度 P3「即将进行的是关键比赛」）：
-        // 含「关键比赛」+「OK」。必须先于 MatchHub 兜底——弹窗文案带"我的联赛积分"字样会被误判
-        if (ocr.ContainsJoined("关键比赛") && ocr.ContainsJoined("OK"))
+        // 含「关键比赛」+「OK」。必须先于 MatchHub 兜底——弹窗文案带"我的联赛积分"字样会被误判。
+        // 「重要比赛」为同义别名（用户反馈用词，防游戏文案改版）；OK 是白底白字小字，OCR 常
+        // 漏读或读成 0K（用户 2026-10-15 实测：传奇级弹窗整帧漏掉 OK → 落 HasConfirm 盲按 A
+        // → 按在默认焦点「取消」上 → 前往比赛↔弹窗死循环），词级做 O/0 归一再认一次
+        if ((ocr.ContainsJoined("关键比赛") || ocr.ContainsJoined("重要比赛")) && HasOkButton(ocr))
             return MlScreen.KeyMatchDialog;
 
         // 比赛起始页（实机 match_start_page）：底部行「设置|球场|下一步」+ 队名/球场名
@@ -248,6 +251,24 @@ public static class MyLeagueBrain
             .Count() >= 2;
 
     /// <summary>
+    /// OK 按钮词证据：拼接文含 OK（大小写不敏感，覆盖被并进邻词的情况），或某词做 O/0
+    /// 归一后恰为 OK（OCR 白底白字小字常读成 0K）。P1 受限难度页含「关键比赛」副标题但
+    /// 无 OK 类词，不会被本证据误判成关键比赛弹窗（keymatch_p1 实测帧守）。
+    /// </summary>
+    public static bool HasOkButton(OcrResult ocr) =>
+        ocr.ContainsJoined("OK") ||
+        ocr.Words.Any(w => OcrText.Norm(w.Text).Replace("0", "O")
+            .Equals("OK", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>难度选择页特征（标题行或 ≥2 难度名列表）：确认键是默认焦点，不上移改难度。</summary>
+    private static bool IsDifficultyChoice(OcrResult ocr) =>
+        ocr.Lines.Any(l => l.Text.Replace(" ", "").Contains("选择赛事等级")) || HasDifficultyList(ocr);
+
+    /// <summary>游戏启动设定窗（画面模式/分辨率）：确认键是默认焦点，不上移。</summary>
+    private static bool IsGameSettingsDialog(OcrResult ocr) =>
+        ocr.ContainsJoined("画面模式") || ocr.ContainsJoined("分辨率");
+
+    /// <summary>
     /// 按当前界面 + OCR + 连续轮数决策。<paramref name="inMatchRecently"/> 来自流程帧记忆
     /// （最近刚见过比赛特征）：为 true 时无特征界面按比赛过场处理，延长 B 逃生耐心。
     /// </summary>
@@ -281,6 +302,12 @@ public static class MyLeagueBrain
             case MlScreen.HasConfirm:
             {
                 if (screenStreak >= StuckStreak) return MlAction.Wait(5000);
+                // 带「取消」的弹窗（关键比赛 P3：OK 在上、取消在下且是默认焦点；购买弹窗同型）：
+                // 盲按 A 正好按在取消上把弹窗关掉。先上移再 A——单按钮页上移无害，双按钮弹窗
+                // 恰好从取消挪到确认键。难度选择页除外（其确认键就是默认焦点，上移反而进选项
+                // 列表改难度）；启动设定窗除外（按 A 保留设置继续）。
+                if (ocr.ContainsJoined("取消") && !IsDifficultyChoice(ocr) && !IsGameSettingsDialog(ocr))
+                    return new MlAction(MlActionKind.PadUpConfirm, 2000, "弹窗确认（上移避开取消）");
                 return new MlAction(MlActionKind.PadConfirm, 2000, "确定/下一步");
             }
             case MlScreen.LeaguePage:

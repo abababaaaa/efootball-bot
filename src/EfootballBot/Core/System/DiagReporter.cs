@@ -304,11 +304,18 @@ if ($steam) {
 
     private static IEnumerable<string> EnumerateFilesSafe(string root, string[] patterns, string[] excludeDirs)
     {
-        var skip = excludeDirs.Select(d => Path.Combine(root, d) + Path.DirectorySeparatorChar).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        // 排除目录按前缀匹配（含其全部子目录）。SafeDirs 会把被排除目录的子目录也压栈，
+        // 若只按目录本身判等，DiagReport 下的「反馈包_ts」不被排除——正在写入的报告目录
+        // 被拷进 app_data，报告目录里又长出 app_data，递归自拷几十层
+        // （v2.0.4 用户反馈包 2026-10-15 实测：app_data/DiagReport/反馈包_ts/app_data/... 嵌套）。
+        var skip = excludeDirs
+            .Select(d => Path.Combine(root, d) + Path.DirectorySeparatorChar)
+            .ToList();
         var dirs = SafeDirs(root);
         foreach (var d in dirs)
         {
-            if (skip.Contains(d + Path.DirectorySeparatorChar)) continue;
+            var probe = d + Path.DirectorySeparatorChar;
+            if (skip.Any(s => probe.StartsWith(s, StringComparison.OrdinalIgnoreCase))) continue;
             foreach (var pat in patterns)
                 foreach (var f in SafeFiles(d, pat))
                     yield return f;

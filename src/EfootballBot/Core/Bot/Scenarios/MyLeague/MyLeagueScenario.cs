@@ -51,6 +51,10 @@ public sealed class MyLeagueScenario : IScenario
     private bool _nextMatchIsKey;
     /// <summary>主页连续按 A 前往比赛但画面未离开主页的次数（无响应自愈计数）。</summary>
     private int _goMatchAttempts;
+    /// <summary>上次按 A 前往比赛的时间（用于只 dump 一次前往后的弹窗画面 OCR）。</summary>
+    private DateTime _lastGoMatchPress = DateTime.MinValue;
+    /// <summary>本次前往比赛后是否已 dump 过画面 OCR（防刷屏）。</summary>
+    private bool _goMatchOcrDumped;
 
     /// <summary>购买流程阶段。</summary>
     private enum PurchasePhase
@@ -92,8 +96,23 @@ public sealed class MyLeagueScenario : IScenario
 
         _memory.Record(screen, now);
 
-        // 主页无响应自愈计数：画面离开主页（难度页/开赛/弹窗）即复位
-        if (screen != MlScreen.LeaguePage) _goMatchAttempts = 0;
+        // 主页无响应自愈计数：只在流程真正推进（开赛/比赛中/关键比赛弹窗被识别）或
+        // 离开联赛（回主菜单/比赛页）时复位。此前"画面离开主页即复位"会被「弹窗被盲按 A
+        // 取消 → 回主页」的循环每圈清零（用户 2026-10-15 实测：传奇级关键比赛弹窗不识别，
+        // 前往比赛↔弹窗死循环，自愈计数永远到不了 6）——连到 6 次 B 退出联赛重进自愈。
+        if (screen is MlScreen.MatchStartPage or MlScreen.InMatch or MlScreen.KeyMatchDialog
+            or MlScreen.MainMenu or MlScreen.MatchHub)
+            _goMatchAttempts = 0;
+
+        // 排障诊断：前往比赛后 15s 内出现的确认页/主页画面，把 OCR 摘要写日志（每次前往只
+        // dump 一次）。2026-10-15 传奇级关键比赛弹窗反馈排查时，HasConfirm 帧没有任何 OCR
+        // 线索（当时 OCR原文 只在零检测帧输出），远程定位全靠猜——此 dump 补上那一环。
+        if ((screen is MlScreen.HasConfirm or MlScreen.LeaguePage) &&
+            (now - _lastGoMatchPress).TotalSeconds < 15 && !_goMatchOcrDumped)
+        {
+            _goMatchOcrDumped = true;
+            _log($"[我的联赛] 前往比赛后画面（{screen}）OCR：{OcrDigest(obs.Ocr)}", LogLevel.Debug);
+        }
 
         // 智能接管：启动时识别当前流程阶段（分类驱动，任意界面可续接）
         if (!_takeoverLogged)
@@ -251,6 +270,12 @@ public sealed class MyLeagueScenario : IScenario
                 // D-pad/A 无效，或输入未到达游戏）：第 3 次先左拨收回面板再归位；
                 // 第 6/9/… 次改按 B 退出联赛由比赛页重进（重进后主页光标回默认位）。
                 _goMatchAttempts++;
+                if (_goMatchAttempts >= 2)
+                {
+                    // 连续多次从主页前往比赛仍未推进到开赛：大概率流程上有弹窗不被识别
+                    // （按 A 被取消又弹回）。画面摘要进日志供远程定位弹窗文案。
+                    _log($"[我的联赛] 注意：第 {_goMatchAttempts} 次前往比赛仍未开赛（疑似有弹窗识别受阻），当前画面 OCR：{OcrDigest(obs.Ocr)}", LogLevel.Warn);
+                }
                 if (_goMatchAttempts == 3)
                 {
                     _log("[我的联赛] 主页连续按 A 未离开：先左拨收回右侧面板再试（面板展开时 D-pad/A 无效）", LogLevel.Warn);
@@ -266,6 +291,8 @@ public sealed class MyLeagueScenario : IScenario
                 await HomeToGoMatchAsync();
                 _log($"[我的联赛] 手柄 A：{action.Target}", LogLevel.Info);
                 await _engine.Pad.Confirm();
+                _lastGoMatchPress = DateTime.Now;
+                _goMatchOcrDumped = false;
                 break;
             }
 
