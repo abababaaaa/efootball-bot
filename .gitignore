@@ -25,3 +25,16 @@ dump_crop*.png
 test_*.ps1
 find_*.ps1
 startup-backup-*
+build_result.txt
+slot-poll.txt
+
+# One-off scripts & unrelated extracted data
+cf-morning-scan.ps1
+github-optimize.*
+rpa_*.py
+rpa_out/
+.superpowers/
+survey/
+
+# Tool-local config
+.zcodeignore
