@@ -76,7 +76,8 @@ jobs:
             release-artifact/efootball-bot-win-x64.zip
           generate_release_notes: true
           draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}
+          # 测试版=4 段数字 tag（v2.0.5.1，迭代递增第 4 段）；带横杠 tag 不可用（更新器 Version.TryParse 解析失败）
+          prerelease: ${{ contains(github.ref_name, '-') || github.ref_name =~ '^v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' }}
 
       # ---- 国内更新源（Gitee）同步：失败不阻塞 GitHub Release（continue-on-error）----
       # 前提：仓库 Secrets 配置 GITEE_TOKEN（projects 权限），Gitee 上已建 abababaaaa/efootball-bot。
@@ -105,7 +106,8 @@ jobs:
           # 所有 API 输出先脱敏 token 再落日志
           function Mask($s) { if ($s) { $s -replace [regex]::Escape($token), '***' } else { $s } }
 
-          $prerelease = if ($tag -like '*-*') { 'true' } else { 'false' }
+          # 测试版=4 段数字 tag（与 GitHub 侧 prerelease 规则一致）
+          $prerelease = if ($tag -like '*-*' -or $tag -match '^v\d+\.\d+\.\d+\.\d+$') { 'true' } else { 'false' }
           $zip = 'release-artifact/EfootballBot.exe'
 
           # 1) 建发行版；已存在则取既有 id（幂等，可重跑）
