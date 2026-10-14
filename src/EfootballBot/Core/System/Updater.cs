@@ -60,9 +60,21 @@ public static class Updater
 
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
-    /// <summary>本地版本号（来自 csproj Version 属性）。</summary>
+    /// <summary>本地版本号（来自 csproj Version 属性，保留全部字段——测试版 4 段如 2.0.5.4）。
+    /// 旧写法 ToString(3) 把测试版截成 2.0.5：与远端 2.0.5.3 比较永远更小 → 更新提示永不消失、
+    /// 更新完还提示更新；关于页/横幅/日志显示的版本号也停在旧的 v2.0.5
+    /// （用户 2026-10-15 "本地还是老版本" 实测）。</summary>
     public static Version CurrentVersion { get; } =
-        new Version(typeof(Updater).Assembly.GetName().Version?.ToString(3) ?? "0.0.0");
+        typeof(Updater).Assembly.GetName().Version ?? new Version(0, 0, 0);
+
+    /// <summary>版本号展示：正式版（程序集 revision 恒补 0）或未定义 revision（-1）渲染三段
+    /// v2.0.6；测试版第 4 段非 0，渲染四段 v2.0.5.4。直接 ToString() 会把正式版显示成 2.0.6.0，
+    /// 而 ToString(4) 对 3 段版本不会省略 -1 字段。</summary>
+    public static string FormatVersion(Version? v)
+    {
+        if (v is null) return "0.0.0";
+        return v.Revision == 0 || v.Revision == -1 ? v.ToString(3) : v.ToString(4);
+    }
 
     // ---- 缓存：避免频繁调用 API 触发限流（两源统一缓存，用户感知的是同一个"最新版本"） ----
     private static readonly TimeSpan CacheTtl = TimeSpan.FromMinutes(30);
@@ -114,7 +126,7 @@ public static class Updater
             if (!Version.TryParse(latest.Tag_Name.TrimStart('v'), out var remoteVer))
                 return UpdateResult.Error($"无法解析版本号：{latest.Tag_Name}");
             if (remoteVer <= CurrentVersion)
-                return UpdateResult.AlreadyLatest($"已是最新版本 v{CurrentVersion}");
+                return UpdateResult.AlreadyLatest($"已是最新版本 v{FormatVersion(CurrentVersion)}");
 
             var picked = PickAssets(latest.Assets);
             if (picked is null)
@@ -159,7 +171,7 @@ public static class Updater
             if (!Version.TryParse(latest.Tag_Name.TrimStart('v'), out var remoteVer))
                 return UpdateResult.Error($"无法解析版本号：{latest.Tag_Name}");
             if (remoteVer <= CurrentVersion)
-                return UpdateResult.AlreadyLatest($"已是最新版本 v{CurrentVersion}");
+                return UpdateResult.AlreadyLatest($"已是最新版本 v{FormatVersion(CurrentVersion)}");
 
             // 新更新器优先裸 exe；老 Release 只有 zip 时兜底
             var single = latest.Assets.FirstOrDefault(a =>

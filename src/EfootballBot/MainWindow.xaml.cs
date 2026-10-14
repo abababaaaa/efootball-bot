@@ -58,7 +58,7 @@ public partial class MainWindow : Window
 
         // 初始化文件日志（早于 BotEngine 创建，否则第一条日志会丢失）
         FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles, _cfg.LogRetentionDays);
-        AppendLog($"应用启动：v{typeof(MainWindow).Assembly.GetName().Version?.ToString(3)}，" +
+        AppendLog($"应用启动：v{Updater.FormatVersion(typeof(MainWindow).Assembly.GetName().Version)}，" +
             $"{Environment.OSVersion.VersionString}", LogLevel.Info);
 
         // 启动后自动检查更新（不阻塞 UI）

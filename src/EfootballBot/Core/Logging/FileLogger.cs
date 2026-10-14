@@ -86,7 +86,7 @@ public sealed class FileLogger : IDisposable
                 _writer.WriteLine($"started: \"{DateTime.Now:yyyy-MM-dd HH:mm:ss}\"");
                 // 环境自述：用户回传日志时一眼定位版本与系统，不再靠猜
                 //（2026-10-13 logs.rar 全是空白会话，连用户跑的哪个版本都无法确认）
-                _writer.WriteLine(EscapeYamlScalar("version", typeof(FileLogger).Assembly.GetName().Version?.ToString(3) ?? "?"));
+                _writer.WriteLine(EscapeYamlScalar("version", Updater.FormatVersion(typeof(FileLogger).Assembly.GetName().Version)));
                 _writer.WriteLine(EscapeYamlScalar("os", Environment.OSVersion.VersionString));
                 _writer.WriteLine(EscapeYamlScalar("exe", Environment.ProcessPath ?? ""));
                 _writer.WriteLine(EscapeYamlScalar("cmd", Environment.CommandLine));

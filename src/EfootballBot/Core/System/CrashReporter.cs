@@ -83,7 +83,7 @@ public static class CrashReporter
             string dir = Path.Combine(AppPaths.DataDir, "crash");
             Directory.CreateDirectory(dir);
             PruneOldDumps(dir, keep: 2); // 加上本次共 3 份
-            string ver = typeof(CrashReporter).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+            string ver = Updater.FormatVersion(typeof(CrashReporter).Assembly.GetName().Version);
             string file = Path.Combine(dir,
                 $"crash_{source}_v{ver}_{DateTime.Now:yyyyMMdd_HHmmss}.dmp");
 

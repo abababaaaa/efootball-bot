@@ -28,7 +28,7 @@ public static class DiagReporter
     public static async Task<string> CollectAsync(Action<string>? progress = null, CancellationToken ct = default, string? userNote = null)
     {
         string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
-        string ver = typeof(Updater).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
+        string ver = Updater.FormatVersion(typeof(Updater).Assembly.GetName().Version);
         string root = Path.Combine(AppPaths.DataDir, "DiagReport");
         string dir = Path.Combine(root, $"反馈包_{ts}");
         string zip = Path.Combine(root, $"反馈包_v{ver}_{ts}.zip");
@@ -50,7 +50,7 @@ public static class DiagReporter
 
         report.AppendLine("eFootball Bot diagnostic report");
         report.AppendLine($"Generated   : {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-        report.AppendLine($"App version : v{typeof(Updater).Assembly.GetName().Version?.ToString(3)}");
+        report.AppendLine($"App version : v{Updater.FormatVersion(typeof(Updater).Assembly.GetName().Version)}");
         report.AppendLine($"App dir     : {AppPaths.ExeDir}");
         report.AppendLine("note: report body is UTF-8; dxdiag.txt is kept exactly as dxdiag wrote it.");
         report.AppendLine("note: this scan is read-only, nothing on the system was changed.");

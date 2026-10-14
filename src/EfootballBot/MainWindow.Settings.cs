@@ -169,7 +169,7 @@ public partial class MainWindow
         _loadingConfig = false;
 
         // 自动更新
-        TxtCurrentVersion.Text = "v" + Updater.CurrentVersion;
+        TxtCurrentVersion.Text = "v" + Updater.FormatVersion(Updater.CurrentVersion);
         TxtUpdateRepo.Text = Updater.DefaultRepository;
         ChkCheckOnStartup.IsChecked = _cfg.Update.CheckOnStartup;
         ChkIncludePrerelease.IsChecked = _cfg.Update.IncludePrerelease;
@@ -679,7 +679,7 @@ public partial class MainWindow
     private void ShowUpdateBanner(UpdateInfo info)
     {
         TxtUpdateBannerTitle.Text = $"发现新版本 v{info.Version}";
-        TxtUpdateBannerDesc.Text = $"当前 v{Updater.CurrentVersion} → v{info.Version}，点击右侧立即更新";
+        TxtUpdateBannerDesc.Text = $"当前 v{Updater.FormatVersion(Updater.CurrentVersion)} → v{info.Version}，点击右侧立即更新";
         UpdateBanner.Visibility = Visibility.Visible;
     }
 
