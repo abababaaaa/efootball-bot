@@ -260,52 +260,86 @@ public static class Updater
             } // using 结束自动释放文件句柄
 
             // 生成批处理脚本（比 PowerShell 更兼容，无执行策略问题）。
-            // 关键：GUI 退出后 Worker 子进程（同名 EfootballBot.exe）可能还活着并锁住 exe 文件，
-            // 直接 copy/xcopy 会静默失败、旧程序原地复活（2026-10-14 用户实测踩坑）——
-            // 所以必须先 taskkill 清掉所有同名残留进程再替换。
+            // 关键设计（v2.0.5.2 重构，修复"更新后旧版复活"）：
+            // ① bat 文件本体纯 ASCII——所有含中文的路径改由命令行参数传入（%1~%6），
+            //   cmd 以 Unicode 处理参数、不经过文件字节解析。旧版把中文路径内嵌在 bat 里
+            //   且先 chcp 65001：cmd 中途切代码页后按新编码重读文件，非 ASCII 字节行为
+            //   未定义，copy 等行可能整段被跳过——更新静默失败、旧版复活且无日志可查；
+            // ② 替换重试最多 10 次 + 裸 exe 大小校验——GUI/Worker 退出与杀软扫描新下载的
+            //   172MB exe 都会短暂锁住目标文件（v2.0.4 只等 1 秒、失败不检查照常 start 旧版）；
+            // ③ 全程写 data\update.log——远程排障可直接要这份文件；
+            // ④ 不再在 bat 里删临时目录（运行中自删会让 cmd 后续行不执行），
+            //   残留由 CleanupStaleTemp 在应用启动时清理。
             string exePath = Environment.ProcessPath!;
             string exeName = Path.GetFileName(exePath);
             string exeDir = Path.GetDirectoryName(exePath)!;
-            string batPath = Path.Combine(tempDir, "update.bat");
-            string kill = $@"taskkill /F /IM ""{exeName}"" >nul 2>&1
-timeout /t 1 /nobreak >nul";
-            string bat;
-            if (info.SingleExecutable)
+            string logPath = Path.Combine(AppPaths.DataDir, "update.log");
+
+            // zip 分支：先在托管侧解压（bat 只做纯 ASCII 的树拷贝），替换源改为解压目录
+            string replaceSource = downloadPath;
+            if (!info.SingleExecutable)
             {
-                // 裸 exe：清残留进程 → 直接覆盖本体 → 重启（免解压）
-                bat = $@"@echo off
-chcp 65001 >nul
-timeout /t 2 /nobreak >nul
-{kill}
-copy /Y ""{downloadPath}"" ""{exePath}""
-del /Q ""{exeDir}\EfootballBot.pdb"" >nul 2>&1
-start """" ""{exePath}""
-rmdir /S /Q ""{tempDir}""
-";
-            }
-            else
-            {
-                // zip：清残留进程 → 解压 → 整目录覆盖 → 重启
                 string extractDir = Path.Combine(tempDir, "extracted");
                 ZipFile.ExtractToDirectory(downloadPath, extractDir);
                 try { File.Delete(downloadPath); } catch { }
-                bat = $@"@echo off
-chcp 65001 >nul
-timeout /t 2 /nobreak >nul
-{kill}
-xcopy /E /I /Y /Q ""{extractDir}\*"" ""{exeDir}""
-del /Q ""{exeDir}\EfootballBot.pdb"" >nul 2>&1
-start """" ""{exePath}""
-rmdir /S /Q ""{tempDir}""
+                replaceSource = extractDir;
+            }
+
+            // 参数语义： %1=替换源(新exe/解压目录) %2=替换目标(exe路径/安装目录)
+            //            %3=exe目录(pdb清理)  %4=日志路径  %5=进程名(taskkill)  %6=启动目标(exe路径)
+            string bat = @"@echo off
+setlocal
+echo [%date% %time%] === update begin ===>>""%~4""
+taskkill /F /IM ""%~5"" >>""%~4"" 2>&1
+ping -n 2 127.0.0.1 >nul
+taskkill /F /IM ""%~5"" >>""%~4"" 2>&1
+set /a tries=0
+:retry
+set /a tries+=1
+";
+            bat += info.SingleExecutable
+                ? @"copy /Y ""%~1"" ""%~2"" >>""%~4"" 2>&1
+"
+                : @"xcopy /E /I /Y /Q ""%~1\*"" ""%~2\"" >>""%~4"" 2>&1
+";
+            bat += @"if not errorlevel 1 goto verify
+echo [%date% %time%] replace failed, try %tries% >>""%~4""
+if %tries% geq 10 goto fail
+ping -n 3 127.0.0.1 >nul
+goto retry
+:verify
+";
+            if (info.SingleExecutable)
+            {
+                // 大小校验：copy 报成功但目标残缺（磁盘满/杀软截断）也重试
+                bat += @"for %%A in (""%~1"") do set SRC=%%~zA
+for %%A in (""%~2"") do set DST=%%~zA
+if ""%SRC%""==""%DST%"" goto ok
+echo [%date% %time%] size mismatch src=%SRC% dst=%DST%, try %tries% >>""%~4""
+if %tries% geq 10 goto fail
+ping -n 2 127.0.0.1 >nul
+goto retry
 ";
             }
+            bat += @":ok
+echo [%date% %time%] replace ok, relaunch >>""%~4""
+del /Q ""%~3\EfootballBot.pdb"" >nul 2>&1
+start """" ""%~6""
+echo [%date% %time%] === update done ===>>""%~4""
+exit /b 0
+:fail
+echo [%date% %time%] === update FAILED after retries, relaunch old exe ===>>""%~4""
+start """" ""%~6""
+exit /b 1
+";
+            string batPath = Path.Combine(tempDir, "update.bat");
             File.WriteAllText(batPath, bat);
 
             // 启动脚本（独立进程，等当前进程退出后执行替换）
             Process.Start(new ProcessStartInfo
             {
                 FileName = "cmd.exe",
-                Arguments = $"/c \"\"{batPath}\"\"",
+                Arguments = $"/c \"\"{batPath}\"\" \"{replaceSource}\" \"{(info.SingleExecutable ? exePath : exeDir)}\" \"{exeDir}\" \"{logPath}\" \"{exeName}\" \"{exePath}\"",
                 CreateNoWindow = true,
                 WindowStyle = ProcessWindowStyle.Hidden,
             });
@@ -316,6 +350,26 @@ rmdir /S /Q ""{tempDir}""
         {
             return UpdateResult.Error($"更新失败：{ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 清理历史更新残留的临时目录（v2.0.5.2 起更新 bat 不再自删临时目录——运行中自删会让
+    /// cmd 读不到后续行；残留目录含下载的旧 exe，攒着占盘）。保留 24 小时内的目录：
+    /// 更新刚完成后新进程若需对照排查还要用。应用启动时后台调用，失败静默。
+    /// </summary>
+    public static void CleanupStaleTemp()
+    {
+        try
+        {
+            string root = Path.Combine(AppPaths.TempDir, "update");
+            if (!Directory.Exists(root)) return;
+            foreach (string dir in Directory.EnumerateDirectories(root))
+            {
+                if (DateTime.Now - Directory.GetLastWriteTime(dir) <= TimeSpan.FromDays(1)) continue;
+                try { Directory.Delete(dir, recursive: true); } catch { /* 占用中下轮再清 */ }
+            }
+        }
+        catch { /* 清理失败不影响启动 */ }
     }
 }
 

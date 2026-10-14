@@ -64,6 +64,9 @@ public partial class MainWindow : Window
         // 启动后自动检查更新（不阻塞 UI）
         _ = AutoCheckUpdateOnStartupAsync();
 
+        // 清理历史更新残留的临时目录（旧版更新 bat 不再自删，见 Updater.CleanupStaleTemp）
+        _ = System.Threading.Tasks.Task.Run(Updater.CleanupStaleTemp);
+
         _previewTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(300) };
         _previewTimer.Tick += (_, _) => UpdatePreviewFrame();
         _statsTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
