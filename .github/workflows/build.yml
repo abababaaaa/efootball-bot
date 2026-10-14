@@ -44,13 +44,15 @@ jobs:
 
       - name: Create zip
         shell: pwsh
-        run: Compress-Archive -Path publish\* -DestinationPath publish\efootball-bot-win-x64.zip -Force
+        run: Compress-Archive -Path publish\EfootballBot.exe -DestinationPath publish\efootball-bot-win-x64.zip -Force
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: efootball-bot
-          path: publish/efootball-bot-win-x64.zip
+          path: |
+            publish/efootball-bot-win-x64.zip
+            publish/EfootballBot.pdb
 
   release:
     needs: build
@@ -68,7 +70,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: release-artifact/efootball-bot-win-x64.zip
+          files: |
+            release-artifact/efootball-bot-win-x64.zip
+            release-artifact/EfootballBot.pdb
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
@@ -163,6 +167,15 @@ jobs:
               "$api/releases/$releaseId/attach_files?access_token=$token" 2>&1
             Write-Host (Mask ($out | Out-String))
             if ($LASTEXITCODE -ne 0) { throw "upload failed: $f" }
+          }
+
+          # 3b) pdb 调试符号单独上传（165KB，崩溃 dump 解析用，用户无需下载）
+          $pdb = 'release-artifact/EfootballBot.pdb'
+          if (Test-Path $pdb) {
+            $out = & curl.exe -sS -X POST `
+              -F "file=@$pdb" `
+              "$api/releases/$releaseId/attach_files?access_token=$token" 2>&1
+            Write-Host (Mask ($out | Out-String))
           }
 
           # 4) 清理旧发行版：只保留最近 5 个（Gitee 免费附件总量 1GB）
