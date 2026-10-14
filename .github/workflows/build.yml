@@ -66,6 +66,16 @@ jobs:
           name: efootball-bot
           path: release-artifact
 
+      # 测试版=4 段数字 tag（v2.0.5.1，迭代递增第 4 段）；带横杠 tag 不可用（更新器 Version.TryParse 解析失败）。
+      # with: 表达式不支持 =~ 正则（v2.0.5.1 首发实测：Unexpected symbol '=~'），先在 step 里算好再引用
+      - name: Resolve prerelease flag
+        id: meta
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $pre = $tag -like '*-*' -or $tag -match '^v\d+\.\d+\.\d+\.\d+$'
+          "prerelease=$(if ($pre) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         env:
@@ -76,8 +86,7 @@ jobs:
             release-artifact/efootball-bot-win-x64.zip
           generate_release_notes: true
           draft: false
-          # 测试版=4 段数字 tag（v2.0.5.1，迭代递增第 4 段）；带横杠 tag 不可用（更新器 Version.TryParse 解析失败）
-          prerelease: ${{ contains(github.ref_name, '-') || github.ref_name =~ '^v[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$' }}
+          prerelease: ${{ steps.meta.outputs.prerelease }}
 
       # ---- 国内更新源（Gitee）同步：失败不阻塞 GitHub Release（continue-on-error）----
       # 前提：仓库 Secrets 配置 GITEE_TOKEN（projects 权限），Gitee 上已建 abababaaaa/efootball-bot。
