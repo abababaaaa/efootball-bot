@@ -72,3 +72,108 @@ jobs:
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
+
+      # ---- 国内更新源（Gitee）同步：失败不阻塞 GitHub Release（continue-on-error）----
+      # 前提：仓库 Secrets 配置 GITEE_TOKEN（projects 权限），Gitee 上已建 abababaaaa/efootball-bot。
+      - name: Push mirror to Gitee
+        continue-on-error: true
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+        run: |
+          git remote add gitee "https://oauth2:$env:GITEE_TOKEN@gitee.com/abababaaaa/efootball-bot.git"
+          git push gitee HEAD:main --force
+          git push gitee "refs/tags/${{ github.ref_name }}" --force
+
+      - name: Sync release to Gitee
+        continue-on-error: true
+        env:
+          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
+          GITEE_REPO: abababaaaa/efootball-bot
+          TAG_NAME: ${{ github.ref_name }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $token = $env:GITEE_TOKEN
+          $repo = $env:GITEE_REPO
+          $tag = $env:TAG_NAME
+          $api = "https://gitee.com/api/v5/repos/$repo"
+          # 所有 API 输出先脱敏 token 再落日志
+          function Mask($s) { if ($s) { $s -replace [regex]::Escape($token), '***' } else { $s } }
+
+          $prerelease = if ($tag -like '*-*') { 'true' } else { 'false' }
+          $zip = 'release-artifact/efootball-bot-win-x64.zip'
+
+          # 1) 建发行版；已存在则取既有 id（幂等，可重跑）
+          $releaseId = $null
+          try {
+            $body = @{
+              access_token     = $token
+              tag_name         = $tag
+              name             = $tag
+              body             = "自动同步自 GitHub Release（国内直连下载）。"
+              prerelease       = $prerelease
+              target_commitish = 'main'
+            }
+            $r = Invoke-RestMethod -Method Post -Uri "$api/releases" -Body $body -ContentType 'application/x-www-form-urlencoded'
+            $releaseId = $r.id
+            Write-Host "Gitee release created: id=$releaseId"
+          } catch {
+            Write-Host ("create failed (maybe exists): " + (Mask $_.Exception.Message))
+            try {
+              $r = Invoke-RestMethod -Uri "$api/releases/tags/$tag?access_token=$token"
+              $releaseId = $r.id
+              Write-Host "Gitee release exists: id=$releaseId"
+            } catch {
+              Write-Host ("cannot resolve existing release: " + (Mask $_.Exception.Message))
+              exit 0
+            }
+          }
+
+          # 2) Gitee 免费单附件 <=100MB，zip 约 160MB → 按 95MB 分卷（.zip.001/.zip.002…）
+          $partsDir = Join-Path $env:RUNNER_TEMP 'gitee-parts'
+          New-Item -ItemType Directory -Force -Path $partsDir | Out-Null
+          $files = @()
+          $chunk = 95MB
+          $fs = [IO.File]::OpenRead((Resolve-Path $zip))
+          try {
+            $buf = New-Object byte[] (4MB)
+            $idx = 1
+            while ($fs.Position -lt $fs.Length) {
+              $part = Join-Path $partsDir ("efootball-bot-win-x64.zip.{0:d3}" -f $idx)
+              $out = [IO.File]::Create($part)
+              try {
+                $left = [Math]::Min($chunk, $fs.Length - $fs.Position)
+                while ($left -gt 0) {
+                  $n = $fs.Read($buf, 0, [int][Math]::Min($buf.Length, $left))
+                  if ($n -le 0) { break }
+                  $out.Write($buf, 0, $n)
+                  $left -= $n
+                }
+              } finally { $out.Dispose() }
+              $files += $part
+              $idx++
+            }
+          } finally { $fs.Dispose() }
+          Write-Host ("split into {0} part(s)" -f $files.Count)
+
+          # 3) 逐卷上传（curl.exe = Windows 自带真实 curl，multipart 大文件可靠）
+          foreach ($f in $files) {
+            $out = & curl.exe -sS -X POST `
+              -F "file=@$f" `
+              "$api/releases/$releaseId/attach_files?access_token=$token" 2>&1
+            Write-Host (Mask ($out | Out-String))
+            if ($LASTEXITCODE -ne 0) { throw "upload failed: $f" }
+          }
+
+          # 4) 清理旧发行版：只保留最近 5 个（Gitee 免费附件总量 1GB）
+          try {
+            $all = Invoke-RestMethod -Uri "$api/releases?per_page=100&access_token=$token"
+            $old = $all | Sort-Object { [datetime]::Parse($_.created_at) } -Descending | Select-Object -Skip 5
+            foreach ($o in $old) {
+              Write-Host "deleting old release: $($o.tag_name)"
+              $out = & curl.exe -sS -X DELETE "$api/releases/$($o.id)?access_token=$token" 2>&1
+              Write-Host (Mask ($out | Out-String))
+            }
+          } catch {
+            Write-Host ("cleanup failed (non-fatal): " + (Mask $_.Exception.Message))
+          }

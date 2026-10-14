@@ -988,6 +988,10 @@
                                     <ColumnDefinition Width="*"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition/>
+                                    <RowDefinition/>
+                                </Grid.RowDefinitions>
                                 <Border Background="{DynamicResource Surface2}" CornerRadius="8" Padding="12,9" Margin="0,0,6,0">
                                     <StackPanel>
                                         <TextBlock Text="当前版本" Foreground="{DynamicResource TextMuted}" FontSize="10.5"/>
@@ -1003,6 +1007,16 @@
                                                    Foreground="{DynamicResource AccentGlow}" FontSize="12.5"
                                                    Margin="0,5,0,0" Cursor="Hand" ToolTip="打开仓库主页"
                                                    MouseLeftButtonUp="TxtUpdateRepo_MouseLeftButtonUp"/>
+                                    </StackPanel>
+                                </Border>
+                                <Border Grid.Row="1" Grid.ColumnSpan="2" Background="{DynamicResource Surface2}" CornerRadius="8"
+                                        Padding="12,9" Margin="0,8,0,0">
+                                    <StackPanel>
+                                        <TextBlock Text="国内更新源（Gitee，优先使用）" Foreground="{DynamicResource TextMuted}" FontSize="10.5"/>
+                                        <TextBlock x:Name="TxtUpdateGitee" Text="abababaaaa/efootball-bot"
+                                                   Foreground="{DynamicResource AccentGlow}" FontSize="12.5"
+                                                   Margin="0,5,0,0" Cursor="Hand" ToolTip="打开国内镜像仓库"
+                                                   MouseLeftButtonUp="TxtUpdateGitee_MouseLeftButtonUp"/>
                                     </StackPanel>
                                 </Border>
                             </Grid>
