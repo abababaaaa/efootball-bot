@@ -119,13 +119,13 @@ jobs:
               prerelease       = $prerelease
               target_commitish = 'main'
             }
-            $r = Invoke-RestMethod -Method Post -Uri "$api/releases" -Body $body -ContentType 'application/x-www-form-urlencoded'
+            $r = Invoke-RestMethod -TimeoutSec 40 -Method Post -Uri "$api/releases" -Body $body -ContentType 'application/x-www-form-urlencoded'
             $releaseId = $r.id
             Write-Host "Gitee release created: id=$releaseId"
           } catch {
             Write-Host ("create failed (maybe exists): " + (Mask $_.Exception.Message))
             try {
-              $r = Invoke-RestMethod -Uri "$api/releases/tags/$tag?access_token=$token"
+              $r = Invoke-RestMethod -TimeoutSec 40 -Uri "$api/releases/tags/$tag?access_token=$token"
               $releaseId = $r.id
               Write-Host "Gitee release exists: id=$releaseId"
             } catch {
@@ -164,7 +164,7 @@ jobs:
 
           # 3) 逐卷上传（curl.exe = Windows 自带真实 curl，multipart 大文件可靠）
           foreach ($f in $files) {
-            $out = & curl.exe -sS -X POST `
+            $out = & curl.exe -sS --max-time 600 -X POST `
               -F "file=@$f" `
               "$api/releases/$releaseId/attach_files?access_token=$token" 2>&1
             Write-Host (Mask ($out | Out-String))
@@ -176,11 +176,11 @@ jobs:
 
           # 4) 清理旧发行版：只保留最近 5 个（Gitee 免费附件总量 1GB）
           try {
-            $all = Invoke-RestMethod -Uri "$api/releases?per_page=100&access_token=$token"
+              $all = Invoke-RestMethod -TimeoutSec 40 -Uri "$api/releases?per_page=100&access_token=$token"
             $old = $all | Sort-Object { [datetime]::Parse($_.created_at) } -Descending | Select-Object -Skip 5
             foreach ($o in $old) {
               Write-Host "deleting old release: $($o.tag_name)"
-              $out = & curl.exe -sS -X DELETE "$api/releases/$($o.id)?access_token=$token" 2>&1
+              $out = & curl.exe -sS --max-time 60 -X DELETE "$api/releases/$($o.id)?access_token=$token" 2>&1
               Write-Host (Mask ($out | Out-String))
             }
           } catch {
