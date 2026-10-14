@@ -259,31 +259,42 @@ public static class Updater
                 }
             } // using 结束自动释放文件句柄
 
-            // 生成批处理脚本（比 PowerShell 更兼容，无执行策略问题）
+            // 生成批处理脚本（比 PowerShell 更兼容，无执行策略问题）。
+            // 关键：GUI 退出后 Worker 子进程（同名 EfootballBot.exe）可能还活着并锁住 exe 文件，
+            // 直接 copy/xcopy 会静默失败、旧程序原地复活（2026-10-14 用户实测踩坑）——
+            // 所以必须先 taskkill 清掉所有同名残留进程再替换。
             string exePath = Environment.ProcessPath!;
+            string exeName = Path.GetFileName(exePath);
+            string exeDir = Path.GetDirectoryName(exePath)!;
             string batPath = Path.Combine(tempDir, "update.bat");
+            string kill = $@"taskkill /F /IM ""{exeName}"" >nul 2>&1
+timeout /t 1 /nobreak >nul";
             string bat;
             if (info.SingleExecutable)
             {
-                // 裸 exe：等进程退出 → 直接覆盖本体 → 重启（免解压）
+                // 裸 exe：清残留进程 → 直接覆盖本体 → 重启（免解压）
                 bat = $@"@echo off
 chcp 65001 >nul
 timeout /t 2 /nobreak >nul
+{kill}
 copy /Y ""{downloadPath}"" ""{exePath}""
+del /Q ""{exeDir}\EfootballBot.pdb"" >nul 2>&1
 start """" ""{exePath}""
 rmdir /S /Q ""{tempDir}""
 ";
             }
             else
             {
-                // zip：解压 → 整目录覆盖 → 重启
+                // zip：清残留进程 → 解压 → 整目录覆盖 → 重启
                 string extractDir = Path.Combine(tempDir, "extracted");
                 ZipFile.ExtractToDirectory(downloadPath, extractDir);
                 try { File.Delete(downloadPath); } catch { }
                 bat = $@"@echo off
 chcp 65001 >nul
 timeout /t 2 /nobreak >nul
-xcopy /E /I /Y /Q ""{extractDir}\*"" ""{Path.GetDirectoryName(exePath)}""
+{kill}
+xcopy /E /I /Y /Q ""{extractDir}\*"" ""{exeDir}""
+del /Q ""{exeDir}\EfootballBot.pdb"" >nul 2>&1
 start """" ""{exePath}""
 rmdir /S /Q ""{tempDir}""
 ";

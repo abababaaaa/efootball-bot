@@ -467,6 +467,7 @@ public partial class MainWindow
         {
             var result = await Task.Run(() => Updater.CheckAsync(includePrerelease: _cfg.Update.IncludePrerelease, force: true));
             TxtUpdateStatus.Text = result.Message;
+            AppendLog($"检查更新：{result.Message}", result.IsError ? LogLevel.Warn : LogLevel.Info);
             BtnApplyUpdate.IsEnabled = result.IsAvailable;
             _pendingUpdate = result.Info;
             if (result.IsAvailable && result.Info is not null)
@@ -547,8 +548,16 @@ public partial class MainWindow
 
         try
         {
+            // 记录下载来源域名（Gitee/GitHub）与体积——国内下载慢/失败时反馈包里可据此定位
+            try
+            {
+                string host = new Uri(_pendingUpdate.DownloadUrls[0]).Host;
+                AppendLog($"开始下载 v{_pendingUpdate.Version}（来源 {host}，约 {_pendingUpdate.TotalBytes / 1024 / 1024} MB）", LogLevel.Info);
+            }
+            catch { }
             var result = await Task.Run(() => Updater.DownloadAndApplyAsync(_pendingUpdate, progress));
             TxtUpdateStatus.Text = result.Message;
+            AppendLog($"应用更新：{result.Message}", result.IsError ? LogLevel.Error : LogLevel.Success);
             if (result.Applied)
             {
                 AppendLog("更新已下载，启动时自动替换后重启。", LogLevel.Success);
