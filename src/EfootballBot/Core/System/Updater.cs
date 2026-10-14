@@ -116,12 +116,12 @@ public static class Updater
             if (remoteVer <= CurrentVersion)
                 return UpdateResult.AlreadyLatest($"已是最新版本 v{CurrentVersion}");
 
-            var picked = PickZipAssets(latest.Assets);
+            var picked = PickAssets(latest.Assets);
             if (picked is null)
-                return UpdateResult.Error($"Release v{remoteVer} 没有 .zip 资产");
+                return UpdateResult.Error($"Release v{remoteVer} 没有可用的 exe/zip 资产");
 
-            var (urls, total) = picked.Value;
-            return UpdateResult.Available(remoteVer, latest.Name ?? latest.Tag_Name, urls, total, latest.Body);
+            var (urls, total, singleExe) = picked.Value;
+            return UpdateResult.Available(remoteVer, latest.Name ?? latest.Tag_Name, urls, total, latest.Body, singleExe);
         }
         catch (Exception ex)
         {
@@ -161,13 +161,17 @@ public static class Updater
             if (remoteVer <= CurrentVersion)
                 return UpdateResult.AlreadyLatest($"已是最新版本 v{CurrentVersion}");
 
+            // 新更新器优先裸 exe；老 Release 只有 zip 时兜底
             var single = latest.Assets.FirstOrDefault(a =>
+                a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+                ?? latest.Assets.FirstOrDefault(a =>
                 a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
             if (single is null)
-                return UpdateResult.Error($"Release v{remoteVer} 没有 .zip 资产");
+                return UpdateResult.Error($"Release v{remoteVer} 没有 exe/zip 资产");
 
             return UpdateResult.Available(remoteVer, latest.Name ?? latest.Tag_Name,
-                new List<string> { single.Browser_Download_Url }, single.Size, latest.Body);
+                new List<string> { single.Browser_Download_Url }, single.Size, latest.Body,
+                single.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
         }
         catch (HttpRequestException ex)
         {
@@ -183,24 +187,30 @@ public static class Updater
         => DateTime.TryParse(s, out var d) ? d : DateTime.MinValue;
 
     /// <summary>
-    /// 从资产列表选发布包：优先单个 .zip；否则取 .zip.001/.zip.002… 分卷（按序号排序）。
-    /// 返回（下载 URL 序列, 总字节数）；没有可用资产返回 null。
+    /// 从资产列表选发布包：优先单个 .exe/.zip；否则取 .exe.001/.zip.001… 分卷（按序号排序）。
+    /// 返回（下载 URL 序列, 总字节数, 是否裸 exe）；没有可用资产返回 null。
     /// </summary>
-    private static (List<string> Urls, long Total)? PickZipAssets(List<GiteeAsset>? assets)
+    private static (List<string> Urls, long Total, bool SingleExecutable)? PickAssets(List<GiteeAsset>? assets)
     {
         var list = assets ?? new();
-        var single = list.FirstOrDefault(a => a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
+        var single = list.FirstOrDefault(a =>
+            a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            || a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
         if (single is not null)
-            return (new List<string> { single.Browser_Download_Url }, single.Size);
+            return (new List<string> { single.Browser_Download_Url }, single.Size,
+                single.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
 
         var parts = list
-            .Select(a => (Asset: a, Match: Regex.Match(a.Name, @"\.zip\.(\d+)$", RegexOptions.IgnoreCase)))
+            .Select(a => (Asset: a, Match: Regex.Match(a.Name, @"\.(exe|zip)\.(\d+)$", RegexOptions.IgnoreCase)))
             .Where(x => x.Match.Success)
-            .OrderBy(x => int.Parse(x.Match.Groups[1].Value))
+            .OrderBy(x => int.Parse(x.Match.Groups[2].Value))
             .ToList();
         if (parts.Count == 0)
             return null;
-        return (parts.Select(x => x.Asset.Browser_Download_Url).ToList(), parts.Sum(x => x.Asset.Size));
+        var isExe = parts[0].Asset.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
+            || parts[0].Asset.Name.Contains(".exe.", StringComparison.OrdinalIgnoreCase);
+        return (parts.Select(x => x.Asset.Browser_Download_Url).ToList(),
+            parts.Sum(x => x.Asset.Size), isExe);
     }
 
     private static UpdateResult Cache(UpdateResult r, string key)
@@ -211,7 +221,8 @@ public static class Updater
         return r;
     }
 
-    /// <summary>下载并应用更新——下载（多源地址时按序追加为同一文件）到唯一临时目录，解压，启动 bat 脚本替换 exe 后重启。</summary>
+    /// <summary>下载并应用更新——下载（多源地址时按序追加为同一文件）到唯一临时目录；
+    /// 裸 exe 直接替换本程序后重启，zip 解压后整目录覆盖。</summary>
     public static async Task<UpdateResult> DownloadAndApplyAsync(UpdateInfo info,
         IProgress<(long Bytes, long Total)>? progress = null)
     {
@@ -221,7 +232,8 @@ public static class Updater
             // 临时下载放 exe 旁 data\tmp\（2026-10-11 用户要求：所有操作收在程序目录内）
             string tempDir = Path.Combine(AppPaths.TempDir, "update", Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(tempDir);
-            string zipPath = Path.Combine(tempDir, "update.zip");
+            string downloadPath = Path.Combine(tempDir,
+                info.SingleExecutable ? Path.GetFileName(Environment.ProcessPath!) : "update.zip");
 
             // 下载（Gitee 分卷或 GitHub 单文件统一按 URL 序列顺序追加）
             using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
@@ -229,7 +241,7 @@ public static class Updater
             long total = info.TotalBytes;
             long read = 0;
             progress?.Report((0, total));
-            using (var file = new FileStream(zipPath, FileMode.Create, FileAccess.Write, FileShare.None))
+            using (var file = new FileStream(downloadPath, FileMode.Create, FileAccess.Write, FileShare.None))
             {
                 var buffer = new byte[81920];
                 foreach (var url in info.DownloadUrls)
@@ -247,23 +259,35 @@ public static class Updater
                 }
             } // using 结束自动释放文件句柄
 
-            // 解压
-            string extractDir = Path.Combine(tempDir, "extracted");
-            ZipFile.ExtractToDirectory(zipPath, extractDir);
-            // 解压后删除 zip，释放文件句柄
-            try { File.Delete(zipPath); } catch { }
-
             // 生成批处理脚本（比 PowerShell 更兼容，无执行策略问题）
-            // 脚本逻辑：等 2 秒（让当前进程退出）→ 复制新文件 → 启动新 exe → 清理临时目录
-            string exeDir = Path.GetDirectoryName(Environment.ProcessPath!)!;
+            string exePath = Environment.ProcessPath!;
             string batPath = Path.Combine(tempDir, "update.bat");
-            string bat = $@"@echo off
+            string bat;
+            if (info.SingleExecutable)
+            {
+                // 裸 exe：等进程退出 → 直接覆盖本体 → 重启（免解压）
+                bat = $@"@echo off
 chcp 65001 >nul
 timeout /t 2 /nobreak >nul
-xcopy /E /I /Y /Q ""{extractDir}\*"" ""{exeDir}""
-start """" ""{Environment.ProcessPath}""
+copy /Y ""{downloadPath}"" ""{exePath}""
+start """" ""{exePath}""
 rmdir /S /Q ""{tempDir}""
 ";
+            }
+            else
+            {
+                // zip：解压 → 整目录覆盖 → 重启
+                string extractDir = Path.Combine(tempDir, "extracted");
+                ZipFile.ExtractToDirectory(downloadPath, extractDir);
+                try { File.Delete(downloadPath); } catch { }
+                bat = $@"@echo off
+chcp 65001 >nul
+timeout /t 2 /nobreak >nul
+xcopy /E /I /Y /Q ""{extractDir}\*"" ""{Path.GetDirectoryName(exePath)}""
+start """" ""{exePath}""
+rmdir /S /Q ""{tempDir}""
+";
+            }
             File.WriteAllText(batPath, bat);
 
             // 启动脚本（独立进程，等当前进程退出后执行替换）
@@ -285,7 +309,8 @@ rmdir /S /Q ""{tempDir}""
 }
 
 /// <param name="DownloadUrls">下载地址序列：GitHub 单文件为 1 个；Gitee 大包分卷时按 .001/.002… 顺序多个。</param>
-public record UpdateInfo(Version Version, string Name, IReadOnlyList<string> DownloadUrls, long TotalBytes, string? Body);
+/// <param name="SingleExecutable">true=裸 exe（下载后直接替换本体）；false=zip（解压整目录覆盖）。</param>
+public record UpdateInfo(Version Version, string Name, IReadOnlyList<string> DownloadUrls, long TotalBytes, string? Body, bool SingleExecutable);
 
 public class UpdateResult
 {
@@ -297,8 +322,8 @@ public class UpdateResult
     public UpdateInfo? Info { get; init; }
 
     public static UpdateResult AlreadyLatest(string msg) => new() { UpToDate = true, Message = msg };
-    public static UpdateResult Available(Version v, string name, IReadOnlyList<string> urls, long size, string? body)
-        => new() { IsAvailable = true, Info = new(v, name, urls, size, body), Message = $"发现新版本 v{v}" };
+    public static UpdateResult Available(Version v, string name, IReadOnlyList<string> urls, long size, string? body, bool singleExecutable)
+        => new() { IsAvailable = true, Info = new(v, name, urls, size, body, singleExecutable), Message = $"发现新版本 v{v}" };
     public static UpdateResult Error(string msg) => new() { IsError = true, Message = msg };
     public static UpdateResult Success(string msg) => new() { Applied = true, Message = msg };
 }

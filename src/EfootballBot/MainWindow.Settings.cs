@@ -408,7 +408,9 @@ public partial class MainWindow
         var progress = new Progress<string>(s => TxtDiagStatus.Text = s);
         try
         {
-            string result = await Task.Run(() => Core.System.DiagReporter.CollectAsync(s => ((IProgress<string>)progress).Report(s)));
+            string note = TxtDiagNote.Text;
+            string result = await Task.Run(() => Core.System.DiagReporter.CollectAsync(
+                s => ((IProgress<string>)progress).Report(s), userNote: note));
             TxtDiagStatus.Text = $"完成：{result}";
             AppendLog($"诊断报告已生成：{result}", LogLevel.Info);
             OpenDiagResult(result);

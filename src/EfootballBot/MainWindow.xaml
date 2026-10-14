@@ -932,6 +932,12 @@
                             </StackPanel>
                             <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520"
                                        Text="出问题点这里：一键收集系统环境信息（显卡与驱动、虚拟手柄栈、系统错误日志、Steam 位置）+ 本程序日志配置 + 自动记录的崩溃转储，打包成一个 zip 发到群里即可远程排查。全程只读，不改动系统任何设置。生成约需 1~2 分钟。"/>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,8,0,0"
+                                       Text="补充说明（可选）：描述遇到的现象，比如卡在哪一步、点了什么没反应、什么时候开始的——会写进反馈包，帮我们更快定位。"/>
+                            <TextBox x:Name="TxtDiagNote" Height="48" Margin="0,4,0,0" Padding="6,4"
+                                     VerticalScrollBarVisibility="Auto" MaxLength="500"
+                                     TextWrapping="Wrap" FontSize="11.5"
+                                     Background="{DynamicResource Surface2}" BorderBrush="#33FFFFFF"/>
                             <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                 <Button x:Name="BtnDiagReport" Content="生成反馈包" Style="{StaticResource GhostBtn}"
                                         Padding="14,7" Click="BtnDiagReport_Click"/>

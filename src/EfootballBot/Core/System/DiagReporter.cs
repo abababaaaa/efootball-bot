@@ -22,9 +22,10 @@ public static class DiagReporter
 
     /// <summary>
     /// 收集诊断并打包。返回 zip 路径；打包失败时返回报告目录路径。
-    /// <paramref name="progress"/> 收到分步进度文案（后台线程回调）。
+    /// <paramref name="progress"/> 收到分步进度文案（后台线程回调）；
+    /// <paramref name="userNote"/> 是用户在界面上填的问题描述（可选），写进包内 user_note.txt 与报告头部。
     /// </summary>
-    public static async Task<string> CollectAsync(Action<string>? progress = null, CancellationToken ct = default)
+    public static async Task<string> CollectAsync(Action<string>? progress = null, CancellationToken ct = default, string? userNote = null)
     {
         string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string ver = typeof(Updater).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
@@ -53,6 +54,19 @@ public static class DiagReporter
         report.AppendLine($"App dir     : {AppPaths.ExeDir}");
         report.AppendLine("note: report body is UTF-8; dxdiag.txt is kept exactly as dxdiag wrote it.");
         report.AppendLine("note: this scan is read-only, nothing on the system was changed.");
+
+        // 用户自己描述的问题现象放最显眼的位置（分析时先读这里）
+        if (!string.IsNullOrWhiteSpace(userNote))
+        {
+            report.AppendLine();
+            report.AppendLine("============ USER NOTE (用户对问题的描述) ============");
+            report.AppendLine(userNote.Trim());
+            try
+            {
+                await File.WriteAllTextAsync(Path.Combine(dir, "user_note.txt"), userNote.Trim(), Utf8Bom, ct);
+            }
+            catch { /* 写不进也继续 */ }
+        }
 
         progress?.Invoke("收集系统信息…");
         Head("SECTION 1 - RUN ENVIRONMENT");

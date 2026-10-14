@@ -44,13 +44,16 @@ jobs:
 
       - name: Create zip
         shell: pwsh
+        # zip 仅为 ≤2.0.2 旧版更新器兼容保留（它们只认 .zip 资产）；新更新器直接下裸 exe
         run: Compress-Archive -Path publish\EfootballBot.exe -DestinationPath publish\efootball-bot-win-x64.zip -Force
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: efootball-bot
-          path: publish/efootball-bot-win-x64.zip
+          path: |
+            publish/EfootballBot.exe
+            publish/efootball-bot-win-x64.zip
 
   release:
     needs: build
@@ -68,7 +71,9 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          files: release-artifact/efootball-bot-win-x64.zip
+          files: |
+            release-artifact/EfootballBot.exe
+            release-artifact/efootball-bot-win-x64.zip
           generate_release_notes: true
           draft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
@@ -101,7 +106,7 @@ jobs:
           function Mask($s) { if ($s) { $s -replace [regex]::Escape($token), '***' } else { $s } }
 
           $prerelease = if ($tag -like '*-*') { 'true' } else { 'false' }
-          $zip = 'release-artifact/efootball-bot-win-x64.zip'
+          $zip = 'release-artifact/EfootballBot.exe'
 
           # 1) 建发行版；已存在则取既有 id（幂等，可重跑）
           $releaseId = $null
@@ -129,7 +134,8 @@ jobs:
             }
           }
 
-          # 2) Gitee 免费单附件 <=100MB，zip 约 160MB → 按 95MB 分卷（.zip.001/.zip.002…）
+          # 2) Gitee 免费单附件 <=100MB，exe 约 160MB → 按 95MB 分卷（.exe.001/.exe.002…）
+          #    只传 exe 分卷（zip 不进 Gitee，省 1GB 附件配额；旧版更新器会自动回退 GitHub 的 zip）
           $partsDir = Join-Path $env:RUNNER_TEMP 'gitee-parts'
           New-Item -ItemType Directory -Force -Path $partsDir | Out-Null
           $files = @()
@@ -139,7 +145,7 @@ jobs:
             $buf = New-Object byte[] (4MB)
             $idx = 1
             while ($fs.Position -lt $fs.Length) {
-              $part = Join-Path $partsDir ("efootball-bot-win-x64.zip.{0:d3}" -f $idx)
+              $part = Join-Path $partsDir ("EfootballBot.exe.{0:d3}" -f $idx)
               $out = [IO.File]::Create($part)
               try {
                 $left = [Math]::Min($chunk, $fs.Length - $fs.Position)
