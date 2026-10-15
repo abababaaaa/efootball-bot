@@ -344,7 +344,9 @@ public partial class App : Application
         string procName = args.Length > 3 ? args[3] : BotEngine.CnProcessName;
         string? actions = args.Length > 4 ? args[4] : null;
 
-        string outDir = Path.Combine(Directory.GetCurrentDirectory(), "dump");
+        // 锚 exe 旁目录：v2.0.6 起强制管理员启动，UAC 提权拉起时 CWD 会被系统设为
+        // System32，跟着 CWD 走会把 dump 写进系统目录
+        string outDir = Path.Combine(AppPaths.ExeDir, "dump");
         Directory.CreateDirectory(outDir);
 
         var win = GameWindow.FindFirst(procName)

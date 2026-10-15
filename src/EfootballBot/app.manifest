@@ -4,7 +4,10 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+        <!-- 强制管理员启动（2026-10-15 用户要求）：游戏常被提权运行，UIPI 会拦截非提权
+             进程的后台停靠(SetWindowPos)与鼠标注入；提权后跨完整性级别操作全部放行。
+             代价：每次启动弹一次 UAC；更新链重启时旧版进程已提权则无感继承 -->
+        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>

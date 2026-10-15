@@ -203,11 +203,18 @@ public static class UpdateApplier
         }
     }
 
+    /// <summary>启动新版本实例。必须走 ShellExecute（Verb=runas）：v2.0.6 起 exe 清单强制
+    /// requireAdministrator，若本进程未提权（≤2.0.5.6 asInvoker 时代装的用户），CreateProcess
+    /// 启动提权 exe 直接报 Win32 740（ERROR_ELEVATION_REQUIRED），交换已完成后新实例起不来；
+    /// ShellExecute 则弹一次 UAC 征得同意。本进程已提权时无 UAC、无感继承。
+    /// 用户拒绝 UAC 时抛 Win32Exception——交换已就位、.old 备份保留，下次手动启动新 exe
+    /// 由 FinalizeAfterUpdate 收尾（四象限 DeleteOld）。</summary>
     internal static void LaunchNewVersion(string exePath)
     {
         using var p = Process.Start(new ProcessStartInfo(exePath, UpdatedArg)
         {
-            UseShellExecute = false,
+            UseShellExecute = true,
+            Verb = "runas",
         });
     }
 
