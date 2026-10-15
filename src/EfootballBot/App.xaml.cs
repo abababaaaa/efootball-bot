@@ -120,7 +120,7 @@ public partial class App : Application
             };
         }
         else
-            Startup += (_, _) => StartGui();
+            Startup += (_, _) => StartGui(fromUpdate: args.Contains("--updated"));
 
         // GUI 未处理异常落盘（与 worker-error.log 对应），便于定位启动崩溃
         DispatcherUnhandledException += (_, e) =>
@@ -155,12 +155,23 @@ public partial class App : Application
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern bool AllowSetForegroundWindow(int dwProcessId);
 
-    private void StartGui()
+    private void StartGui(bool fromUpdate = false)
     {
         // 崩溃自动抓 minidump（原生 + 托管兜底），反馈包自动附带
         Core.System.CrashReporter.Install("gui");
-        _singleMutex = new Mutex(initiallyOwned: true, SingleMutexName, out bool createdNew);
-        if (!createdNew)
+
+        // 更新重启的新实例：旧实例正在优雅退出（存配置→停 Worker→释放单实例锁），
+        // 轮询等锁最多 20s——若跳过等待，会被下方单实例逻辑当成"第二个实例"自杀，
+        // 旧实例一退就没有进程接班了。超时（旧实例卡死未退）则走正常分支唤醒旧实例并
+        // 退出：exe 已换好，用户下次启动即新版本
+        if (fromUpdate)
+        {
+            UpdateApplier.Log("更新重启：新实例等待旧实例退出…");
+            for (int i = 0; i < 40 && !TryOwnSingleMutex(); i++)
+                Thread.Sleep(500);
+        }
+
+        if (_singleMutex is null && !TryOwnSingleMutex())
         {
             // 已有实例在运行：允许它取得前台，管道通知它把窗口弹到最前，然后本进程退出
             try
@@ -187,11 +198,23 @@ public partial class App : Application
         // 老版 %APPDATA%\EfootballBot 的持久数据（config 等）一次性搬到 exe 旁 data\，
         // 所有数据收在程序文件夹内（2026-10-11 用户要求）
         AppPaths.MigrateLegacyData();
+        // 更新收尾（每次启动）：中断还原 .old / 延迟清理旧版备份（无更新残留时无事发生）
+        UpdateApplier.FinalizeAfterUpdate();
         new MainWindow().Show();
         StartPipeServer();
 
         // 上次非正常退出（强制关闭/更新重启/崩溃）可能把游戏窗口丢在屏幕外：启动即还原
         EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
+    }
+
+    /// <summary>尝试创建并持有单实例互斥锁；已被其他实例持有时返回 false（并清空 _singleMutex）。</summary>
+    private bool TryOwnSingleMutex()
+    {
+        _singleMutex = new Mutex(initiallyOwned: true, SingleMutexName, out bool createdNew);
+        if (createdNew) return true;
+        _singleMutex.Dispose();
+        _singleMutex = null;
+        return false;
     }
 
     private void StartPipeServer()

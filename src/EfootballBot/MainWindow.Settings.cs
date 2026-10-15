@@ -566,13 +566,14 @@ public partial class MainWindow
                 AppendLog($"开始下载 v{_pendingUpdate.Version}（来源 {host}，约 {_pendingUpdate.TotalBytes / 1024 / 1024} MB）", LogLevel.Info);
             }
             catch { }
-            var result = await Task.Run(() => Updater.DownloadAndApplyAsync(_pendingUpdate, progress));
+            var result = await Task.Run(() => UpdateApplier.ApplyAsync(_pendingUpdate, progress));
             TxtUpdateStatus.Text = result.Message;
             AppendLog($"应用更新：{result.Message}", result.IsError ? LogLevel.Error : LogLevel.Success);
             if (result.Applied)
             {
-                AppendLog("更新已下载，启动时自动替换后重启。", LogLevel.Success);
-                // 给用户 2 秒看到状态，然后退出当前进程让 PowerShell 脚本接管
+                AppendLog("新版本已启动，本窗口即将退出（旧版本已自动备份，可回退）。", LogLevel.Success);
+                // 给用户 2 秒看到状态，然后优雅退出（存配置→停 Worker→释放单实例锁），
+                // 已启动的新实例等锁接管
                 await Task.Delay(2000);
                 Application.Current.Shutdown();
             }
