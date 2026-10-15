@@ -360,14 +360,16 @@ public sealed class BotEngine : IDisposable
                 ? "未找到正在运行的国服游戏窗口（eFootballOnline），请先启动「实况足球在线」。"
                 : "未找到正在运行的 eFootball 游戏窗口，请先启动游戏。");
 
-        // 管理员权限失配检测：游戏提权而本程序未提权时，UIPI 会拦截画面捕获与窗口消息
-        // （表现为预览黑屏/看不到画面，2026-10-11 用户实测：管理员启动本程序后恢复正常）。
+        // 管理员权限失配检测：游戏提权而本程序未提权时，UIPI 会拦截跨完整性级别的窗口操作与
+        // 窗口消息（后台停靠 SetWindowPos 恒 ERROR_ACCESS_DENIED、后台鼠标注入失效；
+        // WGC 捕获走 DWM，部分环境仍正常出图——2026-10-15 实机：画面正常但停靠失效）。
         // 只提示不强提——UAC 弹窗由用户决定。
         try
         {
             if (!Elevation.IsCurrentProcessElevated() && Elevation.IsProcessElevated(_window.ProcessId))
-                LogInternal("检测到游戏正以管理员权限运行，而本程序未提权：系统会拦截画面捕获（预览黑屏/看不到画面）。" +
-                    "请右键本程序选「以管理员身份运行」，或到 属性→兼容性 勾选「以管理员身份运行此程序」", LogLevel.Warn);
+                LogInternal("检测到游戏正以管理员权限运行，而本程序未提权：系统(UIPI)会拦截本程序的窗口停靠与后台鼠标注入" +
+                    "（后台停靠失效；画面捕获部分环境黑屏）。请右键本程序选「以管理员身份运行」，" +
+                    "或到 属性→兼容性 勾选「以管理员身份运行此程序」", LogLevel.Warn);
         }
         catch { /* 权限检测失败不影响启动 */ }
 

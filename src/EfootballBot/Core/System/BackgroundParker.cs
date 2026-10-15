@@ -12,6 +12,7 @@ namespace EfootballBot.Core.System;
 /// 不注入、不挂钩、不读写游戏进程——反作弊检测面（进程/内存/输入/驱动）完全没碰到。
 /// 窗口不在屏幕上但未最小化：游戏照常渲染、WGC/GDI 照常捕获、XInput 手柄输入照常生效。
 /// 看门狗周期校验窗口位置（有的游戏在加载/切场景时会自己把窗口搬回屏幕中央），被挪回即重新移出。
+/// 前提：游戏未提权（提权进程的窗口本程序移不动，UIPI 拒绝），失败原因按 win32 错误码区分提示。
 /// </summary>
 public sealed class BackgroundParker
 {
@@ -21,6 +22,7 @@ public sealed class BackgroundParker
     private nint _hwnd;
     private RECT _original;
     private bool _hadOriginal;
+    private int _parkApiError;
     private CancellationTokenSource? _cts;
 
     /// <summary>看门狗把窗口重新移出屏幕的次数（游戏自行搬回的次数）。</summary>
@@ -45,6 +47,7 @@ public sealed class BackgroundParker
         _hwnd = hwnd;
         _hadOriginal = GetWindowRect(hwnd, out _original);
         Corrections = 0;
+        _parkApiError = 0;
 
         if (IsIconic(hwnd))
         {
@@ -61,8 +64,7 @@ public sealed class BackgroundParker
         }
         if (!Park())
         {
-            _log("后台停靠失败：SetWindowPos 被拒绝或窗口位置被强制还原" +
-                "（独占全屏模式下无法移出，请在游戏内改为无边框窗口模式）", LogLevel.Warn);
+            _log(DescribeFailure(_parkApiError), LogLevel.Warn);
             return;
         }
 
@@ -98,17 +100,33 @@ public sealed class BackgroundParker
     }
 
     /// <summary>移出屏幕（保留窗口尺寸，不改变 Z 序、不抢激活）。
-    /// 移出后回读位置验证：独占全屏模式下游戏会强制还原坐标，视为失败并给出改无边框的建议。</summary>
+    /// 失败原因经 win32 错误码归类：err=5(拒绝访问)=游戏提权而本程序未提权，UIPI 禁止移动其窗口
+    /// （2026-10-15 实机：国际服游戏以管理员运行，SetWindowPos 恒 ERROR_ACCESS_DENIED，
+    /// 画面/手柄不受影响，仅停靠失效）；API 成功但坐标被还原=独占全屏强制还原。</summary>
     private bool Park()
     {
         int x = ComputeParkX(
             GetSystemMetrics(SM_XVIRTUALSCREEN),
             GetSystemMetrics(SM_CXVIRTUALSCREEN));
+        _ = Marshal.GetLastWin32Error(); // 丢弃陈旧错误码，保证下面读到的是本次调用的
         if (!SetWindowPos(_hwnd, nint.Zero, x, _original.Top,
                 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE))
+        {
+            _parkApiError = Marshal.GetLastWin32Error();
             return false;
-        return GetWindowRect(_hwnd, out var rc) && rc.Left == x;
+        }
+        if (GetWindowRect(_hwnd, out var rc) && rc.Left == x) return true;
+        _parkApiError = 0; // API 成功但位置被游戏强制还原 → 按独占全屏归类
+        return false;
     }
+
+    /// <summary>停靠失败原因归类（纯函数便于单测）。</summary>
+    internal static string DescribeFailure(int parkApiError) =>
+        parkApiError == ERROR_ACCESS_DENIED
+            ? "后台停靠失败：游戏正以管理员权限运行，而本程序未提权，系统(UIPI)禁止移动提权进程的窗口。" +
+              "请右键本程序选「以管理员身份运行」重启后再挂机，或到游戏/Steam 的 属性→兼容性 取消「以管理员身份运行此程序」"
+            : "后台停靠失败：SetWindowPos 被拒绝或窗口位置被强制还原" +
+              "（独占全屏模式下无法移出，请在游戏内改为无边框窗口模式）";
 
     private async Task WatchAsync(nint hwnd, CancellationToken ct)
     {
@@ -144,8 +162,9 @@ public sealed class BackgroundParker
     private const uint SWP_NOSIZE = 0x0001;
     private const uint SWP_NOZORDER = 0x0004;
     private const uint SWP_NOACTIVATE = 0x0010;
+    private const int ERROR_ACCESS_DENIED = 5;
 
-    [DllImport("user32.dll")] private static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll", SetLastError = true)] private static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint hWnd, out RECT rect);
     [DllImport("user32.dll")] private static extern bool IsWindow(nint hWnd);
     [DllImport("user32.dll")] private static extern bool IsIconic(nint hWnd);
