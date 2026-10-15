@@ -32,6 +32,11 @@ public sealed class WeeklyEventScenario : IScenario
         LaunchReady,
         /// <summary>主要奖励已完成：B 返回活动列表换下一个（预留，校准前不进入）。</summary>
         Retreating,
+        /// <summary>挑战活动「挑战清单」：饱和左移归位后逐卡右扫，找第一张
+        /// （无锁且无勾且非本运行内已通关/已拉黑）的卡按 A 进入；扫到尾全勾 = 全通关退列表。</summary>
+        ChallengeList,
+        /// <summary>挑战全部完成/异常放弃：B 退介绍页退活动列表（或 B 后 A 重进清单刷新锁态）。</summary>
+        ChallengeRetreat,
     }
 
     private readonly BotEngine _engine;
@@ -52,6 +57,30 @@ public sealed class WeeklyEventScenario : IScenario
     private readonly HashSet<int> _doneSlots = new();
     /// <summary>赛事等级改选尝试次数（超 2 次放弃改选，继续用游戏当前值）。</summary>
     private int _levelAttempts;
+
+    // ---- 挑战活动子流程（挑战清单弹窗出现时激活；退回活动列表时复位） ----
+    /// <summary>当前活动是挑战活动（以「挑战清单」弹窗或卡详情页「完成的条件」识别）。</summary>
+    private bool _challengeMode;
+    /// <summary>清单扫描游标：下一张待判定的卡号（1 起；饱和左移归位后从 1 向右扫）。</summary>
+    private int _chScan = 1;
+    /// <summary>清单扫描是否已归位（进阶段后先饱和左移到卡 1）。</summary>
+    private bool _chScanReady;
+    /// <summary>游标卡号连续未见于 OCR 的帧数（≥2 判定扫过表尾 = 全部通关）。</summary>
+    private int _chMissing;
+    /// <summary>本运行内已确认通关的卡号（进卡页读到 胜场 N/N 记录；绿勾探针未校准的兜底）。</summary>
+    private readonly HashSet<int> _chLocalDone = new();
+    /// <summary>进卡多次未生效的卡号（游戏拒绝进入/锁误判，跳过防死循环）。</summary>
+    private readonly HashSet<int> _chBlocked = new();
+    /// <summary>最近一次按 A 进入的卡号（重复进入同一卡计数用）。</summary>
+    private int _chCurrentCard;
+    /// <summary>对同一张卡连续按 A 进入的次数（超 2 拉黑该卡）。</summary>
+    private int _chReentry;
+    /// <summary>锁态矛盾（游标越过已通关卡却撞锁）次数；超 2 放弃本活动拉黑槽位。</summary>
+    private int _chContradictions;
+    /// <summary>ChallengeRetreat 子模式：B 退到介绍页后按 A 重进清单（刷新锁态用）。</summary>
+    private bool _chRetreatReenter;
+    /// <summary>ChallengeRetreat 子模式：放弃本活动（返回列表后拉黑槽位再换下一个）。</summary>
+    private bool _chRetreatBlacklist;
 
     private string _lastScreenName = "";
     private int _streak;
@@ -245,6 +274,11 @@ public sealed class WeeklyEventScenario : IScenario
                         _hubRound = 0;
                         SetPhase(WkPhase.Settings);
                         return 800;
+                    case WkScreen.ChallengeList:
+                        // 半途启动直接落在挑战清单（或异常态回到 Flow 时清单还开着）
+                        _hubStep = 0;
+                        _hubRound = 0;
+                        return EnterChallengeListPhase();
                 }
                 if (ml == MlScreen.MainMenu)
                 {
@@ -301,6 +335,8 @@ public sealed class WeeklyEventScenario : IScenario
                 if (wk == WkScreen.EventHome) { SetPhase(WkPhase.AtHome); return 600; }
                 if (wk == WkScreen.EventsList) { SetPhase(WkPhase.Flow); return 800; }
                 if (wk == WkScreen.EventIntro) return await PressConfirmAsync("介绍页：进入");
+                if (wk == WkScreen.ChallengeList)
+                    return EnterChallengeListPhase(); // 挑战活动：介绍页按进入后弹的是挑战清单
                 if (wk == WkScreen.EntryPopup) return await PressConfirmAsync("入场弹窗：确认");
                 if (ml == MlScreen.HasConfirm) return await PressConfirmAsync("入场弹窗：下一步");
                 if (++_attempts > 15)
@@ -326,6 +362,8 @@ public sealed class WeeklyEventScenario : IScenario
 
             case WkPhase.AtHome:
             {
+                if (_challengeMode || WeeklyBrain.IsChallengeCardHome(obs.Ocr))
+                    return await HandleChallengeCardHomeAsync(wk, obs);
                 if (wk != WkScreen.EventHome)
                 {
                     SetPhase(WkPhase.Flow); // X 未开成功等异常：回屏幕驱动
@@ -423,6 +461,12 @@ public sealed class WeeklyEventScenario : IScenario
                 return 1500;
             }
 
+            case WkPhase.ChallengeList:
+                return await HandleChallengeListAsync(wk, ml, obs);
+
+            case WkPhase.ChallengeRetreat:
+                return await HandleChallengeRetreatAsync(wk, ml);
+
             default:
                 return null;
         }
@@ -474,6 +518,11 @@ public sealed class WeeklyEventScenario : IScenario
         {
             var cfg = _engine.Config.Weekly;
             var s = WeeklyBrain.ParseActivitySettings(obs.Ocr);
+
+            // 挑战活动设置浮层：没有赛事等级行（难度由卡片固定），只核验自动控制/弹性。
+            // 2 行布局、光标默认在「自动控制」行——导航计步与普通浮层（3 行、默认在等级行）不同。
+            if (_challengeMode || obs.Ocr.ContainsJoined("完成的条件"))
+                return await HandleChallengeSettingsAsync(s);
 
             var unread = new List<string>();
             if (s.Level is null) unread.Add("赛事等级");
@@ -590,10 +639,247 @@ public sealed class WeeklyEventScenario : IScenario
         return 3500;
     }
 
+    // ---------------- 挑战活动子流程 ----------------
+
+    /// <summary>进入挑战子流程：激活挑战模式并切到清单扫描阶段（下一轮先饱和左移归位）。</summary>
+    private int EnterChallengeListPhase()
+    {
+        _hubStep = 0;
+        _hubRound = 0;
+        if (!_challengeMode)
+        {
+            _challengeMode = true;
+            _log("[周活动] 检测到挑战清单：进入挑战子流程（逐卡挑战，卡难度固定不可选）", LogLevel.Success);
+        }
+        SetPhase(WkPhase.ChallengeList);
+        return 1500;
+    }
+
+    /// <summary>
+    /// 挑战清单扫描（用户规则：永远打第一张既没锁又没勾的卡；等价于「锁前面那张 /
+    /// 无锁时最后一张 / 最后一个勾的下一张」）。归位后逐卡右扫：已通关（绿勾/本运行
+    /// 内已通关/已拉黑）→ 右移；待挑战 → A 进入卡详情页；撞锁 = 锁态矛盾 → B 退出
+    /// 重进清单刷新（超限放弃本活动）；游标卡号消失 = 扫过表尾 → 全部通关退列表。
+    /// 5 张以上需要翻页：右移会自动滚动列表，卡号 OCR 跟踪当前卡位（左/右卡位固定，
+    /// 卡号随翻页变化），游标卡不在屏上即表尾或丢帧，两帧确认防动画误判。
+    /// </summary>
+    private async Task<int> HandleChallengeListAsync(WkScreen wk, MlScreen ml, Observation obs)
+    {
+        if (wk == WkScreen.EventHome) { _chReentry = 0; SetPhase(WkPhase.AtHome); return 600; }
+        if (wk == WkScreen.EventSettings) { SetPhase(WkPhase.Settings); return 800; }
+        if (wk == WkScreen.EventsList) { _challengeMode = false; SetPhase(WkPhase.Flow); return 800; }
+        if (wk == WkScreen.EntryPopup || ml == MlScreen.HasConfirm)
+        {
+            if (++_attempts > 6) { SetPhase(WkPhase.Flow); return 600; }
+            return await PressConfirmAsync("挑战清单弹窗：确认");
+        }
+        if (wk != WkScreen.ChallengeList)
+        {
+            if (++_attempts > 10) { SetPhase(WkPhase.Flow); return 600; } // 过场/未知帧超预算：回屏幕驱动自愈
+            return 1200;
+        }
+
+        if (!_chScanReady)
+        {
+            _chScanReady = true;
+            _chScan = 1;
+            _chMissing = 0;
+            _log("[周活动·挑战] 挑战清单：饱和左移归位到第 1 张卡", LogLevel.Info);
+            await _engine.Pad.DpadRepeat(PadDir.Left, 6);
+            return 1500;
+        }
+
+        var cur = WeeklyBrain.ScanChallengeCards(obs.Ocr, obs.Frame)
+            .FirstOrDefault(c => c.Index == _chScan);
+        if (cur is null)
+        {
+            // 游标卡号不可见：翻页动画丢帧，或已扫过最后一张（1..N-1 全部通关）
+            if (++_chMissing < 2) return 1000;
+            _log($"[周活动·挑战] 卡 {_chScan:00} 之后没有更多卡：全部挑战已完成，B 退出挑战活动", LogLevel.Success);
+            _chRetreatReenter = false;
+            _chRetreatBlacklist = false;
+            SetPhase(WkPhase.ChallengeRetreat);
+            await _engine.Pad.Back();
+            return 2200;
+        }
+        _chMissing = 0;
+
+        if (cur.Locked)
+        {
+            // 游标越过已通关卡却撞锁：游戏解锁可能有延迟（通关即打勾、重进清单才解锁），
+            // B 退介绍页重进刷新锁态；重进仍锁 = 真矛盾（活动过期/进度异常），放弃本活动
+            _chContradictions++;
+            _chRetreatBlacklist = _chContradictions > 2;
+            _log($"[周活动·挑战] 卡 {cur.Index:00} 显示锁定但前置卡应已通关" +
+                 (_chRetreatBlacklist ? "，重进未解锁，放弃本活动（拉黑槽位）" : $"，B 重进清单刷新锁态（第 {_chContradictions} 次）"),
+                _chRetreatBlacklist ? LogLevel.Error : LogLevel.Warn);
+            _chRetreatReenter = !_chRetreatBlacklist;
+            SetPhase(WkPhase.ChallengeRetreat);
+            await _engine.Pad.Back();
+            return 2200;
+        }
+
+        if (cur.Checked || _chLocalDone.Contains(cur.Index) || _chBlocked.Contains(cur.Index))
+        {
+            string why = cur.Checked ? "右上角绿勾"
+                : _chLocalDone.Contains(cur.Index) ? "本运行内已通关" : "多次进入未生效已拉黑";
+            _chScan++;
+            _log($"[周活动·挑战] 卡 {cur.Index:00} 已完成（{why}），右移下一张", LogLevel.Info);
+            await _engine.Pad.Dpad(PadDir.Right);
+            return 1100;
+        }
+
+        // 待挑战卡：按 A 进入（重复进入同一卡计数，超 2 次拉黑防死循环）
+        if (_chCurrentCard == cur.Index)
+        {
+            if (++_chReentry > 2)
+            {
+                _chBlocked.Add(cur.Index);
+                _chScan++;
+                _log($"[周活动·挑战] 卡 {cur.Index:00} 连续进入未生效，拉黑跳过", LogLevel.Warn);
+                await _engine.Pad.Dpad(PadDir.Right);
+                return 1100;
+            }
+        }
+        else
+        {
+            _chCurrentCard = cur.Index;
+            _chReentry = 1;
+        }
+        _log($"[周活动·挑战] 进入卡 {cur.Index:00}", LogLevel.Info);
+        await _engine.Pad.Confirm();
+        return 2600;
+    }
+
+    /// <summary>挑战卡详情页（活动主页样式）：已通关（胜场读满/主要奖励完成）→ 记忆并
+    /// B 回清单换下一张；未通关 → X 开设置核验（无难度，只看自动控制/弹性）后开赛。</summary>
+    private async Task<int> HandleChallengeCardHomeAsync(WkScreen wk, Observation obs)
+    {
+        _challengeMode = true; // 半途启动直接落在卡详情页（「完成的条件」特征）也激活挑战模式
+        if (wk == WkScreen.ChallengeList) { SetPhase(WkPhase.ChallengeList); return 800; }
+        if (wk == WkScreen.EventSettings) { SetPhase(WkPhase.Settings); return 800; }
+        if (wk != WkScreen.EventHome)
+        {
+            SetPhase(WkPhase.Flow); // 弹窗/过场：回屏幕驱动推进，清完再回主页判断
+            return 600;
+        }
+        if (WeeklyBrain.IsMainRewardDone(obs.Ocr, obs.Frame) || WeeklyBrain.ChallengeProgressDone(obs.Ocr))
+        {
+            if (_chCurrentCard > 0) _chLocalDone.Add(_chCurrentCard);
+            _log($"[周活动·挑战] 卡 {_chCurrentCard:00} 已通关，B 返回挑战清单换下一张", LogLevel.Success);
+            SetPhase(WkPhase.ChallengeList);
+            await _engine.Pad.Back();
+            return 2200;
+        }
+        SetPhase(WkPhase.Settings);
+        await _engine.Pad.X();
+        _log("[周活动·挑战] 按 X 打开活动设置（挑战卡无难度，只核验自动控制/弹性）", LogLevel.Info);
+        return 1800;
+    }
+
+    /// <summary>挑战活动设置浮层（2 行：自动控制/弹性自动控制，光标默认在首行）：
+    /// 自动控制强制开（归位直接 A）、弹性强制关（归位下移 1 次 A），就绪 B 返回。
+    /// 挑战卡没有赛事等级行——难度由卡片固定，绝不能沿用普通浮层的下×2/下×3 计步。</summary>
+    private async Task<int> HandleChallengeSettingsAsync(WkActivitySettings s)
+    {
+        var unread = new List<string>();
+        if (s.AutoControl is null) unread.Add("自动控制");
+        if (s.FlexibleAutoControl is null) unread.Add("弹性自动控制");
+        if (unread.Count > 0)
+            _log($"[周活动·挑战] 设置项未读出（{string.Join("、", unread)}），保守跳过不按键", LogLevel.Warn);
+
+        if (++_attempts > 6)
+        {
+            _log("[周活动·挑战] 设置核验多轮未收敛，B 返回直接开赛", LogLevel.Warn);
+            SetPhase(WkPhase.LaunchReady);
+            await _engine.Pad.Back();
+            return 2000;
+        }
+
+        if (s.AutoControl == false)
+        {
+            _log("[周活动·挑战] 自动控制为关：上×4 归位 → A 改为开（强制项）", LogLevel.Info);
+            await _engine.Pad.DpadRepeat(PadDir.Up, 4);
+            await _engine.Pad.Confirm();
+            return 2000;
+        }
+        if (s.FlexibleAutoControl == true)
+        {
+            _log("[周活动·挑战] 弹性自动控制为开：上×4 归位 → 下×1 → A 改为关（强制项）", LogLevel.Info);
+            await _engine.Pad.DpadRepeat(PadDir.Up, 4);
+            await _engine.Pad.Dpad(PadDir.Down);
+            await _engine.Pad.Confirm();
+            return 2000;
+        }
+
+        _log("[周活动·挑战] 设置核验完成，B 返回卡详情页开赛", LogLevel.Success);
+        SetPhase(WkPhase.LaunchReady);
+        await _engine.Pad.Back();
+        return 1800;
+    }
+
+    /// <summary>挑战退出/重进：B 到介绍页；重进模式在介绍页按 A 回清单刷新锁态，
+    /// 否则继续 B 回活动列表（到达后复位挑战模式、按需拉黑槽位并顺延到下一个活动）。</summary>
+    private async Task<int> HandleChallengeRetreatAsync(WkScreen wk, MlScreen ml)
+    {
+        if (wk == WkScreen.EventsList)
+        {
+            if (_chRetreatBlacklist) _doneSlots.Add(_slotIndex);
+            _slotIndex++;
+            _challengeMode = false;
+            _chCurrentCard = 0;
+            _chReentry = 0;
+            _chContradictions = 0;
+            _chLocalDone.Clear();
+            _chBlocked.Clear();
+            _log($"[周活动·挑战] 已退出挑战活动，改刷槽位 {_slotIndex}", LogLevel.Success);
+            SetPhase(WkPhase.Flow);
+            return 800;
+        }
+        if (wk == WkScreen.ChallengeList)
+        {
+            if (++_attempts > 6) { SetPhase(WkPhase.Flow); return 800; }
+            await _engine.Pad.Back();
+            return 2000;
+        }
+        if (wk == WkScreen.EventIntro)
+        {
+            if (_chRetreatReenter)
+            {
+                _chRetreatReenter = false;
+                SetPhase(WkPhase.ChallengeList);
+                await _engine.Pad.Confirm(); // 介绍页光标默认在「进入」：重进清单
+                return 2600;
+            }
+            if (++_attempts <= 4)
+            {
+                await _engine.Pad.Back();
+                return 2200;
+            }
+            SetPhase(WkPhase.Flow);
+            return 800;
+        }
+        if (wk == WkScreen.EntryPopup || ml == MlScreen.HasConfirm)
+        {
+            // 退出途中的弹窗：先 A 清（可能是通关奖励弹窗），多次不消改 B（退出确认类）
+            if (++_attempts <= 5) return await PressConfirmAsync("挑战退出途中弹窗：确认");
+            await _engine.Pad.Back();
+            return 2000;
+        }
+        if (++_attempts > 8) SetPhase(WkPhase.Flow);
+        return 1500;
+    }
+
     private void SetPhase(WkPhase phase)
     {
         _phase = phase;
         _attempts = 0;
+        if (phase == WkPhase.ChallengeList)
+        {
+            _chScanReady = false; // 进阶段先饱和左移归位再开始扫
+            _chScan = 1;
+            _chMissing = 0;
+        }
     }
 
     private async Task<int> PressConfirmAsync(string what)

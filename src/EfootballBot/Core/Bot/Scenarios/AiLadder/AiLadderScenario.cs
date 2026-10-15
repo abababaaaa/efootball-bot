@@ -226,9 +226,11 @@ public sealed class AiLadderScenario : IScenario
                     await _engine.Pad.Back();
                     return 2200;
                 }
-                // 周活动板块残留页（对阵AI/对阵玩家 页签的活动列表，无「类别」后缀）同上
+                // 周活动板块残留页（对阵AI/对阵玩家 页签的活动列表，无「类别」后缀）同上；
+                // 挑战清单弹窗（误入挑战活动）也不是本模块界面，一并 B 退回
                 if (_hubTry > 0 && al == AlScreen.None &&
-                    wk is WkScreen.EventsList or WkScreen.EventIntro or WkScreen.EventHome)
+                    wk is WkScreen.EventsList or WkScreen.EventIntro or WkScreen.EventHome
+                        or WkScreen.ChallengeList)
                 {
                     _log($"[AI天梯联赛] 误入周活动板块（{wk}），B 退回比赛页", LogLevel.Info);
                     await _engine.Pad.Back();

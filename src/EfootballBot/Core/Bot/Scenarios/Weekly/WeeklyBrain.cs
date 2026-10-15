@@ -20,7 +20,14 @@ public enum WkScreen
     EventHome,
     /// <summary>活动设置浮层（按 X 呼出，右半屏：赛事等级/自动控制/弹性自动控制）。</summary>
     EventSettings,
+    /// <summary>挑战活动「挑战清单」弹窗（进入挑战活动后出现，01/02… 编号卡纵排，
+    /// 已完成卡右上有勾、未解锁卡右下有锁）。挑战子流程的菜单侧。</summary>
+    ChallengeList,
 }
+
+/// <summary>挑战清单里一张可见卡的解析结果。Index 为卡上大字编号（1 起）；
+/// Slot 为屏幕卡位（0=左卡 1=右卡，翻页时同一卡位的卡会换）；Locked/Checked 为该卡位的像素探针。</summary>
+public sealed record WkChallengeCard(int Index, int Slot, bool Locked, bool Checked);
 
 /// <summary>活动设置浮层的解析结果。null = 该项 OCR 未读出（保守：读不到就不动）。</summary>
 public sealed record WkActivitySettings(string? Level, bool? AutoControl, bool? FlexibleAutoControl)
@@ -46,6 +53,13 @@ public static class WeeklyBrain
     public static WkScreen Classify(IReadOnlyList<YoloDetection> dets, OcrResult ocr,
         bool topRightHasContent = false, bool matchContext = false, bool mostlyLightPage = false)
     {
+        // 挑战清单弹窗（挑战活动进入后的卡片列表）：标题「挑战清单」为强特征，最先判定。
+        // 无标题兜底：卡位行两枚 H≥0.08 的大字卡号（普通文字 H≈0.04，只有卡编号这么高）
+        // 分布在左右两卡位 + 底栏「返回」词。不先判会被共享分类兜成 LeaguePage（页面只有
+        // btn_back，无可推进词 → 死等/瞎退）。标题词漏读时卡号特征防僵局。
+        if (ocr.ContainsJoined("挑战清单") || HasChallengeListCardNumbers(ocr))
+            return WkScreen.ChallengeList;
+
         // 盖层弹窗探测（赛后结算/奖励领取等多步弹窗，用户 2026-10-12 实机教训）：
         // 主页词透过暗化背景仍会被 OCR 读到，误判 EventHome 后按 X/前往比赛全部无效
         //（弹窗挡着，被误判"设置打不开/开赛未生效"）。弹窗自带推进词或确认按钮，
@@ -100,7 +114,114 @@ public static class WeeklyBrain
         return WkScreen.None;
     }
 
-    // ---------------- 活动设置解析 ----------------
+    /// <summary>
+    /// 挑战清单兜底特征：卡号带（y 0.15~0.40、x&lt;0.72）里左右两卡位各有一枚
+    /// H≥0.08 的两位数字大字（挑战清单卡编号，实机 challenge_list 帧：01 H=0.125 @x0.11、
+    /// 02 H=0.117 @x0.42；普通文字 H≈0.04）+ 底栏「返回」词。O/0 归一防 "O1" 漏检。
+    /// </summary>
+    private static bool HasChallengeListCardNumbers(OcrResult ocr)
+    {
+        bool left = false, right = false;
+        foreach (var w in ocr.Words)
+        {
+            if (w.H < 0.08 || w.CenterY < 0.15 || w.CenterY > 0.40 || w.CenterX >= 0.72) continue;
+            var t = OcrText.Norm(w.Text).ToUpper().Replace("O", "0");
+            if (t.Length != 2 || !t.All(char.IsDigit) || t[0] == '0' && t[1] == '0') continue;
+            if (w.CenterX < 0.33) left = true; else right = true;
+        }
+        return left && right && ocr.ContainsJoined("返回");
+    }
+
+    // ---------------- 挑战清单卡片扫描 ----------------
+
+    /// <summary>卡位右缘 x 坐标（与活动列表卡行同几何；实机 challenge_list 帧：
+    /// 卡1 右缘≈0.351、卡2 右缘≈0.637，锁定图标在卡右下角）。</summary>
+    private static readonly double[] ChallengeSlotRights = { 0.352, 0.645 };
+
+    /// <summary>
+    /// 解析挑战清单当前可见卡：OCR 大字卡号给出「哪张卡在哪个卡位」，再对该卡位做
+    /// 锁（右下角灰锁图标）/勾（右上角绿勾）像素探针。返回按卡号升序的可见卡列表；
+    /// 翻页后同一卡位会换卡号，调用方按 Index 跟踪扫描游标。
+    /// </summary>
+    public static List<WkChallengeCard> ScanChallengeCards(OcrResult ocr, FrameData frame)
+    {
+        var list = new List<WkChallengeCard>();
+        foreach (var w in ocr.Words)
+        {
+            if (w.H < 0.08 || w.CenterY < 0.15 || w.CenterY > 0.40 || w.CenterX >= 0.72) continue;
+            var t = OcrText.Norm(w.Text).ToUpper().Replace("O", "0");
+            if (t.Length != 2 || !t.All(char.IsDigit)) continue;
+            int index = int.Parse(t);
+            if (index < 1 || list.Any(c => c.Index == index)) continue;
+            int slot = w.CenterX < 0.33 ? 0 : 1;
+            list.Add(new WkChallengeCard(index, slot,
+                DetectChallengeLock(frame, slot), DetectChallengeCheck(frame, slot)));
+        }
+        return list.OrderBy(c => c.Index).ToList();
+    }
+
+    /// <summary>
+    /// 挑战清单卡右下角灰色锁图标（该卡未解锁）：灰亮像素（三通道接近、亮度 90~220）
+    /// 计数 ≥25。实机 challenge_list 帧：锁区 44 灰像素，白卡同位 3（白底亮度 &gt;220 不计）。
+    /// </summary>
+    public static bool DetectChallengeLock(FrameData frame, int slot)
+    {
+        if (slot < 0 || slot >= ChallengeSlotRights.Length) return false;
+        double right = ChallengeSlotRights[slot];
+        return CountGray(frame, right - 0.055, right - 0.005, 0.760, 0.850) >= 25;
+    }
+
+    /// <summary>
+    /// 挑战清单卡右上角完成勾（该卡已通关）：绿色像素计数 ≥40（绿底白勾同活动列表
+    /// 绿勾探针）。⚠ 勾区像素特征尚未拿到实机完成态截图校准——漏检由场景层
+    /// 「已通关卡记忆」兜底（进卡页读到 胜场 N/N 即记完成），误检无副作用（跳过卡而已）。
+    /// </summary>
+    public static bool DetectChallengeCheck(FrameData frame, int slot)
+    {
+        if (slot < 0 || slot >= ChallengeSlotRights.Length) return false;
+        double right = ChallengeSlotRights[slot];
+        return CountGreen(frame, right - 0.080, right - 0.005, 0.160, 0.280) >= 40;
+    }
+
+    /// <summary>区域内灰色像素计数（R≈G≈B、亮度 90~220；2px 步进采样）。</summary>
+    private static int CountGray(FrameData f, double x0, double x1, double y0, double y1)
+    {
+        var bgra = f.Bgra;
+        int w = f.Width, h = f.Height;
+        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return 0;
+        int count = 0;
+        for (int y = Math.Max(0, (int)(h * y0)); y < Math.Min(h, (int)(h * y1)); y += 2)
+            for (int x = Math.Max(0, (int)(w * x0)); x < Math.Min(w, (int)(w * x1)); x += 2)
+            {
+                int i = (y * w + x) * 4;
+                int b = bgra[i], g = bgra[i + 1], r = bgra[i + 2];
+                int lum = (r + g + b) / 3;
+                int mx = Math.Max(r, Math.Max(g, b)), mn = Math.Min(r, Math.Min(g, b));
+                if (mx - mn < 30 && lum >= 90 && lum <= 220) count++;
+            }
+        return count;
+    }
+
+    /// <summary>
+    /// 挑战卡详情页（活动主页样式）通关判定：右栏「胜场」计分器读满——
+    /// 右上区（x&gt;0.65、y&lt;0.35）出现各位数字全等的纯数字词（"1/1" 经 Norm 去标点成 "11"，
+    /// 进行中 "0/1"→"01" 首位 0 不命中；"2/2"→"22" 同理）。区域限定防误吃页面其他数字；
+    /// 正常周活动主页右栏是积分值（2030/330 等非等位数），永不命中。
+    /// </summary>
+    public static bool ChallengeProgressDone(OcrResult ocr)
+        => ocr.Words.Any(w => w.CenterX > 0.65 && w.CenterY < 0.35 && IsFullProgress(OcrText.Norm(w.Text)));
+
+    private static bool IsFullProgress(string norm)
+        => norm.Length is >= 2 and <= 4 && norm.All(char.IsDigit) &&
+           norm.All(c => c == norm[0]) && norm[0] != '0';
+
+    /// <summary>
+    /// 是否挑战卡详情页（「完成的条件」标题行，正常周活动主页没有该词——实机两帧对照验证）。
+    /// 用于半途启动时的挑战模式识别（直接落在卡详情页，没经过挑战清单）。
+    /// </summary>
+    public static bool IsChallengeCardHome(OcrResult ocr) => ocr.ContainsJoined("完成的条件");
+
+
 
     /// <summary>在右半屏（x&gt;0.45）找标签词下方的值词（值在标签下一行，y 偏移 0.015~0.13）。</summary>
     private static OcrWord? ValueBelow(OcrResult ocr, double labelY, Func<string, bool> match)
@@ -114,28 +235,43 @@ public static class WeeklyBrain
     /// </summary>
     public static WkActivitySettings ParseActivitySettings(OcrResult ocr)
     {
-        // 「弹性自动控制」包含「自动控制」子串，先匹配弹性行再匹配普通行，普通行要求整行就是「自动控制」
+        // 「弹性自动控制」包含「自动控制」子串，先匹配弹性行再匹配普通行，普通行要求整行就是「自动控制」。
+        // 行级匹配失败时回退词级：挑战活动设置浮层较窄，背后卡详情页的同高文字会并进同一
+        // 排版行（实机 challenge_settings 帧：自动控制行读成「完成的条件自动控制」，整行
+        // 精确匹配落空），而词本身仍是独立词「自动控制」。
         var flexLabel = ocr.Lines.FirstOrDefault(l => l.Text.Replace(" ", "").Contains("弹性"));
         var autoLabel = ocr.Lines.FirstOrDefault(l => l.Text.Replace(" ", "") == "自动控制");
         var levelLabel = ocr.Lines.FirstOrDefault(l => l.Text.Replace(" ", "").Contains("赛事等级"));
+        double? autoY = autoLabel?.CenterY ?? LabelWordY(ocr, "自动控制", exact: true);
+        double? flexY = flexLabel?.CenterY ?? LabelWordY(ocr, "弹性", exact: false);
+        double? levelY = levelLabel?.CenterY ?? LabelWordY(ocr, "赛事等级", exact: false);
 
         string? level = null;
-        if (levelLabel is not null)
+        if (levelY is not null)
         {
-            var v = ValueBelow(ocr, levelLabel.CenterY, t => MyLeagueBrain.Difficulties.Any(d => t.Contains(d)));
+            var v = ValueBelow(ocr, levelY.Value, t => MyLeagueBrain.Difficulties.Any(d => t.Contains(d)));
             if (v is not null)
                 level = MyLeagueBrain.Difficulties.First(d => v.Text.Replace(" ", "").Contains(d));
         }
 
-        bool? ParseSwitch(OcrLine? label)
+        bool? ParseSwitch(double? labelY)
         {
-            if (label is null) return null;
-            var v = ValueBelow(ocr, label.CenterY, t => t == "开" || t == "关");
+            if (labelY is null) return null;
+            var v = ValueBelow(ocr, labelY.Value, t => t == "开" || t == "关");
             return v is null ? null : v.Text.Replace(" ", "") == "开";
         }
 
-        return new WkActivitySettings(level, ParseSwitch(autoLabel), ParseSwitch(flexLabel));
+        return new WkActivitySettings(level, ParseSwitch(autoY), ParseSwitch(flexY));
     }
+
+    /// <summary>词级标签回退：找文本匹配的独立词的纵坐标。exact=true 要求整词相等
+    /// （「自动控制」不得命中「弹性自动控制」词），false 为子串包含。</summary>
+    private static double? LabelWordY(OcrResult ocr, string keyword, bool exact)
+        => ocr.Words
+            .FirstOrDefault(w => exact
+                ? OcrText.Norm(w.Text) == keyword
+                : OcrText.Norm(w.Text).Contains(keyword))
+            ?.CenterY;
 
     // ---------------- 完成态探针（2026-10-13 用户实机截图校准） ----------------
 
