@@ -73,4 +73,17 @@ public class WindowCaptureCapSizeTests
         Assert.Equal(11, dst[0]);                 // 输出左 ← 源左半
         Assert.Equal(22, dst[4]);                 // 输出右 ← 源右半（裁切时这里会是 11）
     }
+
+    [Theory]
+    [InlineData(1296, 759, 1282, 752, true)]   // Win10 item.Size 含不可见边框 vs 实际内容（2026-10-15 用户实机）
+    [InlineData(1296, 759, 1264, 727, true)]   // 差值恰在 32px 容差内
+    [InlineData(1296, 759, 1296, 759, true)]   // 相同尺寸（理论上游已短路，仍应判定为无需重建）
+    [InlineData(1296, 759, 1920, 1080, false)] // 内容超出帧池（窗口化→全屏）必须重建
+    [InlineData(1296, 759, 1200, 700, false)]  // 内容远小于帧池（真窗口缩放）必须重建
+    [InlineData(1296, 759, 1282, 700, false)]  // 单方向超差也必须重建
+    public void IsBorderOnlyContent_ClassifiesWin10BorderPhantom(
+        int poolW, int poolH, int cw, int ch, bool expected)
+    {
+        Assert.Equal(expected, WindowCapture.IsBorderOnlyContent(poolW, poolH, cw, ch));
+    }
 }

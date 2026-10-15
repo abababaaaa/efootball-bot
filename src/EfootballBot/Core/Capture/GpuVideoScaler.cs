@@ -119,7 +119,19 @@ internal sealed class GpuVideoScaler : IDisposable
         if (_processor is not null && srcW == _srcW && srcH == _srcH && dstW == _dstW && dstH == _dstH)
             return;
         ReleaseFrameResources();
+        try
+        {
+            EnsureResourcesCore(srcW, srcH, dstW, dstH);
+        }
+        catch
+        {
+            ReleaseFrameResources(); // 半初始化资源不留到下次（部分 AMD 驱动 CreateVideoProcessorInputView 即抛）
+            throw;
+        }
+    }
 
+    private void EnsureResourcesCore(int srcW, int srcH, int dstW, int dstH)
+    {
         var contentDesc = new VideoProcessorContentDescription
         {
             InputWidth = srcW,

@@ -190,12 +190,27 @@ public sealed class ObservationService : IDisposable
             _rebuildTimes.Add(DateTime.Now);
             if (_rebuildTimes.Count >= 3 || _fastStallCount >= 3)
             {
-                _rebuildTimes.Clear();
-                _fastStallCount = 0;
-                throw new CaptureUnrecoverableException(
-                    "画面捕获短时间内反复中断，已停止重建，避免持续崩溃拖垮系统（黑屏/卡死）。" +
-                    "常见原因：DWM 或显卡驱动异常（事件查看器可查 dwm.exe 崩溃记录）、" +
-                    "捕获绑定了无显示输出的显卡或虚拟显示环境。");
+                // 熔断前最后一次机会：硬件设备 WGC 在虚拟显示器/远程会话机器上跨适配器表面
+                // 失效（GPU 缩放 E_INVALIDARG、CPU 拷贝无产出），重建多少次都无帧；
+                // 强制切 WARP 软渲染设备重建（v1.x 在这些机器上的实际工作形态），仍无帧才熔断降级 GDI。
+                if (_provider is WindowCapture wc && !wc.ForceWarpDevice)
+                {
+                    wc.ForceWarpDevice = true;
+                    _rebuildTimes.Clear();
+                    _fastStallCount = 0;
+                    _firstFreshAfterRestartAt = DateTime.MinValue;
+                    LogInternal("捕获反复无帧：自动改用 WARP 软渲染设备重建捕获" +
+                        "（虚拟显示器/远程环境兼容模式；仍无帧将降级 GDI 捕获）", LogLevel.Warn);
+                }
+                else
+                {
+                    _rebuildTimes.Clear();
+                    _fastStallCount = 0;
+                    throw new CaptureUnrecoverableException(
+                        "画面捕获短时间内反复中断，已停止重建，避免持续崩溃拖垮系统（黑屏/卡死）。" +
+                        "常见原因：DWM 或显卡驱动异常（事件查看器可查 dwm.exe 崩溃记录）、" +
+                        "捕获绑定了无显示输出的显卡或虚拟显示环境。");
+                }
             }
         }
 

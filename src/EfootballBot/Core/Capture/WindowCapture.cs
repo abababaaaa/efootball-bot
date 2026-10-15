@@ -55,6 +55,18 @@ public sealed class WindowCapture : ICaptureProvider
     public bool HasFrame => _latest is not null;
     public DateTime LastFrameAt => _lastFrameAt;
 
+    /// <summary>强制用 WARP 软渲染设备建帧池。硬件设备 WGC 反复无帧时由观察服务启用
+    /// （虚拟显示器/远程会话机器：桌面合成在 WDDM1.3 间接显示驱动上，硬件设备的跨适配器
+    /// 帧表面 GPU 缩放 E_INVALIDARG、CPU 拷贝无产出——v1.x 恰因手写 P/Invoke 失败一直
+    /// 落在 WARP 上，反而这些机器全部可用）。Stop 不复位，整个运行期保持。</summary>
+    public bool ForceWarpDevice { get; set; }
+
+    /// <summary>边框幻影差判定：Win10 的 item.Size 含不可见边框（如 1296×759），首帧 ContentSize
+    /// 是可见内容（1282×752）。内容不超出帧池且差值≤32px（纯函数便于单测）。</summary>
+    internal static bool IsBorderOnlyContent(int poolW, int poolH, int contentW, int contentH) =>
+        contentW <= poolW && contentH <= poolH &&
+        poolW - contentW <= 32 && poolH - contentH <= 32;
+
     public static bool IsSupported()
     {
         try { return GraphicsCaptureSession.IsSupported(); }
@@ -222,9 +234,23 @@ public sealed class WindowCapture : ICaptureProvider
 
     private void CreateDevice()
     {
-        // 两级尝试：显式硬件适配器（显存最大，如独显）→ 默认硬件适配器；任一成功即用。
-        // WARP 软渲染绝不尝试——WGC 帧池建在 WARP 设备上会确定性触发 dwm.exe (d3d10warp.dll)
-        // 崩溃（系统卡死黑屏）。设备创建走 SharpDX：手写 CreateDXGIFactory1/D3D11CreateDevice
+        // 兼容模式：硬件设备 WGC 在虚拟显示器/远程会话机器上反复无帧（跨适配器表面失效），
+        // 观察服务熔断前强制切 WARP——表面为系统内存，CPU 拷贝必达（即 v1.x 实际运行形态）。
+        if (ForceWarpDevice)
+        {
+            _sharpDevice = new SharpDX.Direct3D11.Device(
+                SharpDX.Direct3D.DriverType.Warp,
+                SharpDX.Direct3D11.DeviceCreationFlags.BgraSupport);
+            Step("[捕获] 帧池使用 WARP 软渲染设备（虚拟显示器/远程环境兼容模式，CPU 拷贝帧）");
+            _d3dDevicePtr = _sharpDevice.NativePointer;
+            _winrtDevice = CaptureInterop.CreateDirect3DDevice(_d3dDevicePtr);
+            return;
+        }
+
+        // 常规路径两级尝试：显式硬件适配器（显存最大，如独显）→ 默认硬件适配器；任一成功即用。
+        // 默认不走 WARP（某些环境下 WGC 帧池建在 WARP 设备上会触发 dwm.exe (d3d10warp.dll)
+        // 崩溃）；仅在 ForceWarpDevice 兼容模式下启用（见上）。设备创建走 SharpDX：
+        // 手写 CreateDXGIFactory1/D3D11CreateDevice
         // P/Invoke 在实机探测中分别恒返 E_NOINTERFACE / E_INVALIDARG（2026-10-11），
         // 曾使显式 GPU 绑定永远落空、WGC 在所有机器上启动失败。
         var adapter = CaptureInterop.PickHardwareAdapter(out var adapterName, out var pickedForOutputs);
@@ -272,9 +298,13 @@ public sealed class WindowCapture : ICaptureProvider
             if (frame is null) return;
 
             // 帧池必须与内容原始尺寸严格一致（小了裁切、大了拉伸/黑边）。
-            // 尺寸变化（窗口化↔全屏）时按新内容尺寸整套重建；降采样在取帧后做。
+            // ① 边框幻影差（Win10 item.Size 含不可见边框 1296×759，内容 1282×752）：
+            //    内容不超出帧池即无裁切，差值≤32px 对归一化 ROI 无感——不重建帧池直接产出
+            //    （WGC 重建在多适配器环境下是 DWM 崩溃放大点，且 Win10 上重建后易无帧）。
+            // ② 真实尺寸变化（窗口化↔全屏等）：按新内容尺寸整套重建；降采样在取帧后做。
             var content = ClampSize(frame.ContentSize.Width, frame.ContentSize.Height);
-            if (content.Width != _size.Width || content.Height != _size.Height)
+            if ((content.Width != _size.Width || content.Height != _size.Height) &&
+                !IsBorderOnlyContent(_size.Width, _size.Height, content.Width, content.Height))
             {
                 Exception? recreateError = null;
                 lock (_gate)
@@ -347,8 +377,10 @@ public sealed class WindowCapture : ICaptureProvider
             }
             if (!gpuDone)
             {
-                using var bitmap = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface, BitmapAlphaMode.Premultiplied)
-                    .AsTask().GetAwaiter().GetResult();
+                // 跨适配器/异常表面可能让 WinRT 异步拷贝永不完成（挂住回调线程、画面永远无产出）：
+                // 3s 超时按帧处理失败上报，交给引擎重建/升级捕获设备。
+                var copyTask = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface, BitmapAlphaMode.Premultiplied).AsTask();
+                using var bitmap = copyTask.WaitAsync(TimeSpan.FromSeconds(3)).GetAwaiter().GetResult();
                 var full = ToBgraArray(bitmap, out int w, out int h);
                 // CPU 侧降采样（高≤720）：下游 OCR/ROI 只接触小图，全尺寸数组随本次 GC 释放
                 data = DownscaleIfNeeded(full, w, h, out ow, out oh);
