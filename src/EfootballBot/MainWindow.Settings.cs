@@ -161,6 +161,9 @@ public partial class MainWindow
         _runtimeLogFilter = _cfg.RuntimeLogFilter is "Key" or "Warn" ? _cfg.RuntimeLogFilter : "All";
         _loadingConfig = true;
         CmbRuntimeLogFilter.SelectedIndex = _runtimeLogFilter switch { "Key" => 1, "Warn" => 2, _ => 0 };
+        // 日志历史过滤档（与运行日志同款三档，持久化）
+        _historyLogFilter = _cfg.HistoryLogFilter is "Key" or "Warn" ? _cfg.HistoryLogFilter : "All";
+        CmbHistoryLogFilter.SelectedIndex = _historyLogFilter switch { "Key" => 1, "Warn" => 2, _ => 0 };
         _loadingConfig = false;
 
         // 热键（记录式配置，加载时只同步开关，键位显示由 RefreshHotkeyUi 负责）
@@ -377,13 +380,13 @@ public partial class MainWindow
     {
         // InitializeComponent 按 XAML 顺序建控件：首个 RadioButton 的 Checked 触发时其余元素可能尚未创建
         if (SetTabImportant is null || SetTabDisplay is null || SetTabInput is null
-            || SetTabDaily is null || SetTabAbout is null) return;
+            || SetTabDaily is null || SetTabDev is null) return;
 
         SetTabImportant.Visibility = RbSetImportant.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SetTabDisplay.Visibility = RbSetDisplay.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SetTabInput.Visibility = RbSetInput.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SetTabDaily.Visibility = RbSetDaily.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
-        SetTabAbout.Visibility = RbSetAbout.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        SetTabDev.Visibility = RbSetDev.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ---------------- 训练数据采集（存帧） ----------------

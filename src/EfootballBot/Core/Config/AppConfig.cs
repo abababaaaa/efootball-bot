@@ -405,6 +405,9 @@ public sealed class AppConfig
     /// <summary>应用内运行日志显示过滤：All=全部 / Key=仅关键流程（Success 绿字）/ Warn=仅报错与提醒（Warn+Error）。仅影响 UI 显示，文件日志始终全量。</summary>
     public string RuntimeLogFilter { get; set; } = "All";
 
+    /// <summary>日志历史查看器显示过滤：取值同 RuntimeLogFilter。</summary>
+    public string HistoryLogFilter { get; set; } = "All";
+
     // —— 全局停止热键 ——
     public HotkeyConfig Hotkey { get; set; } = new();
     public UpdateConfig Update { get; set; } = new();

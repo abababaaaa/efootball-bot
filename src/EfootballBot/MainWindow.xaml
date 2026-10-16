@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="eFootball 挂机助手（手柄后台版）" Height="720" Width="1180"
         Icon="app.ico"
-        MinHeight="640" MinWidth="1020"
+        MinHeight="640" MinWidth="1140"
         Background="{DynamicResource WindowBg}" Foreground="{DynamicResource TextPrimary}"
         FontFamily="Microsoft YaHei UI"
         TextOptions.TextFormattingMode="Ideal" TextOptions.TextRenderingMode="ClearType">
@@ -73,8 +73,10 @@
     <Grid>
         <Grid.ColumnDefinitions>
             <ColumnDefinition Width="176"/>
-            <ColumnDefinition Width="*"/>
-            <ColumnDefinition Width="520"/>
+            <!-- 中栏弹性：保底 430 防止页面卡内容被挤没 -->
+            <ColumnDefinition Width="*" MinWidth="430"/>
+            <!-- 右栏 520 封顶（设计宽度），窄窗口时弹性收缩保底 380，杜绝与中栏重叠 -->
+            <ColumnDefinition Width="*" MinWidth="380" MaxWidth="520"/>
         </Grid.ColumnDefinitions>
 
         <!-- ============ 左栏：深色导航轨道 ============ -->
@@ -175,6 +177,23 @@
                         </StackPanel>
                     </Button>
 
+                    <!-- 关于（独立分类：诊断报告 / 声明 / 反馈） -->
+                    <TextBlock Text="关于" Style="{StaticResource SectionLabel}" Margin="4,16,0,8"/>
+                    <Button x:Name="BtnAbout" Style="{StaticResource NavToolBtn}" Click="BtnAbout_Click"
+                            ToolTip="诊断报告、声明与反馈群">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Width="15" Height="15" Stretch="Uniform" StrokeThickness="1.7"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"
+                                  Data="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z M12 11.2v5 M12 7.4v.4"/>
+                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="10,0,0,0">
+                                <TextBlock Text="★" Foreground="{DynamicResource Warning}" FontWeight="Bold"
+                                           VerticalAlignment="Center" Margin="0,0,5,0"/>
+                                <TextBlock Text="关于与反馈" VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </StackPanel>
+                    </Button>
+
                     <!-- 环境检测 -->
                     <TextBlock Text="环境检测" Style="{StaticResource SectionLabel}" Margin="4,16,0,8"/>
                     <Border Background="{DynamicResource Surface2}" CornerRadius="10" Padding="11,9">
@@ -263,7 +282,7 @@
                         <RadioButton x:Name="RbPreMatch" GroupName="IntlModule"
                                      Style="{StaticResource ModuleRadio}"
                                      Checked="RbPreMatch_Checked"
-                                     ToolTip="开赛前通过游戏内「赛前快捷设置」一键应用常用配置（建设中）">
+                                     ToolTip="开赛前一键打开游戏自带的设置工具，调整画质、分辨率、键位">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="★" Foreground="{DynamicResource Warning}" FontWeight="Bold"
                                            VerticalAlignment="Center" Margin="0,0,5,0"/>
@@ -295,9 +314,16 @@
                                                VerticalAlignment="Center" Margin="0,0,8,1"/>
                                     <TextBlock Text="赛前快捷设置" FontSize="16.5" FontWeight="Bold"/>
                                 </StackPanel>
-                                <TextBlock Text="一键打开游戏自带的设置工具（Settings.exe）：开赛前调整画质、分辨率、键位等，保存后即可正常挂机。国际服的设置工具在游戏安装根目录，程序按「运行中的游戏进程 → Steam 游戏库 → Steam 默认路径」自动定位；找不到时先启动一次游戏再点。"
-                                           Foreground="{DynamicResource TextSecondary}" FontSize="12"
-                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0"/>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0">
+                                    <Run Text="一键打开游戏自带的设置工具，调整"/>
+                                    <Run Text="画质、分辨率、键位" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="。工具位置"/>
+                                    <Run Text="自动定位" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="；找不到时"/>
+                                    <Run Text="先启动一次游戏再点" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="即可。"/>
+                                </TextBlock>
                                 <TextBlock x:Name="TxtPreMatchPath" FontSize="11" Foreground="{DynamicResource TextMuted}"
                                            TextWrapping="Wrap" MaxWidth="520" Margin="0,8,0,0"
                                            Text="尚未定位（点击右侧按钮后显示结果）"/>
@@ -328,9 +354,26 @@
                                          VerticalAlignment="Center" Margin="0,0,9,1"/>
                                 <TextBlock Text="我的联赛挂机" FontSize="16.5" FontWeight="Bold"/>
                             </StackPanel>
-                            <TextBlock Text="YOLO 检测 + OCR 感知自动跑「我的联赛」：主菜单找入口 → 物品列表浏览 → 确认弹窗/下一步推进；无特征界面连续多轮自动按 B 逃生。需连接虚拟手柄，开始前请断开真实手柄。"
-                                       Foreground="{DynamicResource TextSecondary}" FontSize="12"
-                                       TextWrapping="Wrap" Margin="0,9,0,0"/>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0">
+                                    <Run Text="自动打完"/>
+                                    <Run Text="「我的联赛」" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="全部比赛："/>
+                                    <Run Text="自动核对比赛难度" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，物品页"/>
+                                    <Run Text="自动购买加成道具" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，达到设定场次"/>
+                                    <Run Text="自动停止并还原窗口" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="；卡住会自动恢复，无需照看。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,7,0,0">
+                                    <Run Text="需连接"/>
+                                    <Run Text="虚拟手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，开始前请"/>
+                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="。"/>
+                                </TextBlock>
                         </StackPanel>
                         <StackPanel Grid.Column="1" Margin="16,4,0,0" VerticalAlignment="Top">
                             <Button x:Name="BtnStartMyLeague" Content="开始"
@@ -356,8 +399,13 @@
                             <ComboBoxItem Content="传奇"/>
                         </ComboBox>
                     </StackPanel>
-                    <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0"
-                               Text="点「前往比赛」进入难度页时，先核对游戏内已选难度（蓝勾）：一致直接确认；不一致自动改选为本设置后确认开赛。关键比赛一律按游戏默认难度开赛，不改选。"/>
+                    <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0">
+                        <Run Text="与游戏内难度一一对应：开赛时"/>
+                        <Run Text="自动核对，不一致自动改选" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                        <Run Text="。"/>
+                        <Run Text="关键比赛" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                        <Run Text="固定按游戏默认难度开赛。"/>
+                    </TextBlock>
 
                     <!-- 场次计数停止（0=无限跑）：总场次 / 关键比赛，并列 -->
                     <StackPanel Orientation="Horizontal" Margin="2,14,0,0">
@@ -392,16 +440,22 @@
                         <TextBlock Text="场" FontSize="12" VerticalAlignment="Center" Margin="4,0,0,0"
                                    Foreground="{DynamicResource TextMuted}"/>
                     </StackPanel>
-                    <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0"
-                               Text="0（无限）= 一直挂机不自动停。达到设定场次（本次挂机累计）即自动停止并还原窗口；自定义请输入正整数。"/>
+                    <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0">
+                        <Run Text="达到设定场次（本次挂机累计）"/>
+                        <Run Text="自动停止并还原窗口" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                        <Run Text="；0（无限）= 一直挂机，自定义请输入正整数。"/>
+                    </TextBlock>
 
                     <!-- 我的联赛道具（模块专属配置）：挂机经过物品页时自动购买 -->
                     <Border Style="{StaticResource Inset}" Margin="0,18,0,0" Padding="14,12">
                         <StackPanel>
                             <TextBlock Text="我的联赛道具（自动购买）" FontWeight="SemiBold" FontSize="12.5"
                                        Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,4"/>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520"
-                                       Text="挂机经过「我的联赛物品」页时按以下选择自动购买（用联赛积分）。每次运行每项至多买一次；未找到时跳过并记日志。"/>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520">
+                                <Run Text="挂机经过物品页时按以下选择"/>
+                                <Run Text="自动购买" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="（消耗联赛积分），每项每次运行至多买一次，找不到时自动跳过。"/>
+                            </TextBlock>
                             <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                 <CheckBox x:Name="ChkBuyExpBoost" Content="购买经验值加成" VerticalAlignment="Center"/>
                                 <ComboBox x:Name="CmbExpBoostLevel" Width="80" Margin="12,0,0,0" SelectedIndex="0">
@@ -420,8 +474,11 @@
                                 </ComboBox>
                             </StackPanel>
 
-                            <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="0,8,0,0"
-                                       Text="每场比赛结束后自动重新核验：回到主页右摇杆拨一下查看「使用的物品」面板，加成道具耗尽（有效场数一般 3 场）会按上面的清单自动补购，无需人工干预。"/>
+                            <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="0,8,0,0">
+                                <Run Text="每场比赛结束后自动核验：道具耗尽（一般可用 3 场）会"/>
+                                <Run Text="自动补购" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="，无需人工干预。"/>
+                            </TextBlock>
 
                         </StackPanel>
                     </Border>
@@ -443,9 +500,24 @@
                                              VerticalAlignment="Center" Margin="0,0,9,1"/>
                                     <TextBlock Text="周活动挂机" FontSize="16.5" FontWeight="Bold"/>
                                 </StackPanel>
-                                <TextBlock Text="自动跑国际服周活动：主菜单找入口 → 比赛页选活动板块 → 对阵AI列表进入活动 → 自动核验活动设置（赛事等级/自动控制开/弹性自动控制关）→ 前往比赛循环刷分。主要奖励完成后（右栏绿勾/「获得的主要奖励」）自动返回换下一个；列表中带绿勾的已完成活动自动跳过不进入。比赛中流程与我的联赛共用。需连接虚拟手柄，开始前请断开真实手柄。"
-                                           Foreground="{DynamicResource TextSecondary}" FontSize="12"
-                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0"/>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0">
+                                    <Run Text="自动刷"/>
+                                    <Run Text="「周活动」" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="：开赛前"/>
+                                    <Run Text="自动核验活动设置" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="（赛事等级、自动控制开关），一个活动的"/>
+                                    <Run Text="主要奖励拿满后自动换下一个" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，已完成的自动跳过；达到设定场次自动停止。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,7,0,0">
+                                    <Run Text="需连接"/>
+                                    <Run Text="虚拟手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，开始前请"/>
+                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="。"/>
+                                </TextBlock>
                             </StackPanel>
                             <Button x:Name="BtnStartWeekly" Grid.Column="1" Content="开始"
                                     Style="{StaticResource PrimaryBtn}" Width="210" Height="40" FontSize="14"
@@ -465,8 +537,17 @@
                                 <ComboBoxItem Content="传奇"/>
                             </ComboBox>
                         </StackPanel>
-                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0"
-                                   Text="按 X 打开活动设置浮层时自动核验：与游戏内已选等级不一致会自动改选（下拉展开样式待实机校准，识别不出时保持游戏当前值并记日志）。自动控制强制开、弹性自动控制强制关，无需设置。"/>
+                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0">
+                            <Run Text="开赛前"/>
+                            <Run Text="自动核对活动设置" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                            <Run Text="：等级不一致会"/>
+                            <Run Text="自动改选" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                            <Run Text="；自动控制"/>
+                            <Run Text="强制开" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                            <Run Text="、弹性自动控制"/>
+                            <Run Text="强制关" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                            <Run Text="，无需手动设置。"/>
+                        </TextBlock>
 
                         <!-- 完成场次停止（0=无限跑） -->
                         <StackPanel Orientation="Horizontal" Margin="2,14,0,0">
@@ -486,8 +567,11 @@
                             <TextBlock Text="场" FontSize="12" VerticalAlignment="Center" Margin="4,0,0,0"
                                        Foreground="{DynamicResource TextMuted}"/>
                         </StackPanel>
-                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0"
-                                   Text="0（无限）= 刷到主要奖励完成或手动停止。达到设定场次（本次挂机累计）即自动停止并还原窗口。"/>
+                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0">
+                            <Run Text="达到设定场次（本次挂机累计）"/>
+                            <Run Text="自动停止并还原窗口" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                            <Run Text="；0（无限）= 刷到主要奖励全部完成或手动停止。"/>
+                        </TextBlock>
                     </StackPanel>
 
                     <!-- AI天梯联赛内容（按入口选中切换显示）：eFootball™联赛·对阵AI类别 -->
@@ -503,9 +587,22 @@
                                              VerticalAlignment="Center" Margin="0,0,9,1"/>
                                     <TextBlock Text="AI天梯联赛挂机（国际服）" FontSize="16.5" FontWeight="Bold"/>
                                 </StackPanel>
-                                <TextBlock Text="自动跑国际服「eFootball™联赛·对阵AI类别」：比赛页进 eFootball™联赛（卡片图片会变，按槽位扫描+文字验证）→ 选对阵AI类别（卡片角标数字/颜色会变，不作判定）→ 前往比赛 → 比赛结束弹窗自动推进 → 回组别主页循环。可选「达到组别停止」检测主页左上角组别数字；完成场次停止与我的联赛一致（无关键比赛）。比赛中流程与我的联赛共用。需连接虚拟手柄，开始前请断开真实手柄。"
-                                           Foreground="{DynamicResource TextSecondary}" FontSize="12"
-                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0"/>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0">
+                                    <Run Text="自动打"/>
+                                    <Run Text="「eFootball™ 联赛 · 对阵AI」" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="：可选"/>
+                                    <Run Text="达到指定组别自动停止" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，也可按完成场次停止；无关键比赛，组别循环冲级。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,7,0,0">
+                                    <Run Text="需连接"/>
+                                    <Run Text="虚拟手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，开始前请"/>
+                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="。"/>
+                                </TextBlock>
                             </StackPanel>
                             <Button x:Name="BtnStartAiLadder" Grid.Column="1" Content="开始"
                                     Style="{StaticResource PrimaryBtn}" Width="210" Height="40" FontSize="14"
@@ -517,7 +614,7 @@
                             <TextBlock Text="达到组别停止" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
                             <ComboBox x:Name="CmbAiStopAtDivision" Width="110" Margin="12,0,0,0" SelectedIndex="0"
                                       VerticalAlignment="Center"
-                                      ToolTip="检测组别主页左上角的「组别X」数字：达到该组别或更高（数字更小）即自动停止">
+                                      ToolTip="达到该组别或更高（数字更小）时自动停止">
                                 <ComboBoxItem Content="不启用"/>
                                 <ComboBoxItem Content="组别10"/>
                                 <ComboBoxItem Content="组别9"/>
@@ -531,8 +628,11 @@
                                 <ComboBoxItem Content="组别1"/>
                             </ComboBox>
                         </StackPanel>
-                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0"
-                                   Text="组别 10 最低、1 最高。达到设定组别（含更高）即自动停止并还原窗口；不启用则一直打到完成场次或手动停止。"/>
+                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0">
+                            <Run Text="组别 10 最低、1 最高：达到设定组别（含更高）"/>
+                            <Run Text="自动停止" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                            <Run Text="。不启用则一直打到完成场次或手动停止。"/>
+                        </TextBlock>
 
                         <!-- 完成场次停止（0=无限跑） -->
                         <StackPanel Orientation="Horizontal" Margin="2,14,0,0">
@@ -552,8 +652,11 @@
                             <TextBlock Text="场" FontSize="12" VerticalAlignment="Center" Margin="4,0,0,0"
                                        Foreground="{DynamicResource TextMuted}"/>
                         </StackPanel>
-                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0"
-                                   Text="0（无限）= 一直挂机不自动停。达到设定场次（本次挂机累计）即自动停止并还原窗口；自定义请输入正整数。"/>
+                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0">
+                            <Run Text="达到设定场次（本次挂机累计）"/>
+                            <Run Text="自动停止并还原窗口" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                            <Run Text="；0（无限）= 一直挂机，自定义请输入正整数。"/>
+                        </TextBlock>
                     </StackPanel>
                 </StackPanel>
             </Border>
@@ -566,7 +669,7 @@
                         <RadioButton x:Name="RbCnPreMatch" GroupName="CnModule"
                                      Style="{StaticResource ModuleRadio}"
                                      Checked="RbCnPreMatch_Checked"
-                                     ToolTip="开赛前通过游戏内「赛前快捷设置」一键应用常用配置（建设中）">
+                                     ToolTip="开赛前一键打开游戏自带的设置工具，调整画质、分辨率、键位">
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="★" Foreground="{DynamicResource Warning}" FontWeight="Bold"
                                            VerticalAlignment="Center" Margin="0,0,5,0"/>
@@ -595,9 +698,16 @@
                                                VerticalAlignment="Center" Margin="0,0,8,1"/>
                                     <TextBlock Text="赛前快捷设置" FontSize="16.5" FontWeight="Bold"/>
                                 </StackPanel>
-                                <TextBlock Text="一键打开游戏自带的设置工具（Settings.exe）：开赛前调整画质、分辨率、键位等，保存后即可正常挂机。国服的设置工具在游戏安装目录的 SettingTool 子目录、且不走 Steam，程序通过运行中的游戏进程向上定位；找不到时先启动一次国服游戏再点。"
-                                           Foreground="{DynamicResource TextSecondary}" FontSize="12"
-                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0"/>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0">
+                                    <Run Text="一键打开游戏自带的设置工具，调整"/>
+                                    <Run Text="画质、分辨率、键位" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="。工具位置"/>
+                                    <Run Text="自动定位" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="；找不到时"/>
+                                    <Run Text="先启动一次国服游戏再点" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="即可。"/>
+                                </TextBlock>
                                 <TextBlock x:Name="TxtCnPreMatchPath" FontSize="11" Foreground="{DynamicResource TextMuted}"
                                            TextWrapping="Wrap" MaxWidth="520" Margin="0,8,0,0"
                                            Text="尚未定位（点击右侧按钮后显示结果）"/>
@@ -628,9 +738,24 @@
                                              VerticalAlignment="Center" Margin="0,0,9,1"/>
                                     <TextBlock Text="天梯巅峰赛挂机（国服·教练）" FontSize="16.5" FontWeight="Bold"/>
                                 </StackPanel>
-                                <TextBlock Text="自动跑国服「天梯巅峰赛·教练」：主页比赛页签进天梯巅峰赛 → 模式选择页鼠标点「天梯巅峰赛-教练」卡 → 活动主页识别「本周可参赛场次」（0 场自动退出并停止）→ 鼠标点前往比赛 → 弹窗上×2 选「单场比赛」→ 教练模式 AI 自动踢，赛后回活动主页循环直到场次用尽。页面点击走后台鼠标（本程序须以管理员运行，否则国服拦截鼠标注入）；比赛中流程与我的联赛共用。需连接虚拟手柄，开始前请断开真实手柄。"
-                                           Foreground="{DynamicResource TextSecondary}" FontSize="12"
-                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0"/>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0">
+                                    <Run Text="自动打"/>
+                                    <Run Text="「天梯巅峰赛 · 教练」" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="：教练模式 AI 自动踢，"/>
+                                    <Run Text="本周可参赛场次用尽时自动停止" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，场次刷新后再跑即可。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,7,0,0">
+                                    <Run Text="本程序需"/>
+                                    <Run Text="以管理员运行" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="；需"/>
+                                    <Run Text="虚拟手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，开始前请"/>
+                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="。"/>
+                                </TextBlock>
                                 <Border Background="{DynamicResource Surface2}" CornerRadius="7"
                                         HorizontalAlignment="Left" Margin="0,18,0,0" Padding="10,6">
                                     <StackPanel Orientation="Horizontal">
@@ -653,12 +778,38 @@
                                 <TextBlock Text="国服使用提示" FontWeight="SemiBold" FontSize="12.5"
                                            Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,9"/>
                                 <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" LineHeight="19" Margin="0,0,0,3">
+                                    <Run Text="1. 先启动国服「实况足球在线」并进入"/>
+                                    <Run Text="游戏主界面" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，再点开始。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" LineHeight="19" Margin="0,0,0,3">
+                                    <Run Text="2. 开始前"/>
+                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，否则虚拟手柄只能当"/>
+                                    <Run Text="玩家 2" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，菜单不响应。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" LineHeight="19" Margin="0,0,0,3">
+                                    <Run Text="3. 本程序需"/>
+                                    <Run Text="以管理员身份运行" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="：国服为提权进程，普通权限的鼠标操作会被系统拦截。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" LineHeight="19" Margin="0,0,0,3">
+                                    <Run Text="4. 每周场次用尽时"/>
+                                    <Run Text="自动停止" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，场次刷新后再跑即可。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
                                            TextWrapping="Wrap" LineHeight="19">
-                                    1. 先启动国服「实况足球在线」并进入游戏主界面，再点开始。&#x0a;
-                                    2. 开始前请断开真实手柄（拔出接收器/蓝牙断开），否则虚拟手柄只能当玩家2，菜单不响应。&#x0a;
-                                    3. 本模块需要管理员权限运行本程序：国服为提权进程，普通权限的鼠标注入会被系统拦截。&#x0a;
-                                    4. 每周可参赛场次用尽（=0）时自动退出活动并停止；场次刷新后再跑即可。&#x0a;
-                                    5. 游戏语言需为简体中文；卡住时请把日志与预览截图反馈以便校准。
+                                    <Run Text="5. 游戏语言需为"/>
+                                    <Run Text="简体中文" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="；卡住时把"/>
+                                    <Run Text="日志与预览截图" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="发到群里以便排查。"/>
                                 </TextBlock>
                             </StackPanel>
                         </Border>
@@ -677,9 +828,24 @@
                                              VerticalAlignment="Center" Margin="0,0,9,1"/>
                                     <TextBlock Text="周活动挂机（国服）" FontSize="16.5" FontWeight="Bold"/>
                                 </StackPanel>
-                                <TextBlock Text="自动跑国服「比赛活动」（当前：冠军赛）：主页归位推荐页签 → 右进比赛页 → 选比赛活动 → 进入活动 → 对阵表 RT 下一步 → 首次自动进球队阵容按 RS 选「活动加成」自动配阵 → B 完成 → RT 教练入场开赛。赛后自动回活动主页循环，打满冠军赛全程（小组赛×3+淘汰赛×4=7 场）。比赛中流程与我的联赛共用。需连接虚拟手柄，开始前请断开真实手柄。"
-                                           Foreground="{DynamicResource TextSecondary}" FontSize="12"
-                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0"/>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0">
+                                    <Run Text="自动打国服"/>
+                                    <Run Text="「比赛活动 · 冠军赛」" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="：自动完成报名配阵（优先"/>
+                                    <Run Text="活动加成" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="），打满整期"/>
+                                    <Run Text="7 场" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="（小组赛到决赛）；达到设定场次自动停止。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,7,0,0">
+                                    <Run Text="需连接"/>
+                                    <Run Text="虚拟手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，开始前请"/>
+                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="。"/>
+                                </TextBlock>
                             </StackPanel>
                             <Button x:Name="BtnStartCnWeekly" Grid.Column="1" Content="开始"
                                     Style="{StaticResource PrimaryBtn}" Width="210" Height="40" FontSize="14"
@@ -704,8 +870,11 @@
                             <TextBlock Text="场" FontSize="12" VerticalAlignment="Center" Margin="4,0,0,0"
                                        Foreground="{DynamicResource TextMuted}"/>
                         </StackPanel>
-                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0"
-                                   Text="0（无限）= 打满冠军赛全程或手动停止。冠军赛每期固定 7 场（小组赛 1~3、1/8 决赛、1/4 决赛、半决赛、决赛），想打满整期选 7。达到设定场次（本次挂机累计）即自动停止并还原窗口。国服活动设置（赛事等级等）待实机校准后补充。"/>
+                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0">
+                            <Run Text="冠军赛每期固定 7 场：想打满整期选 7；达到设定场次"/>
+                            <Run Text="自动停止并还原窗口" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                            <Run Text="；0（无限）= 打满全程或手动停止。"/>
+                        </TextBlock>
                     </StackPanel>
                 </StackPanel>
             </Border>
@@ -730,8 +899,9 @@
                                      Content="手柄与输入" Checked="SettingsTab_Checked"/>
                         <RadioButton x:Name="RbSetDaily" GroupName="SettingsNav" Style="{StaticResource SettingsTabRadio}"
                                      Content="挂机与日志" Checked="SettingsTab_Checked"/>
-                        <RadioButton x:Name="RbSetAbout" GroupName="SettingsNav" Style="{StaticResource SettingsTabRadio}"
-                                     Content="关于" Checked="SettingsTab_Checked"/>
+                        <RadioButton x:Name="RbSetDev" GroupName="SettingsNav" Style="{StaticResource SettingsTabRadio}"
+                                     Content="开发者选项" Checked="SettingsTab_Checked"
+                                     ToolTip="训练数据采集等面向开发调试的功能，普通用户无需改动"/>
                     </StackPanel>
 
                     <!-- ============ 二级页：★ 重要设定（防检测 + 热键） ============ -->
@@ -742,18 +912,38 @@
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
                                 <TextBlock Style="{StaticResource H2}"><Run Text="★ " Foreground="{DynamicResource Warning}"/>防检测保护</TextBlock>
                             </StackPanel>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520"
-                                       Text="这三项直接决定挂机的服务端风险面：真实封号风险来自服务端行为检测（7×24 在线、恒定操作节奏），与窗口怎么放、怎么输入无关。建议保持开启。"/>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520">
+                                <Run Text="这三项直接决定挂机的"/>
+                                <Run Text="服务端风险面" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="：真实封号风险来自"/>
+                                <Run Text="服务端行为检测" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="（7×24 在线、恒定操作节奏），与窗口怎么放、怎么输入无关。"/>
+                                <Run Text="建议保持开启" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="。"/>
+                            </TextBlock>
 
                             <!-- 后台停靠 -->
                             <CheckBox x:Name="ChkBackgroundParking" FontWeight="SemiBold" Margin="0,14,0,0"
                                       Content="后台停靠：挂机时把游戏窗口移出屏幕"/>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="28,4,0,0"
-                                       Text="开始挂机后自动把游戏窗口整体移到所有显示器之外：主屏幕完全看不到、点击其他软件也不会跳出；纯窗口坐标操作，不碰游戏进程。虚拟手柄输入与后台捕获不受影响，每 2.5 秒自动校验（游戏自己挪回也会被移出），停止挂机自动还原原位置；强制关闭/更新等非正常退出也会在下次启动时自动还原。开启后 DXGI 捕获模式自动改用 WGC/GDI。注意：游戏全屏（最大化）状态下无法移出，请使用无边框窗口模式。"/>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="28,4,0,0">
+                                <Run Text="开始挂机后把游戏窗口"/>
+                                <Run Text="整体移到屏幕之外" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="：完全看不到、误点不跳出；停止挂机"/>
+                                <Run Text="自动还原原位置" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="（异常退出也会在下次启动时还原），游戏自己挪回也会被移出。"/>
+                                <Run Text="游戏全屏（最大化）时无法移出，请使用"/>
+                                <Run Text="无边框窗口模式" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="。"/>
+                            </TextBlock>
                             <CheckBox x:Name="ChkHumanPacing" FontWeight="SemiBold" Margin="0,12,0,0"
                                       Content="拟人节奏：按键时长/间隔对数正态随机化"/>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="28,4,0,0"
-                                       Text="所有按键改用真人反应时间的经典分布（右偏长尾，非均匀随机），并按约 2% 概率插入 0.3~0.9 秒「犹豫」停顿，模拟被手机/弹窗打断的瞬间，消除恒定节奏这一机器签名。"/>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="28,4,0,0">
+                                <Run Text="所有按键按"/>
+                                <Run Text="真人反应节奏随机化" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="，并随机插入短暂的「犹豫」停顿，消除"/>
+                                <Run Text="恒定节奏这一机器签名" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="。"/>
+                            </TextBlock>
                             <CheckBox x:Name="ChkScheduleEnabled" FontWeight="SemiBold" Margin="0,12,0,0"
                                       Content="作息调度：每日活跃时段与时长上限"/>
                             <StackPanel Orientation="Horizontal" Margin="28,8,0,0">
@@ -774,8 +964,44 @@
                             </StackPanel>
                             <TextBlock x:Name="TxtScheduleError" Foreground="{DynamicResource Danger}" FontSize="11.5"
                                        Margin="28,6,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="28,4,0,0"
-                                       Text="只在活跃时段挂机、每天累计到上限自动休息、启停时间每日随机漂移（真人不会每天同一秒上线）、运行中每 30~70 分钟短暂离开 2~5 分钟。支持跨午夜时段（如 22:00–02:00）。到点自动暂停/恢复，无需人工干预。"/>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="28,4,0,0">
+                                <Run Text="只在活跃时段挂机、每天累计到上限"/>
+                                <Run Text="自动休息" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="、启停时间每日随机漂移（真人不会每天同一秒上线）、运行中会随机短暂离开几分钟。支持"/>
+                                <Run Text="跨午夜时段" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="（如 22:00–02:00）。到点自动暂停/恢复，无需人工干预。"/>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- 挂机节奏（自「挂机与日志」移入：属于挂机行为的重要设定） -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <StackPanel>
+                                    <TextBlock Text="挂机节奏" Style="{StaticResource H2}"/>
+                                    <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" Margin="0,2,0,0"
+                                               Text="比赛中挂机点按的间隔区间"/>
+                                </StackPanel>
+                            </StackPanel>
+                            <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap">
+                                <Run Text="越小点得越勤，越大越像真人偶尔操作；"/>
+                                <Run Text="必须立即响应的按钮不受影响" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="。"/>
+                            </TextBlock>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <TextBlock Text="最小" Style="{StaticResource FieldLabel}"/>
+                                <TextBox x:Name="TxtIdleMin" Width="68" Margin="9,0,0,0" Text="1"
+                                         TextChanged="IdleTap_TextChanged"/>
+                                <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="8,0,0,0"/>
+                                <TextBlock Text="最大" Style="{StaticResource FieldLabel}" Margin="20,0,0,0"/>
+                                <TextBox x:Name="TxtIdleMax" Width="68" Margin="9,0,0,0" Text="4"
+                                         TextChanged="IdleTap_TextChanged"/>
+                                <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="8,0,0,0"/>
+                            </StackPanel>
+                            <TextBlock x:Name="TxtIdleError" Foreground="{DynamicResource Danger}" FontSize="11.5"
+                                       Margin="0,9,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
 
@@ -801,9 +1027,14 @@
                                            Foreground="{DynamicResource AccentGlow}" FontSize="12" FontWeight="SemiBold"
                                            VerticalAlignment="Center" Margin="12,0,0,0"/>
                             </StackPanel>
-                            <TextBlock Text="运行中第一次按=暂停，暂停中再按=彻底停止。支持键盘任意键与鼠标键（可含修饰键）。"
-                                       Foreground="{DynamicResource TextMuted}" FontSize="11" TextWrapping="Wrap"
-                                       MaxWidth="520" Margin="0,4,0,0"/>
+                            <TextBlock Foreground="{DynamicResource TextMuted}" FontSize="11" TextWrapping="Wrap"
+                                       MaxWidth="520" Margin="0,4,0,0">
+                                <Run Text="运行中第一次按="/>
+                                <Run Text="暂停" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="，暂停中再按="/>
+                                <Run Text="彻底停止" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="。支持键盘任意键与鼠标键（可含修饰键），游戏全屏时也能响应。"/>
+                            </TextBlock>
 
                             <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                 <TextBlock Text="恢复" Style="{StaticResource FieldLabel}" Width="72"/>
@@ -826,7 +1057,7 @@
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Text="性能 / 内存" Style="{StaticResource H2}"/>
+                                <TextBlock Text="捕获与识别" Style="{StaticResource H2}"/>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal">
                                 <TextBlock Text="画面捕获方式" Style="{StaticResource FieldLabel}"/>
@@ -835,23 +1066,15 @@
                                     <ComboBoxItem Content="DXGI 桌面复制（更快，但窗口须可见）"/>
                                 </ComboBox>
                             </StackPanel>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,6,0,9"
-                                       Text="WGC 是 Windows 官方窗口专属捕获（Discord/Teams/OBS 同款），游戏被遮挡、你在操作其他程序时照常挂机；DXGI 直接读显卡桌面画面、高分辨率略快，但窗口不能被遮挡或最小化。建议游戏设为无边框窗口模式。更改在下次开始挂机时生效。"/>
-                            <CheckBox x:Name="ChkFrameDump" Content="训练数据采集（存帧）：挂机时按间隔自动保存画面 JPG" Margin="0,8,0,0"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
-                                <TextBlock Text="存帧间隔" Style="{StaticResource FieldLabel}"/>
-                                <ComboBox x:Name="CmbFrameDumpInterval" Width="110" Margin="10,0,0,0" SelectedIndex="2">
-                                    <ComboBoxItem Content="2 秒"/>
-                                    <ComboBoxItem Content="5 秒"/>
-                                    <ComboBoxItem Content="10 秒"/>
-                                    <ComboBoxItem Content="30 秒"/>
-                                    <ComboBoxItem Content="60 秒"/>
-                                </ComboBox>
-                                <Button x:Name="BtnOpenCaptures" Content="打开存帧目录" Margin="12,0,0,0" Width="110"
-                                        Style="{StaticResource PrimaryBtn}" Click="BtnOpenCaptures_Click"/>
-                            </StackPanel>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,4,0,9"
-                                       Text="用于积累 YOLO 自定义模型的标注训练集：存到 exe 同级 captures\日期\ 目录（约每张 100KB，10 秒间隔挂机一晚约 30MB）。标注训练完成后把 yolo26n.onnx + classes.txt 放回 models\yolo\ 即可生效。更改在下次开始挂机时生效。"/>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,6,0,9">
+                                <Run Text="WGC 为 Windows 官方"/>
+                                <Run Text="后台捕获" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="（Discord/OBS 同款）：游戏被遮挡、你操作其他软件时照常挂机；DXGI 高分辨率略快，但"/>
+                                <Run Text="窗口必须可见" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="。建议游戏使用"/>
+                                <Run Text="无边框窗口模式" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="。更改在下次开始挂机时生效。"/>
+                            </TextBlock>
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                                 <TextBlock Text="OCR 识别引擎" Style="{StaticResource FieldLabel}"/>
                                 <ComboBox x:Name="CmbOcrEngine" Width="280" Margin="10,0,0,0" SelectedIndex="0">
@@ -859,8 +1082,13 @@
                                     <ComboBoxItem Content="Windows 内置 OCR（更快，回退用）"/>
                                 </ComboBox>
                             </StackPanel>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,6,0,9"
-                                       Text="PP-OCRv6 是随程序自带的离线深度学习模型（约 30MB，不联网、不装第三方软件），对游戏美术字、小号说明文字、繁简英日混排的识别显著优于 Windows OCR；代价是全屏识别约 0.3~0.5 秒。若新引擎在你的机器上异常，可随时切回 Windows OCR。更改在下次开始挂机时生效。"/>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,6,0,9">
+                                <Run Text="PP-OCRv6 为随程序自带的"/>
+                                <Run Text="离线模型" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="（约 30MB，不联网、不装第三方软件），对游戏美术字、小号说明文字的识别显著更好，代价是稍慢；引擎异常时可"/>
+                                <Run Text="随时切回 Windows OCR" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="。更改在下次开始挂机时生效。"/>
+                            </TextBlock>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,0">
                                 <TextBlock Text="OCR 识别频率" Style="{StaticResource FieldLabel}"/>
                                 <ComboBox x:Name="CmbOcrInterval" Width="116" Margin="10,0,0,0" SelectedIndex="1">
@@ -894,8 +1122,13 @@
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
                                 <TextBlock Text="手柄隔离" Style="{StaticResource H2}"/>
                             </StackPanel>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap"
-                                       Text="开启后机器人虚拟手柄对其他应用隐藏（Steam、其他游戏收不到机器人按键），仅游戏进程可见。基于 Nefarius HidHide 过滤驱动，首次开启自动安装并需管理员授权一次。"/>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap">
+                                <Run Text="开启后机器人虚拟手柄"/>
+                                <Run Text="仅游戏内可见" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="：Steam 与其他游戏收不到机器人按键。基于 HidHide 过滤驱动，首次开启自动安装并需"/>
+                                <Run Text="管理员授权一次" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="。"/>
+                            </TextBlock>
 
                             <CheckBox x:Name="ChkHidHideEnabled" Content="虚拟手柄仅游戏内可见"
                                       Margin="0,12,0,0" FontWeight="SemiBold"
@@ -909,8 +1142,13 @@
                                 <StackPanel>
                                     <TextBlock Text="挂机时自动禁用真实手柄（释放玩家 1）" FontSize="12.5"/>
                                     <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}"
-                                               TextWrapping="Wrap" MaxWidth="520" Margin="0,3,0,0"
-                                               Text="真实手柄会占用玩家 1，虚拟手柄输入将被游戏忽略。开启后启动挂机时自动在设备管理器级禁用真实手柄，关闭本程序后自动恢复。需一次管理员授权注册系统任务，之后全自动。"/>
+                                               TextWrapping="Wrap" MaxWidth="520" Margin="0,3,0,0">
+                                        <Run Text="真实手柄会占用玩家 1，虚拟手柄输入将被游戏忽略。开启后"/>
+                                        <Run Text="启动挂机自动禁用真实手柄、退出自动恢复" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                        <Run Text="；首次需管理员授权注册系统任务，之后"/>
+                                        <Run Text="全自动" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                        <Run Text="。"/>
+                                    </TextBlock>
                                 </StackPanel>
                             </CheckBox>
                         </StackPanel>
@@ -930,32 +1168,7 @@
                         </StackPanel>
                     </Border>
 
-                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <StackPanel>
-                                    <TextBlock Text="挂机节奏" Style="{StaticResource H2}"/>
-                                    <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" Margin="0,2,0,0"
-                                               Text="比赛中轻按 A、赛后弹窗确认的随机间隔区间"/>
-                                </StackPanel>
-                            </StackPanel>
-                            <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
-                                       Text="越小点得越勤，越大越像真人偶尔操作；必须立即响应的按钮不受此设置影响。"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                <TextBlock Text="最小" Style="{StaticResource FieldLabel}"/>
-                                <TextBox x:Name="TxtIdleMin" Width="68" Margin="9,0,0,0" Text="1"
-                                         TextChanged="IdleTap_TextChanged"/>
-                                <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="8,0,0,0"/>
-                                <TextBlock Text="最大" Style="{StaticResource FieldLabel}" Margin="20,0,0,0"/>
-                                <TextBox x:Name="TxtIdleMax" Width="68" Margin="9,0,0,0" Text="4"
-                                         TextChanged="IdleTap_TextChanged"/>
-                                <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="8,0,0,0"/>
-                            </StackPanel>
-                            <TextBlock x:Name="TxtIdleError" Foreground="{DynamicResource Danger}" FontSize="11.5"
-                                       Margin="0,9,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </Border>
+                    <!-- （挂机节奏已移至「★重要设定」页） -->
 
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                         <StackPanel>
@@ -991,17 +1204,67 @@
                     </Border>
                     </StackPanel>
 
-                    <!-- ============ 二级页：关于 ============ -->
-                    <StackPanel x:Name="SetTabAbout" Visibility="Collapsed">
+                    <!-- ============ 二级页：开发者选项（训练数据采集等开发调试功能） ============ -->
+                    <StackPanel x:Name="SetTabDev" Visibility="Collapsed">
+                    <Border Style="{StaticResource Card}" Margin="0,2,0,12">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Text="训练数据采集（存帧）" Style="{StaticResource H2}"/>
+                            </StackPanel>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520">
+                                <Run Text="面向"/>
+                                <Run Text="开发调试" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="：挂机时按设定间隔自动保存画面 JPG，用于积累自定义识别模型的训练集，"/>
+                                <Run Text="普通用户无需开启" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="。"/>
+                            </TextBlock>
+                            <CheckBox x:Name="ChkFrameDump" Content="启用：挂机时按间隔自动保存画面 JPG" Margin="0,12,0,0"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBlock Text="存帧间隔" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="CmbFrameDumpInterval" Width="110" Margin="10,0,0,0" SelectedIndex="2">
+                                    <ComboBoxItem Content="2 秒"/>
+                                    <ComboBoxItem Content="5 秒"/>
+                                    <ComboBoxItem Content="10 秒"/>
+                                    <ComboBoxItem Content="30 秒"/>
+                                    <ComboBoxItem Content="60 秒"/>
+                                </ComboBox>
+                                <Button x:Name="BtnOpenCaptures" Content="打开存帧目录" Margin="12,0,0,0" Width="110"
+                                        Style="{StaticResource PrimaryBtn}" Click="BtnOpenCaptures_Click"/>
+                            </StackPanel>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,8,0,0" MaxWidth="520">
+                                <Run Text="保存到 exe 同级 "/>
+                                <Run Text="captures\日期\" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text=" 目录（每张约 100KB，10 秒间隔挂机一晚约 30MB）。标注训练完成后把 "/>
+                                <Run Text="yolo26n.onnx + classes.txt" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text=" 放回 models\yolo\ 即可生效。更改在下次开始挂机时生效。"/>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+                    </StackPanel>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ===== 关于面板（左栏独立分类：诊断报告 / 声明 / 反馈） ===== -->
+            <ScrollViewer x:Name="AboutPanel" Grid.Row="2" Visibility="Collapsed"
+                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                <StackPanel Margin="0,0,12,0">
                     <!-- ===== 诊断报告 ===== -->
                     <Border Style="{StaticResource Card}" Margin="0,2,0,12">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Text="诊断报告" Style="{StaticResource H2}"/>
+                                <TextBlock Style="{StaticResource H2}"><Run Text="★ " Foreground="{DynamicResource Warning}"/>诊断报告</TextBlock>
                             </StackPanel>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520"
-                                       Text="出问题点这里：一键收集系统环境信息（显卡与驱动、虚拟手柄栈、系统错误日志、Steam 位置）+ 本程序日志配置 + 自动记录的崩溃转储，打包成一个 zip 发到群里即可远程排查。全程只读，不改动系统任何设置。生成约需 1~2 分钟。"/>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520">
+                                <Run Text="出问题点这里：一键收集"/>
+                                <Run Text="系统环境信息、本程序日志与崩溃记录" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="，打包成一个 zip，"/>
+                                <Run Text="发到群里即可远程排查" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="。"/>
+                                <Run Text="全程只读" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="，不改动系统任何设置，生成约需 1~2 分钟。"/>
+                            </TextBlock>
                             <TextBlock FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,8,0,0"
                                        Text="补充说明（可选）：描述遇到的现象，比如卡在哪一步、点了什么没反应、什么时候开始的——会写进反馈包，帮我们更快定位。"/>
                             <TextBox x:Name="TxtDiagNote" Height="48" Margin="0,4,0,0" Padding="6,4"
@@ -1028,23 +1291,34 @@
                             </StackPanel>
 
                             <TextBlock Text="分辨率建议" FontWeight="SemiBold" FontSize="12.5" Foreground="{DynamicResource TextPrimary}"/>
-                            <TextBlock Text="理论支持全分辨率，但强烈建议游戏以「窗口化 720p」运行。分辨率过高会导致后台捕获与 OCR 卡顿，影响挂机稳定性。"
-                                       TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,11"/>
+                            <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,11">
+                                <Run Text="理论支持全分辨率，但强烈建议游戏以"/>
+                                <Run Text="「窗口化 720p」" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="运行：分辨率过高会导致后台捕获与 OCR 卡顿，影响挂机稳定性。"/>
+                            </TextBlock>
 
                             <TextBlock Text="封号风险" FontWeight="SemiBold" FontSize="12.5" Foreground="{DynamicResource TextPrimary}"/>
-                            <TextBlock Text="本软件仅供学习交流与个人使用。使用自动化工具存在被官方封号的风险，一切后果由使用者自行承担，与作者无关。自愿使用，风险自担。"
-                                       TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,11"/>
+                            <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,11">
+                                <Run Text="本软件仅供学习交流与个人使用。使用自动化工具"/>
+                                <Run Text="存在被官方封号的风险" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="，一切后果由使用者自行承担，与作者无关。自愿使用，风险自担。"/>
+                            </TextBlock>
 
                             <TextBlock Text="反馈交流" FontWeight="SemiBold" FontSize="12.5" Foreground="{DynamicResource TextPrimary}"/>
-                            <TextBlock Text="问题反馈与交流请加 QQ 群：1128646247。"
-                                       TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,11"/>
+                            <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,11">
+                                <Run Text="问题反馈与交流请加 QQ 群："/>
+                                <Run Text="1128646247" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="。"/>
+                            </TextBlock>
 
                             <TextBlock Text="版权与分发" FontWeight="SemiBold" FontSize="12.5" Foreground="{DynamicResource TextPrimary}"/>
-                            <TextBlock Text="本软件无偿免费，禁止二次售卖、付费分发，禁止篡改或移除作者信息后重新发布。转载请注明作者 Dabao#1392。"
-                                       TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,2"/>
+                            <TextBlock TextWrapping="Wrap" FontSize="12" Foreground="{DynamicResource TextSecondary}" Margin="0,3,0,2">
+                                <Run Text="本软件无偿免费，"/>
+                                <Run Text="禁止二次售卖、付费分发" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="，禁止篡改或移除作者信息后重新发布。转载请注明作者 Dabao#1392。"/>
+                            </TextBlock>
                         </StackPanel>
                     </Border>
-                    </StackPanel>
                 </StackPanel>
             </ScrollViewer>
 
@@ -1133,9 +1407,14 @@
                                 <Ellipse Width="9" Height="9" Fill="#FF4FA8E0" VerticalAlignment="Center" Margin="0,0,9,1"/>
                                 <TextBlock Text="网络优化" FontSize="14" FontWeight="Bold"/>
                             </StackPanel>
-                            <TextBlock Text="若 GitHub 无法直连导致检查更新或下载失败，可一键将 GitHub 域名指向测速最快的 IP（修改 hosts）。"
-                                       Foreground="{DynamicResource TextSecondary}" FontSize="12"
-                                       TextWrapping="Wrap" Margin="0,9,0,0"/>
+                            <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                       TextWrapping="Wrap" Margin="0,9,0,0">
+                                <Run Text="若 GitHub 无法直连导致检查更新或下载失败，可"/>
+                                <Run Text="一键将 GitHub 域名指向测速最快的 IP" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="（修改 "/>
+                                <Run Text="hosts" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="）。"/>
+                            </TextBlock>
                             <Button x:Name="BtnOptimizeGitHub" Content="一键优化 GitHub 直连" Style="{StaticResource PrimaryBtn}"
                                     HorizontalAlignment="Left" Margin="0,14,0,0" Click="BtnOptimizeGitHub_Click"/>
                             <ProgressBar x:Name="PbGitHub" Margin="0,12,0,0" Visibility="Collapsed"/>
@@ -1155,15 +1434,30 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <!-- 工具栏 -->
+                    <!-- 工具栏：四列弹性布局（文件下拉框在星号列里伸缩），窄窗口只会收窄不会重叠 -->
                     <Grid>
-                        <StackPanel Orientation="Horizontal">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*" MinWidth="110" MaxWidth="300"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel Orientation="Horizontal" Grid.Column="0">
                             <Rectangle Style="{StaticResource CardTitleBar}"/>
                             <TextBlock Text="日志历史" Style="{StaticResource H2}" VerticalAlignment="Center"/>
-                            <ComboBox x:Name="CmbLogFiles" Width="280" Margin="14,0,0,0"
-                                      SelectionChanged="CmbLogFiles_SelectionChanged"/>
                         </StackPanel>
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                        <ComboBox x:Name="CmbLogFiles" Grid.Column="1" Margin="14,0,0,0"
+                                  VerticalAlignment="Center"
+                                  SelectionChanged="CmbLogFiles_SelectionChanged"/>
+                        <ComboBox x:Name="CmbHistoryLogFilter" Grid.Column="2" Width="118" FontSize="11"
+                                  Margin="8,0,0,0" VerticalAlignment="Center" SelectedIndex="0"
+                                  ToolTip="历史日志显示过滤（文件内容不受影响，与运行日志同款三档）"
+                                  SelectionChanged="CmbHistoryLogFilter_SelectionChanged">
+                            <ComboBoxItem Content="全部"/>
+                            <ComboBoxItem Content="仅关键流程"/>
+                            <ComboBoxItem Content="仅报错/提醒"/>
+                        </ComboBox>
+                        <StackPanel Orientation="Horizontal" Grid.Column="3" Margin="12,0,0,0">
                             <Button x:Name="BtnRefreshLogs" Content="刷新" Style="{StaticResource GhostBtn}"
                                     Padding="11,4" FontSize="11" Click="BtnRefreshLogs_Click"/>
                             <Button x:Name="BtnOpenLogFolder2" Content="打开文件夹" Style="{StaticResource GhostBtn}"
@@ -1178,7 +1472,7 @@
                         <ListBox x:Name="LogFileContent" Background="Transparent" BorderThickness="0"
                                  Margin="6" FontFamily="Consolas" FontSize="11.5"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
-                                 ScrollViewer.HorizontalScrollBarVisibility="Auto">
+                                 ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                             <ListBox.ItemContainerStyle>
                                 <Style TargetType="ListBoxItem">
                                     <Setter Property="Padding" Value="5,1.5"/>

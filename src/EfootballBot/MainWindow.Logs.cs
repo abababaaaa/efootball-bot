@@ -38,6 +38,27 @@ public partial class MainWindow
         @"^\[(?<t>\d{2}:\d{2}:\d{2})\]\s*(?<tag>\[[^\]]+\])?\s*(?<rest>.*)$",
         System.Text.RegularExpressions.RegexOptions.Compiled);
 
+    private static Brush LevelBrush(LogLevel lv) => lv switch
+    {
+        LogLevel.Success => BrushOk,
+        LogLevel.Warn => BrushWarn,
+        LogLevel.Error => BrushBad,
+        _ => BrushLogInfo,
+    };
+
+    /// <summary>
+    /// 运行日志与日志历史共用的三段分色行：[时间] 橙 / [模块前缀] 蓝 / 正文按级别，自动换行。
+    /// </summary>
+    private static TextBlock BuildLogLine(string time, string? tag, string rest, LogLevel lv)
+    {
+        var tb = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        tb.Inlines.Add(new Run($"[{time}] ") { Foreground = BrushLogTime });
+        if (!string.IsNullOrEmpty(tag))
+            tb.Inlines.Add(new Run($"{tag} ") { Foreground = BrushLogTag });
+        tb.Inlines.Add(new Run(rest) { Foreground = LevelBrush(lv) });
+        return tb;
+    }
+
     private void AppendLog(string msg, LogLevel lv)
     {
         // GUI 侧日志全部落盘（v1.1.19 修复）：此前 AppendLog 只写 UI 控件，"正在启动 Worker"、
@@ -49,16 +70,19 @@ public partial class MainWindow
         // 回放缓存（与显示上限同步 300 条）：切换过滤档时按当前档重渲，被隐藏的条目不丢失
         _logBuffer.Enqueue((msg, lv));
         while (_logBuffer.Count > 300) _logBuffer.Dequeue();
-        if (!PassesRuntimeLogFilter(lv)) return;
+        if (!PassesLogFilter(lv, _runtimeLogFilter)) return;
         AppendLogItem(msg, lv);
     }
 
     /// <summary>应用内显示过滤档：All=全部 / Key=仅关键流程（Success）/ Warn=仅报错与提醒（Warn+Error）。仅影响 UI，文件日志全量。</summary>
     private string _runtimeLogFilter = "All";
 
+    /// <summary>日志历史查看器的显示过滤档（与运行日志同款三档，选择持久化到配置）。</summary>
+    private string _historyLogFilter = "All";
+
     private readonly Queue<(string Msg, LogLevel Lv)> _logBuffer = new();
 
-    private bool PassesRuntimeLogFilter(LogLevel lv) => _runtimeLogFilter switch
+    private static bool PassesLogFilter(LogLevel lv, string mode) => mode switch
     {
         "Key" => lv == LogLevel.Success,
         "Warn" => lv is LogLevel.Warn or LogLevel.Error,
@@ -67,27 +91,17 @@ public partial class MainWindow
 
     private void AppendLogItem(string msg, LogLevel lv)
     {
-        Brush levelBrush = lv switch
-        {
-            LogLevel.Success => BrushOk,
-            LogLevel.Warn => BrushWarn,
-            LogLevel.Error => BrushBad,
-            _ => BrushLogInfo,
-        };
-
         // 三段分色：[时间] 灰 / [模块前缀] 主题色 / 正文按级别
-        var tb = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        TextBlock tb;
         var m = LogPrefixRegex.Match(msg);
         if (m.Success)
         {
-            tb.Inlines.Add(new Run($"[{m.Groups["t"].Value}] ") { Foreground = BrushLogTime });
-            if (!string.IsNullOrEmpty(m.Groups["tag"].Value))
-                tb.Inlines.Add(new Run($"{m.Groups["tag"].Value} ") { Foreground = BrushLogTag });
-            tb.Inlines.Add(new Run(m.Groups["rest"].Value) { Foreground = levelBrush });
+            tb = BuildLogLine(m.Groups["t"].Value, m.Groups["tag"].Value, m.Groups["rest"].Value, lv);
         }
         else
         {
-            tb.Inlines.Add(new Run(msg) { Foreground = levelBrush });
+            tb = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            tb.Inlines.Add(new Run(msg) { Foreground = LevelBrush(lv) });
         }
 
         LogList.Items.Add(tb);
@@ -110,7 +124,7 @@ public partial class MainWindow
         // 切档即时生效：从回放缓存重渲（切回「全部」可看到此前被隐藏的日志）
         LogList.Items.Clear();
         foreach (var (msg, lv) in _logBuffer)
-            if (PassesRuntimeLogFilter(lv))
+            if (PassesLogFilter(lv, _runtimeLogFilter))
                 AppendLogItem(msg, lv);
     }
 
@@ -134,6 +148,10 @@ public partial class MainWindow
     }
 
     // ---------------- 历史日志查看器 ----------------
+
+    private static readonly System.Text.RegularExpressions.Regex YamlLogLineRegex = new(
+        @"^- \{time: ""(?<t>.*?)"", level: ""(?<l>.*?)"", msg: ""(?<m>.*)""\}\s*$",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
 
     private void RefreshLogFileList()
     {
@@ -192,6 +210,43 @@ public partial class MainWindow
         LoadLogFile(path);
     }
 
+    private void CmbHistoryLogFilter_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        // XAML 的 SelectedIndex=0 在 InitializeComponent 期间即触发，此时控件尚未就绪
+        if (LogFileContent is null || CmbLogFiles is null || _loadingConfig) return;
+        _historyLogFilter = CmbHistoryLogFilter.SelectedIndex switch
+        {
+            1 => "Key",
+            2 => "Warn",
+            _ => "All",
+        };
+        _cfg.HistoryLogFilter = _historyLogFilter;
+        _cfg.Save();
+        // 当前已加载的文件按新档重渲
+        if (CmbLogFiles.SelectedItem is ComboBoxItem ci && ci.Tag is string path)
+            LoadLogFile(path);
+    }
+
+    /// <summary>YAML 级别标签 → 显示级别（与 FileLogger.WriteYamlLine 的写出对应）。</summary>
+    private static LogLevel ParseFileLevel(string tag) => tag?.Trim().ToUpperInvariant() switch
+    {
+        "OK" => LogLevel.Success,
+        "WARN" or "WARNING" => LogLevel.Warn,
+        "ERROR" or "FATAL" => LogLevel.Error,
+        "DEBUG" => LogLevel.Debug,
+        _ => LogLevel.Info,
+    };
+
+    /// <summary>旧版 .txt/.log 行内级别标记猜测（无 YAML level 字段时兜底）。</summary>
+    private static LogLevel GuessLegacyLevel(string line)
+    {
+        if (line.Contains("[ERROR]")) return LogLevel.Error;
+        if (line.Contains("[WARN]")) return LogLevel.Warn;
+        if (line.Contains("[OK]")) return LogLevel.Success;
+        if (line.Contains("[DEBUG]")) return LogLevel.Debug;
+        return LogLevel.Info;
+    }
+
     private void LoadLogFile(string path)
     {
         LogFileContent.Items.Clear();
@@ -209,40 +264,57 @@ public partial class MainWindow
             {
                 lines = sr.ReadToEnd().Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
             }
-            var brushInfo = (Brush)FindResource("LogInfo");
-            var brushWarn = (Brush)FindResource("Warning");
-            var brushError = (Brush)FindResource("Danger");
-            var brushOk = (Brush)FindResource("AccentGlow");
 
-            // YAML 日志行：- {time: "...", level: "INFO", msg: "..."}
-            var yamlLine = new System.Text.RegularExpressions.Regex(
-                @"^- \{time: ""(?<t>.*?)"", level: ""(?<l>.*?)"", msg: ""(?<m>.*)""\}\s*$");
-            int shown = 0;
+            int total = 0, shown = 0;
             foreach (var raw in lines)
             {
-                string line = raw;
-                string level = "";
-                var m = yamlLine.Match(raw);
+                var m = YamlLogLineRegex.Match(raw);
+                string msg;
+                LogLevel lv;
+                string? yamlTime = null;
                 if (m.Success)
                 {
-                    level = m.Groups["l"].Value;
-                    string msg = m.Groups["m"].Value.Replace("\\\"", "\"").Replace("\\\\", "\\");
-                    line = $"[{m.Groups["t"].Value}] [{level}] {msg}";
+                    // YAML 日志行：- {time: "...", level: "INFO", msg: "..."}
+                    // msg 已被 FileLogger 剥掉 [HH:mm:ss] 前缀，但保留 [模块tag]，与运行日志同构
+                    yamlTime = m.Groups["t"].Value;
+                    lv = ParseFileLevel(m.Groups["l"].Value);
+                    msg = m.Groups["m"].Value.Replace("\\\"", "\"").Replace("\\\\", "\\");
                 }
-                Brush b = brushInfo;
-                if (line.Contains("[ERROR]") || level == "ERROR") b = brushError;
-                else if (line.Contains("[WARN]") || level == "WARN") b = brushWarn;
-                else if (line.Contains("[OK]") || level == "OK") b = brushOk;
-                LogFileContent.Items.Add(new TextBlock
+                else
                 {
-                    Text = line,
-                    Foreground = b,
-                    TextWrapping = TextWrapping.NoWrap,
-                });
+                    msg = raw;
+                    lv = GuessLegacyLevel(raw);
+                }
+                total++;
+
+                if (!PassesLogFilter(lv, _historyLogFilter)) continue;
+
+                // 与运行日志完全同款的三段分色渲染；YAML 行显示时间取自文件时间戳（HH:mm:ss）
+                TextBlock tb;
+                var pm = LogPrefixRegex.Match(msg);
+                if (pm.Success)
+                {
+                    string t = yamlTime is not null && yamlTime.Length >= 19
+                        ? yamlTime.Substring(11, 8)
+                        : pm.Groups["t"].Value;
+                    tb = BuildLogLine(t, pm.Groups["tag"].Value, pm.Groups["rest"].Value, lv);
+                }
+                else if (yamlTime is not null)
+                {
+                    string t = yamlTime.Length >= 19 ? yamlTime.Substring(11, 8) : yamlTime;
+                    tb = BuildLogLine(t, null, msg, lv);
+                }
+                else
+                {
+                    tb = new TextBlock { TextWrapping = TextWrapping.Wrap };
+                    tb.Inlines.Add(new Run(msg) { Foreground = LevelBrush(lv) });
+                }
+
+                LogFileContent.Items.Add(tb);
                 shown++;
             }
 
-            LogFileStatus.Text = $"{path} | {shown} 条日志";
+            LogFileStatus.Text = $"{path} | {shown}/{total} 条日志";
         }
         catch (Exception ex)
         {

@@ -524,8 +524,14 @@
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ScrollBar">
+                        <!-- PART_Track 是 WPF 模板化部件约定名：ScrollBar 靠它找到 Track 并接通
+                             值同步与滑块拖拽，缺了它 Thumb 永远拖不动（历次版本滑块失效根因） -->
                         <Grid Background="Transparent">
-                            <Track x:Name="track" IsDirectionReversed="True">
+                            <Track x:Name="PART_Track" IsDirectionReversed="True"
+                                   Minimum="{TemplateBinding Minimum}"
+                                   Maximum="{TemplateBinding Maximum}"
+                                   Value="{TemplateBinding Value}"
+                                   ViewportSize="{TemplateBinding ViewportSize}">
                                 <Track.DecreaseRepeatButton>
                                     <RepeatButton Command="ScrollBar.PageUpCommand">
                                         <RepeatButton.Template>
@@ -558,7 +564,7 @@
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="Orientation" Value="Horizontal">
-                                <Setter TargetName="track" Property="IsDirectionReversed" Value="False"/>
+                                <Setter TargetName="PART_Track" Property="IsDirectionReversed" Value="False"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
