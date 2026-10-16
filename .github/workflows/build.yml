@@ -88,112 +88,57 @@ jobs:
           draft: false
           prerelease: ${{ steps.meta.outputs.prerelease }}
 
-      # ---- 国内更新源（Gitee）同步：失败不阻塞 GitHub Release（continue-on-error）----
-      # 前提：仓库 Secrets 配置 GITEE_TOKEN（projects 权限），Gitee 上已建 abababaaaa/efootball-bot。
-      - name: Push mirror to Gitee
-        continue-on-error: true
+      # SHA256 写入 Release 正文：更新器下载完成后按它校验完整性——加速镜像被篡改/反代吐
+      # 错误页/发错版本都因哈希不匹配被弃用并切换下一通道。正文经 api.github.com 直读，与
+      # 镜像分属不同信任域，不被中间人污染。
+      - name: Append SHA256 to release notes
         env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-        run: |
-          git remote add gitee "https://oauth2:$env:GITEE_TOKEN@gitee.com/abababaaaa/efootball-bot.git"
-          git push gitee HEAD:main --force
-          git push gitee "refs/tags/${{ github.ref_name }}" --force
-
-      - name: Sync release to Gitee
-        continue-on-error: true
-        env:
-          GITEE_TOKEN: ${{ secrets.GITEE_TOKEN }}
-          GITEE_REPO: abababaaaa/efootball-bot
-          TAG_NAME: ${{ github.ref_name }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $token = $env:GITEE_TOKEN
-          $repo = $env:GITEE_REPO
-          $tag = $env:TAG_NAME
-          $api = "https://gitee.com/api/v5/repos/$repo"
-          # 所有 API 输出先脱敏 token 再落日志
-          function Mask($s) { if ($s) { $s -replace [regex]::Escape($token), '***' } else { $s } }
-
-          # 测试版=4 段数字 tag（与 GitHub 侧 prerelease 规则一致）
-          $prerelease = if ($tag -like '*-*' -or $tag -match '^v\d+\.\d+\.\d+\.\d+$') { 'true' } else { 'false' }
-          $zip = 'release-artifact/EfootballBot.exe'
-
-          # 1) 建发行版；已存在则取既有 id（幂等，可重跑）
-          $releaseId = $null
-          try {
-            $body = @{
-              access_token     = $token
-              tag_name         = $tag
-              name             = $tag
-              body             = "自动同步自 GitHub Release（国内直连下载）。"
-              prerelease       = $prerelease
-              target_commitish = 'main'
-            }
-            $r = Invoke-RestMethod -TimeoutSec 40 -Method Post -Uri "$api/releases" -Body $body -ContentType 'application/x-www-form-urlencoded'
-            $releaseId = $r.id
-            Write-Host "Gitee release created: id=$releaseId"
-          } catch {
-            Write-Host ("create failed (maybe exists): " + (Mask $_.Exception.Message))
-            try {
-              $r = Invoke-RestMethod -TimeoutSec 40 -Uri "$api/releases/tags/$tag?access_token=$token"
-              $releaseId = $r.id
-              Write-Host "Gitee release exists: id=$releaseId"
-            } catch {
-              Write-Host ("cannot resolve existing release: " + (Mask $_.Exception.Message))
-              exit 0
-            }
+          $lines = foreach ($f in 'release-artifact/EfootballBot.exe', 'release-artifact/efootball-bot-win-x64.zip') {
+            "SHA256 $(Split-Path -Leaf $f): $((Get-FileHash -Algorithm SHA256 $f).Hash.ToLower())"
           }
+          $hdr = @{ Authorization = "Bearer $env:GH_TOKEN" }
+          $api = "$env:GITHUB_API_URL/repos/${{ github.repository }}/releases"
+          $rel = Invoke-RestMethod -TimeoutSec 40 -Headers $hdr "$api/tags/${{ github.ref_name }}"
+          # 重跑幂等：先剥掉旧 SHA256 行再追加（重发布的哈希可能变化）
+          $kept = (($rel.body -split "`r?`n") | Where-Object { $_ -notmatch '^SHA256 ' }) -join "`n"
+          $body = $kept.TrimEnd() + "`n`n" + ($lines -join "`n")
+          Invoke-RestMethod -TimeoutSec 40 -Method Patch -Headers $hdr -Uri "$api/$($rel.id)" `
+            -Body (@{ body = $body } | ConvertTo-Json) -ContentType 'application/json'
+          Write-Host "SHA256 appended to release $($rel.tag_name)"
 
-          # 2) Gitee 免费单附件 <=100MB，exe 约 160MB → 按 95MB 分卷（.exe.001/.exe.002…）
-          #    只传 exe 分卷（zip 不进 Gitee，省 1GB 附件配额；旧版更新器会自动回退 GitHub 的 zip）
-          $partsDir = Join-Path $env:RUNNER_TEMP 'gitee-parts'
-          New-Item -ItemType Directory -Force -Path $partsDir | Out-Null
-          $files = @()
-          $chunk = 95MB
-          $fs = [IO.File]::OpenRead((Resolve-Path $zip))
-          try {
-            $buf = New-Object byte[] (4MB)
-            $idx = 1
-            while ($fs.Position -lt $fs.Length) {
-              $part = Join-Path $partsDir ("EfootballBot.exe.{0:d3}" -f $idx)
-              $out = [IO.File]::Create($part)
-              try {
-                $left = [Math]::Min($chunk, $fs.Length - $fs.Position)
-                while ($left -gt 0) {
-                  $n = $fs.Read($buf, 0, [int][Math]::Min($buf.Length, $left))
-                  if ($n -le 0) { break }
-                  $out.Write($buf, 0, $n)
-                  $left -= $n
-                }
-              } finally { $out.Dispose() }
-              $files += $part
-              $idx++
-            }
-          } finally { $fs.Dispose() }
-          Write-Host ("split into {0} part(s)" -f $files.Count)
-
-          # 3) 逐卷上传（curl.exe = Windows 自带真实 curl，multipart 大文件可靠）
-          foreach ($f in $files) {
-            $out = & curl.exe -sS --max-time 600 -X POST `
-              -F "file=@$f" `
-              "$api/releases/$releaseId/attach_files?access_token=$token" 2>&1
-            Write-Host (Mask ($out | Out-String))
-            if ($LASTEXITCODE -ne 0) { throw "upload failed: $f" }
+      # ---- 国内直连源（Cloudflare R2：免费 10GB、流量免费、免实名，r2.dev 公开桶）----
+      # 前提（一次性）：Cloudflare → R2 建桶并启用 r2.dev 公开访问 → 创建 API Token
+      # （Object Read & Write），仓库 Secrets：R2_ACCOUNT_ID / R2_ACCESS_KEY_ID /
+      # R2_SECRET_ACCESS_KEY / R2_BUCKET；桶公开地址填入 Updater.R2PublicBaseUrl。
+      # 未配置 Secret 时本步自动跳过，客户端走 镜像 → GitHub 直连 候选链。
+      # 顺序=先 exe 后清单：清单最后可见，不会出现"新清单配旧 exe"。
+      - name: Publish to Cloudflare R2
+        if: ${{ secrets.R2_ACCESS_KEY_ID != '' }}
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
+          R2_ENDPOINT: https://${{ secrets.R2_ACCOUNT_ID }}.r2.cloudflarestorage.com
+          R2_BUCKET: ${{ secrets.R2_BUCKET }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = 'release-artifact/EfootballBot.exe'
+          $manifest = @{
+            version = '${{ github.ref_name }}'.TrimStart('v')
+            sha256  = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
+            size    = (Get-Item $exe).Length
+          } | ConvertTo-Json -Compress
+          Set-Content -Path latest-pre.json -Value $manifest -Encoding ascii
+          aws s3 cp $exe "s3://$env:R2_BUCKET/EfootballBot.exe" --endpoint-url $env:R2_ENDPOINT --content-type application/octet-stream
+          aws s3 cp latest-pre.json "s3://$env:R2_BUCKET/latest-pre.json" --endpoint-url $env:R2_ENDPOINT --content-type application/json
+          # 正式版才更新 latest.json（测试版用户读 latest-pre.json，两清单独立）
+          $tag = '${{ github.ref_name }}'
+          if ($tag -notlike '*-*' -and $tag -notmatch '^v\d+\.\d+\.\d+\.\d+$') {
+            Set-Content -Path latest.json -Value $manifest -Encoding ascii
+            aws s3 cp latest.json "s3://$env:R2_BUCKET/latest.json" --endpoint-url $env:R2_ENDPOINT --content-type application/json
           }
-
-          # 3b) 无 pdb——符号已 DebugType=embedded 嵌入 exe 本体（165KB，体积无感），
-          #     崩溃 dump 解析直接用 Release 上的 exe，无需单独符号文件
-
-          # 4) 清理旧发行版：只保留最近 5 个（Gitee 免费附件总量 1GB）
-          try {
-              $all = Invoke-RestMethod -TimeoutSec 40 -Uri "$api/releases?per_page=100&access_token=$token"
-            $old = $all | Sort-Object { [datetime]::Parse($_.created_at) } -Descending | Select-Object -Skip 5
-            foreach ($o in $old) {
-              Write-Host "deleting old release: $($o.tag_name)"
-              $out = & curl.exe -sS --max-time 60 -X DELETE "$api/releases/$($o.id)?access_token=$token" 2>&1
-              Write-Host (Mask ($out | Out-String))
-            }
-          } catch {
-            Write-Host ("cleanup failed (non-fatal): " + (Mask $_.Exception.Message))
-          }
+          Write-Host "R2 published: $tag"

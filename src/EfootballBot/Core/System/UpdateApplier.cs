@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
 using System.Net.Http;
+using System.Security.Cryptography;
 
 namespace EfootballBot.Core.System;
 
@@ -73,7 +74,8 @@ public static class UpdateApplier
             Directory.CreateDirectory(tempDir);
             string downloadPath = Path.Combine(tempDir, "download.bin");
 
-            long downloaded = await DownloadAsync(info.DownloadUrls, downloadPath, info.TotalBytes, progress);
+            long downloaded = await DownloadAsync(info.DownloadUrls, downloadPath, info.TotalBytes, progress,
+                info.ExpectedSha256);
             if (downloaded != info.TotalBytes)
                 throw new IOException($"下载不完整：收到 {downloaded} 字节，应为 {info.TotalBytes}");
             Log($"下载完成：{downloaded} 字节");
@@ -109,46 +111,67 @@ public static class UpdateApplier
         }
     }
 
-    /// <summary>顺序下载 URL 序列（Gitee 分卷按 .001/.002… 追加为同一文件；GitHub 单文件）。
-    /// 每个 URL 失败重试一次（瞬断/限流），实时上报进度。返回总字节数。</summary>
-    internal static async Task<long> DownloadAsync(IReadOnlyList<string> urls, string targetPath,
-        long expectedTotal, IProgress<(long Bytes, long Total)>? progress)
+    /// <summary>
+    /// 按候选顺序下载单个文件（候选=同一字节的多个来源：国内直连源 → 加速镜像 → GitHub 直连，
+    /// Updater.BuildDownloadUrls 生成；不是分卷拼接）。单候选 60 秒收不到数据（含连接/首字节
+    /// 等待）即放弃换下一个——慢镜像只要还在流数据就不熔断；候选失败回卷文件长度，防半截数据
+    /// 污染后续候选。指定 expectedSha256 时每个候选下载完即校验，不匹配按该候选失败处理
+    /// （镜像被篡改/反代吐错误页都拦在这），全部候选耗尽才抛最后的错误。返回实际字节数。
+    /// </summary>
+    internal static async Task<long> DownloadAsync(IReadOnlyList<string> candidates, string targetPath,
+        long expectedTotal, IProgress<(long Bytes, long Total)>? progress, string? expectedSha256 = null)
     {
         using var http = new HttpClient { Timeout = Timeout.InfiniteTimeSpan };
         http.DefaultRequestHeaders.UserAgent.ParseAdd("EfootballBot");
-
-        long total = 0;
-        await using var file = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None);
         var buffer = new byte[81920];
-        foreach (var url in urls)
+        Exception? last = null;
+        // 文件流只写不读（FileAccess.Write），哈希随下载流增量计算，不回读文件
+        using var hasher = expectedSha256 is null ? null : IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+
+        await using var file = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None);
+        foreach (var url in candidates)
         {
-            Exception? last = null;
-            for (int attempt = 1; attempt <= 2; attempt++)
+            try
             {
-                try
+                using var stall = new CancellationTokenSource(TimeSpan.FromSeconds(60));
+                using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, stall.Token);
+                resp.EnsureSuccessStatusCode();
+                using var stream = await resp.Content.ReadAsStreamAsync(stall.Token);
+                long written = 0;
+                int n;
+                while ((n = await stream.ReadAsync(buffer, stall.Token)) > 0)
                 {
-                    using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead);
-                    resp.EnsureSuccessStatusCode();
-                    using var stream = await resp.Content.ReadAsStreamAsync();
-                    int n;
-                    while ((n = await stream.ReadAsync(buffer)) > 0)
-                    {
-                        await file.WriteAsync(buffer.AsMemory(0, n));
-                        total += n;
-                        progress?.Report((total, expectedTotal));
-                    }
-                    last = null;
-                    break;
+                    await file.WriteAsync(buffer.AsMemory(0, n), stall.Token);
+                    hasher?.AppendData(buffer, 0, n);
+                    written += n;
+                    stall.CancelAfter(TimeSpan.FromSeconds(60)); // 收到数据即续命
+                    progress?.Report((written, expectedTotal));
                 }
-                catch (Exception ex) when (attempt == 1)
+                // 反代吐 200 错误页/连接提前收尾时不会有异常，用 Content-Length 兜住
+                if (resp.Content.Headers.ContentLength is long d && d != written)
+                    throw new IOException($"内容长度不符：收到 {written} 字节，标称 {d}");
+
+                if (hasher is not null)
                 {
-                    last = ex;
-                    Log($"下载分段失败（将重试一次）：{ex.Message}");
+                    string actual = Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant();
+                    if (actual != expectedSha256)
+                        throw new InvalidDataException(
+                            $"SHA256 校验失败：实际 {actual[..12]}…，期望 {expectedSha256[..12]}…");
                 }
+
+                Log($"下载成功：{HostOf(url)}（{written} 字节）");
+                return written;
             }
-            if (last is not null) throw last;
+            catch (Exception ex)
+            {
+                last = ex;
+                hasher?.GetHashAndReset(); // 丢弃半截数据的哈希状态，下一候选从零累计
+                file.Seek(0, SeekOrigin.Begin);
+                file.SetLength(0);
+                Log($"下载通道失败，切换下一通道：{HostOf(url)} — {ex.Message}");
+            }
         }
-        return total;
+        throw last ?? new IOException("所有下载通道均失败");
     }
 
     private static string? FindExtractedExe(string extractDir)

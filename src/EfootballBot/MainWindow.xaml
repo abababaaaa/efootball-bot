@@ -1088,11 +1088,10 @@
                                 <Border Grid.Row="1" Grid.ColumnSpan="2" Background="{DynamicResource Surface2}" CornerRadius="8"
                                         Padding="12,9" Margin="0,8,0,0">
                                     <StackPanel>
-                                        <TextBlock Text="国内更新源（Gitee，优先使用）" Foreground="{DynamicResource TextMuted}" FontSize="10.5"/>
-                                        <TextBlock x:Name="TxtUpdateGitee" Text="abababaaaa/efootball-bot"
-                                                   Foreground="{DynamicResource AccentGlow}" FontSize="12.5"
-                                                   Margin="0,5,0,0" Cursor="Hand" ToolTip="打开国内镜像仓库"
-                                                   MouseLeftButtonUp="TxtUpdateGitee_MouseLeftButtonUp"/>
+                                        <TextBlock Text="下载通道" Foreground="{DynamicResource TextMuted}" FontSize="10.5"/>
+                                        <TextBlock Text="国内直连源 → 加速镜像 → GitHub，自动选路 + SHA256 完整性校验"
+                                                   Foreground="{DynamicResource TextMuted}" FontSize="10.5"
+                                                   TextWrapping="Wrap" Margin="0,4,0,0"/>
                                     </StackPanel>
                                 </Border>
                             </Grid>

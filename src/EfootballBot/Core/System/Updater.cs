@@ -6,22 +6,26 @@ using System.Text.RegularExpressions;
 namespace EfootballBot.Core.System;
 
 /// <summary>
-/// 自动更新，双通道：Gitee（国内，优先）→ GitHub（兜底）。
-/// 两源对用户是同一逻辑目标：先查 Gitee，任何失败（超时/限流/解析失败/没有 Release）
-/// 都自动回退 GitHub；两源都失败才报错。下载 URL 直接来自检查结果（Gitee 附件走国内 CDN），
-/// 下载与替换流程对源无感知。
-/// Gitee 免费版单附件 ≤ 100MB，而发布 zip 约 160MB——CI 侧按 95MB 分卷
-/// （文件名 .zip.001/.zip.002…），本类检查时把分卷按序拼成下载列表，
-/// 下载时顺序追加到同一个文件再解压；GitHub 侧仍是单文件。
+/// 自动更新。版本检查：R2 清单（国内直连，10 秒超时）→ GitHub Releases API（兜底，
+/// api.github.com 与 github.com 下载域不同路，实测裸网可达）。下载不区分来源，统一走
+/// 候选链：R2 直连源 → 加速镜像前缀 → GitHub 直连（UpdateApplier 逐个尝试，60 秒无数据
+/// 即换下一个），下载完成后按 SHA256 校验（R2 清单或 Release 正文提供）——镜像被篡改或
+/// 发错版本都会因哈希不匹配被弃用并切换下一通道，最后一档 GitHub 直连是信任锚点。
 /// </summary>
 public static class Updater
 {
     /// <summary>GitHub 仓库地址（owner/repo），无需用户手动填写。</summary>
     public const string DefaultRepository = "abababaaaa/efootball-bot";
-    /// <summary>Gitee 国内镜像仓库地址（owner/repo）。CI 发版时自动同步；不可用时客户端自动回退 GitHub。</summary>
-    public const string DefaultGiteeRepository = "abababaaaa/efootball-bot";
 
-    private const string GiteeApiBase = "https://gitee.com/api/v5";
+    /// <summary>R2 公开桶基地址（如 https://pub-xxxx.r2.dev ），CI 发版时同步 exe 与版本清单；
+    /// 空 = 未配置，自动跳过该通道（建桶后填入即可生效）。internal set 供单测切换。</summary>
+    public static string R2PublicBaseUrl { get; internal set; } = "";
+
+    /// <summary>下载加速镜像前缀（第三方 GitHub 反代，拼在完整原始 URL 前）。2026-10-16 实测
+    /// 存活：gh-proxy.com、ghproxy.net、ghproxy.cn（速度随时段波动）；ghfast.top / ghproxy.cc /
+    /// gh.llkk.cc / github.moeyy.xyz 等一批已死，勿照抄旧清单。全部失败自动回退 GitHub 直连。</summary>
+    public static readonly string[] DownloadMirrorPrefixes =
+        { "https://gh-proxy.com/", "https://ghproxy.net/", "https://ghproxy.cn/" };
 
     /// <summary>GitHub Release API 的简化模型。</summary>
     private record GhRelease(
@@ -39,21 +43,8 @@ public static class Updater
         string Browser_Download_Url
     );
 
-    /// <summary>Gitee 发行版模型（字段 snake_case，Created_At 需自行解析）。</summary>
-    private record GiteeRelease(
-        string Tag_Name,
-        string? Name,
-        bool Prerelease,
-        string? Body,
-        string Created_At,
-        List<GiteeAsset> Assets
-    );
-
-    private record GiteeAsset(
-        string Name,
-        long Size,
-        string Browser_Download_Url
-    );
+    /// <summary>R2 版本清单（CI 发版时写入桶内 latest.json / latest-pre.json）。</summary>
+    private sealed record R2Manifest(string Version, long Size, string? Sha256);
 
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
@@ -82,7 +73,7 @@ public static class Updater
     /// <summary>可选 GitHub Token（从环境变量 GITHUB_TOKEN 读取），用于提高 API 限流上限。</summary>
     private static string? GithubToken => Environment.GetEnvironmentVariable("GITHUB_TOKEN");
 
-    /// <summary>检查最新版本：Gitee 优先、GitHub 兜底（带 30 分钟缓存）。</summary>
+    /// <summary>检查最新版本：R2 清单优先、GitHub API 兜底（带 30 分钟缓存）。</summary>
     /// <param name="force">true 时跳过缓存（手动检查时用）。</param>
     public static async Task<UpdateResult> CheckAsync(string? repository = null, bool includePrerelease = false, bool force = false)
     {
@@ -91,54 +82,44 @@ public static class Updater
         if (!force && _cachedResult is not null && _cacheKey == key && DateTime.Now - _cacheTime < CacheTtl)
             return _cachedResult;
 
-        var gitee = await CheckGiteeAsync(includePrerelease);
-        if (!gitee.IsError)
-            return Cache(gitee, key);
+        var r2 = await CheckR2Async(includePrerelease);
+        if (r2 is not null)
+            return Cache(r2, key);
 
         var github = await CheckGitHubAsync(repository, includePrerelease);
         if (!github.IsError)
             return Cache(github, key);
 
-        return UpdateResult.Error("Gitee 与 GitHub 均无法连接，请检查网络后重试");
+        return UpdateResult.Error("无法连接更新源（直连清单与 GitHub 均失败），请检查网络后重试");
     }
 
-    /// <summary>国内源检查：Gitee Releases API（匿名可访问，15 秒超时）。</summary>
-    private static async Task<UpdateResult> CheckGiteeAsync(bool includePrerelease)
+    /// <summary>国内直连源检查：读 R2 公开桶版本清单（匿名、无 API 限流）。任何失败或"没有
+    /// 比本机更新的版本"都返回 null，静默交给 GitHub 检查兜底——清单只反映"上一次 CI 构建"，
+    /// GitHub 才是完整事实源。</summary>
+    private static async Task<UpdateResult?> CheckR2Async(bool includePrerelease)
     {
+        if (string.IsNullOrWhiteSpace(R2PublicBaseUrl)) return null;
         try
         {
-            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("EfootballBot");
-            using var resp = await http.GetAsync($"{GiteeApiBase}/repos/{DefaultGiteeRepository}/releases?per_page=20&direction=desc");
-            resp.EnsureSuccessStatusCode();
+            string manifestName = includePrerelease ? "latest-pre.json" : "latest.json";
+            var m = await http.GetFromJsonAsync<R2Manifest>(
+                $"{R2PublicBaseUrl.TrimEnd('/')}/{manifestName}", JsonOpts);
+            if (m?.Version is null || !Version.TryParse(m.Version, out var remoteVer)) return null;
+            if (remoteVer <= CurrentVersion) return null;
 
-            var releases = await resp.Content.ReadFromJsonAsync<List<GiteeRelease>>(JsonOpts);
-            var latest = (releases ?? new())
-                .Where(r => includePrerelease || !r.Prerelease)
-                .OrderByDescending(r => ParseDate(r.Created_At))
-                .FirstOrDefault();
-
-            if (latest is null)
-                return UpdateResult.Error("Gitee 仓库没有 Release");
-            if (!Version.TryParse(latest.Tag_Name.TrimStart('v'), out var remoteVer))
-                return UpdateResult.Error($"无法解析版本号：{latest.Tag_Name}");
-            if (remoteVer <= CurrentVersion)
-                return UpdateResult.AlreadyLatest($"已是最新版本 v{FormatVersion(CurrentVersion)}");
-
-            var picked = PickAssets(latest.Assets);
-            if (picked is null)
-                return UpdateResult.Error($"Release v{remoteVer} 没有可用的 exe/zip 资产");
-
-            var (urls, total, singleExe) = picked.Value;
-            return UpdateResult.Available(remoteVer, latest.Name ?? latest.Tag_Name, urls, total, latest.Body, singleExe);
+            return UpdateResult.Available(remoteVer, $"v{remoteVer}",
+                BuildDownloadUrls(remoteVer), m.Size, null, singleExecutable: true,
+                expectedSha256: string.IsNullOrWhiteSpace(m.Sha256) ? null : m.Sha256.ToLowerInvariant());
         }
-        catch (Exception ex)
+        catch
         {
-            return UpdateResult.Error($"Gitee 检查失败：{ex.Message}");
+            return null; // R2 不可达/清单损坏：回退 GitHub，不打扰用户
         }
     }
 
-    /// <summary>兜底源检查：GitHub Releases API（现有逻辑）。</summary>
+    /// <summary>兜底源检查：GitHub Releases API。</summary>
     private static async Task<UpdateResult> CheckGitHubAsync(string repository, bool includePrerelease)
     {
         if (string.IsNullOrWhiteSpace(repository) || !repository.Contains('/'))
@@ -179,8 +160,9 @@ public static class Updater
                 return UpdateResult.Error($"Release v{remoteVer} 没有 exe/zip 资产");
 
             return UpdateResult.Available(remoteVer, latest.Name ?? latest.Tag_Name,
-                new List<string> { single.Browser_Download_Url }, single.Size, latest.Body,
-                single.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+                BuildDownloadUrls(remoteVer, single.Name), single.Size, latest.Body,
+                single.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase),
+                expectedSha256: ParseExpectedSha256(latest.Body, single.Name));
         }
         catch (HttpRequestException ex)
         {
@@ -192,34 +174,30 @@ public static class Updater
         }
     }
 
-    private static DateTime ParseDate(string? s)
-        => DateTime.TryParse(s, out var d) ? d : DateTime.MinValue;
-
-    /// <summary>
-    /// 从资产列表选发布包：优先单个 .exe/.zip；否则取 .exe.001/.zip.001… 分卷（按序号排序）。
-    /// 返回（下载 URL 序列, 总字节数, 是否裸 exe）；没有可用资产返回 null。
-    /// </summary>
-    private static (List<string> Urls, long Total, bool SingleExecutable)? PickAssets(List<GiteeAsset>? assets)
+    /// <summary>构建下载候选地址序列（同一份字节的多个来源，任一成功即可，非分卷拼接）：
+    /// R2 直连源（已配置且为目标是 exe 时）→ 各加速镜像 → GitHub 直连（恒在最后兜底）。
+    /// CI 用同一构建产物发布到所有来源，ExpectedSha256 对全部候选一体适用。</summary>
+    internal static List<string> BuildDownloadUrls(Version v, string fileName = "EfootballBot.exe")
     {
-        var list = assets ?? new();
-        var single = list.FirstOrDefault(a =>
-            a.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-            || a.Name.EndsWith(".zip", StringComparison.OrdinalIgnoreCase));
-        if (single is not null)
-            return (new List<string> { single.Browser_Download_Url }, single.Size,
-                single.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase));
+        string gh = $"https://github.com/{DefaultRepository}/releases/download/v{v}/{fileName}";
+        var urls = new List<string>();
+        if (!string.IsNullOrWhiteSpace(R2PublicBaseUrl) &&
+            fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
+            urls.Add($"{R2PublicBaseUrl.TrimEnd('/')}/{fileName}");
+        foreach (var p in DownloadMirrorPrefixes)
+            urls.Add(p + gh);
+        urls.Add(gh);
+        return urls;
+    }
 
-        var parts = list
-            .Select(a => (Asset: a, Match: Regex.Match(a.Name, @"\.(exe|zip)\.(\d+)$", RegexOptions.IgnoreCase)))
-            .Where(x => x.Match.Success)
-            .OrderBy(x => int.Parse(x.Match.Groups[2].Value))
-            .ToList();
-        if (parts.Count == 0)
-            return null;
-        var isExe = parts[0].Asset.Name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)
-            || parts[0].Asset.Name.Contains(".exe.", StringComparison.OrdinalIgnoreCase);
-        return (parts.Select(x => x.Asset.Browser_Download_Url).ToList(),
-            parts.Sum(x => x.Asset.Size), isExe);
+    /// <summary>从 Release 正文解析 CI 追加的「SHA256 文件名: 64位十六进制」（取首个匹配）。
+    /// 正文无此行（旧版 Release）返回 null = 下载不做哈希校验，行为与历史版本一致。</summary>
+    internal static string? ParseExpectedSha256(string? body, string assetName)
+    {
+        if (string.IsNullOrWhiteSpace(body) || string.IsNullOrWhiteSpace(assetName)) return null;
+        var m = Regex.Match(body,
+            $@"SHA256\s+{Regex.Escape(assetName)}\s*:\s*([0-9a-fA-F]{{64}})", RegexOptions.IgnoreCase);
+        return m.Success ? m.Groups[1].Value.ToLowerInvariant() : null;
     }
 
     private static UpdateResult Cache(UpdateResult r, string key)
@@ -231,9 +209,13 @@ public static class Updater
     }
 }
 
-/// <param name="DownloadUrls">下载地址序列：GitHub 单文件为 1 个；Gitee 大包分卷时按 .001/.002… 顺序多个。</param>
+/// <param name="DownloadUrls">下载候选地址序列（同一文件的多个来源，按优先级排列，
+/// UpdateApplier 逐个尝试直到成功；不是分卷拼接）。</param>
 /// <param name="SingleExecutable">true=裸 exe（下载后直接替换本体）；false=zip（解压整目录覆盖）。</param>
-public record UpdateInfo(Version Version, string Name, IReadOnlyList<string> DownloadUrls, long TotalBytes, string? Body, bool SingleExecutable);
+/// <param name="ExpectedSha256">期望的 SHA256（R2 清单或 Release 正文提供）；null=不做校验
+/// （仅旧版 Release 无哈希行时发生）。</param>
+public record UpdateInfo(Version Version, string Name, IReadOnlyList<string> DownloadUrls, long TotalBytes,
+    string? Body, bool SingleExecutable, string? ExpectedSha256 = null);
 
 public class UpdateResult
 {
@@ -245,8 +227,9 @@ public class UpdateResult
     public UpdateInfo? Info { get; init; }
 
     public static UpdateResult AlreadyLatest(string msg) => new() { UpToDate = true, Message = msg };
-    public static UpdateResult Available(Version v, string name, IReadOnlyList<string> urls, long size, string? body, bool singleExecutable)
-        => new() { IsAvailable = true, Info = new(v, name, urls, size, body, singleExecutable), Message = $"发现新版本 v{v}" };
+    public static UpdateResult Available(Version v, string name, IReadOnlyList<string> urls, long size, string? body,
+        bool singleExecutable, string? expectedSha256 = null)
+        => new() { IsAvailable = true, Info = new(v, name, urls, size, body, singleExecutable, expectedSha256), Message = $"发现新版本 v{v}" };
     public static UpdateResult Error(string msg) => new() { IsError = true, Message = msg };
     public static UpdateResult Success(string msg) => new() { Applied = true, Message = msg };
 }

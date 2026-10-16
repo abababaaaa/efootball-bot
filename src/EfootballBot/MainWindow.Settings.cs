@@ -521,19 +521,6 @@ public partial class MainWindow
         catch { /* 忽略 */ }
     }
 
-    private void TxtUpdateGitee_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
-    {
-        try
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = $"https://gitee.com/{Updater.DefaultGiteeRepository}",
-                UseShellExecute = true
-            });
-        }
-        catch { /* 忽略 */ }
-    }
-
     private void BtnBannerUpdate_Click(object sender, RoutedEventArgs e)
     {
         // 先跳转到更新面板，再执行更新
