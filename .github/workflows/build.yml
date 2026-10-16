@@ -117,7 +117,8 @@ jobs:
       # 未配置 Secret 时本步自动跳过，客户端走 镜像 → GitHub 直连 候选链。
       # 顺序=先 exe 后清单：清单最后可见，不会出现"新清单配旧 exe"。
       - name: Publish to Cloudflare R2
-        if: ${{ secrets.R2_ACCESS_KEY_ID != '' }}
+        # 注意：if: 里不能引用 secrets 上下文（Unrecognized named-value，整个 workflow 解析失败，
+        # e9ab974 首发实测 run 59/60 双双 no-jobs failure）——改在脚本内检测，未配置时直接退出
         env:
           AWS_ACCESS_KEY_ID: ${{ secrets.R2_ACCESS_KEY_ID }}
           AWS_SECRET_ACCESS_KEY: ${{ secrets.R2_SECRET_ACCESS_KEY }}
@@ -126,6 +127,10 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
+          if (-not $env:AWS_ACCESS_KEY_ID) {
+            Write-Host 'R2 secrets not configured, skipping publish (client falls back to mirrors -> GitHub).'
+            exit 0
+          }
           $exe = 'release-artifact/EfootballBot.exe'
           $manifest = @{
             version = '${{ github.ref_name }}'.TrimStart('v')
