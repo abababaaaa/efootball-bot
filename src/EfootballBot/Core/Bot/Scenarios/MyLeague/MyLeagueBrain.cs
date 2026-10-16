@@ -73,7 +73,10 @@ public static class MyLeagueBrain
     /// <summary>状态判定/点击目标的最低检测置信度。</summary>
     public const float MinScore = 0.45f;
 
-    /// <summary>同一界面连续该轮数后停止操作类动作，退避等待。</summary>
+    /// <summary>同一界面连续该轮数后操作退避放慢（导航类界面停手等待）。
+    /// 弹窗/推进类界面例外：A/X 是唯一推进键，退避只放慢节奏绝不停止——
+    /// 终场后的奖励弹窗常连成一长串且每页同判 HasConfirm（实机 2026-10-16：
+    /// ≥9 页弹窗链在第 8 帧退避停手，尾页「物品已送到收件箱」永远等不到 A，空转 8 小时）。</summary>
     public const int StuckStreak = 8;
 
     /// <summary>无特征界面（比赛/过场）连续该轮数后按 B 逃生。</summary>
@@ -301,14 +304,15 @@ public static class MyLeagueBrain
             }
             case MlScreen.HasConfirm:
             {
-                if (screenStreak >= StuckStreak) return MlAction.Wait(5000);
                 // 带「取消」的弹窗（关键比赛 P3：OK 在上、取消在下且是默认焦点；购买弹窗同型）：
                 // 盲按 A 正好按在取消上把弹窗关掉。先上移再 A——单按钮页上移无害，双按钮弹窗
                 // 恰好从取消挪到确认键。难度选择页除外（其确认键就是默认焦点，上移反而进选项
                 // 列表改难度）；启动设定窗除外（按 A 保留设置继续）。
+                // 超过退避轮数只放慢不停手：弹窗链的第 9+ 页仍需要 A 推进（见 StuckStreak 注释）。
+                bool slow = screenStreak >= StuckStreak;
                 if (ocr.ContainsJoined("取消") && !IsDifficultyChoice(ocr) && !IsGameSettingsDialog(ocr))
-                    return new MlAction(MlActionKind.PadUpConfirm, 2000, "弹窗确认（上移避开取消）");
-                return new MlAction(MlActionKind.PadConfirm, 2000, "确定/下一步");
+                    return new MlAction(MlActionKind.PadUpConfirm, slow ? 5000 : 2000, "弹窗确认（上移避开取消）");
+                return new MlAction(MlActionKind.PadConfirm, slow ? 5000 : 2000, "确定/下一步");
             }
             case MlScreen.LeaguePage:
             {
@@ -325,30 +329,33 @@ public static class MyLeagueBrain
             }
             case MlScreen.FullTime:
             {
-                // 终场：脱离比赛状态，立即按 A（下一步）
-                if (screenStreak >= StuckStreak) return MlAction.Wait(5000);
-                return new MlAction(MlActionKind.PadConfirm, 2000, "全场结束→下一步");
+                // 终场：脱离比赛状态，立即按 A（下一步）。结算/里程碑多页链同理退避只放慢
+                return new MlAction(MlActionKind.PadConfirm,
+                    screenStreak >= StuckStreak ? 5000 : 2000, "全场结束→下一步");
             }
 
             case MlScreen.KeyMatchDialog:
             {
-                // 关键比赛弹窗：光标上移一格点 OK（实机 P2/P3：OK 上方/下方默认位不对齐）
-                if (screenStreak >= StuckStreak) return MlAction.Wait(5000);
-                return new MlAction(MlActionKind.PadUpConfirm, 2500, "关键比赛→OK");
+                // 关键比赛弹窗：光标上移一格点 OK（实机 P2/P3：OK 上方/下方默认位不对齐）。
+                // 上移+A 是唯一关法，退避只放慢不停手
+                return new MlAction(MlActionKind.PadUpConfirm,
+                    screenStreak >= StuckStreak ? 5000 : 2500, "关键比赛→OK");
             }
 
             case MlScreen.MatchStartPage:
             {
                 // 起始页：按 A（下一步）开赛；比赛画面出现后由比分框时钟进入 InMatch（自动点击）
-                if (screenStreak >= StuckStreak) return MlAction.Wait(5000);
-                return new MlAction(MlActionKind.PadConfirm, 3000, "起始页→下一步开赛");
+                return new MlAction(MlActionKind.PadConfirm,
+                    screenStreak >= StuckStreak ? 5000 : 3000, "起始页→下一步开赛");
             }
 
             case MlScreen.TitleScreen:
             {
-                // 标题画面：进入键是手柄 X（A 无效），按 X 进入主菜单
-                if (screenStreak >= StuckStreak) return MlAction.Wait(5000);
-                return new MlAction(MlActionKind.PadXPress, 3000, "标题画面→X");
+                // 标题画面：进入键是手柄 X（A 无效），按 X 进入主菜单。
+                // 场景层的 30s 宽限（区分加载画面）期间不按键，宽限后必须持续按 X——
+                // 退避停手会让真标题（掉线/游戏重启）永久卡死
+                return new MlAction(MlActionKind.PadXPress,
+                    screenStreak >= StuckStreak ? 5000 : 3000, "标题画面→X");
             }
 
             case MlScreen.LeagueInfoPage:
@@ -361,9 +368,10 @@ public static class MyLeagueBrain
 
             case MlScreen.PurchaseDialog:
             {
-                // 购买弹窗：焦点默认在「取消」→ 上移一格点上方带数字（积分价）的确认按钮
-                if (screenStreak >= StuckStreak) return MlAction.Wait(5000);
-                return new MlAction(MlActionKind.PadUpConfirm, 2500, "购买确认（上移→数字按钮）");
+                // 购买弹窗：焦点默认在「取消」→ 上移一格点上方带数字（积分价）的确认按钮。
+                // 上移+A 是唯一买法，退避只放慢不停手
+                return new MlAction(MlActionKind.PadUpConfirm,
+                    screenStreak >= StuckStreak ? 5000 : 2500, "购买确认（上移→数字按钮）");
             }
 
             case MlScreen.PointsPage:

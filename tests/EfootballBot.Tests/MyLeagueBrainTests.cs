@@ -379,6 +379,78 @@ public class MyLeagueBrainTests
         Assert.Equal(MlActionKind.PadConfirm, action.Kind);
     }
 
+    // ---------------- 弹窗链退避不停手（实机 2026-10-16 回归） ----------------
+    // 终场后奖励弹窗链 ≥9 页且每页同判 HasConfirm：第 8 帧退避停手后，尾页
+    // 「物品已送到收件箱 30,000 GP」永远等不到 A，挂机空转 8 小时。
+    // 弹窗/推进类界面退避只放慢节奏，A/X 必须继续按。
+
+    [Fact]
+    public void Decide_HasConfirm_Stuck_StillConfirms()
+    {
+        var action = MyLeagueBrain.Decide(MlScreen.HasConfirm, OcrResult.Empty, MyLeagueBrain.StuckStreak);
+        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        Assert.True(action.WaitMs >= 5000, "退避后应放慢节奏");
+    }
+
+    [Fact]
+    public void Decide_HasConfirm_Stuck_WithCancel_StillUpConfirms()
+    {
+        var ocr = Ocr(("取消", 0.5, 0.6));
+        var action = MyLeagueBrain.Decide(MlScreen.HasConfirm, ocr, MyLeagueBrain.StuckStreak);
+        Assert.Equal(MlActionKind.PadUpConfirm, action.Kind);
+        Assert.True(action.WaitMs >= 5000, "退避后应放慢节奏");
+    }
+
+    [Fact]
+    public void Decide_FullTime_Stuck_StillConfirms()
+    {
+        var ocr = Ocr(("全场", 0.62, 0.074));
+        var action = MyLeagueBrain.Decide(MlScreen.FullTime, ocr, MyLeagueBrain.StuckStreak);
+        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+    }
+
+    [Fact]
+    public void Decide_KeyMatchDialog_Stuck_StillUpConfirms()
+    {
+        var action = MyLeagueBrain.Decide(MlScreen.KeyMatchDialog, OcrResult.Empty, MyLeagueBrain.StuckStreak);
+        Assert.Equal(MlActionKind.PadUpConfirm, action.Kind);
+    }
+
+    [Fact]
+    public void Decide_PurchaseDialog_Stuck_StillUpConfirms()
+    {
+        var action = MyLeagueBrain.Decide(MlScreen.PurchaseDialog, OcrResult.Empty, MyLeagueBrain.StuckStreak);
+        Assert.Equal(MlActionKind.PadUpConfirm, action.Kind);
+    }
+
+    [Fact]
+    public void Decide_MatchStartPage_Stuck_StillConfirms()
+    {
+        var action = MyLeagueBrain.Decide(MlScreen.MatchStartPage, OcrResult.Empty, MyLeagueBrain.StuckStreak);
+        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+    }
+
+    [Fact]
+    public void Decide_TitleScreen_Stuck_StillPressesX()
+    {
+        // 真标题（掉线/重启）：场景层 30s 宽限只护加载帧，宽限后必须持续按 X，
+        // 退避停手会让标题画面永久卡死
+        var action = MyLeagueBrain.Decide(MlScreen.TitleScreen, OcrResult.Empty, MyLeagueBrain.StuckStreak);
+        Assert.Equal(MlActionKind.PadXPress, action.Kind);
+    }
+
+    [Fact]
+    public void Decide_NavigationScreens_Stuck_StillWaits()
+    {
+        // 导航类界面维持原退避：重复按键会乱导航，等待 + B 逃生才是恢复路径
+        Assert.Equal(MlActionKind.Wait,
+            MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
+        Assert.Equal(MlActionKind.Wait,
+            MyLeagueBrain.Decide(MlScreen.MatchHub, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
+        Assert.Equal(MlActionKind.Wait,
+            MyLeagueBrain.Decide(MlScreen.ItemList, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
+    }
+
     [Fact]
     public void Decide_LeaguePage_NextStep_Confirms()
     {
