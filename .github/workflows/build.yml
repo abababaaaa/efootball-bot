@@ -22,6 +22,11 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
+      # 测试门禁：Brain 判定回归（历史上反复出问题的误判都有测试锁定）不得在编译通过的
+      # 情况下发版。此前测试只在本地跑，tag 推送直接 publish 发 Release 并被自动更新拉走。
+      - name: Test
+        run: dotnet test tests/EfootballBot.Tests/EfootballBot.Tests.csproj -c Release --nologo
+
       - name: Get version from csproj
         id: get_version
         shell: pwsh

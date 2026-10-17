@@ -70,8 +70,7 @@ public sealed class AiLadderScenario : IScenario
         // 角区探针兜底 InMatch 需比赛上下文（同我的联赛/周活动场景）
         bool corner = MyLeagueScenario.CornerHasContent(obs.Frame);
         bool light = MyLeagueScenario.IsMostlyLightPage(obs.Frame);
-        bool matchContext = _memory.SawWithin(MlScreen.InMatch, TimeSpan.FromSeconds(90), now) ||
-                            _memory.SawWithin(MlScreen.MatchStartPage, TimeSpan.FromSeconds(90), now);
+        bool matchContext = ScenarioShared.MatchContext(_memory, now);
 
         // 本模块界面先判（组别主页也含「前往比赛」，不先判会被共享分类误归 LeaguePage）；
         // 未命中再判周活动（比赛页活动板块扫格误入）残留页；两者都不是才交 MyLeagueBrain
@@ -136,25 +135,17 @@ public sealed class AiLadderScenario : IScenario
         // 未接管：走共用决策（比赛中/终场/弹窗/逃生）
 
         var action = MyLeagueBrain.Decide(ml, obs.Ocr, _streak, matchContext);
+        ScenarioShared.DecisionSnapshot(_log, "AI天梯联赛", ml, _streak, action, obs.Ocr);
 
-        // 标题画面宽限（同周活动）：比赛上下文中的品牌过场帧会连续出现 30s 以上，
-        // 赛后弹窗链上下文宽限拉长到 90s
+        // 标题画面宽限（共享实现，含赛后弹窗链 90s 档）：比赛上下文中的品牌过场帧会
+        // 连续出现 30s 以上，赛后弹窗链上下文宽限拉长到 90s
         if (action.Kind != MlActionKind.PadXPress)
         {
             _titleSince = null;
         }
-        else
+        else if (ScenarioShared.TitleGrace(_memory, now, ref _titleSince, _log, "AI天梯联赛"))
         {
-            bool recentFlow = _memory.SawWithin(MlScreen.InMatch, TimeSpan.FromMinutes(3), now) ||
-                              _memory.SawWithin(MlScreen.MatchStartPage, TimeSpan.FromMinutes(3), now);
-            bool postMatchChain = _memory.SawWithin(MlScreen.FullTime, TimeSpan.FromMinutes(2), now);
-            var grace = postMatchChain ? TimeSpan.FromSeconds(90) : TimeSpan.FromSeconds(30);
-            _titleSince ??= now;
-            if (recentFlow && now - _titleSince.Value < grace)
-            {
-                _log("[AI天梯联赛] eFootball 标志帧（疑似比赛加载/赛后过场画面），暂不按 X，继续观察", LogLevel.Info);
-                return 2000;
-            }
+            return 2000;
         }
 
         switch (action.Kind)
@@ -251,7 +242,13 @@ public sealed class AiLadderScenario : IScenario
 
                 if (ml == MlScreen.MainMenu)
                 {
-                    if (_streak >= MyLeagueBrain.StuckStreak) return 5000;
+                    // 导航多轮无效不再永久等待（≥NavEscapeStreak 周期性 B 清盖层，共享决策同款）
+                    if (_streak >= MyLeagueBrain.NavEscapeStreak && (_streak - MyLeagueBrain.NavEscapeStreak) % 5 == 0)
+                    {
+                        _log("[AI天梯联赛] 主菜单导航多轮无效，B 清盖层/回上级重试", LogLevel.Warn);
+                        await _engine.Pad.Back();
+                        return 2400;
+                    }
                     _log("[AI天梯联赛] 主菜单导航：下→左×6→A 进比赛页", LogLevel.Info);
                     await _engine.Pad.Dpad(PadDir.Down);
                     await _engine.Pad.DpadRepeat(PadDir.Left, 6);
@@ -261,7 +258,15 @@ public sealed class AiLadderScenario : IScenario
 
                 if (ml == MlScreen.MatchHub)
                 {
-                    if (_streak >= MyLeagueBrain.StuckStreak) return 5000;
+                    // 此前 streak≥StuckStreak 永久等待排在恢复分支之前，会把下方的
+                    // B 退出/暂停重扫自愈饿死（两计数并行增长，到 8 轮时恢复分支永远轮不到）
+                    // ——改为放慢继续扫描，≥NavEscapeStreak 周期性 B 逃生。
+                    if (_streak >= MyLeagueBrain.NavEscapeStreak && (_streak - MyLeagueBrain.NavEscapeStreak) % 5 == 0)
+                    {
+                        _log("[AI天梯联赛] 比赛页多轮无进展，B 退回主菜单重导航", LogLevel.Warn);
+                        await _engine.Pad.Back();
+                        return 2400;
+                    }
                     if (_hubTry >= 4)
                     {
                         _hubRound++;

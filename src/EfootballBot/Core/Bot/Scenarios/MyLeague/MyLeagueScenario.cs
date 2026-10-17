@@ -98,8 +98,7 @@ public class MyLeagueScenario : IScenario
         // 菜单页右上角也可能有内容（2026-10-11 用户实机：联赛主页奖励徽章点亮角区探针），
         // 无上下文时宁可判 Unknown 等一拍，绝不把菜单当比赛盲按 A。
         // 冷启动直接落在真实比赛中由比分框时钟主判据覆盖，不依赖角区兜底。
-        bool matchContext = _memory.SawWithin(MlScreen.InMatch, TimeSpan.FromSeconds(90), now) ||
-                            _memory.SawWithin(MlScreen.MatchStartPage, TimeSpan.FromSeconds(90), now);
+        bool matchContext = ScenarioShared.MatchContext(_memory, now);
         var screen = ClassifyScreen(obs, matchContext);
 
         _memory.Record(screen, now);
@@ -212,7 +211,7 @@ public class MyLeagueScenario : IScenario
         int expPagePlayers = MyLeagueBrain.IsExpResultPage(obs.Ocr)
             ? MyLeagueBrain.CountExpResultPlayers(obs.Ocr)
             : 0;
-        if (_engine.Config.MyLeague.NotifyPlayerMaxLevel && expPagePlayers is > 0 and <= 3 &&
+        if (LeagueConfig.NotifyPlayerMaxLevel && expPagePlayers is > 0 and <= 3 &&
             (now - _lastExpPageMaxLogAt).TotalSeconds > 60)
         {
             _lastExpPageMaxLogAt = now;
@@ -244,27 +243,21 @@ public class MyLeagueScenario : IScenario
         if (customWait is not null) return customWait.Value;
 
         var action = MyLeagueBrain.Decide(screen, obs.Ocr, _streak, inMatchRecently);
+        ScenarioShared.DecisionSnapshot(_log, "我的联赛", screen, _streak, action, obs.Ocr);
 
-        // 标题画面宽限：比赛流程上下文中出现「eFootball™+X」帧，多为开赛加载画面
-        // （实机 bot-20261011-140943：确认难度开赛后的加载帧被判 TitleScreen 盲按 X）。
-        // 前 30s 只等待不按 X；真实标题画面（游戏重启/掉线回标题）会停留超过宽限期，
-        // 届时照常按 X 重新进入。冷启动直接落在标题画面（无流程上下文）不等待。
+        // 标题画面宽限（共享实现，含赛后弹窗链 90s 档，见 ScenarioShared.TitleGrace）：
+        // 比赛流程上下文中的「eFootball™+X」帧多为开赛加载画面（实机 bot-20261011-140943：
+        // 确认难度开赛后的加载帧被判 TitleScreen 盲按 X）；赛后品牌过场会连续 30s+
+        // （实机 2026-10-12：全场结束后 33s 处按 X 打断弹窗链）。真实标题画面
+        // （游戏重启/掉线回标题）停留超宽限期后照常按 X 重新进入。冷启动直接落在
+        // 标题画面（无流程上下文）不等待。
         if (action.Kind != MlActionKind.PadXPress)
         {
             _titleSince = null;
         }
-        else
+        else if (ScenarioShared.TitleGrace(_memory, now, ref _titleSince, _log, "我的联赛"))
         {
-            bool recentFlow =
-                _memory.SawWithin(MlScreen.InMatch, TimeSpan.FromMinutes(3), now) ||
-                _memory.SawWithin(MlScreen.MatchStartPage, TimeSpan.FromMinutes(3), now) ||
-                _memory.SawWithin(MlScreen.LeaguePage, TimeSpan.FromMinutes(3), now);
-            _titleSince ??= now;
-            if (recentFlow && now - _titleSince.Value < TimeSpan.FromSeconds(30))
-            {
-                _log("[我的联赛] eFootball 标志帧（疑似比赛加载画面），暂不按 X，继续观察", LogLevel.Info);
-                return 2000;
-            }
+            return 2000;
         }
 
         // ---- 我的联赛道具购买状态机（只在联赛主页/积分页/物品页介入）----

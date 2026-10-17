@@ -258,12 +258,26 @@ public partial class MainWindow
                 return;
             }
 
-            string[] lines;
+            // Debug 级 8 小时会话的日志文件可达数十万行，ReadToEnd 全量渲染会内存暴涨 +
+            // UI 冻结——恰是远程排障最需要打开的时刻。只取末尾一段（先数总行数再回读尾部）。
+            const int MaxLoadedLines = 5000;
+            long totalLines = 0;
             using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
             using (var sr = new StreamReader(fs))
             {
-                lines = sr.ReadToEnd().Split(['\r', '\n'], StringSplitOptions.RemoveEmptyEntries);
+                while (sr.ReadLine() is not null) totalLines++;
             }
+            long skip = Math.Max(0, totalLines - MaxLoadedLines);
+
+            var tail = new List<string>();
+            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+            using (var sr = new StreamReader(fs))
+            {
+                for (long i = 0; i < skip; i++) sr.ReadLine();
+                string? l;
+                while ((l = sr.ReadLine()) is not null) tail.Add(l);
+            }
+            string[] lines = tail.ToArray();
 
             int total = 0, shown = 0;
             foreach (var raw in lines)
@@ -314,7 +328,9 @@ public partial class MainWindow
                 shown++;
             }
 
-            LogFileStatus.Text = $"{path} | {shown}/{total} 条日志";
+            LogFileStatus.Text = skip > 0
+                ? $"{path} | 末尾 {total}/{totalLines} 条日志（大文件仅载入末尾 {MaxLoadedLines} 行）"
+                : $"{path} | {shown}/{total} 条日志";
         }
         catch (Exception ex)
         {

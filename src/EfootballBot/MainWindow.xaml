@@ -886,6 +886,24 @@
                             <TextBlock Text="场" FontSize="12" VerticalAlignment="Center" Margin="4,0,0,0"
                                        Foreground="{DynamicResource TextMuted}"/>
                         </StackPanel>
+                        <!-- 比赛难度（前往比赛后自动核对，与游戏内选择比赛难度一一对应） -->
+                        <StackPanel Orientation="Horizontal" Margin="2,16,0,0">
+                            <TextBlock Text="比赛难度" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="CmbCnWeeklyDifficulty" Width="150" Margin="12,0,0,0" SelectedIndex="2" VerticalAlignment="Center">
+                                <ComboBoxItem Content="新手"/>
+                                <ComboBoxItem Content="业余"/>
+                                <ComboBoxItem Content="标准"/>
+                                <ComboBoxItem Content="职业"/>
+                                <ComboBoxItem Content="顶尖球员"/>
+                                <ComboBoxItem Content="超级球星"/>
+                                <ComboBoxItem Content="传奇"/>
+                            </ComboBox>
+                        </StackPanel>
+                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0">
+                            <Run Text="与游戏内难度一一对应：前往比赛后"/>
+                            <Run Text="自动核对，不一致自动改选" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                            <Run Text="（相同直接开赛）。"/>
+                        </TextBlock>
                         <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0">
                             <Run Text="冠军赛每期固定 7 场：想打满整期选 7；达到设定场次"/>
                             <Run Text="自动停止并还原窗口" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>

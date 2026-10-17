@@ -139,7 +139,9 @@ public partial class MainWindow
         CmbWeeklyLevel.SelectedIndex = weeklyLevelIdx >= 0 ? weeklyLevelIdx : 6;
         LoadStopAfterUi(CmbWeeklyStopAfter, TxtWeeklyStopAfter, _cfg.Weekly.StopAfterMatches);
 
-        // 周活动（国服）：场次停止
+        // 周活动（国服）：难度（默认标准，索引 2）+ 场次停止
+        int cnWeeklyDiffIdx = Array.IndexOf(MyLeagueDifficulties, _cfg.CnWeekly.Difficulty);
+        CmbCnWeeklyDifficulty.SelectedIndex = cnWeeklyDiffIdx >= 0 ? cnWeeklyDiffIdx : 2;
         LoadStopAfterUi(CmbCnWeeklyStopAfter, TxtCnWeeklyStopAfter, _cfg.CnWeekly.StopAfterMatches);
 
         // 我的联赛（国服）：难度/道具/满级提示/场次停止（独立配置段，与国际服互不影响）
@@ -253,6 +255,8 @@ public partial class MainWindow
         _cfg.Weekly.StopAfterMatches = SaveStopAfterUi(CmbWeeklyStopAfter, TxtWeeklyStopAfter);
 
         // 周活动（国服）
+        if (CmbCnWeeklyDifficulty.SelectedIndex >= 0)
+            _cfg.CnWeekly.Difficulty = MyLeagueDifficulties[CmbCnWeeklyDifficulty.SelectedIndex];
         _cfg.CnWeekly.StopAfterMatches = SaveStopAfterUi(CmbCnWeeklyStopAfter, TxtCnWeeklyStopAfter);
 
         // 我的联赛（国服）

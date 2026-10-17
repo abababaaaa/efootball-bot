@@ -342,10 +342,13 @@ public class MyLeagueBrainTests
     }
 
     [Fact]
-    public void Decide_MainMenu_Stuck_Waits()
+    public void Decide_MainMenu_Stuck_SlowsDownNotStops()
     {
+        // 导航屏退避放慢继续导航；永久等待已改为 NavEscapeStreak 后周期性 B 逃生
+        //（v2.0.7 弹窗链 8 小时空转同款模式，2026-10-17 评审补齐）
         var action = MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, MyLeagueBrain.StuckStreak);
-        Assert.Equal(MlActionKind.Wait, action.Kind);
+        Assert.Equal(MlActionKind.PadEnterMatch, action.Kind);
+        Assert.True(action.WaitMs >= 5000, "退避后应放慢节奏");
     }
 
     [Fact]
@@ -440,15 +443,40 @@ public class MyLeagueBrainTests
     }
 
     [Fact]
-    public void Decide_NavigationScreens_Stuck_StillWaits()
+    public void Decide_NavigationScreens_Stuck_SlowContinue_EscapeAtNav()
     {
-        // 导航类界面维持原退避：重复按键会乱导航，等待 + B 逃生才是恢复路径
-        Assert.Equal(MlActionKind.Wait,
+        // 导航屏：StuckStreak 后放慢继续原动作（不再 Wait 停手）；到 NavEscapeStreak
+        // 周期性（每 5 轮）按 B 逃生，其余轮继续导航
+        Assert.Equal(MlActionKind.PadEnterMatch,
             MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
-        Assert.Equal(MlActionKind.Wait,
+        Assert.Equal(MlActionKind.PadMoveRight,
             MyLeagueBrain.Decide(MlScreen.MatchHub, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
-        Assert.Equal(MlActionKind.Wait,
+        Assert.Equal(MlActionKind.PadConfirm,
             MyLeagueBrain.Decide(MlScreen.ItemList, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
+        Assert.Equal(MlActionKind.PadConfirm,
+            MyLeagueBrain.Decide(MlScreen.PointsPage, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
+
+        Assert.Equal(MlActionKind.GamepadBack,
+            MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, MyLeagueBrain.NavEscapeStreak).Kind);
+        Assert.Equal(MlActionKind.GamepadBack,
+            MyLeagueBrain.Decide(MlScreen.MatchHub, OcrResult.Empty, MyLeagueBrain.NavEscapeStreak).Kind);
+        Assert.Equal(MlActionKind.GamepadBack,
+            MyLeagueBrain.Decide(MlScreen.ItemList, OcrResult.Empty, MyLeagueBrain.NavEscapeStreak).Kind);
+        Assert.Equal(MlActionKind.GamepadBack,
+            MyLeagueBrain.Decide(MlScreen.PointsPage, OcrResult.Empty, MyLeagueBrain.NavEscapeStreak).Kind);
+        Assert.Equal(MlActionKind.PadEnterMatch,
+            MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, MyLeagueBrain.NavEscapeStreak + 1).Kind);
+    }
+
+    [Fact]
+    public void Decide_HasConfirm_EscapeAt30_PressesBack()
+    {
+        // A 永不生效的「RT 下一步」型页（实机 2026-10-14 对阵表连按 A 8 次不动）：
+        // ConfirmEscapeStreak（30）轮后周期性 B 逃生；之前仍按 A 推进（弹窗链 9+ 页到不了）
+        var before = MyLeagueBrain.Decide(MlScreen.HasConfirm, OcrResult.Empty, MyLeagueBrain.ConfirmEscapeStreak - 1);
+        Assert.Equal(MlActionKind.PadConfirm, before.Kind);
+        var escape = MyLeagueBrain.Decide(MlScreen.HasConfirm, OcrResult.Empty, MyLeagueBrain.ConfirmEscapeStreak);
+        Assert.Equal(MlActionKind.GamepadBack, escape.Kind);
     }
 
     [Fact]

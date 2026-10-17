@@ -21,6 +21,7 @@ public sealed class ObservationService : IDisposable
     private FrameData? _frame;
     private FrameData? _lastOcrFrame;
     private OcrResult _lastOcr = OcrResult.Empty;
+    private ulong? _lastOcrHash;
     private long _lastOcrTick;
     private readonly List<DateTime> _rebuildTimes = new();
 
@@ -86,6 +87,7 @@ public sealed class ObservationService : IDisposable
         _firstFreshAfterRestartAt = DateTime.MinValue;
         _frame = null;
         _lastOcrFrame = null;
+        _lastOcrHash = null;
     }
 
     /// <summary>
@@ -249,12 +251,37 @@ public sealed class ObservationService : IDisposable
         if (now - _lastOcrTick < ocrIntervalMs && _lastOcrFrame is not null)
             return (_lastOcrFrame, _lastOcr);
 
+        // 静帧去重：画面与上次 OCR 帧逐字节相同（等待页/静止菜单的常态）→ 识别结果必然
+        // 相同，跳过全帧 OCR——PP-OCR CPU 全帧一次几百 ms，是观察循环最大单项 CPU。
+        // 命中时返回【新帧】+ 缓存识别，YOLO 仍按新帧节奏跑，不被 OCR 绑死。
+        if (_lastOcrHash is { } lastHash && HashBgra(f.Bgra) == lastHash)
+        {
+            _lastOcrTick = now; // 视同一次 OCR 周期，维持节流节奏
+            return (f, _lastOcr);
+        }
+
         await Task.Yield();
         var ocr = await _ocr.RecognizeAsync(f, ct);
         _lastOcrFrame = f;
         _lastOcr = ocr;
+        _lastOcrHash = HashBgra(f.Bgra);
         _lastOcrTick = now;
         return (f, ocr);
+    }
+
+    /// <summary>帧内容指纹（FNV-1a 64，全字节）。仅用于同帧去重：极小概率的碰撞只是
+    /// 多跑/少跑一次 OCR，不同帧误判同帧的概率 ~2^-64，无正确性风险。</summary>
+    private static ulong HashBgra(byte[] bgra)
+    {
+        const ulong offset = 14695981039346656037;
+        const ulong prime = 1099511628211;
+        ulong hash = offset;
+        foreach (byte b in bgra)
+        {
+            hash ^= b;
+            hash *= prime;
+        }
+        return hash;
     }
 
     // ---------------- 捕获节流 ----------------

@@ -17,7 +17,7 @@
     <!-- 测试版约定：4 段版本号（如 2.0.5.1）+ 同名 4 段 tag（v2.0.5.1）→ CI 按 pre-release 发布，
          更新器 Version.TryParse 原生支持、仅「包含测试版」开启的用户可见；迭代测试版递增第 4 段，
          正式版顺延三段号（2.0.6）。带横杠的 tag（v2.0.5-beta1）不可用——Version.TryParse 解析失败 -->
-    <Version>2.0.8</Version>
+    <Version>2.0.9</Version>
     <Product>eFootball 挂机助手</Product>
     <Company>EfootballBot</Company>
     <InvariantGlobalization>false</InvariantGlobalization>

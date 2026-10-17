@@ -135,6 +135,48 @@ public class ChallengeRealFrameTests
         Assert.Equal(2, cards.Count);
         Assert.Equal((1, 0, false, false), (cards[0].Index, cards[0].Slot, cards[0].Locked, cards[0].Checked));
         Assert.Equal((2, 1, true, false), (cards[1].Index, cards[1].Slot, cards[1].Locked, cards[1].Checked));
+
+        // 消失处置守卫的前提：真实清单弹窗不含「完成的条件」（那是卡详情页专属词）——
+        // 否则 cur 为空时会被误路由到卡详情处理
+        Assert.False(WeeklyBrain.IsChallengeCardHome(ocr));
+    }
+
+    [Fact]
+    public void ChallengeVanishDecision_NeverDeclaresCompleteAfterEnteringPlayableCard()
+    {
+        // ★实机 2026-10-17 反馈回归（v2.0.8 假「全部完成」跳过未通关活动）：
+        // 卡 02 无勾无锁按 A 进入后详情页被误判、卡号消失——游标未越过已勾卡，
+        // 无论第几次消失都不得判全完成：未确证 → 重扫，反复无法确证 → 放弃拉黑
+        Assert.Equal(WeeklyBrain.ChVanishDecision.Rescan, WeeklyBrain.DecideChallengeVanish(2, cursorDone: false, rescans: 0));
+        Assert.Equal(WeeklyBrain.ChVanishDecision.Rescan, WeeklyBrain.DecideChallengeVanish(2, cursorDone: false, rescans: 1));
+        Assert.Equal(WeeklyBrain.ChVanishDecision.Rescan, WeeklyBrain.DecideChallengeVanish(2, cursorDone: false, rescans: 2));
+        Assert.Equal(WeeklyBrain.ChVanishDecision.Abort, WeeklyBrain.DecideChallengeVanish(2, cursorDone: false, rescans: 3));
+
+        // 两帧确认：动画丢帧等待
+        Assert.Equal(WeeklyBrain.ChVanishDecision.WaitFrame, WeeklyBrain.DecideChallengeVanish(0, cursorDone: true, rescans: 5));
+        Assert.Equal(WeeklyBrain.ChVanishDecision.WaitFrame, WeeklyBrain.DecideChallengeVanish(1, cursorDone: false, rescans: 0));
+
+        // 正常全通关：游标越过已勾卡后消失 → 重扫确证一次 → 第二次消失才判完成
+        Assert.Equal(WeeklyBrain.ChVanishDecision.Rescan, WeeklyBrain.DecideChallengeVanish(2, cursorDone: true, rescans: 0));
+        Assert.Equal(WeeklyBrain.ChVanishDecision.ConfirmTail, WeeklyBrain.DecideChallengeVanish(2, cursorDone: true, rescans: 1));
+        // 已越勾的重扫消失优先于放弃（能确证完成就不报错误）
+        Assert.Equal(WeeklyBrain.ChVanishDecision.ConfirmTail, WeeklyBrain.DecideChallengeVanish(2, cursorDone: true, rescans: 3));
+    }
+
+    [Fact]
+    public void ChallengeCardHomeMarker_TriggersEvenWhenScreenClassifiedAsList()
+    {
+        // 实机 2026-10-17 反馈回归：详情页含大字数字+底栏「返回」时会被卡号兜底判成
+        // ChallengeList——场景层凭「完成的条件」把它拉回卡详情处理（构造此类帧的 OCR：
+        // 无当前卡号、但有详情页专属词）
+        var ocr = Ocr(("完成的条件", 0.2, 0.3), ("返回", 0.5, 0.93));
+        Assert.True(WeeklyBrain.IsChallengeCardHome(ocr));
+    }
+
+    private static OcrResult Ocr(params (string text, double x, double y)[] words)
+    {
+        var list = words.Select(w => new OcrWord(w.text, w.x, w.y, 0.1, 0.03)).ToList();
+        return new OcrResult(list, 1, 1);
     }
 
     [Fact]

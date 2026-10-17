@@ -66,8 +66,7 @@ public sealed class PeakLadderScenario : IScenario
         // 角区探针兜底 InMatch 需比赛上下文（同我的联赛/国服周活动场景）
         bool corner = MyLeagueScenario.CornerHasContent(obs.Frame);
         bool light = MyLeagueScenario.IsMostlyLightPage(obs.Frame);
-        bool matchContext = _memory.SawWithin(MlScreen.InMatch, TimeSpan.FromSeconds(90), now) ||
-                            _memory.SawWithin(MlScreen.MatchStartPage, TimeSpan.FromSeconds(90), now);
+        bool matchContext = ScenarioShared.MatchContext(_memory, now);
 
         // 本模块界面先判：命中时 ml 记 Unknown（状态机处理，不走共享决策）；
         // 未命中再判周活动（冠军赛）残留页面；两者都不是才交 MyLeagueBrain
@@ -137,24 +136,17 @@ public sealed class PeakLadderScenario : IScenario
         // pl==None 且阶段已交回共享流程：走共用决策（比赛中/终场/弹窗/逃生）
 
         var action = MyLeagueBrain.Decide(ml, obs.Ocr, _streak, matchContext);
+        ScenarioShared.DecisionSnapshot(_log, "天梯巅峰赛", ml, _streak, action, obs.Ocr);
 
-        // 标题画面宽限（同国服周活动）：比赛上下文中的品牌过场帧会连续出现 30s 以上，宽限 90s
+        // 标题画面宽限（共享实现，含赛后弹窗链 90s 档）：比赛上下文中的品牌过场帧会
+        // 连续出现 30s 以上，宽限 90s
         if (action.Kind != MlActionKind.PadXPress)
         {
             _titleSince = null;
         }
-        else
+        else if (ScenarioShared.TitleGrace(_memory, now, ref _titleSince, _log, "天梯巅峰赛"))
         {
-            bool recentFlow = _memory.SawWithin(MlScreen.InMatch, TimeSpan.FromMinutes(3), now) ||
-                              _memory.SawWithin(MlScreen.MatchStartPage, TimeSpan.FromMinutes(3), now);
-            bool postMatchChain = _memory.SawWithin(MlScreen.FullTime, TimeSpan.FromMinutes(2), now);
-            var grace = postMatchChain ? TimeSpan.FromSeconds(90) : TimeSpan.FromSeconds(30);
-            _titleSince ??= now;
-            if (recentFlow && now - _titleSince.Value < grace)
-            {
-                _log("[天梯巅峰赛] eFootball 标志帧（疑似比赛加载/赛后过场画面），暂不按 X，继续观察", LogLevel.Info);
-                return 2000;
-            }
+            return 2000;
         }
 
         switch (action.Kind)

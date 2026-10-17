@@ -206,22 +206,37 @@ public sealed class BotEngine : IDisposable
             try
             {
                 int failStreak = 0;
+                bool idleThrottled = false; // 暂停/作息休息期间已把捕获降到 2s/帧
                 while (!token.IsCancellationRequested)
                 {
                     try
                     {
-                        // 暂停：不再观察/操作，只轮询等待恢复或取消
-                        if (_paused) { await Task.Delay(400, token); continue; }
+                        // 暂停：不再观察/操作，只轮询等待恢复或取消。
+                        // 捕获同时降到 2s/帧——暂停可能持续整夜，300ms 全速抓帧是纯空转
+                        if (_paused)
+                        {
+                            if (!idleThrottled) { idleThrottled = true; Observation.ApplyCaptureThrottle(2000); }
+                            await Task.Delay(400, token);
+                            continue;
+                        }
 
                         // 作息调度：超出活跃时段/当日上限/模拟短暂离开时，复位手柄空转等待自动恢复
                         if (!_scheduler.ShouldRunNow(DateTime.Now))
                         {
+                            if (!idleThrottled) { idleThrottled = true; Observation.ApplyCaptureThrottle(2000); }
                             if (_scheduler.PauseJustBegan)
                             {
                                 try { Pad360.ResetAll(); } catch { }
                             }
                             await Task.Delay(2500, token);
                             continue;
+                        }
+
+                        // 恢复活跃：还原常规捕获节奏
+                        if (idleThrottled)
+                        {
+                            idleThrottled = false;
+                            Observation.ApplyCaptureThrottle(300);
                         }
 
                         await ObserveAsync(token);
@@ -670,7 +685,15 @@ public sealed class BotEngine : IDisposable
     /// </summary>
     public async Task<Observation> ObserveAsync(CancellationToken ct)
     {
-        var (f, ocr) = await Observation.ObserveAsync(ct, _cfg.Timing.OcrIntervalMs);
+        // 比赛画面（OCR 零词 + YOLO 零框）文字密度天然为零——全帧 OCR 是观察循环里最大
+        // 单项 CPU，比赛中基本全浪费（比赛判定靠角区探针 + YOLO，见下方注释）。上一轮感知
+        // 为全空时把 OCR 间隔放宽 3 倍（≤5s 封顶）：文字/按钮一出现（弹窗、终场、回菜单）
+        // 下一轮立刻恢复常规节奏，最多慢一轮。
+        int ocrIntervalMs = _cfg.Timing.OcrIntervalMs;
+        if (_lastObs is { } prev && prev.Ocr.Words.Count == 0 && prev.Detections.Count == 0)
+            ocrIntervalMs = Math.Min(ocrIntervalMs * 3, 5000);
+
+        var (f, ocr) = await Observation.ObserveAsync(ct, ocrIntervalMs);
 
         // 距上次 OCR 不足间隔时返回缓存帧，直接复用上一次感知结果
         if (_lastObs is not null && _lastObs.Frame == f && _lastObs.Ocr == ocr)

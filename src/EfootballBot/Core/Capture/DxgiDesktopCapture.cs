@@ -30,6 +30,8 @@ public sealed class DxgiDesktopCapture : ICaptureProvider
     private DeviceContext? _context;
     private OutputDuplication? _duplication;
     private Texture2D? _stagingTexture;
+    private int _stagingW;
+    private int _stagingH;
     private int _outputWidth;
     private int _outputHeight;
     private int _outputOffsetX;
@@ -161,20 +163,9 @@ public sealed class DxgiDesktopCapture : ICaptureProvider
         using var output5 = output.QueryInterface<Output5>();
         _duplication = output5.DuplicateOutput(device);
 
-        var stagingDesc = new Texture2DDescription
-        {
-            Width = _outputWidth,
-            Height = _outputHeight,
-            MipLevels = 1,
-            ArraySize = 1,
-            Format = Format.B8G8R8A8_UNorm,
-            SampleDescription = new SharpDX.DXGI.SampleDescription(1, 0),
-            Usage = ResourceUsage.Staging,
-            BindFlags = BindFlags.None,
-            CpuAccessFlags = CpuAccessFlags.Read,
-            OptionFlags = ResourceOptionFlags.None,
-        };
-        _stagingTexture = new Texture2D(device, stagingDesc);
+        // staging 纹理按窗口实际尺寸惰性创建（EnsureStaging，随窗口移动/缩放重建）——
+        // 不再预建整幅桌面大小：4K 桌面全幅 staging 每帧 GPU→CPU 回读 ~33MB，窗口通常
+        // 只占一小块，绝大部分是白读的带宽
         UpdateWindowRect();
 
         // 现场取帧校验（≤1.5s）：全黑 = 该适配器不是此输出的属主，换下一个候选。
@@ -190,27 +181,13 @@ public sealed class DxgiDesktopCapture : ICaptureProvider
                 using (desktopResource)
                 using (var d3dResource = desktopResource.QueryInterface<SharpDX.Direct3D11.Resource>())
                 {
-                    _context!.CopyResource(_stagingTexture, d3dResource);
-                    var dataBox = _context.MapSubresource(_stagingTexture, 0, MapMode.Read, SharpDX.Direct3D11.MapFlags.None);
-                    try
+                    UpdateWindowRect();
+                    var raw = CopyWindowBgra(d3dResource);
+                    if (raw.Length > 0 && !IsMostlyBlack(raw))
                     {
-                        UpdateWindowRect();
-                        int winW = _windowRect.Right - _windowRect.Left;
-                        int winH = _windowRect.Bottom - _windowRect.Top;
-                        if (winW <= 0 || winH <= 0) continue;
-                        int srcX = _windowRect.Left - _outputOffsetX;
-                        int srcY = _windowRect.Top - _outputOffsetY;
-                        var raw = CropBgra(dataBox, _outputWidth, _outputHeight, srcX, srcY, winW, winH);
-                        if (!IsMostlyBlack(raw))
-                        {
-                            Step($"桌面复制绑定：{adapter.Description.Description}" +
-                                 $"（输出 {_outputWidth}×{_outputHeight}）");
-                            return true;
-                        }
-                    }
-                    finally
-                    {
-                        _context.UnmapSubresource(_stagingTexture, 0);
+                        Step($"桌面复制绑定：{adapter.Description.Description}" +
+                             $"（输出 {_outputWidth}×{_outputHeight}）");
+                        return true;
                     }
                 }
             }
@@ -289,36 +266,23 @@ public sealed class DxgiDesktopCapture : ICaptureProvider
             {
                 // DXGI.Resource → D3D11.Resource（桌面帧底层是 D3D11 纹理）
                 using var d3dResource = desktopResource.QueryInterface<SharpDX.Direct3D11.Resource>();
-                // 拷贝到 staging 纹理后 Map 读取
-                _context.CopyResource(_stagingTexture, d3dResource);
-                var dataBox = _context.MapSubresource((SharpDX.Direct3D11.Resource)_stagingTexture, 0, MapMode.Read, SharpDX.Direct3D11.MapFlags.None);
-                try
-                {
-                    // 每帧更新窗口 rect（窗口可能被移动 / 调整大小）
-                    UpdateWindowRect();
+                // 每帧更新窗口 rect（窗口可能被移动 / 调整大小）
+                UpdateWindowRect();
 
-                    int winW = _windowRect.Right - _windowRect.Left;
-                    int winH = _windowRect.Bottom - _windowRect.Top;
-                    if (winW <= 0 || winH <= 0) return false;
+                int winW = _windowRect.Right - _windowRect.Left;
+                int winH = _windowRect.Bottom - _windowRect.Top;
+                if (winW <= 0 || winH <= 0) return false;
 
-                    // 裁剪窗口区域（换算到 output 纹理坐标，副显示器为相对偏移）
-                    int srcX = _windowRect.Left - _outputOffsetX;
-                    int srcY = _windowRect.Top - _outputOffsetY;
+                // 只回读窗口区域（CopyWindowBgra，GPU 端按矩形拷贝），
+                // 再降采样到 ≤720p（复用 WindowCapture 的降采样逻辑，保证输出尺寸一致）
+                var raw = CopyWindowBgra(d3dResource);
+                var data = WindowCapture.DownscaleIfNeeded(raw, winW, winH, out int ow, out int oh);
 
-                    // 降采样到 ≤720p（复用 WindowCapture 的降采样逻辑，保证输出尺寸一致）
-                    var raw = CropBgra(dataBox, _outputWidth, _outputHeight, srcX, srcY, winW, winH);
-                    var data = WindowCapture.DownscaleIfNeeded(raw, winW, winH, out int ow, out int oh);
-
-                    long tick = Environment.TickCount64;
-                    _lastProduceTick = tick;
-                    _latest = new FrameData(data, ow, oh, tick);
-                    _lastFrameAt = DateTime.Now;
-                    FrameUpdated?.Invoke(this, EventArgs.Empty);
-                }
-                finally
-                {
-                    _context.UnmapSubresource(_stagingTexture, 0);
-                }
+                long tick = Environment.TickCount64;
+                _lastProduceTick = tick;
+                _latest = new FrameData(data, ow, oh, tick);
+                _lastFrameAt = DateTime.Now;
+                FrameUpdated?.Invoke(this, EventArgs.Empty);
             }
         }
         finally
@@ -329,27 +293,73 @@ public sealed class DxgiDesktopCapture : ICaptureProvider
     }
 
     /// <summary>
-    /// 从已 Map 的桌面纹理中裁剪出窗口区域的 BGRA 字节（w×h 紧密排列，越界部分留黑）。
-    /// x/y 为相对 output 纹理原点的坐标（可能为负或超出 output，跨显示器时边缘为黑边）。
+    /// 把桌面帧中的窗口区域拷到窗口尺寸 staging 纹理并读回。GPU 端 CopySubresourceRegion
+    /// 只拷窗口与 output 的交集矩形，替代旧「整幅桌面 CopyResource → CPU 裁剪」——
+    /// 4K 桌面每帧省 ~30MB 的 GPU→CPU 回读带宽。窗口越出本 output 的部分留黑
+    /// （与旧 CropBgra 语义一致，引擎黑帧守卫接管全黑情形）。调用前需 UpdateWindowRect()。
+    /// 仅捕获线程调用。
     /// </summary>
-    private static byte[] CropBgra(DataBox dataBox, int deskW, int deskH, int x, int y, int w, int h)
+    private byte[] CopyWindowBgra(SharpDX.Direct3D11.Resource desktop)
     {
-        int stride = dataBox.RowPitch;
-        var dst = new byte[w * h * 4];
-        nint srcPtr = dataBox.DataPointer;
-        for (int row = 0; row < h; row++)
+        int winW = _windowRect.Right - _windowRect.Left;
+        int winH = _windowRect.Bottom - _windowRect.Top;
+        var dst = new byte[Math.Max(0, winW) * Math.Max(0, winH) * 4];
+        if (winW <= 0 || winH <= 0) return dst;
+
+        // 与 output 可见区域求交集（窗口在其他显示器/跨屏时为部分或空）
+        int srcX = _windowRect.Left - _outputOffsetX;
+        int srcY = _windowRect.Top - _outputOffsetY;
+        int cx = Math.Max(0, srcX);
+        int cy = Math.Max(0, srcY);
+        int cxEnd = Math.Min(_outputWidth, srcX + winW);
+        int cyEnd = Math.Min(_outputHeight, srcY + winH);
+        int boxW = cxEnd - cx;
+        int boxH = cyEnd - cy;
+        if (boxW <= 0 || boxH <= 0) return dst; // 完全不在本 output：全黑帧
+
+        EnsureStaging(boxW, boxH);
+        // SharpDX 签名：（源, 源子资源, 源区域, 目标, 目标子资源, 目标X, Y, Z）
+        _context!.CopySubresourceRegion(desktop, 0,
+            new ResourceRegion(cx, cy, 0, cxEnd, cyEnd, 1),
+            _stagingTexture!, 0, 0, 0, 0);
+        var dataBox = _context.MapSubresource(_stagingTexture!, 0, MapMode.Read, SharpDX.Direct3D11.MapFlags.None);
+        try
         {
-            int srcRow = y + row;
-            if (srcRow < 0 || srcRow >= deskH) continue;
-            // 水平方向与 output 可见区域求交集
-            int xStart = Math.Max(0, x);
-            int xEnd = Math.Min(deskW, x + w);
-            int copyBytes = (xEnd - xStart) * 4;
-            if (copyBytes <= 0) continue;
-            nint rowPtr = srcPtr + srcRow * stride + xStart * 4;
-            Marshal.Copy(rowPtr, dst, row * w * 4 + (xStart - x) * 4, copyBytes);
+            int stride = dataBox.RowPitch;
+            nint srcPtr = dataBox.DataPointer;
+            for (int row = 0; row < boxH; row++)
+            {
+                Marshal.Copy(srcPtr + row * stride, dst,
+                    ((cy - srcY) + row) * (winW * 4) + (cx - srcX) * 4, boxW * 4);
+            }
+        }
+        finally
+        {
+            _context.UnmapSubresource(_stagingTexture!, 0);
         }
         return dst;
+    }
+
+    /// <summary>staging 纹理按需创建/随窗口尺寸变化重建（仅捕获线程调用）。</summary>
+    private void EnsureStaging(int w, int h)
+    {
+        if (_stagingTexture is not null && _stagingW == w && _stagingH == h) return;
+        _stagingTexture?.Dispose();
+        _stagingTexture = new Texture2D(_device!, new Texture2DDescription
+        {
+            Width = w,
+            Height = h,
+            MipLevels = 1,
+            ArraySize = 1,
+            Format = Format.B8G8R8A8_UNorm,
+            SampleDescription = new SharpDX.DXGI.SampleDescription(1, 0),
+            Usage = ResourceUsage.Staging,
+            BindFlags = BindFlags.None,
+            CpuAccessFlags = CpuAccessFlags.Read,
+            OptionFlags = ResourceOptionFlags.None,
+        });
+        _stagingW = w;
+        _stagingH = h;
     }
 
     private void UpdateWindowRect()
@@ -392,6 +402,8 @@ public sealed class DxgiDesktopCapture : ICaptureProvider
         try { _device?.Dispose(); } catch { }
         _duplication = null;
         _stagingTexture = null;
+        _stagingW = 0;
+        _stagingH = 0;
         _context = null;
         _device = null;
     }

@@ -25,6 +25,13 @@ public sealed class YoloDetector : IDisposable
     private readonly string[] _inputNames;
     private readonly string _outputName;
 
+    // 预处理复用缓冲（Detect 单线程串行调用）：此前每次检测新建 bgr/resized/letterbox 三个
+    // Mat + ~4.9MB DenseTensor，约 8MB/次的 LOH churn；形状固定后全部预分配复用
+    private readonly Mat _letterbox;
+    private readonly Mat _bgr = new();
+    private readonly Mat _resized = new();
+    private readonly DenseTensor<float> _inputTensor;
+
     public bool Enabled => true;
     public string ModelLabel { get; }
 
@@ -41,6 +48,8 @@ public sealed class YoloDetector : IDisposable
         // 输入尺寸：优先从模型元数据读取，动态维或读不到时回退 640
         (_inputW, _inputH) = ResolveInputSize();
         _outputName = ResolveOutputName();
+        _letterbox = new Mat(_inputH, _inputW, MatType.CV_8UC3);
+        _inputTensor = new DenseTensor<float>(new[] { 1, 3, _inputH, _inputW });
 
         ModelLabel = $"{Path.GetFileName(modelPath)} {_inputW}×{_inputH} {_classes.Length}类";
     }
@@ -82,7 +91,7 @@ public sealed class YoloDetector : IDisposable
     public IReadOnlyList<YoloDetection> Detect(FrameData frame, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        using var input = Letterbox(frame, out float scale, out int padX, out int padY);
+        var input = Letterbox(frame, out float scale, out int padX, out int padY);
         var tensor = ToCHWTensor(input);
 
         // InferenceSession.Run 走 IReadOnlyCollection<NamedOnnxValue> 重载（名称携带在 NamedOnnxValue 上）
@@ -99,7 +108,10 @@ public sealed class YoloDetector : IDisposable
 
     // ---------------- 预处理 ----------------
 
-    /// <summary>BGRA 帧 → letterbox 缩放到模型输入尺寸（等比 + 灰边填充），输出 RGB Mat。</summary>
+    /// <summary>
+    /// BGRA 帧 → letterbox 缩放到模型输入尺寸（等比 + 灰边填充），输出 RGB Mat。
+    /// 返回复用的 _letterbox（调用方不持有/不释放）；仅 Detect 单线程调用。
+    /// </summary>
     internal Mat Letterbox(FrameData frame, out float scale, out int padX, out int padY)
     {
         scale = Math.Min((float)_inputW / frame.Width, (float)_inputH / frame.Height);
@@ -109,22 +121,22 @@ public sealed class YoloDetector : IDisposable
         padY = (_inputH - newH) / 2;
 
         using var bgra = Mat.FromPixelData(frame.Height, frame.Width, MatType.CV_8UC4, frame.Bgra);
-        using var bgr = new Mat();
-        Cv2.CvtColor(bgra, bgr, ColorConversionCodes.BGRA2BGR);
+        Cv2.CvtColor(bgra, _bgr, ColorConversionCodes.BGRA2BGR);
 
-        var dst = new Mat(_inputH, _inputW, MatType.CV_8UC3, new Scalar(114, 114, 114));
-        using var resized = new Mat();
-        Cv2.Resize(bgr, resized, new OpenCvSharp.Size(newW, newH));
-        resized.CopyTo(dst[new Rect(padX, padY, newW, newH)]);
+        var dst = _letterbox;
+        dst.SetTo(new Scalar(114, 114, 114));
+        Cv2.Resize(_bgr, _resized, new OpenCvSharp.Size(newW, newH));
+        _resized.CopyTo(dst[new Rect(padX, padY, newW, newH)]);
         Cv2.CvtColor(dst, dst, ColorConversionCodes.BGR2RGB);
         return dst;
     }
 
-    /// <summary>RGB Mat → [1,3,H,W] 归一化 Tensor。</summary>
+    /// <summary>RGB Mat → [1,3,H,W] 归一化 Tensor（复用预分配 tensor，Span 直写）。</summary>
     internal DenseTensor<float> ToCHWTensor(Mat rgb)
     {
-        var t = new DenseTensor<float>(new[] { 1, 3, _inputH, _inputW });
+        var span = _inputTensor.Buffer.Span;
         float inv = 1f / 255f;
+        int plane = _inputH * _inputW;
         unsafe
         {
             byte* basePtr = (byte*)rgb.DataPointer;
@@ -132,16 +144,17 @@ public sealed class YoloDetector : IDisposable
             for (int y = 0; y < _inputH; y++)
             {
                 byte* row = basePtr + y * stride;
+                int rowBase = y * _inputW;
                 for (int x = 0; x < _inputW; x++)
                 {
                     int p = x * 3;
-                    t[0, 0, y, x] = row[p] * inv;
-                    t[0, 1, y, x] = row[p + 1] * inv;
-                    t[0, 2, y, x] = row[p + 2] * inv;
+                    span[rowBase + x] = row[p] * inv;
+                    span[plane + rowBase + x] = row[p + 1] * inv;
+                    span[2 * plane + rowBase + x] = row[p + 2] * inv;
                 }
             }
         }
-        return t;
+        return _inputTensor;
     }
 
     // ---------------- 输出解析 ----------------
@@ -273,5 +286,11 @@ public sealed class YoloDetector : IDisposable
         return union <= 0f ? 0f : inter / union;
     }
 
-    public void Dispose() => _session.Dispose();
+    public void Dispose()
+    {
+        _session.Dispose();
+        _letterbox.Dispose();
+        _bgr.Dispose();
+        _resized.Dispose();
+    }
 }

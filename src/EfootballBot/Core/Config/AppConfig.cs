@@ -26,7 +26,6 @@ public sealed class TimingConfig
     public int LoadingTimeoutS { get; set; } = 120;
     public int MatchTimeoutMin { get; set; } = 30;  // 单场比赛最长等待（实测整场约20~25分钟）
     public int ResultAKeyCount { get; set; } = 24;  // 结算页连按 A 的次数
-    public int StuckRetry { get; set; } = 3;        // 卡死重试次数
     public int HumanJitterMs { get; set; } = 90;    // 随机人为抖动
     // 非必须立即的连点（比赛中挂机按 A、赛后弹窗确认）使用闭区间随机等待，降低行为机械感
     public int IdleTapMinMs { get; set; } = 1000;
@@ -319,14 +318,19 @@ public sealed class WeeklyConfig
 }
 
 /// <summary>
-/// 国服周活动挂机配置（实况足球在线「比赛活动」）。活动每周轮换两种形态：
-/// 杯赛型（冠军赛，全程固定 7 场：小组赛×3 + 1/8决赛 + 1/4决赛 + 半决赛 + 决赛）与
-/// 巡回赛型（球星训练等，场次不定刷积分）。均无赛事等级/自动控制设置项，仅场次停止。
+/// 国服周活动挂机配置（实况足球在线「比赛活动」）。活动每周轮换多种形态：
+/// 杯赛型（冠军赛，全程固定 7 场：小组赛×3 + 1/8决赛 + 1/4决赛 + 半决赛 + 决赛）、
+/// 巡回赛型（球星训练等，场次不定刷积分）与挑战型（挑战清单逐卡挑战）。
+/// 前往比赛后的「选择比赛难度」页按 Difficulty 自动核对改选。
 /// </summary>
 public sealed class CnWeeklyConfig
 {
     /// <summary>完成场次后自动停止（本次挂机累计）。0 = 无限跑（默认；巡回赛型刷到主要奖励打满为宜）。</summary>
     public int StopAfterMatches { get; set; } = 0;
+
+    /// <summary>比赛难度（前往比赛后的「选择比赛难度」页自动核对）：与我的联赛同表
+    /// 新手 / 业余 / 标准 / 职业 / 顶尖球员 / 超级球星 / 传奇。读不到当前所选时按游戏默认直接确认。</summary>
+    public string Difficulty { get; set; } = "标准";
 }
 
 /// <summary>
@@ -369,12 +373,10 @@ public sealed class ScheduleConfig
 public sealed class AppConfig
 {
     public string Theme { get; set; } = "Dark"; // Dark / Light / DeepBlue
-    public string? GameExePath { get; set; }
     public string? OcrLanguage { get; set; }
     /// <summary>OCR 识别引擎：RapidV6（PP-OCRv6 深度学习，默认）或 Windows（内置 OCR 回退）。下次启动挂机生效。</summary>
     public OcrEngineKind OcrEngine { get; set; } = OcrEngineKind.RapidV6;
     public bool AutoLaunchGame { get; set; }
-    public bool KeepGameOnTop { get; set; } = false; // 兜底模式：游戏窗口置顶（不激活）
     /// <summary>画面捕获后端：WGC 窗口捕获（默认，支持后台挂机/窗口被遮挡；已绑定真实 GPU 适配器）或 DXGI 桌面复制（高性能但窗口须可见）。</summary>
     public CaptureMode CaptureMode { get; set; } = CaptureMode.Wgc;
     public TimingConfig Timing { get; set; } = new();
@@ -462,13 +464,28 @@ public sealed class AppConfig
                 return cfg;
             }
         }
-        catch { /* 配置损坏时回退默认 */ }
+        catch
+        {
+            // 配置损坏（写入中途崩溃/被杀软占用截断）：把坏文件改名留档再回退默认启动，
+            // 防止「静默回退默认值 → 运行中任何一次 Save 用默认值覆盖用户全部配置」后无从排查
+            try
+            {
+                var bad = ConfigPath + ".bad";
+                if (File.Exists(bad)) File.Delete(bad);
+                File.Move(ConfigPath, bad);
+            }
+            catch { /* 留档失败不阻塞启动 */ }
+        }
         return new AppConfig();
     }
 
     public void Save()
     {
         Directory.CreateDirectory(ConfigDir);
-        File.WriteAllText(ConfigPath, JsonSerializer.Serialize(this, JsonOpts));
+        // 原子替换：先写临时文件再 Move 覆盖，绝不产生写了一半的截断 JSON
+        //（截断 → 下次启动静默回退默认 → 用户配置被默认值覆盖，数据丢失级故障）
+        var tmp = ConfigPath + ".tmp";
+        File.WriteAllText(tmp, JsonSerializer.Serialize(this, JsonOpts));
+        File.Move(tmp, ConfigPath, overwrite: true);
     }
 }

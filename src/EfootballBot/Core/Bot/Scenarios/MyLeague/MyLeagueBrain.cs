@@ -79,6 +79,16 @@ public static class MyLeagueBrain
     /// ≥9 页弹窗链在第 8 帧退避停手，尾页「物品已送到收件箱」永远等不到 A，空转 8 小时）。</summary>
     public const int StuckStreak = 8;
 
+    /// <summary>导航类界面（主菜单/比赛页/物品/积分页）连续该轮数仍无进展时，从「放慢继续」
+    /// 升级为周期性按 B 逃生（清盖层/回上级重新导航）。此前导航屏在 StuckStreak 后永久等待，
+    /// OCR 漏读焦点词即无限空转——v2.0.7 弹窗链 8 小时事故同款模式的补齐（2026-10-17 评审）。</summary>
+    public const int NavEscapeStreak = 20;
+
+    /// <summary>HasConfirm 弹窗连续该轮数仍无进展时周期性按 B 逃生。正常奖励弹窗链 9+ 页
+    /// （每页 1~2 轮）远到不了该值；A 永不生效的「RT 下一步」型页面（实机 2026-10-14 对阵表）
+    /// 靠它脱困。数值与国服 CnMyLeague 的 B@30 一致，国服侧其保险先行接管不叠加。</summary>
+    public const int ConfirmEscapeStreak = 30;
+
     /// <summary>无特征界面（比赛/过场）连续该轮数后按 B 逃生。</summary>
     public const int UnknownEscapeStreak = 6;
 
@@ -281,26 +291,37 @@ public static class MyLeagueBrain
         {
             case MlScreen.MainMenu:
             {
-                // 复合导航：Dpad 下（确保焦点在底部卡片行）→ 左 ×6（推到最左"比赛"，到头多按无害）→ A 进入
-                if (screenStreak >= StuckStreak) return MlAction.Wait(5000);
-                return new MlAction(MlActionKind.PadEnterMatch, 3000, "主菜单→比赛卡片");
+                // 复合导航：Dpad 下（确保焦点在底部卡片行）→ 左 ×6（推到最左"比赛"，到头多按无害）→ A 进入。
+                // 超过 StuckStreak 只放慢继续导航；到 NavEscapeStreak 仍无效说明有识别不到的盖层/
+                // 焦点异常，按 B 清一次盖层（主菜单 B 最坏情况是弹退出确认窗 → HasConfirm 上移+确认
+                // 退出 → 标题画面 X 重进，仍可自愈），此后每 5 轮一次——好过静默死等。
+                if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
+                    return new MlAction(MlActionKind.GamepadBack, 2400, "主菜单导航失效，B 清盖层重试");
+                return new MlAction(MlActionKind.PadEnterMatch,
+                    screenStreak >= StuckStreak ? 5000 : 3000, "主菜单→比赛卡片");
             }
             case MlScreen.MatchHub:
             {
-                if (screenStreak >= StuckStreak) return MlAction.Wait(5000);
                 // 右移选中「我的联赛」磁贴：进入比赛页后默认焦点不在其上（实机需右移一次）。
                 // OCR 预览区（y<0.6，磁贴行标签在 y≈0.72）看到「我的联赛」= 焦点已到 → A 进入；
                 // 否则右移一格，下一轮观察确认——避免盲按 A 进错模式。
+                // 焦点词被 OCR 漏读时会无限右移，≥NavEscapeStreak 按 B 回主菜单重新导航。
+                if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
+                    return new MlAction(MlActionKind.GamepadBack, 2400, "比赛页导航失效，B 回主菜单重导航");
                 bool focused = ocr.Lines.Any(l => l.Text.Contains("我的联赛") && l.CenterY < 0.6);
                 return focused
-                    ? new MlAction(MlActionKind.PadConfirm, 2500, "比赛页→我的联赛")
-                    : new MlAction(MlActionKind.PadMoveRight, 1500, "比赛页右移→我的联赛");
+                    ? new MlAction(MlActionKind.PadConfirm,
+                        screenStreak >= StuckStreak ? 5000 : 2500, "比赛页→我的联赛")
+                    : new MlAction(MlActionKind.PadMoveRight,
+                        screenStreak >= StuckStreak ? 5000 : 1500, "比赛页右移→我的联赛");
             }
             case MlScreen.ItemList:
             {
-                // 物品列表：A 选中当前焦点行
-                if (screenStreak >= StuckStreak) return MlAction.Wait(8000);
-                return new MlAction(MlActionKind.PadConfirm, 2500, "物品列表焦点行");
+                // 物品列表：A 选中当前焦点行；多轮无效（≥NavEscapeStreak）B 退出由购买状态机重导航
+                if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
+                    return new MlAction(MlActionKind.GamepadBack, 2400, "物品列表多轮无进展，B 退出重进");
+                return new MlAction(MlActionKind.PadConfirm,
+                    screenStreak >= StuckStreak ? 5000 : 2500, "物品列表焦点行");
             }
             case MlScreen.HasConfirm:
             {
@@ -309,6 +330,9 @@ public static class MyLeagueBrain
                 // 恰好从取消挪到确认键。难度选择页除外（其确认键就是默认焦点，上移反而进选项
                 // 列表改难度）；启动设定窗除外（按 A 保留设置继续）。
                 // 超过退避轮数只放慢不停手：弹窗链的第 9+ 页仍需要 A 推进（见 StuckStreak 注释）。
+                // 到 ConfirmEscapeStreak 仍无进展（A 永不生效的 RT 型页）：B 退出该页自愈。
+                if (screenStreak >= ConfirmEscapeStreak && (screenStreak - ConfirmEscapeStreak) % 5 == 0)
+                    return new MlAction(MlActionKind.GamepadBack, 2400, "弹窗久按无效，B 逃生");
                 bool slow = screenStreak >= StuckStreak;
                 if (ocr.ContainsJoined("取消") && !IsDifficultyChoice(ocr) && !IsGameSettingsDialog(ocr))
                     return new MlAction(MlActionKind.PadUpConfirm, slow ? 5000 : 2000, "弹窗确认（上移避开取消）");
@@ -376,9 +400,12 @@ public static class MyLeagueBrain
 
             case MlScreen.PointsPage:
             {
-                // 积分页：进入「我的联赛物品」（右选项）。导航序列由场景层校验重试
-                if (screenStreak >= StuckStreak) return MlAction.Wait(5000);
-                return new MlAction(MlActionKind.PadConfirm, 2500, "积分页→我的联赛物品");
+                // 积分页：进入「我的联赛物品」（右选项）。导航序列由场景层校验重试；
+                // ≥NavEscapeStreak 按 B 回退重新导航（此前永久等待）
+                if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
+                    return new MlAction(MlActionKind.GamepadBack, 2400, "积分页导航失效，B 回退重导航");
+                return new MlAction(MlActionKind.PadConfirm,
+                    screenStreak >= StuckStreak ? 5000 : 2500, "积分页→我的联赛物品");
             }
 
             case MlScreen.InMatch:

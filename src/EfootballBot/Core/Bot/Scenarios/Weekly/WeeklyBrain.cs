@@ -221,6 +221,34 @@ public static class WeeklyBrain
     /// </summary>
     public static bool IsChallengeCardHome(OcrResult ocr) => ocr.ContainsJoined("完成的条件");
 
+    /// <summary>挑战清单扫描中，游标卡号从屏上消失后的处置决策。</summary>
+    public enum ChVanishDecision
+    {
+        /// <summary>消失未满两帧：翻页/进入动画丢帧，继续观察。</summary>
+        WaitFrame,
+        /// <summary>重扫确证后再次消失且游标已越过已通关卡：表尾，全部挑战完成。</summary>
+        ConfirmTail,
+        /// <summary>无法确证表尾：重新饱和左移从头扫一遍。</summary>
+        Rescan,
+        /// <summary>反复消失且始终无法确证：放弃本活动（拉黑槽位）。</summary>
+        Abort,
+    }
+
+    /// <summary>
+    /// 游标卡号消失决策（纯函数）。实机 2026-10-17 教训：刚对一张无勾无锁的卡按过 A，
+    /// 详情页会被卡号兜底误判成清单、且详情页上找不到卡号——旧逻辑凭 2 帧消失直接
+    /// 假报「全部挑战已完成」，整活动被跳过。因此「全完成」必须同时满足：
+    /// 游标最后一次可见状态是已通关（越过已勾卡后的消失才可能是表尾）
+    /// 且已经重扫确证过一次。反复消失无法确证则放弃，绝不假报完成。
+    /// </summary>
+    public static ChVanishDecision DecideChallengeVanish(int missingFrames, bool cursorDone, int rescans)
+    {
+        if (missingFrames < 2) return ChVanishDecision.WaitFrame;
+        if (cursorDone && rescans >= 1) return ChVanishDecision.ConfirmTail;
+        if (rescans >= 3) return ChVanishDecision.Abort;
+        return ChVanishDecision.Rescan;
+    }
+
 
 
     /// <summary>在右半屏（x&gt;0.45）找标签词下方的值词（值在标签下一行，y 偏移 0.015~0.13）。</summary>

@@ -53,6 +53,13 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
         _cw = _pl == PlScreen.None
             ? CnWeeklyBrain.Classify(obs.Detections, obs.Ocr)
             : CwScreen.None;
+        // PeakLadder「活动主页」的兜底路径（前往比赛+比赛记录）与国服我的联赛主页同构——
+        // 国服联赛主页磁贴就叫「比赛记录」（国际服为 赛季纪录/比赛历史），两词同屏会把
+        // 联赛主页抢判成天梯活动主页 → 拦截钩子当残留页 B 退回主页死循环
+        //（2026-10-17 实机：进主页即被 B 退回）。无天梯专属词不认，交还国际服判定
+        //（前往比赛 → LeaguePage → 共享流程正常推进）
+        if (_pl == PlScreen.ActivityHome && !HasPeakLadderEvidence(obs.Ocr))
+            _pl = PlScreen.None;
         // 国服主页页签/其他模块残留页：记 Unknown 由拦截钩子接管（主页/残留页由 IsCnHome 区分）
         if (_pl != PlScreen.None || _cw != CwScreen.None)
             return MlScreen.Unknown;
@@ -64,6 +71,15 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
         }
         return ml;
     }
+
+    /// <summary>
+    /// 帧内是否有天梯巅峰赛专属证据：场次行「本周可参赛场次」或任何位置的「天梯巅峰赛」
+    /// 字样（活动主页标题 教练天梯巅峰赛/模式选择页卡）。二者皆无时 PeakLadder 的
+    /// ActivityHome 只可能来自「前往比赛+比赛记录」兜底——该词组与国服我的联赛主页
+    /// 无法区分，不构成天梯证据。
+    /// </summary>
+    public static bool HasPeakLadderEvidence(OcrResult ocr)
+        => ocr.ContainsJoined("本周可参赛场次") || ocr.ContainsJoined("天梯巅峰赛");
 
     /// <summary>当前帧是否为国服主页（两 Brain 任一判出主页页签，或 YOLO 主菜单兜底）。</summary>
     private bool IsCnHome =>
@@ -109,7 +125,8 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
         if (_pl is PlScreen.ModeSelect or PlScreen.ActivityHome or PlScreen.ModeDialog ||
             _cw is CwScreen.EventsList or CwScreen.EventIntro or CwScreen.Bracket or
                     CwScreen.EventHome or CwScreen.Squad or CwScreen.SquadMenu or
-                    CwScreen.EventHomeTour or CwScreen.EventSettings)
+                    CwScreen.EventHomeTour or CwScreen.EventSettings or
+                    CwScreen.ChallengeList)
         {
             if (++_escapeAttempts > 6)
             {

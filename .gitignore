@@ -1,6 +1,6 @@
 bin/
 obj/
-publish/
+publish*/
 .vs/
 
 # User files

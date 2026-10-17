@@ -1,3 +1,4 @@
+using EfootballBot.Core.Bot.Scenarios.CnMyLeague;
 using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Bot.Scenarios.PeakLadder;
 using EfootballBot.Core.Config;
@@ -93,5 +94,36 @@ public class CnMyLeagueEntryTests
         Assert.Equal("新手", cfg.CnMyLeague.Difficulty);
         Assert.Equal(5, cfg.CnMyLeague.StopAfterMatches);
         Assert.Equal(0, cfg.CnMyLeague.StopAfterKeyMatches); // 未设段回落默认
+    }
+
+    // ---------------- 回归 2026-10-17：联赛主页撞 PeakLadder.ActivityHome 兜底 ----------------
+
+    [Fact]
+    public void CnLeagueHome_MatchRecordTile_NotTreatedAsLadderLeftover()
+    {
+        // 实机 2026-10-17：国服联赛主页磁贴叫「比赛记录」（国际服为 赛季纪录/比赛历史），
+        // 与「前往比赛」同屏撞 PeakLadderBrain.ActivityHome 兜底（前往比赛+比赛记录）
+        // → 曾被拦截钩子当残留页 B 退回主页死循环（进主页即退）。帧里无天梯专属词
+        // （本周可参赛场次/天梯巅峰赛）时必须不算天梯页，交还国际服判定 LeaguePage
+        var ocr = Ocr(W("我的联赛", 0.2, 0.07), W("前往比赛", 0.14, 0.24),
+            W("比赛记录", 0.55, 0.4), W("赛程表", 0.14, 0.38), W("返回", 0.07, 0.94));
+        Assert.Equal(PlScreen.ActivityHome, PeakLadderBrain.Classify(ocr)); // 碰撞事实锁定
+        Assert.False(CnMyLeagueScenario.HasPeakLadderEvidence(ocr));        // 修复判定
+
+        var leagueHome = MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr);
+        Assert.Equal(MlScreen.LeaguePage, leagueHome); // 交还后走联赛主页推进
+    }
+
+    [Fact]
+    public void LadderPages_WithExclusiveWord_StillLeftover()
+    {
+        // 场次行或天梯巅峰赛字样在帧上 = 真天梯页，残留页拦截照常 B 退回
+        var withCount = Ocr(W("前往比赛", 0.14, 0.24), W("本周可参赛场次: 40", 0.5, 0.35));
+        Assert.True(CnMyLeagueScenario.HasPeakLadderEvidence(withCount));
+
+        var withTitle = Ocr(W("教练天梯巅峰赛", 0.3, 0.1), W("前往比赛", 0.14, 0.24),
+            W("比赛记录", 0.55, 0.4));
+        Assert.True(CnMyLeagueScenario.HasPeakLadderEvidence(withTitle));
+        Assert.Equal(PlScreen.ActivityHome, PeakLadderBrain.Classify(withTitle));
     }
 }
