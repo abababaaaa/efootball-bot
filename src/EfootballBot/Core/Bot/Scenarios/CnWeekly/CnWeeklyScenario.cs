@@ -7,12 +7,16 @@ namespace EfootballBot.Core.Bot.Scenarios.CnWeekly;
 
 /// <summary>
 /// 国服周活动挂机场景（实况足球在线）。菜单侧状态机：主页（推荐页签）→ 饱和归位进比赛页签
-/// → 卡行 下→左 选「比赛活动」→ 活动列表（对阵电脑）进活动 → 介绍页「进入」→ 对阵表 RT 下一步
-/// → 活动主页：首次先进「球队阵容」RS 自动配置选「活动加成」→ B 完成 → RT 教练入场开赛。
+/// → 卡行 下→左 选「比赛活动」→ 活动列表（对阵电脑）进活动 → 介绍页「进入」→ 按活动形态分叉：
+/// ①杯赛型（冠军赛）：对阵表 A/RT 下一步 → 活动主页：首次进「球队阵容」RS 自动配置选「活动加成」
+///   → B 完成 → RT 教练入场开赛；赛后回活动主页循环，打满冠军赛全程（小组赛×3+淘汰赛×4=7 场）。
+/// ②巡回赛型（球星训练，2026-10-17 实机）：活动主页（前往比赛 + X 活动设置）——首次 X 打开
+///   活动设置只读核验 教练模式=开 + 教练模式内控制=完全托管（不盲改：面板里 A 可能误开换队；
+///   OCR 漏读则提示后照常开赛）→ B 完成 → A 前往比赛；赛后回主页循环。
 /// 比赛中流程与我的联赛完全共用：InMatch 随机点击、终场、结算弹窗、满级检测、场次计数。
-/// 赛后回到活动主页自动循环 RT 教练入场，打满冠军赛全程（小组赛×3+淘汰赛×4=7 场）；
 /// 达到「完成场次停止」设定或主要奖励打完后由用户手动停止（完成态探针待校准）。
-/// 判定只用固定 UI 词（对阵电脑/教练入场/球队阵容列表/活动加成…），活动名每周轮换禁作判定点。
+/// 判定只用固定 UI 词（对阵电脑/教练入场/前往比赛/活动设置/球队阵容列表/活动加成…），
+/// 活动名每周轮换禁作判定点。
 /// </summary>
 public sealed class CnWeeklyScenario : IScenario
 {
@@ -40,6 +44,13 @@ public sealed class CnWeeklyScenario : IScenario
     private bool _squadConfigured;
     /// <summary>进入阵容页的尝试次数（超 3 次放弃配置，照常开赛——活动加成是加分优化非阻塞项）。</summary>
     private int _squadTries;
+    /// <summary>巡回赛活动设置已核验/已放弃（教练模式=开+完全托管；每次运行核验一次）。</summary>
+    private bool _tourReady;
+    /// <summary>为核验设置打开活动设置的次数（超 3 次放弃核验照常开赛）。</summary>
+    private int _tourSettingsTries;
+    /// <summary>核验通过后活动设置面板又被打开的次数（≥2 = 主页焦点停在底栏「活动设置」上，
+    /// A 前须先上移焦点到「前往比赛」，否则 A↔设置面板乒乓循环）。</summary>
+    private int _tourPanelReopens;
 
     private string _lastScreenName = "";
     private int _streak;
@@ -90,12 +101,15 @@ public sealed class CnWeeklyScenario : IScenario
             sawKeyMatchHint: ml == MlScreen.KeyMatchDialog || obs.Ocr.ContainsJoined("关键比赛"),
             isHome: false);
         if (!wasActive && _matchSession.Active)
+        {
+            _tourPanelReopens = 0; // 比赛开打：游戏会重置主页焦点，乒乓探测复位
             _log("[国服周活动] 比赛开始：挂机等待比赛结束（按节奏随机点击）", LogLevel.Info);
+        }
         if (matchEnded)
         {
             _engine.Stats.MatchesDone++;
             if (_matchSession.WasKeyMatch) _engine.Stats.KeyMatches++;
-            _log($"[国服周活动] 一场比赛结束（累计 {_engine.Stats.MatchesDone} 场，冠军赛全程 7 场）", LogLevel.Success);
+            _log($"[国服周活动] 一场比赛结束（累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
 
             var cwCfg = _engine.Config.CnWeekly;
             if (cwCfg.StopAfterMatches > 0 && _engine.Stats.MatchesDone >= cwCfg.StopAfterMatches)
@@ -306,6 +320,67 @@ public sealed class CnWeeklyScenario : IScenario
                         SetPhase(CwPhase.LaunchReady);
                         return 700; // 下一轮 RT 教练入场
 
+                    case CwScreen.EventHomeTour:
+                        if (_streak < 1) return 800; // 过渡帧防抖
+                        if (!_tourReady && _tourSettingsTries < 3)
+                        {
+                            _tourSettingsTries++;
+                            _log($"[国服周活动] 巡回赛主页：X 打开活动设置核验 教练模式=开+完全托管（第 {_tourSettingsTries} 次）", LogLevel.Info);
+                            await _engine.Pad.X();
+                            return 2600;
+                        }
+                        if (!_tourReady)
+                        {
+                            _tourReady = true; // 放弃核验：不再反复开设置，按当前设置开赛
+                            _log("[国服周活动] 活动设置多次未能核验，照常开赛；若比赛无法自动进行，请手动在活动设置开启 教练模式=开 + 完全托管", LogLevel.Error);
+                        }
+                        if (++_attempts > 4)
+                        {
+                            _log("[国服周活动] 前往比赛多次未生效，B 返回活动列表重导航", LogLevel.Warn);
+                            SetPhase(CwPhase.Flow);
+                            await _engine.Pad.Back();
+                            return 2400;
+                        }
+                        // A 未生效多因焦点停在底栏「活动设置」上（B 关面板后焦点不在前往比赛，
+                        // A 会再开面板形成乒乓）：先上移焦点再 A
+                        if (_attempts >= 3 || _tourPanelReopens >= 2)
+                        {
+                            _log("[国服周活动] 巡回赛主页：上移焦点避开活动设置 → A 前往比赛", LogLevel.Info);
+                            await _engine.Pad.Dpad(PadDir.Up);
+                        }
+                        else
+                        {
+                            _log("[国服周活动] 巡回赛主页：A 前往比赛", LogLevel.Info);
+                        }
+                        await _engine.Pad.Confirm();
+                        return 3400;
+
+                    case CwScreen.EventSettings:
+                        if (_streak < 1) return 800; // 面板打开过渡帧
+                        if (CnWeeklyBrain.TourSettingsReady(obs.Ocr))
+                        {
+                            if (_tourReady) _tourPanelReopens++; // 未请求却又见面板=焦点停在活动设置上
+                            else
+                            {
+                                _tourReady = true;
+                                _log("[国服周活动] 活动设置核验通过：教练模式=开 + 完全托管，B 完成返回", LogLevel.Success);
+                            }
+                            _log("[国服周活动] 活动设置：B 完成", LogLevel.Debug);
+                            await _engine.Pad.Back();
+                            return 2200;
+                        }
+                        // 未读全/未达标：绝不盲按（面板里 A 可能落在「选择的球队」上误开换队），
+                        // 只读不改；两轮后 B 退出照常开赛并提示
+                        if (++_attempts > 2)
+                        {
+                            _tourReady = true;
+                            _log("[国服周活动] 活动设置未确认 教练模式=开 + 完全托管（OCR 漏读或设置不对），B 返回照常开赛；若比赛不自动请手动改设置", LogLevel.Error);
+                            await _engine.Pad.Back();
+                            return 2200;
+                        }
+                        _log("[国服周活动] 活动设置：暂未读到 开+完全托管，再核验一拍", LogLevel.Warn);
+                        return 1500;
+
                     case CwScreen.Squad:
                     case CwScreen.SquadMenu:
                         if (_squadConfigured)
@@ -451,9 +526,10 @@ public sealed class CnWeeklyScenario : IScenario
                     return 2200;
                 }
                 if (cw is CwScreen.EventsList or CwScreen.EventIntro or
-                    CwScreen.HomeRecommended or CwScreen.HomeMatch)
+                    CwScreen.HomeRecommended or CwScreen.HomeMatch or
+                    CwScreen.EventHomeTour or CwScreen.EventSettings)
                 {
-                    SetPhase(CwPhase.Flow); // 被弹回导航链：回屏幕驱动重走
+                    SetPhase(CwPhase.Flow); // 被弹回导航链/巡回赛界面：回屏幕驱动重走
                     return 700;
                 }
                 // 离开活动主页：交给共享比赛流程（起始页/弹窗/比赛内）

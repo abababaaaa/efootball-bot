@@ -21,6 +21,14 @@ public static class GameSettingsLocator
     private const string IntlGameDirName = "eFootball";
     private const int MaxUpwardLevels = 6;
 
+    /// <summary>游戏本体 exe 文件名（不带扩展名；进程名与 exe 同名）：国际服在游戏根目录，
+    /// 国服在 {安装目录}\eFootball\Binaries\Win64\（实测目录结构见类注释）。</summary>
+    public const string IntlGameExeName = "eFootball";
+    public const string CnGameExeName = "eFootballOnline";
+
+    /// <summary>国际服 Steam 应用 ID（eFootball，steam://rungameid 正规拉起用）。</summary>
+    public const string IntlSteamAppId = "1665460";
+
     /// <summary>返回定位到的 Settings.exe 完整路径；找不到返回 null。
     /// <paramref name="allowSteamFallback"/>=false（国服）时只走进程锚定——Steam 回退两级
     /// 是国际服专属：国服不走 Steam，游戏未启动时跌进 Steam 库会打开国际服的设置工具
@@ -43,6 +51,52 @@ public static class GameSettingsLocator
 
             var inSub = Path.Combine(dir, SettingsSubDir, SettingsExeName);
             if (File.Exists(inSub)) return inSub;
+
+            var parent = Directory.GetParent(dir)?.FullName;
+            if (parent is null || string.Equals(parent, dir, StringComparison.OrdinalIgnoreCase))
+                break;
+            dir = parent;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 定位游戏本体 exe（「快速打开游戏」按钮）。国际服 = {游戏根}\eFootball.exe，
+    /// 国服 = {安装目录}\eFootball\Binaries\Win64\eFootballOnline.exe。
+    /// 先试 hintDirs（通常是上次定位的 Settings.exe 所在目录，向上逐级找），国际服再走
+    /// Steam 库/默认路径回退（与设置工具同链路）；国服绝不碰 Steam——那是国际服的安装。
+    /// 找不到返回 null。
+    /// </summary>
+    public static string? LocateGameExe(bool intl, params string?[] hintDirs)
+    {
+        foreach (var dir in hintDirs)
+        {
+            var found = FindGameExeNear(dir, intl);
+            if (found is not null) return found;
+        }
+        if (!intl) return null;
+        foreach (var library in EnumerateSteamLibraries())
+        {
+            var found = FindGameExeNear(Path.Combine(library, "steamapps", "common", IntlGameDirName), intl);
+            if (found is not null) return found;
+        }
+        return FindGameExeNear(Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+            "Steam", "steamapps", "common", IntlGameDirName), intl);
+    }
+
+    /// <summary>从 startDir 起向上逐级找游戏本体 exe：国际服 {级}\eFootball.exe（根目录），
+    /// 国服 {级}\eFootball\Binaries\Win64\eFootballOnline.exe，最多向上 6 级。</summary>
+    public static string? FindGameExeNear(string? startDir, bool intl)
+    {
+        string relative = intl
+            ? IntlGameExeName + ".exe"
+            : Path.Combine("eFootball", "Binaries", "Win64", CnGameExeName + ".exe");
+        var dir = startDir;
+        for (int depth = 0; dir is not null && depth < MaxUpwardLevels; depth++)
+        {
+            var candidate = Path.Combine(dir, relative);
+            if (File.Exists(candidate)) return candidate;
 
             var parent = Directory.GetParent(dir)?.FullName;
             if (parent is null || string.Equals(parent, dir, StringComparison.OrdinalIgnoreCase))

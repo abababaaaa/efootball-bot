@@ -149,4 +149,72 @@ public class CnWeeklyBrainTests
         var ocr = Ocr(W("活动加成", 0.5, 0.5));
         Assert.Equal(CwScreen.None, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
+
+    // ---------------- 巡回赛型活动（2026-10-17 实机新增） ----------------
+
+    [Fact]
+    public void Classify_TourHome_GoMatchPlusSettingsBar()
+    {
+        // 巡回赛主页：主按钮 前往比赛 + 底栏 X 活动设置 + 比赛历史/建议（无 教练入场/下场比赛）
+        var ocr = Ocr(W("球星训练 巡回赛", 0.3, 0.09),
+            W("前往比赛", 0.18, 0.24), W("总活动积分", 0.5, 0.21),
+            W("比赛历史", 0.18, 0.47), W("建议", 0.18, 0.79),
+            W("返回", 0.14, 0.93), W("活动设置", 0.42, 0.93));
+        Assert.Equal(CwScreen.EventHomeTour, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_EventSettings_BeatsTourHome()
+    {
+        // 设置面板盖在主页右半：主页词透暗背景仍可读，必须先判面板（实机 cn_tour_event_settings）
+        var ocr = Ocr(W("前往比赛", 0.18, 0.24), W("比赛历史", 0.18, 0.47),
+            W("返回", 0.14, 0.93), W("活动设置", 0.42, 0.93),
+            W("活动设置", 0.75, 0.09), W("选择的球队", 0.75, 0.23), W("AC米兰", 0.75, 0.26),
+            W("教练模式", 0.75, 0.36), W("开", 0.76, 0.42),
+            W("教练模式内控制", 0.75, 0.46), W("完全托管", 0.76, 0.52),
+            W("完成", 0.75, 0.93));
+        Assert.Equal(CwScreen.EventSettings, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_PopupOverTourHome_GatedToSharedFlow()
+    {
+        // 弹窗盖在巡回赛主页上：主页词透背景仍可读，有中部推进词交共享流程按 A，不得判回主页
+        var ocr = Ocr(W("前往比赛", 0.18, 0.24), W("活动设置", 0.42, 0.93),
+            W("比赛历史", 0.18, 0.47),
+            W("下一步", 0.5, 0.55));
+        Assert.Equal(CwScreen.None, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_SettingsPanelAloneNotEnough()
+    {
+        // 只有「教练模式」无面板佐证词：不构成设置面板（防其他页面偶然出现教练模式字样）
+        var ocr = Ocr(W("教练模式", 0.5, 0.5));
+        Assert.Equal(CwScreen.None, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void TourSettingsReady_RequiresCoachOnAndFullAuto()
+    {
+        // 实机排版：标签行 + 值 pill 行分开，值为单字
+        var ready = Ocr(W("活动设置", 0.75, 0.09), W("选择的球队", 0.75, 0.23),
+            W("教练模式", 0.75, 0.36), W("开", 0.76, 0.42),
+            W("教练模式内控制", 0.75, 0.46), W("完全托管", 0.76, 0.52));
+        Assert.True(CnWeeklyBrain.TourSettingsReady(ready));
+
+        // 教练模式=关：缺「开」词 → 未就绪
+        var coachOff = Ocr(W("教练模式", 0.75, 0.36), W("关", 0.76, 0.42),
+            W("教练模式内控制", 0.75, 0.46), W("完全托管", 0.76, 0.52));
+        Assert.False(CnWeeklyBrain.TourSettingsReady(coachOff));
+
+        // 内控制≠完全托管 → 未就绪
+        var noFullAuto = Ocr(W("教练模式", 0.75, 0.36), W("开", 0.76, 0.42),
+            W("教练模式内控制", 0.75, 0.46), W("部分托管", 0.76, 0.52));
+        Assert.False(CnWeeklyBrain.TourSettingsReady(noFullAuto));
+
+        // OCR 把标签与值并成一行（「教练模式开」）也认得出；含内控制的行不误报
+        var merged = Ocr(W("教练模式开", 0.75, 0.39), W("教练模式内控制完全托管", 0.75, 0.49));
+        Assert.True(CnWeeklyBrain.TourSettingsReady(merged));
+    }
 }

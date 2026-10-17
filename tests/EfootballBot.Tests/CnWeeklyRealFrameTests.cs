@@ -47,6 +47,7 @@ public class CnWeeklyRealFrameTests
         ("cn_squad.png", CwScreen.Squad),
         ("cn_squad_menu.png", CwScreen.SquadMenu),
         ("cn_squad_menu_cursor.png", CwScreen.SquadMenu),
+        ("cn_tour_event_settings.png", CwScreen.EventSettings),
     };
 
     [Fact]
@@ -76,5 +77,32 @@ public class CnWeeklyRealFrameTests
 
         Assert.True(failures.Count == 0,
             "国服周活动实机帧分类回归失败：\n" + string.Join("\n", failures));
+    }
+
+    // 实机 2026-10-17：球星训练·巡回赛 活动设置面板（教练模式=开 + 教练模式内控制=完全托管，
+    // 主页词透暗背景同屏）。固化：面板判 EventSettings（先于巡回赛主页/杯赛型主页）+
+    // TourSettingsReady=true。OCR 词与坐标全部打印，判定偏差时可直接据此调参。
+    // 主页关闭面板的实机帧暂缺，巡回赛主页分类由 CnWeeklyBrainTests 合成帧锁定。
+    [Fact]
+    public async Task TourEventSettings_Frame_ClassifyAndReady()
+    {
+        using var ocr = new OcrRecognizer();
+        string img = Path.Combine(CnDir, "cn_tour_event_settings.png");
+        var data = LoadPngBgra(img, out int w, out int h);
+        var frame = new FrameData(data, w, h, 0);
+        var ocrRes = await ocr.RecognizeAsync(frame);
+
+        var screen = CnWeeklyBrain.Classify(
+            Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
+        bool ready = CnWeeklyBrain.TourSettingsReady(ocrRes);
+
+        _out.WriteLine($"screen={screen} tourSettingsReady={ready}");
+        foreach (var l in ocrRes.Lines)
+            _out.WriteLine($"  L \"{l.Text}\" @({l.CenterX:F2},{l.CenterY:F2})");
+        foreach (var wd in ocrRes.Words)
+            _out.WriteLine($"  W \"{wd.Text}\" @({wd.CenterX:F2},{wd.CenterY:F2})");
+
+        Assert.Equal(CwScreen.EventSettings, screen);
+        Assert.True(ready, "应核验通过：教练模式=开 + 完全托管");
     }
 }

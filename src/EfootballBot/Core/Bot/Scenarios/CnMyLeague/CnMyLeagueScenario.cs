@@ -1,0 +1,159 @@
+using EfootballBot.Core.Bot.Scenarios.CnWeekly;
+using EfootballBot.Core.Bot.Scenarios.MyLeague;
+using EfootballBot.Core.Bot.Scenarios.PeakLadder;
+using EfootballBot.Core.Config;
+using EfootballBot.Core.Input;
+using EfootballBot.Core.Vision;
+
+namespace EfootballBot.Core.Bot.Scenarios.CnMyLeague;
+
+/// <summary>
+/// 国服我的联赛挂机场景：继承国际服我的联赛的完整联赛内流程（主页推进/难度核对/道具购买/
+/// 比赛挂机/终场弹窗链/经验值页），仅进入导航与确认键按国服适配——
+/// 主页 上×2 进页签行 → 左×4 饱和归位「推荐」→ 右进「比赛」页签 → 下（卡行默认焦点即
+/// 天梯巅峰赛，与国服天梯模块实测一致）→ 右×1 到「我的联赛」（与天梯巅峰赛同排右侧，
+/// 用户 2026-10-17 实机指认：从比赛高光向下是天梯巅峰赛，还需向右一次）→ A 进入。
+/// 国服特有：比赛起始页确认键是 RT 而非 A（天梯巅峰赛 2026-10-14 实机教训，按 A 永远卡在
+/// 起始页）；本程序须以管理员运行（国服为提权进程，UIPI 拦低权限注入；手柄走内核不受限）。
+/// 判定只用固定 UI 词；主页页签复用国服天梯巅峰赛的特征（推荐|比赛|签约|商店 页签行 +
+/// 比赛活动/我的联赛/好友对战 卡片词），难度/道具/停止场次用独立的 CnMyLeague 配置段。
+/// </summary>
+public sealed class CnMyLeagueScenario : MyLeagueScenario
+{
+    /// <summary>主页导航失败预算：连续多轮未进入联赛 → 暂停 8s 后重来（防死循环刷屏）。</summary>
+    private int _homeAttempts;
+
+    /// <summary>残留页 B 逃生预算：连续多轮未退出 → 暂停 8s 后重来。</summary>
+    private int _escapeAttempts;
+
+    /// <summary>最近一轮国服界面判定（ClassifyScreen 产出，InterceptAsync 消费；单线程无竞争）。</summary>
+    private PlScreen _pl = PlScreen.None;
+    private CwScreen _cw = CwScreen.None;
+
+    public CnMyLeagueScenario(BotEngine engine, Action<string, LogLevel> log)
+        : base(engine, log)
+    {
+    }
+
+    public override string Name => "我的联赛（国服）";
+
+    /// <summary>国服独立配置段：与国际服我的联赛设置互不影响。</summary>
+    protected override MyLeagueConfig LeagueConfig => _engine.Config.CnMyLeague;
+
+    /// <summary>
+    /// 国服界面先判：主页页签（天梯巅峰赛 Brain 的页签行特征）与国服周活动残留页命中时
+    /// 记 Unknown（由拦截钩子接管，不走国际服共享决策）；全未命中回落国际服判定。
+    /// 兜底：OCR 页签行漏读任一词（推荐/签约/商店）导致两个 Brain 都不命中时，国际服判定
+    /// 会把主页「比赛」页签误判成国际服式比赛页（标题「比赛」+ 我的联赛磁贴词同构）——
+    /// 国服没有该独立页面，此分类只可能来自主页页签，一律按主页导航处理。
+    /// </summary>
+    protected override MlScreen ClassifyScreen(Observation obs, bool matchContext)
+    {
+        _pl = PeakLadderBrain.Classify(obs.Ocr);
+        _cw = _pl == PlScreen.None
+            ? CnWeeklyBrain.Classify(obs.Detections, obs.Ocr)
+            : CwScreen.None;
+        // 国服主页页签/其他模块残留页：记 Unknown 由拦截钩子接管（主页/残留页由 IsCnHome 区分）
+        if (_pl != PlScreen.None || _cw != CwScreen.None)
+            return MlScreen.Unknown;
+        var ml = base.ClassifyScreen(obs, matchContext);
+        if (ml == MlScreen.MatchHub)
+        {
+            _pl = PlScreen.HomeMatch;
+            return MlScreen.Unknown;
+        }
+        return ml;
+    }
+
+    /// <summary>当前帧是否为国服主页（两 Brain 任一判出主页页签，或 YOLO 主菜单兜底）。</summary>
+    private bool IsCnHome =>
+        _pl is PlScreen.HomeMatch or PlScreen.HomeRecommended ||
+        _cw is CwScreen.HomeMatch or CwScreen.HomeRecommended;
+
+    protected override string DescribeScreen(MlScreen screen)
+    {
+        if (IsCnHome) return _pl != PlScreen.None ? $"国服主页·{_pl}" : "国服主页·比赛页签";
+        if (_pl != PlScreen.None) return _pl.ToString();
+        if (_cw != CwScreen.None) return _cw.ToString();
+        return screen.ToString();
+    }
+
+    /// <summary>
+    /// 国服自有界面接管（先于共享决策）：主页导航 / 其他模块残留页 B 逃生 /
+    /// 起始页 RT 开赛 / 疑似国服 RT 确认页的 A 无进展保险。
+    /// </summary>
+    protected override async Task<int?> InterceptAsync(Observation obs, MlScreen screen, int streak, bool inMatchRecently)
+    {
+        // ---- 国服主页：饱和归位导航进「我的联赛」（任意焦点/页签状态皆可达，到头多按无害）----
+        if (IsCnHome || screen == MlScreen.MainMenu)
+        {
+            if (++_homeAttempts > 4)
+            {
+                _log("[我的联赛] 主页导航多轮未进入我的联赛，暂停 8s 后重试（若反复出现请回报日志）", LogLevel.Error);
+                _homeAttempts = 0;
+                return 8000;
+            }
+            // 上×2 进页签行 → 左×4 到最左「推荐」→ 右×1 到「比赛」页签
+            // → 下进卡行（默认焦点即天梯巅峰赛）→ 右×1 到「我的联赛」→ A 进入
+            _log("[我的联赛] 主页导航：上×2 左×4 归位推荐 → 右进比赛页签 → 下（落天梯巅峰赛）→ 右→A 进我的联赛", LogLevel.Info);
+            await _engine.Pad.DpadRepeat(PadDir.Up, 2);
+            await _engine.Pad.DpadRepeat(PadDir.Left, 4);
+            await _engine.Pad.Dpad(PadDir.Right);
+            await _engine.Pad.Dpad(PadDir.Down);
+            await _engine.Pad.Dpad(PadDir.Right);
+            await _engine.Pad.Confirm();
+            return 3200;
+        }
+
+        // ---- 其他模块残留页（开始挂机时用户停在天梯巅峰赛/周活动里）：一律 B 退回主页 ----
+        if (_pl is PlScreen.ModeSelect or PlScreen.ActivityHome or PlScreen.ModeDialog ||
+            _cw is CwScreen.EventsList or CwScreen.EventIntro or CwScreen.Bracket or
+                    CwScreen.EventHome or CwScreen.Squad or CwScreen.SquadMenu or
+                    CwScreen.EventHomeTour or CwScreen.EventSettings)
+        {
+            if (++_escapeAttempts > 6)
+            {
+                _log("[我的联赛] 残留页面多次未退出，暂停 8s 后重试（若反复出现请回报日志）", LogLevel.Error);
+                _escapeAttempts = 0;
+                return 8000;
+            }
+            _log($"[我的联赛] 其他模块残留页面（{DescribeScreen(screen)}），B 退回主页", LogLevel.Info);
+            await _engine.Pad.Back();
+            return 2400;
+        }
+
+        // 离开主页/残留页（进联赛或过场）：预算复位，下次回主页从零计
+        _homeAttempts = 0;
+        _escapeAttempts = 0;
+
+        // ---- 国服特有：比赛起始页确认键是 RT 而非 A（国际服为 A，按 A 永远开不了赛）----
+        if (screen == MlScreen.MatchStartPage)
+        {
+            if (streak < 1) return 800; // 过渡帧防抖
+            _log("[我的联赛] 起始页：RT 下一步开赛（国服确认键为 RT）", LogLevel.Info);
+            await _engine.Pad.RT();
+            return 3400;
+        }
+
+        // ---- 国服 RT 确认页保险：推进页 A 连续 10 轮无进展改试 RT（天梯对阵表「RT 下一步」
+        //      同型页面偶见于国服各流程）。正常 A 推进的页面每页 1~2 轮即过，到不了 10 轮；
+        //      赛后奖励弹窗链虽会累计轮数，但 RT 在弹窗上无绑定，按了无害 ----
+        if ((screen == MlScreen.DifficultyPage || screen == MlScreen.HasConfirm) &&
+            streak >= 10 && (streak - 10) % 5 == 0)
+        {
+            _log($"[我的联赛] {DescribeScreen(screen)} 连续 {streak} 轮 A 无进展（疑似国服 RT 确认页），尝试 RT", LogLevel.Warn);
+            await _engine.Pad.RT();
+            return 3000;
+        }
+
+        // ---- 死页逃生：A/RT 均无进展 30 轮（≈2 分钟）→ B 退出该页自愈 ----
+        if (screen == MlScreen.HasConfirm && streak >= 30 && (streak - 30) % 5 == 0)
+        {
+            _log("[我的联赛] 确认页 A/RT 均无进展，B 退出自愈", LogLevel.Warn);
+            await _engine.Pad.Back();
+            return 2400;
+        }
+
+        return null;
+    }
+}

@@ -6,6 +6,7 @@ using EfootballBot.Core.Input;
 using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Bot.Scenarios.Weekly;
 using EfootballBot.Core.Bot.Scenarios.CnWeekly;
+using EfootballBot.Core.Bot.Scenarios.CnMyLeague;
 using EfootballBot.Core.Bot.Scenarios.PeakLadder;
 using EfootballBot.Core.Bot.Scenarios.AiLadder;
 using EfootballBot.Core.Observation;
@@ -141,14 +142,14 @@ public sealed class BotEngine : IDisposable
     public async Task StartAsync(string mode)
     {
         if (IsRunning) return;
-        // 场景模式（cndaily=国服日常 / cnweekly=国服周活动 / intl=国际服我的联赛 /
-        // intlweekly=国际服周活动 / intlladder=国际服AI天梯联赛）需接管虚拟手柄（B 键逃生依赖）；
-        // observe 纯观察不操作游戏
-        bool scenarioMode = mode is "cndaily" or "cnweekly" or "intl" or "intlweekly" or "intlladder";
+        // 场景模式（cndaily=国服天梯巅峰赛 / cnweekly=国服周活动 / cnmyleague=国服我的联赛 /
+        // intl=国际服我的联赛 / intlweekly=国际服周活动 / intlladder=国际服AI天梯联赛）
+        // 需接管虚拟手柄（B 键逃生依赖）；observe 纯观察不操作游戏
+        bool scenarioMode = mode is "cndaily" or "cnweekly" or "cnmyleague" or "intl" or "intlweekly" or "intlladder";
         CancellationToken token;
         try
         {
-            bool cn = mode is "cndaily" or "cnweekly";
+            bool cn = mode is "cndaily" or "cnweekly" or "cnmyleague";
             token = await PrepareSessionAsync(cn ? CnProcessName : null, connectPad: scenarioMode);
         }
         catch
@@ -167,13 +168,14 @@ public sealed class BotEngine : IDisposable
 
         // 感知管线（YOLO 模型缺失时仅 OCR，不阻塞启动）
         _perception ??= PerceptionPipeline.Create(_cfg, _factory, LogInternal);
-        // 场景体系：cndaily=国服天梯巅峰赛 / cnweekly=国服周活动 / intl=国际服我的联赛 /
-        // intlweekly=国际服周活动 / intlladder=国际服AI天梯联赛
+        // 场景体系：cndaily=国服天梯巅峰赛 / cnweekly=国服周活动 / cnmyleague=国服我的联赛 /
+        // intl=国际服我的联赛 / intlweekly=国际服周活动 / intlladder=国际服AI天梯联赛
         Scenario = mode switch
         {
             "intlweekly" => new WeeklyEventScenario(this, LogInternal),
             "cnweekly" => new CnWeeklyScenario(this, LogInternal),
             "cndaily" => new PeakLadderScenario(this, LogInternal),
+            "cnmyleague" => new CnMyLeagueScenario(this, LogInternal),
             "intlladder" => new AiLadderScenario(this, LogInternal),
             _ when scenarioMode => new MyLeagueScenario(this, LogInternal),
             _ => null,

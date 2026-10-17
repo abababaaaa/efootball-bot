@@ -181,12 +181,16 @@ public partial class MainWindow : Window
 
     private void RbCnWeekly_Checked(object sender, RoutedEventArgs e) => SwitchCnModule();
 
+    private void RbCnMyLeague_Checked(object sender, RoutedEventArgs e) => SwitchCnModule();
+
     private void SwitchCnModule()
     {
-        if (CnPreMatchContent is null || CnLeagueContent is null || CnWeeklyContent is null) return;
+        if (CnPreMatchContent is null || CnLeagueContent is null || CnWeeklyContent is null
+            || CnMyLeagueContent is null) return;
         CnPreMatchContent.Visibility = RbCnPreMatch.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         CnLeagueContent.Visibility = RbCnLeague.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         CnWeeklyContent.Visibility = RbCnWeekly.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+        CnMyLeagueContent.Visibility = RbCnMyLeague.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
     }
 
     // ---------------- 赛前快捷设置（一键打开游戏自带设置工具） ----------------
@@ -202,6 +206,77 @@ public partial class MainWindow : Window
 
     private void BtnOpenCnGameDir_Click(object sender, RoutedEventArgs e)
         => OpenGameDirectory(TxtCnPreMatchPath, intl: false, "国服");
+
+    private void BtnLaunchGame_Click(object sender, RoutedEventArgs e)
+        => LaunchGame(TxtPreMatchPath, intl: true, "国际服");
+
+    private void BtnLaunchCnGame_Click(object sender, RoutedEventArgs e)
+        => LaunchGame(TxtCnPreMatchPath, intl: false, "国服");
+
+    /// <summary>
+    /// 快速启动游戏本体：已在运行只提示不重复拉起。国际服优先走 Steam 正规链路
+    /// （steam://rungameid/1665460，与 Steam 库内快捷方式等效，Steam 未启动会自动带起，
+    /// 不依赖安装位置），Steam 不在时回退定位到的 eFootball.exe 直启；国服定位
+    /// eFootballOnline.exe 直启（定位链路与 Steam 严格隔离，见 GameSettingsLocator）。
+    /// </summary>
+    private void LaunchGame(TextBlock status, bool intl, string label)
+    {
+        try
+        {
+            string procName = intl ? GameWindow.GlobalProcessName : BotEngine.CnProcessName;
+            if (Process.GetProcessesByName(procName).Length > 0)
+            {
+                status.Text = $"{label}游戏已在运行，无需重复启动。";
+                AppendLog($"[赛前快捷设置] {label}游戏已在运行，未重复启动。", LogLevel.Info);
+                return;
+            }
+
+            if (intl)
+            {
+                try
+                {
+                    Process.Start(new ProcessStartInfo
+                    {
+                        FileName = $"steam://rungameid/{GameSettingsLocator.IntlSteamAppId}",
+                        UseShellExecute = true,
+                    });
+                    status.Text = "已通过 Steam 启动国际服游戏（eFootball），窗口出现需等待片刻。";
+                    AppendLog("[赛前快捷设置] 已通过 Steam 启动国际服游戏（eFootball）。", LogLevel.Success);
+                    return;
+                }
+                catch
+                {
+                    // 无 Steam（URI 协议未注册）→ 回退定位 exe 直启
+                }
+            }
+
+            // 定位游戏本体：上次定位的 Settings.exe 所在目录向上找（两服各自的路径记忆）
+            var settingsPath = intl ? _cfg.GamePaths.IntlSettingsTool : _cfg.GamePaths.CnSettingsTool;
+            string? exe = GameSettingsLocator.LocateGameExe(intl, Path.GetDirectoryName(settingsPath));
+            if (exe is null)
+            {
+                status.Text = intl
+                    ? "未定位到国际服游戏本体（eFootball.exe）——请确认已安装 Steam 版 eFootball。"
+                    : "未找到国服游戏本体（eFootballOnline.exe）——请先点一次「打开设置工具」形成路径记忆（或启动国服游戏）后再试。";
+                AppendLog($"[赛前快捷设置] 未定位到{label}游戏本体，未启动。", LogLevel.Warn);
+                return;
+            }
+
+            status.Text = exe;
+            Process.Start(new ProcessStartInfo
+            {
+                FileName = exe,
+                UseShellExecute = true,
+                WorkingDirectory = Path.GetDirectoryName(exe),
+            });
+            AppendLog($"[赛前快捷设置] 已启动{label}游戏：{exe}", LogLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            status.Text = $"启动失败：{ex.Message}";
+            AppendLog($"[赛前快捷设置] 启动{label}游戏失败：{ex.Message}", LogLevel.Error);
+        }
+    }
 
     /// <summary>
     /// 定位某服的 Settings.exe：运行中的游戏进程锚定 → 上次定位记忆（GamePaths）兜底，
@@ -289,6 +364,9 @@ public partial class MainWindow : Window
 
     private async void BtnStartCnWeekly_Click(object sender, RoutedEventArgs e)
         => await ToggleScenarioAsync(BtnStartCnWeekly, "cnweekly");
+
+    private async void BtnStartCnMyLeague_Click(object sender, RoutedEventArgs e)
+        => await ToggleScenarioAsync(BtnStartCnMyLeague, "cnmyleague");
 
     private async Task ToggleScenarioAsync(Button btn, string? mode)
     {
@@ -421,6 +499,7 @@ public partial class MainWindow : Window
         BtnStartAiLadder.IsEnabled = enabled;
         BtnStartCn.IsEnabled = enabled;
         BtnStartCnWeekly.IsEnabled = enabled;
+        BtnStartCnMyLeague.IsEnabled = enabled;
     }
 
     // 暂停状态（仅 GUI 侧镜像，真实状态在 Worker 引擎；停止时复位）
@@ -442,6 +521,8 @@ public partial class MainWindow : Window
         BtnStartCn.Style = (Style)FindResource("PrimaryBtn");
         BtnStartCnWeekly.Content = "开始";
         BtnStartCnWeekly.Style = (Style)FindResource("PrimaryBtn");
+        BtnStartCnMyLeague.Content = "开始";
+        BtnStartCnMyLeague.Style = (Style)FindResource("PrimaryBtn");
         SetStartButtonsEnabled(true);
         BtnPause.IsEnabled = false;
         _paused = false;

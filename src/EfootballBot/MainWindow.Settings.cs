@@ -142,6 +142,20 @@ public partial class MainWindow
         // 周活动（国服）：场次停止
         LoadStopAfterUi(CmbCnWeeklyStopAfter, TxtCnWeeklyStopAfter, _cfg.CnWeekly.StopAfterMatches);
 
+        // 我的联赛（国服）：难度/道具/满级提示/场次停止（独立配置段，与国际服互不影响）
+        ChkCnMlBuyExpBoost.IsChecked = _cfg.CnMyLeague.BuyExpBoost;
+        int cnMlExpIdx = Array.IndexOf(new[] { "2x", "3x", "4x" }, _cfg.CnMyLeague.ExpBoostLevel);
+        CmbCnMlExpBoostLevel.SelectedIndex = cnMlExpIdx >= 0 ? cnMlExpIdx : 0;
+        ChkCnMlBuyCoachBoost.IsChecked = _cfg.CnMyLeague.BuyCoachBoost;
+        ChkCnMlBuyConditionBoost.IsChecked = _cfg.CnMyLeague.BuyConditionBoost;
+        int cnMlCondIdx = Array.IndexOf(new[] { "普通+", "好+", "杰出" }, _cfg.CnMyLeague.ConditionLevel);
+        CmbCnMlConditionLevel.SelectedIndex = cnMlCondIdx >= 0 ? cnMlCondIdx : 0;
+        int cnMlDiffIdx = Array.IndexOf(MyLeagueDifficulties, _cfg.CnMyLeague.Difficulty);
+        CmbCnMlDifficulty.SelectedIndex = cnMlDiffIdx >= 0 ? cnMlDiffIdx : 0;
+        ChkCnMlMaxLevelNotify.IsChecked = _cfg.CnMyLeague.NotifyPlayerMaxLevel;
+        LoadStopAfterUi(CmbCnMlStopAfterMatches, TxtCnMlStopAfterMatches, _cfg.CnMyLeague.StopAfterMatches);
+        LoadStopAfterUi(CmbCnMlStopAfterKeyMatches, TxtCnMlStopAfterKeyMatches, _cfg.CnMyLeague.StopAfterKeyMatches);
+
         // AI天梯联赛（国际服）：达到组别停止（索引 0=不启用，1~10 对应 组别10~组别1）+ 场次停止
         int aiDiv = _cfg.AiLadder.StopAtDivision;
         CmbAiStopAtDivision.SelectedIndex = aiDiv is >= 1 and <= 10 ? 11 - aiDiv : 0;
@@ -240,6 +254,20 @@ public partial class MainWindow
 
         // 周活动（国服）
         _cfg.CnWeekly.StopAfterMatches = SaveStopAfterUi(CmbCnWeeklyStopAfter, TxtCnWeeklyStopAfter);
+
+        // 我的联赛（国服）
+        _cfg.CnMyLeague.BuyExpBoost = ChkCnMlBuyExpBoost.IsChecked == true;
+        if (CmbCnMlExpBoostLevel.SelectedIndex >= 0)
+            _cfg.CnMyLeague.ExpBoostLevel = new[] { "2x", "3x", "4x" }[CmbCnMlExpBoostLevel.SelectedIndex];
+        _cfg.CnMyLeague.BuyCoachBoost = ChkCnMlBuyCoachBoost.IsChecked == true;
+        _cfg.CnMyLeague.BuyConditionBoost = ChkCnMlBuyConditionBoost.IsChecked == true;
+        if (CmbCnMlConditionLevel.SelectedIndex >= 0)
+            _cfg.CnMyLeague.ConditionLevel = new[] { "普通+", "好+", "杰出" }[CmbCnMlConditionLevel.SelectedIndex];
+        if (CmbCnMlDifficulty.SelectedIndex >= 0)
+            _cfg.CnMyLeague.Difficulty = MyLeagueDifficulties[CmbCnMlDifficulty.SelectedIndex];
+        _cfg.CnMyLeague.NotifyPlayerMaxLevel = ChkCnMlMaxLevelNotify.IsChecked == true;
+        _cfg.CnMyLeague.StopAfterMatches = SaveStopAfterUi(CmbCnMlStopAfterMatches, TxtCnMlStopAfterMatches);
+        _cfg.CnMyLeague.StopAfterKeyMatches = SaveStopAfterUi(CmbCnMlStopAfterKeyMatches, TxtCnMlStopAfterKeyMatches);
 
         // AI天梯联赛（国际服）：索引 1~10 对应 组别10~组别1（10 最低、1 最高）
         _cfg.AiLadder.StopAtDivision = CmbAiStopAtDivision.SelectedIndex is >= 1 and <= 10

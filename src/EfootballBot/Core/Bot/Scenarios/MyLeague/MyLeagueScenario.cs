@@ -1,3 +1,4 @@
+using EfootballBot.Core.Config;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 
@@ -8,11 +9,13 @@ namespace EfootballBot.Core.Bot.Scenarios.MyLeague;
 /// → 全程模拟手柄操作（Dpad 导航 / A 确认 / B 逃生）。
 /// 骨架流程：主菜单"比赛"卡片 → 比赛页进"我的联赛" → 签领奖励一路确认推进 → 比赛画面等待。
 /// 国际服游戏不响应 PostMessage 后台鼠标，因此不使用鼠标，全部手柄输入。
+/// 国服我的联赛（CnMyLeagueScenario）继承本类：联赛内流程完全一致（难度核对/道具购买/
+/// 比赛挂机/终场弹窗链），仅进入导航与确认键通过三个虚钩子（分类/拦截/配置）按国服适配。
 /// </summary>
-public sealed class MyLeagueScenario : IScenario
+public class MyLeagueScenario : IScenario
 {
-    private readonly BotEngine _engine;
-    private readonly Action<string, LogLevel> _log;
+    protected readonly BotEngine _engine;
+    protected readonly Action<string, LogLevel> _log;
 
     private MlScreen _lastScreen = MlScreen.Unknown;
     private int _streak;
@@ -45,6 +48,8 @@ public sealed class MyLeagueScenario : IScenario
     private bool _keyMatchAnnounced;
     /// <summary>球员满级提示节流。</summary>
     private DateTime _lastMaxLevelAt = DateTime.MinValue;
+    /// <summary>经验值页「大部分球员已满级」日志节流（页面停留多帧只报一次）。</summary>
+    private DateTime _lastExpPageMaxLogAt = DateTime.MinValue;
     /// <summary>购买后主页重验次数（超过 2 次仍缺则放弃，防死循环）。</summary>
     private int _verifyRetries;
     /// <summary>下一场为关键比赛（预告弹窗/主页预告已见；比赛结束即消费复位）。</summary>
@@ -79,7 +84,11 @@ public sealed class MyLeagueScenario : IScenario
         MyLeagueBrain.FocusDiag = s => _log($"[我的联赛] {s}", LogLevel.Debug);
     }
 
-    public string Name => "我的联赛";
+    public virtual string Name => "我的联赛";
+
+    /// <summary>难度/道具购买/停止场次等配置来源。国服子类换用 CnMyLeague 配置段，
+    /// 与国际服互不影响（同款玩法、两服各自记设置）。</summary>
+    protected virtual MyLeagueConfig LeagueConfig => _engine.Config.MyLeague;
 
     public async Task<int> RunOnceAsync(CancellationToken ct)
     {
@@ -91,8 +100,7 @@ public sealed class MyLeagueScenario : IScenario
         // 冷启动直接落在真实比赛中由比分框时钟主判据覆盖，不依赖角区兜底。
         bool matchContext = _memory.SawWithin(MlScreen.InMatch, TimeSpan.FromSeconds(90), now) ||
                             _memory.SawWithin(MlScreen.MatchStartPage, TimeSpan.FromSeconds(90), now);
-        var screen = MyLeagueBrain.Classify(obs.Detections, obs.Ocr, CornerHasContent(obs.Frame),
-            matchContext, IsMostlyLightPage(obs.Frame));
+        var screen = ClassifyScreen(obs, matchContext);
 
         _memory.Record(screen, now);
 
@@ -118,7 +126,7 @@ public sealed class MyLeagueScenario : IScenario
         if (!_takeoverLogged)
         {
             _takeoverLogged = true;
-            _log($"[我的联赛] 智能接管：当前界面「{screen}」，从该阶段继续", LogLevel.Success);
+            _log($"[我的联赛] 智能接管：当前界面「{DescribeScreen(screen)}」，从该阶段继续", LogLevel.Success);
         }
 
         // 关键比赛预告弹窗（P2「下一场是关键比赛」/ P3 固定难度）：下一场难度由游戏指定
@@ -173,7 +181,7 @@ public sealed class MyLeagueScenario : IScenario
             // 场次计数停止（0=无限跑）：总场次 / 关键比赛任一达标即自动停止挂机。
             // 计数为本此挂机累计（引擎每次启动重建）。Stop 会还原停靠窗口、复位手柄、
             // 取消观察循环，本方法返回后主循环随取消令牌干净退出。
-            var mlCfg = _engine.Config.MyLeague;
+            var mlCfg = LeagueConfig;
             if (mlCfg.StopAfterMatches > 0 && _engine.Stats.MatchesDone >= mlCfg.StopAfterMatches)
             {
                 _log($"[我的联赛] 已完成设定场次（{_engine.Stats.MatchesDone}/{mlCfg.StopAfterMatches} 场），自动停止挂机", LogLevel.Success);
@@ -189,12 +197,26 @@ public sealed class MyLeagueScenario : IScenario
         }
 
         // 球员满级提示（开关可关；比赛期间"满级"字样，60s 节流计数一次）
-        if (_engine.Config.MyLeague.NotifyPlayerMaxLevel &&
+        if (LeagueConfig.NotifyPlayerMaxLevel &&
             obs.Ocr.ContainsJoined("满级") && (now - _lastMaxLevelAt).TotalSeconds > 60)
         {
             _lastMaxLevelAt = now;
             _engine.Stats.PlayersMaxed++;
             _log($"[我的联赛] 球员满级提示（累计 {_engine.Stats.PlayersMaxed} 次）——该换人了", LogLevel.Success);
+        }
+
+        // 赛后「经验值」页（推进链中的一页，动作不变仍按 A 下一步）：页面只列出本场
+        // 还能获得经验的球员，≤3 人 = 大部分球员已满级（实机 2026-10-17 用户需求：
+        // 从页面人数一眼看出阵容成长空间）→ 彩色日志提醒换人。60s 节流防页面停留
+        // 多帧连报；跟随「球员满级提示」开关。
+        int expPagePlayers = MyLeagueBrain.IsExpResultPage(obs.Ocr)
+            ? MyLeagueBrain.CountExpResultPlayers(obs.Ocr)
+            : 0;
+        if (_engine.Config.MyLeague.NotifyPlayerMaxLevel && expPagePlayers is > 0 and <= 3 &&
+            (now - _lastExpPageMaxLogAt).TotalSeconds > 60)
+        {
+            _lastExpPageMaxLogAt = now;
+            _log($"[我的联赛] 经验值页仅 {expPagePlayers} 名球员获得经验——大部分球员已满级，该换人了", LogLevel.Success);
         }
 
         if (screen == _lastScreen)
@@ -205,7 +227,7 @@ public sealed class MyLeagueScenario : IScenario
         {
             _streak = 0;
             _lastScreen = screen;
-            _log($"[我的联赛] 界面：{screen}", LogLevel.Info);
+            _log($"[我的联赛] 界面：{DescribeScreen(screen)}", LogLevel.Info);
         }
 
         // 错误点标记：误入「我的联赛」说明页（光标停在 i 图标时按了 A）
@@ -217,6 +239,10 @@ public sealed class MyLeagueScenario : IScenario
         bool inMatchRecently =
             _memory.SawWithin(MlScreen.InMatch, TimeSpan.FromSeconds(60), now) ||
             _memory.SawWithin(MlScreen.MatchStartPage, TimeSpan.FromSeconds(90), now);
+        // 模块自有界面拦截（国服子类在此接管主页导航与 RT 确认键）：返回非 null = 本轮已处理
+        int? customWait = await InterceptAsync(obs, screen, _streak, inMatchRecently);
+        if (customWait is not null) return customWait.Value;
+
         var action = MyLeagueBrain.Decide(screen, obs.Ocr, _streak, inMatchRecently);
 
         // 标题画面宽限：比赛流程上下文中出现「eFootball™+X」帧，多为开赛加载画面
@@ -342,6 +368,26 @@ public sealed class MyLeagueScenario : IScenario
         }
         return action.WaitMs;
     }
+
+    // ---------------- 国服子类扩展钩子 ----------------
+
+    /// <summary>
+    /// 界面分类：右上角像素探针 + 比赛上下文 + 亮度探针 → MyLeagueBrain。
+    /// 国服子类先判国服主页页签/其他模块残留页（命中记 Unknown 由拦截钩子接管），未命中回落本判定。
+    /// </summary>
+    protected virtual MlScreen ClassifyScreen(Observation obs, bool matchContext) =>
+        MyLeagueBrain.Classify(obs.Detections, obs.Ocr, CornerHasContent(obs.Frame),
+            matchContext, IsMostlyLightPage(obs.Frame));
+
+    /// <summary>日志里的界面显示名（国服子类把主页 Unknown 显示成国服页签名，便于远程排障）。</summary>
+    protected virtual string DescribeScreen(MlScreen screen) => screen.ToString();
+
+    /// <summary>
+    /// 模块自有界面拦截：在共享决策（Decide/购买状态机/难度页）之前接管。
+    /// 返回非 null = 本轮已处理（值为下一轮延时）；null = 交给共享流程。国际服无自有界面，恒 null。
+    /// </summary>
+    protected virtual Task<int?> InterceptAsync(Observation obs, MlScreen screen, int streak, bool inMatchRecently)
+        => Task.FromResult<int?>(null);
 
     /// <summary>
     /// 右上角（AI 徽标区，x≥0.80 / y 0.03~0.18）内容探针：≥10% 采样点非黑（任一通道 &gt;40）
@@ -626,7 +672,7 @@ public sealed class MyLeagueScenario : IScenario
     /// </summary>
     private async Task<int> HandleDifficultyAsync(Capture.FrameData frame, OcrResult ocr)
     {
-        string wanted = _engine.Config.MyLeague.Difficulty;
+        string wanted = LeagueConfig.Difficulty;
         var options = MyLeagueBrain.DetectDifficultyOptions(ocr);
         var selected = MyLeagueBrain.DetectSelectedDifficulty(frame, ocr);
 
@@ -711,7 +757,7 @@ public sealed class MyLeagueScenario : IScenario
     {
         if (_itemsInitialized) return;
         _itemsInitialized = true;
-        var c = _engine.Config.MyLeague;
+        var c = LeagueConfig;
         var targets = new List<MyLeagueBrain.MlItemTarget>();
         if (c.BuyExpBoost)
             targets.Add(new MyLeagueBrain.MlItemTarget(MyLeagueBrain.MlItemKind.ExpBoost, c.ExpBoostLevel));
@@ -741,7 +787,7 @@ public sealed class MyLeagueScenario : IScenario
     }
 
     /// <summary>OCR 行摘要（面板切换失败等远程排障用，截断防日志膨胀）。</summary>
-    private static string OcrDigest(OcrResult ocr)
+    protected static string OcrDigest(OcrResult ocr)
     {
         var text = string.Join(" | ", ocr.Lines.Select(l => l.Text.Replace(" ", "")));
         return text.Length <= 320 ? text : text[..320];

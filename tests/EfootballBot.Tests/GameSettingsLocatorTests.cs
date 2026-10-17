@@ -108,4 +108,51 @@ public class GameSettingsLocatorTests : IDisposable
         Assert.NotNull(found);
         Assert.True(File.Exists(found), $"定位到不存在的文件: {found}");
     }
+
+    // ---------------- 游戏本体 exe 定位（快速打开游戏） ----------------
+
+    [Fact]
+    public void FindGameExeNear_Intl_AtGameRoot()
+    {
+        // 国际服：{根}\eFootball.exe；线索可以是任一子目录（如设置工具目录），向上逐级命中
+        TouchDir("eFootball.exe");
+        var hint = Dir("anything");
+
+        var found = GameSettingsLocator.FindGameExeNear(hint, intl: true);
+
+        Assert.Equal(Path.Combine(_root, "eFootball.exe"), found);
+    }
+
+    [Fact]
+    public void FindGameExeNear_Cn_InBinariesWin64()
+    {
+        // 国服：{根}\eFootball\Binaries\Win64\eFootballOnline.exe；
+        // 线索 = 上次定位的 SettingTool\Settings.exe 所在目录，向上 1 级命中
+        var expected = TouchDir("eFootball", "Binaries", "Win64", "eFootballOnline.exe");
+        var hint = Dir("SettingTool");
+
+        var found = GameSettingsLocator.FindGameExeNear(hint, intl: false);
+
+        Assert.Equal(expected, found);
+    }
+
+    [Fact]
+    public void LocateGameExe_Cn_NeverFallsBackToSteam()
+    {
+        // 与设置工具同规则（实机 2026-10-13 教训）：国服线索找不到 eFootballOnline.exe
+        // → null，绝不跌进 Steam 库（那是国际服的安装，会拉起国际服）
+        var hint = Dir("SettingTool");
+
+        Assert.Null(GameSettingsLocator.LocateGameExe(intl: false, hint));
+    }
+
+    [Fact]
+    public void FindGameExeNear_HandlesNullAndMissing()
+    {
+        Assert.Null(GameSettingsLocator.FindGameExeNear(null, intl: true));
+        Assert.Null(GameSettingsLocator.FindGameExeNear(null, intl: false));
+        Assert.Null(GameSettingsLocator.FindGameExeNear(Path.Combine(_root, "not-exist"), intl: true));
+        // 国服无线索（路径记忆为空）→ null，不抛异常
+        Assert.Null(GameSettingsLocator.LocateGameExe(intl: false));
+    }
 }

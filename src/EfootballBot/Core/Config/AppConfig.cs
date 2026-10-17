@@ -319,13 +319,13 @@ public sealed class WeeklyConfig
 }
 
 /// <summary>
-/// 国服周活动挂机配置（实况足球在线「比赛活动」，当前为冠军赛刷分）。
-/// 国服冠军赛无赛事等级/自动控制设置项，仅场次停止；全程固定 7 场
-/// （小组赛×3 + 1/8决赛 + 1/4决赛 + 半决赛 + 决赛）。
+/// 国服周活动挂机配置（实况足球在线「比赛活动」）。活动每周轮换两种形态：
+/// 杯赛型（冠军赛，全程固定 7 场：小组赛×3 + 1/8决赛 + 1/4决赛 + 半决赛 + 决赛）与
+/// 巡回赛型（球星训练等，场次不定刷积分）。均无赛事等级/自动控制设置项，仅场次停止。
 /// </summary>
 public sealed class CnWeeklyConfig
 {
-    /// <summary>完成场次后自动停止（本次挂机累计）。0 = 无限跑（默认：打满冠军赛全程）。</summary>
+    /// <summary>完成场次后自动停止（本次挂机累计）。0 = 无限跑（默认；巡回赛型刷到主要奖励打满为宜）。</summary>
     public int StopAfterMatches { get; set; } = 0;
 }
 
@@ -426,6 +426,9 @@ public sealed class AppConfig
 
     // —— 周活动（国服，比赛活动冠军赛）——
     public CnWeeklyConfig CnWeekly { get; set; } = new();
+
+    // —— 我的联赛（国服，与国际服同款玩法、独立配置段互不影响）——
+    public MyLeagueConfig CnMyLeague { get; set; } = new();
 
     // —— 游戏路径记忆（赛前快捷设置）——
     public GamePathsConfig GamePaths { get; set; } = new();

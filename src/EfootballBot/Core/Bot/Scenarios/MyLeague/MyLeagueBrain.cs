@@ -617,6 +617,68 @@ public static class MyLeagueBrain
     /// <summary>联赛主页右侧面板当前显示的是「挑战」（默认状态，需右拨切换）。</summary>
     public static bool ShowsChallengePanel(OcrResult ocr) => ocr.ContainsJoined("挑战");
 
+    // ---------------- 赛后经验值页（球员数判定） ----------------
+
+    /// <summary>
+    /// 赛后「经验值」页（实机 2026-10-17 截图 myleague_exp_result_page.png）：比赛推进链中的
+    /// 一页——页首大字标题「经验值」+ 球员格（每格「等级 N/N」+「加成:+N%」两行）+
+    /// 底部「Y 查看经验值」提示 + 右下「下一步」。判据只用固定 UI 词，球员名不参与：
+    /// 主判「查看经验值」（全流程唯一）；底部提示漏读时兜底=页首标题「经验值」（y&lt;0.2）
+    /// 且页内确有球员行——物品页行/主页面板行同样含「经验值」字样但都在 y&gt;0.2，单凭标题会误判。
+    /// </summary>
+    public static bool IsExpResultPage(OcrResult ocr)
+    {
+        if (ocr.ContainsJoined("查看经验值")) return true;
+        return ocr.Lines.Any(l => l.CenterY < 0.2 && l.Text.Contains("经验值")) &&
+               CountExpResultPlayers(ocr) > 0;
+    }
+
+    /// <summary>同一球员「等级 N/N」与「加成:+N%」两行的 Y 差上限（实机 ≈0.03；不同球员行距 ≥0.12）。</summary>
+    private const double ExpPlayerLineGap = 0.08;
+
+    /// <summary>左右两列球员格的 X 分界（两列中心距 ≈0.43，列内词 X 抖动 ≲0.05）。</summary>
+    private const double ExpPlayerColumnGap = 0.2;
+
+    /// <summary>
+    /// 数经验值页显示的球员数：2 列网格每格一名球员，格内「等级 N/N」+「加成:+N%」两行，
+    /// OCR 漏读其一仍按现存词计。先按 X 聚成左右列，列内按 Y 聚球员（相邻两行 Y 差小归同人，
+    /// 上下球员行距大分人）。「等级/加成」是每格固定 UI 词；球员名/头像数每场都变，禁作判定点。
+    /// </summary>
+    public static int CountExpResultPlayers(OcrResult ocr)
+    {
+        var words = ocr.Words
+            .Where(w =>
+            {
+                var t = OcrText.Norm(w.Text);
+                return t.Contains("等级") || t.Contains("加成");
+            })
+            .OrderBy(w => w.CenterX)
+            .ToList();
+        if (words.Count == 0) return 0;
+
+        int count = 0;
+        int i = 0;
+        while (i < words.Count)
+        {
+            // 按 X 聚列（锚=列内最左词）
+            double colLeft = words[i].CenterX;
+            var column = new List<OcrWord>();
+            for (; i < words.Count && words[i].CenterX - colLeft < ExpPlayerColumnGap; i++)
+                column.Add(words[i]);
+
+            // 列内按 Y 聚球员：相邻词 Y 差 ≤0.08 归同一名（等级/加成两行差 ≈0.03）
+            column.Sort((a, b) => a.CenterY.CompareTo(b.CenterY));
+            double? lastY = null;
+            foreach (var w in column)
+            {
+                if (lastY is null || w.CenterY - lastY.Value > ExpPlayerLineGap)
+                    count++;
+                lastY = w.CenterY;
+            }
+        }
+        return count;
+    }
+
     // ---------------- 联赛主页光标检测与智能导航 ----------------
 
     /// <summary>主页可聚焦磁贴（固定 UI 词；「i」为前往比赛旁的信息图标，无文字不可检）。</summary>

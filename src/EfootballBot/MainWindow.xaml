@@ -316,7 +316,9 @@
                                 </StackPanel>
                                 <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
                                            TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0">
-                                    <Run Text="一键打开游戏自带的设置工具，调整"/>
+                                    <Run Text="一键"/>
+                                    <Run Text="启动游戏本体或打开自带设置工具" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，调整"/>
                                     <Run Text="画质、分辨率、键位" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
                                     <Run Text="。工具位置"/>
                                     <Run Text="自动定位" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
@@ -329,8 +331,12 @@
                                            Text="尚未定位（点击右侧按钮后显示结果）"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Margin="16,4,0,0" VerticalAlignment="Top">
-                                <Button x:Name="BtnOpenGameSettings" Content="打开设置工具"
+                                <Button x:Name="BtnLaunchGame" Content="快速打开游戏"
                                         Style="{StaticResource PrimaryBtn}" Width="210" Height="40" FontSize="14"
+                                        Click="BtnLaunchGame_Click"
+                                        ToolTip="启动国际服游戏本体：优先经 Steam 拉起（Steam 未启动会自动带起），游戏已在运行时不重复启动"/>
+                                <Button x:Name="BtnOpenGameSettings" Content="打开设置工具"
+                                        Style="{StaticResource PrimaryBtn}" Width="210" Height="40" FontSize="14" Margin="0,8,0,0"
                                         Click="BtnOpenGameSettings_Click"
                                         ToolTip="启动游戏安装目录下的 Settings.exe（与游戏本体同目录）"/>
                                 <Button x:Name="BtnOpenGameDir" Content="打开游戏目录"
@@ -664,7 +670,7 @@
             <!-- ===== 国服面板 ===== -->
             <Border x:Name="PanelCn" Grid.Row="2" Style="{StaticResource Card}" Margin="0" Visibility="Collapsed">
                 <StackPanel>
-                    <!-- 上层模块列表（照抄国际服：★赛前快捷设置 / 天梯巅峰赛 / 周活动；独立分组，切服务器互不干扰选中态） -->
+                    <!-- 上层模块列表（照抄国际服：★赛前快捷设置 / 天梯巅峰赛 / 周活动 / 我的联赛；独立分组，切服务器互不干扰选中态） -->
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,2,0,4">
                         <RadioButton x:Name="RbCnPreMatch" GroupName="CnModule"
                                      Style="{StaticResource ModuleRadio}"
@@ -683,6 +689,10 @@
                         <RadioButton x:Name="RbCnWeekly" GroupName="CnModule" Content="周活动"
                                      Style="{StaticResource ModuleRadio}" Margin="22,0,0,0"
                                      Checked="RbCnWeekly_Checked"/>
+                        <RadioButton x:Name="RbCnMyLeague" GroupName="CnModule" Content="我的联赛"
+                                     Style="{StaticResource ModuleRadio}" Margin="22,0,0,0"
+                                     ToolTip="国服我的联赛（对抗电脑球队提升球队实力）：与国际服我的联赛同款玩法，自动核对难度并打完联赛比赛"
+                                     Checked="RbCnMyLeague_Checked"/>
                     </StackPanel>
 
                     <!-- 赛前快捷设置内容（国服，按入口选中切换显示）：一键打开游戏自带设置工具 -->
@@ -700,7 +710,9 @@
                                 </StackPanel>
                                 <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
                                            TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0">
-                                    <Run Text="一键打开游戏自带的设置工具，调整"/>
+                                    <Run Text="一键"/>
+                                    <Run Text="启动游戏本体或打开自带设置工具" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，调整"/>
                                     <Run Text="画质、分辨率、键位" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
                                     <Run Text="。工具位置"/>
                                     <Run Text="自动定位" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
@@ -713,8 +725,12 @@
                                            Text="尚未定位（点击右侧按钮后显示结果）"/>
                             </StackPanel>
                             <StackPanel Grid.Column="1" Margin="16,4,0,0" VerticalAlignment="Top">
-                                <Button x:Name="BtnOpenCnGameSettings" Content="打开设置工具"
+                                <Button x:Name="BtnLaunchCnGame" Content="快速打开游戏"
                                         Style="{StaticResource PrimaryBtn}" Width="210" Height="40" FontSize="14"
+                                        Click="BtnLaunchCnGame_Click"
+                                        ToolTip="启动国服游戏本体 eFootballOnline.exe（走国服路径定位，不经过 Steam），游戏已在运行时不重复启动"/>
+                                <Button x:Name="BtnOpenCnGameSettings" Content="打开设置工具"
+                                        Style="{StaticResource PrimaryBtn}" Width="210" Height="40" FontSize="14" Margin="0,8,0,0"
                                         Click="BtnOpenCnGameSettings_Click"
                                         ToolTip="启动国服安装目录 SettingTool 子目录下的 Settings.exe（国际服在游戏根目录，两服路径互不影响）"/>
                                 <Button x:Name="BtnOpenCnGameDir" Content="打开游戏目录"
@@ -875,6 +891,148 @@
                             <Run Text="自动停止并还原窗口" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
                             <Run Text="；0（无限）= 打满全程或手动停止。"/>
                         </TextBlock>
+                    </StackPanel>
+
+                    <!-- 我的联赛内容（国服，按入口选中切换显示）：与国际服同款玩法，进入导航按国服页签适配 -->
+                    <StackPanel x:Name="CnMyLeagueContent" Visibility="Collapsed">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Width="9" Height="9" Fill="#FF4CC9A6"
+                                             VerticalAlignment="Center" Margin="0,0,9,1"/>
+                                    <TextBlock Text="我的联赛挂机（国服）" FontSize="16.5" FontWeight="Bold"/>
+                                </StackPanel>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,9,0,0">
+                                    <Run Text="自动打完国服"/>
+                                    <Run Text="「我的联赛」" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="（对抗电脑球队提升球队实力）全部比赛："/>
+                                    <Run Text="自动核对比赛难度" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，物品页"/>
+                                    <Run Text="自动购买加成道具" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，达到设定场次"/>
+                                    <Run Text="自动停止并还原窗口" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="；卡住会自动恢复，无需照看。"/>
+                                </TextBlock>
+                                <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                           TextWrapping="Wrap" MaxWidth="520" Margin="0,7,0,0">
+                                    <Run Text="本程序需"/>
+                                    <Run Text="以管理员运行" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="；需连接"/>
+                                    <Run Text="虚拟手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，开始前请"/>
+                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="。"/>
+                                </TextBlock>
+                            </StackPanel>
+                            <Button x:Name="BtnStartCnMyLeague" Grid.Column="1" Content="开始"
+                                    Style="{StaticResource PrimaryBtn}" Width="210" Height="40" FontSize="14"
+                                    VerticalAlignment="Top" Margin="16,4,0,0" Click="BtnStartCnMyLeague_Click"/>
+                        </Grid>
+
+                        <!-- 比赛难度（与游戏内选择赛事等级一一对应；国服独立配置） -->
+                        <StackPanel Orientation="Horizontal" Margin="2,16,0,0">
+                            <TextBlock Text="比赛难度" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="CmbCnMlDifficulty" Width="150" Margin="12,0,0,0" SelectedIndex="0" VerticalAlignment="Center">
+                                <ComboBoxItem Content="新手"/>
+                                <ComboBoxItem Content="业余"/>
+                                <ComboBoxItem Content="标准"/>
+                                <ComboBoxItem Content="职业"/>
+                                <ComboBoxItem Content="顶尖球员"/>
+                                <ComboBoxItem Content="超级球星"/>
+                                <ComboBoxItem Content="传奇"/>
+                            </ComboBox>
+                        </StackPanel>
+                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0">
+                            <Run Text="与游戏内难度一一对应：开赛时"/>
+                            <Run Text="自动核对，不一致自动改选" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                            <Run Text="。"/>
+                            <Run Text="关键比赛" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                            <Run Text="固定按游戏默认难度开赛。"/>
+                        </TextBlock>
+
+                        <!-- 场次计数停止（0=无限跑）：总场次 / 关键比赛，并列 -->
+                        <StackPanel Orientation="Horizontal" Margin="2,14,0,0">
+                            <TextBlock Text="完成场次停止" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="CmbCnMlStopAfterMatches" Width="96" Margin="12,0,0,0" SelectedIndex="0"
+                                      VerticalAlignment="Center" SelectionChanged="CmbStopAfter_SelectionChanged">
+                                <ComboBoxItem Content="0（无限）"/>
+                                <ComboBoxItem Content="1"/>
+                                <ComboBoxItem Content="3"/>
+                                <ComboBoxItem Content="5"/>
+                                <ComboBoxItem Content="10"/>
+                                <ComboBoxItem Content="20"/>
+                                <ComboBoxItem Content="自定义"/>
+                            </ComboBox>
+                            <TextBox x:Name="TxtCnMlStopAfterMatches" Width="52" Margin="8,0,0,0" VerticalAlignment="Center"
+                                     Visibility="Collapsed" Text="1" ToolTip="完成多少场后停止（正整数）"/>
+                            <TextBlock Text="场" FontSize="12" VerticalAlignment="Center" Margin="4,0,0,0"
+                                       Foreground="{DynamicResource TextMuted}"/>
+                            <TextBlock Text="关键比赛停止" FontWeight="SemiBold" FontSize="12.5" VerticalAlignment="Center" Margin="30,0,0,0"/>
+                            <ComboBox x:Name="CmbCnMlStopAfterKeyMatches" Width="96" Margin="12,0,0,0" SelectedIndex="0"
+                                      VerticalAlignment="Center" SelectionChanged="CmbStopAfter_SelectionChanged">
+                                <ComboBoxItem Content="0（无限）"/>
+                                <ComboBoxItem Content="1"/>
+                                <ComboBoxItem Content="3"/>
+                                <ComboBoxItem Content="5"/>
+                                <ComboBoxItem Content="10"/>
+                                <ComboBoxItem Content="20"/>
+                                <ComboBoxItem Content="自定义"/>
+                            </ComboBox>
+                            <TextBox x:Name="TxtCnMlStopAfterKeyMatches" Width="52" Margin="8,0,0,0" VerticalAlignment="Center"
+                                     Visibility="Collapsed" Text="1" ToolTip="完成多少场关键比赛后停止（正整数）"/>
+                            <TextBlock Text="场" FontSize="12" VerticalAlignment="Center" Margin="4,0,0,0"
+                                       Foreground="{DynamicResource TextMuted}"/>
+                        </StackPanel>
+                        <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="2,4,0,0">
+                            <Run Text="达到设定场次（本次挂机累计）"/>
+                            <Run Text="自动停止并还原窗口" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                            <Run Text="；0（无限）= 一直挂机，自定义请输入正整数。"/>
+                        </TextBlock>
+
+                        <!-- 我的联赛道具（国服独立配置）：挂机经过物品页时自动购买 -->
+                        <Border Style="{StaticResource Inset}" Margin="0,18,0,0" Padding="14,12">
+                            <StackPanel>
+                                <TextBlock Text="我的联赛道具（自动购买）" FontWeight="SemiBold" FontSize="12.5"
+                                           Foreground="{DynamicResource TextPrimary}" Margin="0,0,0,4"/>
+                                <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520">
+                                    <Run Text="挂机经过物品页时按以下选择"/>
+                                    <Run Text="自动购买" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="（消耗联赛积分），每项每次运行至多买一次，找不到时自动跳过。"/>
+                                </TextBlock>
+                                <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                    <CheckBox x:Name="ChkCnMlBuyExpBoost" Content="购买经验值加成" VerticalAlignment="Center"/>
+                                    <ComboBox x:Name="CmbCnMlExpBoostLevel" Width="80" Margin="12,0,0,0" SelectedIndex="0">
+                                        <ComboBoxItem Content="2x"/>
+                                        <ComboBoxItem Content="3x"/>
+                                        <ComboBoxItem Content="4x"/>
+                                    </ComboBox>
+                                </StackPanel>
+                                <CheckBox x:Name="ChkCnMlBuyCoachBoost" Content="购买教练强化" Margin="0,9,0,0"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,9,0,0">
+                                    <CheckBox x:Name="ChkCnMlBuyConditionBoost" Content="购买状态加成" VerticalAlignment="Center"/>
+                                    <ComboBox x:Name="CmbCnMlConditionLevel" Width="80" Margin="12,0,0,0" SelectedIndex="0">
+                                        <ComboBoxItem Content="普通+"/>
+                                        <ComboBoxItem Content="好+"/>
+                                        <ComboBoxItem Content="杰出"/>
+                                    </ComboBox>
+                                </StackPanel>
+
+                                <TextBlock FontSize="11" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="520" Margin="0,8,0,0">
+                                    <Run Text="每场比赛结束后自动核验：道具耗尽（一般可用 3 场）会"/>
+                                    <Run Text="自动补购" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，无需人工干预。"/>
+                                </TextBlock>
+
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 球员满级提示开关 -->
+                        <CheckBox x:Name="ChkCnMlMaxLevelNotify" Content="球员满级提示（检测到满级时计数并提醒换人）" Margin="2,12,0,0"/>
                     </StackPanel>
                 </StackPanel>
             </Border>
