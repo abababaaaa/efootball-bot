@@ -26,6 +26,9 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
     /// <summary>残留页 B 逃生预算：连续多轮未退出 → 暂停 8s 后重来。</summary>
     private int _escapeAttempts;
 
+    /// <summary>难度页确认预算：连续多轮未离开难度页 → B 退出重走「前往比赛」（页面重开光标归位）。</summary>
+    private int _diffAttempts;
+
     /// <summary>最近一轮国服界面判定（ClassifyScreen 产出，InterceptAsync 消费；单线程无竞争）。</summary>
     private PlScreen _pl = PlScreen.None;
     private CwScreen _cw = CwScreen.None;
@@ -152,10 +155,20 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
             return 3400;
         }
 
+        // ---- 国服「选择比赛等级」难度页全量接管（2026-10-18 实机）：布局与国际服页不同——
+        //      没有「底行 取消/确认」结构，光标在 7 行难度列表内游走，A=勾选光标行、RT=确定。
+        //      国际服基类按「默认光标在底行确认」导航（上×k A 下×k 右×1 A），落点全在列表里，
+        //      把勾反复打在 业余 行——实机日志证据：首轮读 当前=新手，此后永远 业余（上一轮
+        //      计划的末次 A 按在了业余行）。此处接管后基类难度页处理对国服不可达 ----
+        if (screen == MlScreen.DifficultyPage)
+            return await HandleCnDifficultyAsync(obs, streak);
+        _diffAttempts = 0;
+
         // ---- 国服 RT 确认页保险：推进页 A 连续 10 轮无进展改试 RT（天梯对阵表「RT 下一步」
         //      同型页面偶见于国服各流程）。正常 A 推进的页面每页 1~2 轮即过，到不了 10 轮；
-        //      赛后奖励弹窗链虽会累计轮数，但 RT 在弹窗上无绑定，按了无害 ----
-        if ((screen == MlScreen.DifficultyPage || screen == MlScreen.HasConfirm) &&
+        //      赛后奖励弹窗链虽会累计轮数，但 RT 在弹窗上无绑定，按了无害。
+        //      难度页已由上方分支全量接管（含 RT 确认与 B 退出自愈），不进本保险 ----
+        if (screen == MlScreen.HasConfirm &&
             streak >= 10 && (streak - 10) % 5 == 0)
         {
             _log($"[我的联赛] {DescribeScreen(screen)} 连续 {streak} 轮 A 无进展（疑似国服 RT 确认页），尝试 RT", LogLevel.Warn);
@@ -172,5 +185,79 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
         }
 
         return null;
+    }
+
+    /// <summary>
+    /// 国服难度页处置（守则同基类：读当前选中与配置比对，读不到/已一致绝不乱按方向）：
+    /// 需改选/需落位 → <see cref="PlanCnDifficulty"/> 规划（上×7 饱和归位首行 → 下×(k-1)
+    /// 按难度表行号精确落位 → A 勾选 → RT 确定）；关键比赛不改选，直接 RT。
+    /// 连续 6 轮仍未离开难度页 → B 返回主页重走「前往比赛」（页面重开后光标归位）。
+    /// </summary>
+    private async Task<int> HandleCnDifficultyAsync(Observation obs, int streak)
+    {
+        if (streak < 1)
+        {
+            _diffAttempts = 0; // 页面刚出现（或重开后）：预算清零
+            return 800;        // 淡入防抖，等下一轮再读勾
+        }
+        if (++_diffAttempts > 6)
+        {
+            _log("[我的联赛] 难度页多次确认未生效，B 返回主页重走「前往比赛」", LogLevel.Warn);
+            await _engine.Pad.Back();
+            return 2400;
+        }
+
+        string wanted = LeagueConfig.Difficulty;
+        var ocr = obs.Ocr;
+
+        // 关键比赛：难度由游戏指定（受限页只出高档位），按默认直接 RT 确认，绝不导航改选
+        if (MyLeagueBrain.RespectGameDifficulty(_nextMatchIsKey, ocr))
+        {
+            _log("[我的联赛] 关键比赛：难度由游戏指定，RT 直接确认开赛（不改选）", LogLevel.Info);
+            await _engine.Pad.RT();
+            return 3200;
+        }
+
+        string? selected = MyLeagueBrain.DetectSelectedDifficulty(obs.Frame, ocr);
+        var plan = PlanCnDifficulty(selected, wanted);
+        if (plan is null)
+        {
+            // 目标难度名不合法（配置异常）：按游戏默认直接确认，绝不盲导航
+            _log($"[我的联赛] 难度「{wanted}」不在难度表，按游戏默认 RT 确认开赛", LogLevel.Warn);
+            await _engine.Pad.RT();
+            return 3200;
+        }
+
+        _log($"[我的联赛] 难度页：{plan.Summary}：上×{plan.UpStrokes} 归位 → 下×{plan.DownStrokes}" +
+             (plan.CheckFirst ? " → A 勾选" : "") + " → RT 确定", LogLevel.Info);
+        await _engine.Pad.DpadRepeat(PadDir.Up, plan.UpStrokes);
+        await _engine.Pad.DpadRepeat(PadDir.Down, plan.DownStrokes);
+        if (plan.CheckFirst) await _engine.Pad.Confirm(); // A 勾选光标行（该页 A=勾选，实机 2026-10-18 日志证据）
+        await _engine.Pad.RT();                            // 国服确认键
+        return 3500;
+    }
+
+    /// <summary>一次国服难度页落位规划：饱和上移行数 / 落位后下移行数 / 是否需 A 勾选。</summary>
+    public sealed record CnDifficultyPlan(int UpStrokes, int DownStrokes, bool CheckFirst, string Summary);
+
+    /// <summary>
+    /// 国服难度页落位规划（纯函数）。光标起始位置未知 → 一律「上×难度表长度」饱和归位首行
+    /// （列表到头即停不回绕，与全库饱和归位约定一致），再按难度表行号（而非当帧 OCR 检出的
+    /// 子集——漏读一行就会错位一行）下移落位。当前已勾目标 → 落位后直接 RT（CheckFirst=false，
+    /// 无需再勾）；当前未读出/不在难度表 → 同样落位到目标行再 RT（RT 若按光标行开赛则正中
+    /// 目标，若按已勾行开赛则等于游戏默认，两种实现下都不劣于盲确认）；目标名不在难度表 →
+    /// null（绝不导航）。
+    /// </summary>
+    public static CnDifficultyPlan? PlanCnDifficulty(string? selected, string wanted)
+    {
+        int to = Array.IndexOf(MyLeagueBrain.Difficulties, wanted);
+        if (to < 0) return null;
+        bool check = selected is not null && selected != wanted &&
+                     Array.IndexOf(MyLeagueBrain.Difficulties, selected) >= 0;
+        string why = check ? $"{selected} → {wanted}（第 {to + 1} 行）"
+            : selected is null ? $"当前难度未读出，落位 {wanted}（第 {to + 1} 行）后确认"
+            : selected == wanted ? $"已是 {wanted}（第 {to + 1} 行），落位后确认"
+            : $"当前 {selected} 不在难度表，落位 {wanted}（第 {to + 1} 行）后确认";
+        return new CnDifficultyPlan(MyLeagueBrain.Difficulties.Length, to, check, why);
     }
 }

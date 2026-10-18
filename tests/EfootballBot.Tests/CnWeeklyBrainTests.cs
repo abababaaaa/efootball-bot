@@ -334,6 +334,32 @@ public class CnWeeklyBrainTests
         Assert.Equal(0, cards[0].Slot);
     }
 
+    [Fact]
+    public void ChallengeRewardClaimed_RightColumnCheck()
+    {
+        // 卡详情页右栏奖励行末绿勾 (≈0.96,0.51)（实机 2026-10-17）：卡已完成判据，
+        // 比「首次以后的奖励」词可靠（23:21 实机该词被 OCR 漏读后再次空开比赛）
+        var frame = new FrameData(new byte[4 * 400 * 240], 400, 240, 0);
+        PaintRect(frame, 0.940, 0.980, 0.480, 0.535, 40, 200, 40);
+        Assert.True(CnWeeklyBrain.ChallengeRewardClaimed(frame));
+        Assert.False(CnWeeklyBrain.ChallengeRewardClaimed(
+            new FrameData(new byte[4 * 400 * 240], 400, 240, 0)));
+    }
+
+    [Fact]
+    public void DetectFocusedChallengeCard_WhiteFocusedCard()
+    {
+        // 用户 2026-10-17 晚实机规则：打完的勾卡可能仍是白色聚焦——探测聚焦白卡位置，
+        // 场景层据此差值导航到目标卡（上锁的前一张）；全暗=读不出，调用方直接按 A 试
+        var frame = BlackFrame();
+        PaintRect(frame, 0.10, 0.30, 0.30, 0.70, 235, 235, 235); // 卡 1 白底聚焦
+        var ocr = Ocr(BigW("01", 0.115, 0.28), BigW("02", 0.425, 0.28), BigW("03", 0.72, 0.28));
+        Assert.Equal(1, CnWeeklyBrain.DetectFocusedChallengeCard(ocr, frame));
+
+        Assert.Null(CnWeeklyBrain.DetectFocusedChallengeCard(
+            Ocr(BigW("01", 0.115, 0.28), BigW("02", 0.425, 0.28), BigW("03", 0.72, 0.28)), BlackFrame()));
+    }
+
     // ---------------- 选择比赛难度页（2026-10-17 实机新增） ----------------
 
     [Fact]
@@ -413,5 +439,50 @@ public class CnWeeklyBrainTests
         var noPopup = Ocr(W("获得的主要奖励", 0.74, 0.44), W("1/2", 0.55, 0.42));
         var (readable3, _) = CnWeeklyBrain.ParseMainRewardProgress(noPopup);
         Assert.False(readable3);
+    }
+
+    // ---------------- 挑战卡详情页（2026-10-17 第二周实机 绿茵传奇挑战赛） ----------------
+
+    [Fact]
+    public void Classify_ChallengeCardHome_SecondWeekCardPage()
+    {
+        // 实机 2026-10-17 晚 绿茵传奇挑战赛 卡详情页（cn_challenge_card_home.png）：巡回赛主页样
+        // （前往比赛+活动设置）+ 挑战专属词 完成挑战1/完成挑战可获得对应的奖励! ——独立分类为
+        // ChallengeCardHome，先于普通巡回赛主页（不借道 EventHomeTour，i 弹窗/设置核验均不适用）
+        var ocr = Ocr(W("实况足球在线", 0.1, 0.05), W("绿茵传奇挑战赛", 0.3, 0.09),
+            W("前往比赛", 0.18, 0.24), W("教练模式", 0.75, 0.30), W("RS", 0.8, 0.35),
+            W("完成挑战1", 0.6, 0.35), W("完成挑战可获得对应的奖励!", 0.5, 0.42),
+            W("比赛历史", 0.18, 0.47), W("活动信息", 0.6, 0.50), W("奖励", 0.68, 0.55),
+            W("进度", 0.74, 0.55), W("首次以后的奖励", 0.7, 0.60), W("1/3", 0.8, 0.60),
+            W("17 - 0", 0.75, 0.65), W("赛事等级", 0.7, 0.70), W("业余", 0.8, 0.70),
+            W("活动条件", 0.7, 0.75), W("无条件", 0.8, 0.75), W("建议", 0.18, 0.79),
+            W("球队阵容", 0.6, 0.85), W("返回", 0.14, 0.93), W("活动设置", 0.42, 0.93));
+        Assert.True(CnWeeklyBrain.IsCnChallengeCardHome(ocr));
+        Assert.Equal(CwScreen.ChallengeCardHome, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_SettingsPanelBeatsChallengeCardHome()
+    {
+        // 设置面板盖在挑战卡页右半：卡页词透暗背景仍可读，必须先判面板
+        var ocr = Ocr(W("前往比赛", 0.18, 0.24), W("完成挑战1", 0.6, 0.35),
+            W("完成挑战可获得对应的奖励!", 0.5, 0.42), W("活动设置", 0.42, 0.93),
+            W("活动设置", 0.75, 0.09), W("选择的球队", 0.75, 0.23),
+            W("教练模式", 0.75, 0.36), W("开", 0.76, 0.42),
+            W("教练模式内控制", 0.75, 0.46), W("完全托管", 0.76, 0.52));
+        Assert.Equal(CwScreen.EventSettings, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void IsCnChallengeCardHome_NotOtherScreens()
+    {
+        // 巡回赛主页/挑战清单/介绍页不含 完成挑战：不得误判成挑战卡页
+        Assert.False(CnWeeklyBrain.IsCnChallengeCardHome(Ocr(
+            W("前往比赛", 0.18, 0.24), W("总活动积分", 0.5, 0.21),
+            W("比赛历史", 0.18, 0.47), W("活动设置", 0.42, 0.93))));
+        Assert.False(CnWeeklyBrain.IsCnChallengeCardHome(Ocr(
+            W("挑战清单", 0.13, 0.11), W("以1分或以上为目标", 0.2, 0.4), W("返回", 0.1, 0.93))));
+        Assert.False(CnWeeklyBrain.IsCnChallengeCardHome(Ocr(
+            W("进入", 0.26, 0.69), W("详情", 0.26, 0.78))));
     }
 }

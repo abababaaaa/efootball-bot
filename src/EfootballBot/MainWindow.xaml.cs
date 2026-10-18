@@ -575,11 +575,13 @@ public partial class MainWindow : Window
         _previewTimer.Stop();
         _statsTimer.Stop();
         _hotkey.Dispose();
-        // 停靠中的游戏窗口还原兜底：Worker 被 Kill 等场景下引擎来不及 Stop
-        EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
         // 先杀 Worker（虚拟手柄释放玩家 1 槽位），再恢复真实手柄——
-        // 顺序反了会把真实手柄顶到玩家 2。恢复由提权任务在进程退出后自行完成
+        // 顺序反了会把真实手柄顶到玩家 2。恢复由提权任务在进程退出后自行完成。
+        // ★必须先于停靠还原：Worker 里的停靠看门狗存活期间会把刚还原的窗口再移出屏幕，
+        //   而还原记录已被删除，游戏就永远留在屏幕外（挂机中直接关主窗口的实测路径）
         _workerHost?.Dispose();
+        // 停靠中的游戏窗口还原兜底：Worker 已死，看门狗不会再对抗还原
+        EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
         RestorePhysicalPadIfDisabled();
         FileLogger.Instance.Dispose();
         base.OnClosing(e);

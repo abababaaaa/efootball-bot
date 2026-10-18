@@ -35,6 +35,10 @@ public enum MlScreen
     /// 页内正文含「前往比赛」等词，不识别会被误判 LeaguePage 盲按 A 卡死
     /// （实机 bot-20261011-160559 16:07-16:48 卡死 41 分钟）。</summary>
     LeagueInfoPage,
+    /// <summary>国服比赛暂停菜单（Start 键打开）：左列 跳过比赛/比赛回放/重新开始/放弃。
+    /// ★必须先于「比赛回放」弹窗判定——菜单含比赛回放词，误判 HasConfirm 会盲按 A 在
+    /// 菜单与确认弹窗间死循环。处置见 Decide：有「对局获胜」小字才跳，否则 B 回比赛。</summary>
+    CnMatchPause,
 }
 
 public enum MlActionKind
@@ -50,6 +54,9 @@ public enum MlActionKind
     PadUpConfirm,
     /// <summary>标题画面按 X（eFootball 启动标题的进入键，A 无效）。</summary>
     PadXPress,
+    /// <summary>暂停键（Start）：国服比赛中右上角出现「跳过比赛✅」横幅时打开暂停菜单
+    /// （能否跳过由菜单里的「对局获胜」小字二次把关）。</summary>
+    PadStartPress,
     Wait,
 }
 
@@ -177,6 +184,13 @@ public static class MyLeagueBrain
         if (ocr.Words.Any(w => w.CenterY < 0.35 && w.Text.Replace(" ", "").Contains("全场")))
             return MlScreen.FullTime;
 
+        // 国服比赛暂停菜单（Start 键打开）：「跳过比赛」+ (比赛回放|重新开始|放弃) 左列词同屏。
+        // ★必须先于「比赛回放」→HasConfirm 弹窗判定——暂停菜单含比赛回放词，误判 HasConfirm
+        // 会盲按 A 在菜单↔确认弹窗间死循环；也先于记分牌 InMatch（菜单顶部有时钟/比分）
+        if (ocr.ContainsJoined("跳过比赛") &&
+            (ocr.ContainsJoined("比赛回放") || ocr.ContainsJoined("重新开始") || ocr.ContainsJoined("放弃")))
+            return MlScreen.CnMatchPause;
+
         // 物品购买确认弹窗：标题「使用物品」/「消耗我的联赛积分」+「取消」，
         // 焦点默认在取消——必须上移点上方带数字（积分价格）的按钮（实机 2026-10-10 flow_8）。
         // 先于 YOLO btn_confirm：该弹窗也检出确认按钮，直接按 A 会点到「取消」
@@ -284,8 +298,11 @@ public static class MyLeagueBrain
     /// <summary>
     /// 按当前界面 + OCR + 连续轮数决策。<paramref name="inMatchRecently"/> 来自流程帧记忆
     /// （最近刚见过比赛特征）：为 true 时无特征界面按比赛过场处理，延长 B 逃生耐心。
+    /// <paramref name="frame"/> 用于「跳过比赛✅」横幅的绿勾像素核验（同位置还有无勾的
+    /// 目标提示 toast，见 InMatch 分支），调用方尽量传入。
     /// </summary>
-    public static MlAction Decide(MlScreen screen, OcrResult ocr, int screenStreak, bool inMatchRecently = false)
+    public static MlAction Decide(MlScreen screen, OcrResult ocr, int screenStreak,
+        bool inMatchRecently = false, FrameData? frame = null)
     {
         switch (screen)
         {
@@ -325,17 +342,20 @@ public static class MyLeagueBrain
             }
             case MlScreen.HasConfirm:
             {
-                // 带「取消」的弹窗（关键比赛 P3：OK 在上、取消在下且是默认焦点；购买弹窗同型）：
-                // 盲按 A 正好按在取消上把弹窗关掉。先上移再 A——单按钮页上移无害，双按钮弹窗
-                // 恰好从取消挪到确认键。难度选择页除外（其确认键就是默认焦点，上移反而进选项
-                // 列表改难度）；启动设定窗除外（按 A 保留设置继续）。
+                // 带取消类按钮的弹窗（关键比赛 P3：OK 在上、取消在下且是默认焦点；购买弹窗
+                // 同型；跳过比赛确认弹窗默认焦点在关闭）：盲按 A 正好按在取消/关闭上把弹窗
+                // 关掉。★统一规则（用户 2026-10-18）：弹窗出现 取消/关闭 类字眼一律先上移
+                // 把光标挪到 下一步/确定/进入 等推进键上再按 A——单按钮弹窗上移无害，双按钮
+                // 弹窗恰好从取消/关闭挪到推进键。难度选择页除外（其确认键就是默认焦点，上移
+                // 反而进选项列表改难度）；启动设定窗除外（按 A 保留设置继续）。
                 // 超过退避轮数只放慢不停手：弹窗链的第 9+ 页仍需要 A 推进（见 StuckStreak 注释）。
                 // 到 ConfirmEscapeStreak 仍无进展（A 永不生效的 RT 型页）：B 退出该页自愈。
                 if (screenStreak >= ConfirmEscapeStreak && (screenStreak - ConfirmEscapeStreak) % 5 == 0)
                     return new MlAction(MlActionKind.GamepadBack, 2400, "弹窗久按无效，B 逃生");
                 bool slow = screenStreak >= StuckStreak;
-                if (ocr.ContainsJoined("取消") && !IsDifficultyChoice(ocr) && !IsGameSettingsDialog(ocr))
-                    return new MlAction(MlActionKind.PadUpConfirm, slow ? 5000 : 2000, "弹窗确认（上移避开取消）");
+                if ((ocr.ContainsJoined("取消") || ocr.ContainsJoined("关闭")) &&
+                    !IsDifficultyChoice(ocr) && !IsGameSettingsDialog(ocr))
+                    return new MlAction(MlActionKind.PadUpConfirm, slow ? 5000 : 2000, "弹窗确认（上移避开取消/关闭）");
                 return new MlAction(MlActionKind.PadConfirm, slow ? 5000 : 2000, "确定/下一步");
             }
             case MlScreen.LeaguePage:
@@ -413,9 +433,31 @@ public static class MyLeagueBrain
                 // 比赛中超时兜底：远超一场比赛时长仍停留（重播暂停等）才 B 逃生
                 if (screenStreak >= InMatchEscapeStreak)
                     return new MlAction(MlActionKind.GamepadBack, 3000, "比赛超时 B 逃生");
+                // 右上角「跳过比赛✅」横幅（国服 2026-10-17 实机）：按暂停键打开暂停菜单。
+                // 能否真跳由菜单里的「对局获胜」小字二次把关（见 CnMatchPause 分支）。
+                // ★同位置还会弹「跳过比赛 / 累计进球N/3个或以上」挑战目标提示 toast（用户
+                //   2026-10-17 实机）——那只是目标提醒、不可跳，横幅与 toast 的区别是右端
+                //   绿勾，必须绿勾像素核验通过（+排除 累计进球 词）才按暂停，否则空开菜单
+                if (ocr.ContainsJoined("跳过比赛") && !ocr.ContainsJoined("累计进球") &&
+                    SkipBannerHasCheck(frame))
+                    return new MlAction(MlActionKind.PadStartPress, 3000, "跳过比赛✅→暂停菜单");
                 // 比赛中挂机：按 A + 用户设定的随机间隔（设置→挂机节奏），
                 // 拟人化避免全程零输入；A 在比赛中是传球/逼抢，不会暂停或退出
                 return new MlAction(MlActionKind.MatchIdleTap, 0, "比赛中随机点击");
+            }
+
+            case MlScreen.CnMatchPause:
+            {
+                // 跳过确认弹窗（盖在暂停菜单上：确认跳过/关闭，焦点默认在关闭）。必须先于
+                // 对局获胜判定——弹窗文案「以当前比分跳过，对局获胜」也含对局获胜，盲按 A
+                // 会按在关闭上永远进不去。上移光标点「确认跳过」
+                if (ocr.ContainsJoined("确认跳过"))
+                    return new MlAction(MlActionKind.PadUpConfirm, 2600, "跳过比赛→确认跳过");
+                // 暂停菜单：默认光标就在「跳过比赛」上，仅当其下有绿色小字「对局获胜」才可跳
+                // （用户 2026-10-17 实机规则：不是这几个字就返回比赛并继续挂机）
+                if (ocr.ContainsJoined("对局获胜"))
+                    return new MlAction(MlActionKind.PadConfirm, 2600, "跳过比赛（对局获胜）");
+                return new MlAction(MlActionKind.GamepadBack, 2600, "不可跳过，B 返回比赛继续");
             }
 
             default:
@@ -436,6 +478,34 @@ public static class MyLeagueBrain
                 return MlAction.Wait(4000);
             }
         }
+    }
+
+    /// <summary>
+    /// 「跳过比赛」横幅右端绿勾核验（≈(0.95,0.05)，实机 2026-10-17 用户截图）：绿像素 ≥30。
+    /// ★同位置会弹「跳过比赛 / 累计进球N/3个或以上」挑战目标提示 toast——外观与横幅几乎
+    /// 一样但没有绿勾，只是目标提醒、不可跳。frame 为 null（旧调用/部分单测）时只按词判
+    /// （toast 由 累计进球 词排除）。
+    /// </summary>
+    public static bool SkipBannerHasCheck(FrameData? frame)
+    {
+        if (frame is null) return true;
+        return CountGreen(frame, 0.930, 0.990, 0.015, 0.095) >= 30;
+    }
+
+    /// <summary>区域内绿色像素计数（绿底白勾：G&gt;100 且显著高于 R/B；2px 步进采样）。</summary>
+    private static int CountGreen(FrameData f, double x0, double x1, double y0, double y1)
+    {
+        var bgra = f.Bgra;
+        int w = f.Width, h = f.Height;
+        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return 0;
+        int count = 0;
+        for (int y = Math.Max(0, (int)(h * y0)); y < Math.Min(h, (int)(h * y1)); y += 2)
+            for (int x = Math.Max(0, (int)(w * x0)); x < Math.Min(w, (int)(w * x1)); x += 2)
+            {
+                int i = (y * w + x) * 4;
+                if (bgra[i + 1] > 100 && bgra[i + 1] > bgra[i + 2] + 40 && bgra[i + 1] > bgra[i] + 40) count++;
+            }
+        return count;
     }
 
     /// <summary>在 OCR 排版行里找包含任一关键词的行，返回命中词。</summary>

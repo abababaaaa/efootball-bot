@@ -49,6 +49,7 @@ public class CnWeeklyRealFrameTests
         ("cn_squad_menu_cursor.png", CwScreen.SquadMenu),
         ("cn_tour_event_settings.png", CwScreen.EventSettings),
         ("cn_challenge_list.png", CwScreen.ChallengeList),
+        ("cn_challenge_card_home.png", CwScreen.ChallengeCardHome),
         ("cn_tour_difficulty.png", CwScreen.Difficulty),
     };
 
@@ -136,6 +137,109 @@ public class CnWeeklyRealFrameTests
         Assert.Equal((1, 0, false, false), (cards[0].Index, cards[0].Slot, cards[0].Locked, cards[0].Checked));
         Assert.Equal((2, 1, true, false), (cards[1].Index, cards[1].Slot, cards[1].Locked, cards[1].Checked));
         Assert.Equal((3, 2, true, false), (cards[2].Index, cards[2].Slot, cards[2].Locked, cards[2].Checked));
+    }
+
+    // 实机 2026-10-17 晚：打完卡 01 回清单——★勾卡仍是白色聚焦+参赛中（游标不在待挑战卡上），
+    // 卡 02 待挑战、卡 03 灰锁。固化：分类 ChallengeList；勾探针完成态首次拿到实机验证
+    // （卡 1 勾、卡 3 锁、卡 2 无锁无勾）；聚焦白卡探测=卡 1（场景层据此 右移×1 到卡 2 再 A）。
+    // OCR 词、各卡锁/勾判定、聚焦卡全部打印，偏差时据此调参。
+    [Fact]
+    public async Task ChallengeList_DoneFocus_Frame_ScanAndFocused()
+    {
+        using var ocr = new OcrRecognizer();
+        string img = Path.Combine(CnDir, "cn_challenge_list_done_focus.png");
+        var data = LoadPngBgra(img, out int w, out int h);
+        var frame = new FrameData(data, w, h, 0);
+        var ocrRes = await ocr.RecognizeAsync(frame);
+
+        var screen = CnWeeklyBrain.Classify(
+            Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
+        var cards = CnWeeklyBrain.ScanChallengeCards(ocrRes, frame);
+        int? focused = CnWeeklyBrain.DetectFocusedChallengeCard(ocrRes, frame);
+
+        _out.WriteLine($"screen={screen} focused={focused} cards=[{string.Join(", ", cards.Select(c => $"{c.Index:00}@slot{c.Slot} lock={c.Locked} check={c.Checked}"))}]");
+        foreach (var wd in ocrRes.Words)
+            _out.WriteLine($"  W \"{wd.Text}\" @({wd.CenterX:F2},{wd.CenterY:F2}) wh=({wd.W:F3},{wd.H:F3})");
+
+        Assert.Equal(CwScreen.ChallengeList, screen);
+        var c1 = cards.FirstOrDefault(c => c.Index == 1);
+        var c2 = cards.FirstOrDefault(c => c.Index == 2);
+        var c3 = cards.FirstOrDefault(c => c.Index == 3);
+        Assert.NotNull(c1);
+        Assert.True(c1.Checked, "卡 1 应命中绿勾（完成态探针实机校验）");
+        Assert.False(c1.Locked);
+        Assert.NotNull(c2);
+        Assert.False(c2.Locked);
+        Assert.False(c2.Checked);
+        Assert.NotNull(c3);
+        Assert.True(c3.Locked, "卡 3 应命中灰锁");
+        Assert.Equal(1, focused);
+    }
+
+    // 实机 2026-10-17 晚：进入下一张挑战卡时弹「参加新的挑战？」（覆盖当前进度警告，
+    // 进入/取消 两键，默认焦点在取消）。固化：分类仍 ChallengeList（标题可见、进入/取消
+    // 不构成推进词门控），场景层弹窗分支靠「参加新的挑战」词上移选进入。
+    [Fact]
+    public async Task ChallengeList_JoinPopup_Frame_Words()
+    {
+        using var ocr = new OcrRecognizer();
+        string img = Path.Combine(CnDir, "cn_challenge_join_popup.png");
+        var data = LoadPngBgra(img, out int w, out int h);
+        var frame = new FrameData(data, w, h, 0);
+        var ocrRes = await ocr.RecognizeAsync(frame);
+
+        var screen = CnWeeklyBrain.Classify(
+            Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
+
+        _out.WriteLine($"screen={screen} joinWord={ocrRes.ContainsJoined("参加新的挑战")} " +
+                       $"enter={ocrRes.ContainsJoined("进入")} cancel={ocrRes.ContainsJoined("取消")}");
+        foreach (var wd in ocrRes.Words)
+            _out.WriteLine($"  W \"{wd.Text}\" @({wd.CenterX:F2},{wd.CenterY:F2})");
+
+        Assert.Equal(CwScreen.ChallengeList, screen);
+        Assert.True(ocrRes.ContainsJoined("参加新的挑战"), "应读到 参加新的挑战");
+    }
+
+    // 实机卡详情页（cn_challenge_card_home.png，已完成卡）：右栏奖励行带绿勾——
+    // ChallengeRewardClaimed 探针必须命中。完成态主判据：「首次以后的奖励」词 OCR
+    // 常漏读（2026-10-17 23:21 实机 24 词帧漏读后再次空开比赛）
+    [Fact]
+    public async Task ChallengeCardHome_Frame_RewardCheckClaimed()
+    {
+        using var ocr = new OcrRecognizer();
+        var data = LoadPngBgra(Path.Combine(CnDir, "cn_challenge_card_home.png"), out int w, out int h);
+        var frame = new FrameData(data, w, h, 0);
+
+        bool claimed = CnWeeklyBrain.ChallengeRewardClaimed(frame);
+        _out.WriteLine($"rewardClaimed={claimed}");
+
+        Assert.True(claimed, "右栏奖励勾应命中（实机已完成卡详情页）");
+    }
+
+    // 实机 2026-10-17 晚：挑战清单可见卡全勾（01/02/03 全 ✓ + 第 4 卡屏外残边）。
+    // 固化：分类 ChallengeList；三张可见卡全部命中勾探针（场景层据此进入盲点右移
+    // 翻页确认屏外卡，不直接报全部完成——卡数不固定且可见卡≠全部卡）
+    [Fact]
+    public async Task ChallengeList_AllChecked_Frame_VisibleOnly()
+    {
+        using var ocr = new OcrRecognizer();
+        var data = LoadPngBgra(Path.Combine(CnDir, "cn_challenge_list_all_checked.png"), out int w, out int h);
+        var frame = new FrameData(data, w, h, 0);
+        var ocrRes = await ocr.RecognizeAsync(frame);
+
+        var screen = CnWeeklyBrain.Classify(
+            Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
+        var cards = CnWeeklyBrain.ScanChallengeCards(ocrRes, frame);
+        var playable = cards.Where(c => !c.Locked && !c.Checked).ToList();
+
+        _out.WriteLine($"screen={screen} cards=[{string.Join(", ", cards.Select(c => $"{c.Index:00} lock={c.Locked} check={c.Checked}"))}] playable={playable.Count}");
+        foreach (var wd in ocrRes.Words)
+            _out.WriteLine($"  W \"{wd.Text}\" @({wd.CenterX:F2},{wd.CenterY:F2})");
+
+        Assert.Equal(CwScreen.ChallengeList, screen);
+        Assert.True(cards.Count >= 3, "应识别出可见卡 01/02/03");
+        Assert.All(cards.Take(3), c => Assert.True(c.Checked, $"卡 {c.Index:00} 应命中绿勾"));
+        Assert.Empty(playable);
     }
 
     // 实机 2026-10-17：国服巡回赛「选择比赛难度」页（前往比赛后弹出；5 张难度卡横排，

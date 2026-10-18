@@ -1,4 +1,5 @@
 using EfootballBot.Core.Bot.Scenarios.MyLeague;
+using EfootballBot.Core.Capture;
 using EfootballBot.Core.Vision;
 using EfootballBot.Core.Vision.Yolo;
 using Xunit;
@@ -280,6 +281,116 @@ public class MyLeagueBrainTests
         // 远超一场比赛时长（~30 分钟）仍停留才 B 逃生（重播暂停等卡死兜底）
         var action = MyLeagueBrain.Decide(MlScreen.InMatch, OcrResult.Empty, MyLeagueBrain.InMatchEscapeStreak);
         Assert.Equal(MlActionKind.GamepadBack, action.Kind);
+    }
+
+    // ---------------- 国服跳过比赛（2026-10-17 实机规则） ----------------
+
+    [Fact]
+    public void Classify_CnMatchPause_BeatsReplayPopupWord()
+    {
+        // ★暂停菜单含「比赛回放」——不先判会被 比赛回放→HasConfirm 抢走盲按 A，
+        // 在菜单与确认弹窗间死循环。跳过比赛+比赛回放/重新开始/放弃 同屏 = 暂停菜单
+        var ocr = Ocr(("跳过比赛", 0.14, 0.13), ("对局获胜", 0.14, 0.20),
+            ("比赛回放", 0.14, 0.35), ("重新开始", 0.14, 0.55), ("放弃", 0.14, 0.75),
+            ("瑞典", 0.43, 0.27), ("AC米兰", 0.79, 0.27));
+        Assert.Equal(MlScreen.CnMatchPause, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+
+        // 确认弹窗盖在菜单上（背景左列仍可读）：同样判暂停菜单，Decide 内再分弹窗/菜单
+        var popup = Ocr(("跳过比赛", 0.14, 0.13), ("比赛回放", 0.14, 0.35),
+            ("重新开始", 0.14, 0.55), ("放弃", 0.14, 0.75),
+            ("确认跳过", 0.5, 0.66), ("关闭", 0.5, 0.74), ("对局获胜", 0.5, 0.32));
+        Assert.Equal(MlScreen.CnMatchPause, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), popup));
+    }
+
+    [Fact]
+    public void Classify_SkipBannerAlone_NotPauseMenu()
+    {
+        // 比赛中右上角横幅只有 跳过比赛 一个词：仍是 InMatch（触发暂停键在 Decide 里）
+        var ocr = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.86, 0.055));
+        Assert.Equal(MlScreen.InMatch, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Decide_InMatch_SkipBanner_PressesStart()
+    {
+        // 无帧（词判兜底路径）：横幅词即可触发
+        var ocr = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.86, 0.055));
+        var action = MyLeagueBrain.Decide(MlScreen.InMatch, ocr, 5);
+        Assert.Equal(MlActionKind.PadStartPress, action.Kind);
+    }
+
+    [Fact]
+    public void Decide_InMatch_SkipBanner_NeedsGreenCheck()
+    {
+        // 用户 2026-10-17 实机干扰项：同位置「跳过比赛/累计进球N/3个或以上」目标 toast
+        // （无绿勾）——词排除 + 绿勾像素双闸，绝不因此空开暂停菜单
+        var toast = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.84, 0.05), ("累计进球0/3个或以上", 0.84, 0.10));
+        Assert.Equal(MlActionKind.MatchIdleTap,
+            MyLeagueBrain.Decide(MlScreen.InMatch, toast, 5, frame: Frame()).Kind);
+
+        // 有横幅词但右端无绿勾 → 不可跳，继续挂机
+        var banner = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.86, 0.055));
+        Assert.Equal(MlActionKind.MatchIdleTap,
+            MyLeagueBrain.Decide(MlScreen.InMatch, banner, 5, frame: Frame()).Kind);
+
+        // 词 + 右端绿勾 → 按暂停键
+        var green = Frame();
+        PaintGreen(green, 0.930, 0.990, 0.015, 0.095);
+        Assert.Equal(MlActionKind.PadStartPress,
+            MyLeagueBrain.Decide(MlScreen.InMatch, banner, 5, frame: green).Kind);
+    }
+
+    private static FrameData Frame() => new(new byte[4 * 400 * 240], 400, 240, 0);
+
+    private static void PaintGreen(FrameData f, double x0, double x1, double y0, double y1)
+    {
+        for (int y = (int)(f.Height * y0); y < (int)(f.Height * y1); y += 2)
+            for (int x = (int)(f.Width * x0); x < (int)(f.Width * x1); x += 2)
+            {
+                int i = (y * f.Width + x) * 4;
+                f.Bgra[i] = 40; f.Bgra[i + 1] = 200; f.Bgra[i + 2] = 40;
+            }
+    }
+
+    [Fact]
+    public void Decide_CnMatchPause_GatedByWinningText()
+    {
+        // 确认弹窗（确认跳过/关闭，焦点默认在关闭）→ 上移确认，绝不盲按 A
+        var popup = Ocr(("跳过比赛", 0.5, 0.25), ("以当前比分跳过，对局获胜", 0.5, 0.32),
+            ("确认跳过", 0.5, 0.66), ("关闭", 0.5, 0.74));
+        Assert.Equal(MlActionKind.PadUpConfirm,
+            MyLeagueBrain.Decide(MlScreen.CnMatchPause, popup, 1).Kind);
+
+        // 菜单且有「对局获胜」小字 → A（默认光标即在跳过比赛上）
+        var menu = Ocr(("跳过比赛", 0.14, 0.13), ("对局获胜", 0.14, 0.20),
+            ("比赛回放", 0.14, 0.35), ("重新开始", 0.14, 0.55), ("放弃", 0.14, 0.75));
+        Assert.Equal(MlActionKind.PadConfirm,
+            MyLeagueBrain.Decide(MlScreen.CnMatchPause, menu, 1).Kind);
+
+        // 没有「对局获胜」小字 → B 返回比赛继续挂机（用户实机规则）
+        var noWin = Ocr(("跳过比赛", 0.14, 0.13),
+            ("比赛回放", 0.14, 0.35), ("重新开始", 0.14, 0.55), ("放弃", 0.14, 0.75));
+        Assert.Equal(MlActionKind.GamepadBack,
+            MyLeagueBrain.Decide(MlScreen.CnMatchPause, noWin, 1).Kind);
+    }
+
+    [Fact]
+    public void Decide_HasConfirm_DismissButton_UpConfirms()
+    {
+        // 统一弹窗规则（用户 2026-10-18）：弹窗带 取消/关闭 一律先上移再 A——默认焦点多在
+        // 取消/关闭上，盲按 A 会把弹窗关掉（跳过比赛确认弹窗 确认跳过/关闭 即此类）
+        var close = Ocr(("跳过比赛", 0.5, 0.25), ("确认跳过", 0.5, 0.66), ("关闭", 0.5, 0.74));
+        Assert.Equal(MlActionKind.PadUpConfirm,
+            MyLeagueBrain.Decide(MlScreen.HasConfirm, close, 1).Kind);
+
+        var cancel = Ocr(("参加新的挑战?", 0.5, 0.32), ("进入", 0.5, 0.55), ("取消", 0.5, 0.65));
+        Assert.Equal(MlActionKind.PadUpConfirm,
+            MyLeagueBrain.Decide(MlScreen.HasConfirm, cancel, 1).Kind);
+
+        // 仅推进键的弹窗/页面：直接按 A
+        var next = Ocr(("全场", 0.6, 0.1), ("下一步", 0.5, 0.9));
+        Assert.Equal(MlActionKind.PadConfirm,
+            MyLeagueBrain.Decide(MlScreen.HasConfirm, next, 1).Kind);
     }
 
     [Fact]

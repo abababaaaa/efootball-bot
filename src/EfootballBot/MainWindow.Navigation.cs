@@ -186,6 +186,11 @@ public partial class MainWindow
 
     private void BtnRecheck_Click(object sender, RoutedEventArgs e) => RunEnvChecks();
 
+    /// <summary>窗口防卡死：把被留在屏幕外的游戏窗口一键拉回（先按停靠记录还原原位置，否则主屏居中）。</summary>
+    private void BtnWindowRescue_Click(object sender, RoutedEventArgs e)
+        => EfootballBot.Core.System.BackgroundParker.RescueGameWindow(
+            (msg, lv) => Dispatcher.BeginInvoke(() => AppendLog(msg, lv)));
+
     private async void BtnInstallVigem_Click(object sender, RoutedEventArgs e)
     {
         BtnInstallVigem.IsEnabled = false;

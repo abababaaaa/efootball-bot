@@ -52,8 +52,9 @@ public class MyLeagueScenario : IScenario
     private DateTime _lastExpPageMaxLogAt = DateTime.MinValue;
     /// <summary>购买后主页重验次数（超过 2 次仍缺则放弃，防死循环）。</summary>
     private int _verifyRetries;
-    /// <summary>下一场为关键比赛（预告弹窗/主页预告已见；比赛结束即消费复位）。</summary>
-    private bool _nextMatchIsKey;
+    /// <summary>下一场为关键比赛（预告弹窗/主页预告已见；比赛结束即消费复位）。
+    /// 国服子类难度页接管复用（RespectGameDifficulty 同款守则）。</summary>
+    protected bool _nextMatchIsKey;
     /// <summary>主页连续按 A 前往比赛但画面未离开主页的次数（无响应自愈计数）。</summary>
     private int _goMatchAttempts;
     /// <summary>上次按 A 前往比赛的时间（用于只 dump 一次前往后的弹窗画面 OCR）。</summary>
@@ -242,7 +243,7 @@ public class MyLeagueScenario : IScenario
         int? customWait = await InterceptAsync(obs, screen, _streak, inMatchRecently);
         if (customWait is not null) return customWait.Value;
 
-        var action = MyLeagueBrain.Decide(screen, obs.Ocr, _streak, inMatchRecently);
+        var action = MyLeagueBrain.Decide(screen, obs.Ocr, _streak, inMatchRecently, obs.Frame);
         ScenarioShared.DecisionSnapshot(_log, "我的联赛", screen, _streak, action, obs.Ocr);
 
         // 标题画面宽限（共享实现，含赛后弹窗链 90s 档，见 ScenarioShared.TitleGrace）：
@@ -334,6 +335,11 @@ public class MyLeagueScenario : IScenario
                 _log($"[我的联赛] 弹窗上移确认：{action.Target}", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Up);
                 await _engine.Pad.Confirm();
+                break;
+
+            case MlActionKind.PadStartPress:
+                _log($"[我的联赛] {action.Target}", LogLevel.Info);
+                await _engine.Pad.Start();
                 break;
 
             case MlActionKind.PadXPress:

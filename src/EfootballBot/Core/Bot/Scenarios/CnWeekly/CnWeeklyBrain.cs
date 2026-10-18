@@ -31,6 +31,12 @@ public enum CwScreen
     /// <summary>巡回赛型活动主页（球星训练等，2026-10-17 实机：主按钮 前往比赛 + 总活动积分/
     /// 比赛历史/建议，底栏 B 返回 + X 活动设置；无杯赛型的 教练入场/球队阵容）。</summary>
     EventHomeTour,
+    /// <summary>挑战卡详情页（2026-10-17 第二周实机 绿茵传奇挑战赛）：巡回赛主页样
+    /// （前往比赛+活动设置）+ 挑战专属词「完成挑战…」。独立分类不借道 EventHomeTour：
+    /// ★绝不进 i 信息弹窗（主要奖励 x/x 是本周全部活动卡合计进度，对单个活动卡无意义）、
+    /// 不核验巡回赛活动设置；通关判定=右栏胜场 N/N 或反复进入无比赛，A 前往比赛后由
+    /// 游戏分叉进清单/难度页/比赛，挑战子流程自会接住。</summary>
+    ChallengeCardHome,
     /// <summary>活动设置面板（巡回赛主页 X 打开的右侧盖层：选择的球队/教练模式/教练模式内控制，
     /// 底部 B 完成。主页词透过暗化背景仍可读，必须先于主页判定）。</summary>
     EventSettings,
@@ -76,6 +82,8 @@ public static class CnWeeklyBrain
         bool settingsBody = ocr.ContainsJoined("教练模式") &&
             (ocr.ContainsJoined("选择的球队") || ocr.ContainsJoined("完全托管"));
         bool tourHomeBody = ocr.ContainsJoined("前往比赛") && ocr.ContainsJoined("活动设置");
+        // 挑战卡详情页：巡回赛主页样/杯赛主页样 + 挑战专属词「完成挑战」（2026-10-17 第二周实机）
+        bool challengeCardBody = (tourHomeBody || eventHomeBody) && ocr.ContainsJoined("完成挑战");
         bool bracketBody = ocr.ContainsJoined("重置") || ocr.ContainsJoined("冠军杯");
         bool listBody = ocr.ContainsJoined("对阵电脑") && ocr.ContainsJoined("对阵玩家");
         bool introBody = ocr.ContainsJoined("详情") && ocr.ContainsJoined("进入");
@@ -97,7 +105,8 @@ public static class CnWeeklyBrain
         bool popupOnTop = CenterPopupWord(ocr) ||
             dets.Any(d => d.ClassName == "btn_confirm" && d.Score >= MyLeagueBrain.MinScore && d.CenterY < 0.82);
         if (popupOnTop && (squadBody || eventHomeBody || tourHomeBody || settingsBody ||
-                           bracketBody || listBody || introBody || challengeBody || difficultyBody))
+                           bracketBody || listBody || introBody || challengeBody || difficultyBody ||
+                           challengeCardBody))
             return CwScreen.None;
 
         // i 信息弹窗：盖在巡回赛主页上的白底大面板，先于主页判定（主页左半被盖，
@@ -126,6 +135,12 @@ public static class CnWeeklyBrain
         // 活动设置面板：盖在巡回赛主页右半，主页词透背景仍可读，先于两个主页判定
         if (settingsBody)
             return CwScreen.EventSettings;
+
+        // 挑战卡详情页（2026-10-17 第二周实机 绿茵传奇挑战赛）：巡回赛主页样（前往比赛+
+        // 活动设置）+ 挑战专属词「完成挑战」，先于普通巡回赛主页——场景层挑战子流程
+        // 靠它把卡页与真巡回赛主页区分开（i 弹窗核验/设置核验都是巡回赛专属）
+        if (challengeCardBody)
+            return CwScreen.ChallengeCardHome;
 
         // 巡回赛型活动主页：主按钮「前往比赛」+ 底栏「X 活动设置」（杯赛型主页没有这两个词；
         // 我的联赛主页虽有前往比赛但无活动设置，不冲突）。先于杯赛型主页——两代都含「比赛历史」，
@@ -298,6 +313,48 @@ public static class CnWeeklyBrain
         return list.OrderBy(c => c.Index).ToList();
     }
 
+    /// <summary>区域内亮度中位数（3px 步进采样；聚焦白卡/深灰卡的判别用中位数抗文字干扰）。</summary>
+    private static int RegionMedianLuma(FrameData f, double x0, double x1, double y0, double y1)
+    {
+        var bgra = f.Bgra;
+        int w = f.Width, h = f.Height;
+        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return 0;
+        var lumas = new List<int>();
+        for (int y = Math.Max(0, (int)(h * y0)); y < Math.Min(h, (int)(h * y1)); y += 3)
+            for (int x = Math.Max(0, (int)(w * x0)); x < Math.Min(w, (int)(w * x1)); x += 3)
+            {
+                int i = (y * w + x) * 4;
+                lumas.Add((bgra[i] + bgra[i + 1] + bgra[i + 2]) / 3);
+            }
+        if (lumas.Count == 0) return 0;
+        lumas.Sort();
+        return lumas[lumas.Count / 2];
+    }
+
+    /// <summary>
+    /// 挑战清单当前聚焦卡（游标所在卡）：聚焦卡白底高亮、其余卡深灰底（实机 2026-10-17 晚
+    /// cn_challenge_list_done_focus：聚焦白卡中位亮度 200+，深灰卡 &lt;80）。对每张可见卡体
+    /// 取亮度中位数，最亮者须过白底下限且显著高于其余卡，否则视为未读出（返回 null，
+    /// 调用方保持旧行为直接按 A）。用于把游标主动移到目标卡——清单打开时光标可能停在
+    /// 刚打完的勾卡上，并不总在待挑战卡上。
+    /// </summary>
+    public static int? DetectFocusedChallengeCard(OcrResult ocr, FrameData frame)
+    {
+        var medians = new List<(int Index, double Slot, int Median)>();
+        foreach (var (index, slot, right, left) in ChallengeCardBounds(ocr))
+        {
+            int median = RegionMedianLuma(frame, left + 0.04, right - 0.04, 0.30, 0.72);
+            medians.Add((index, slot, median));
+        }
+        if (medians.Count == 0) return null;
+        var best = medians.OrderByDescending(m => m.Median).First();
+        if (best.Median < 180) return null; // 没有白卡：聚焦态未读出
+        int restMax = medians.Where(m => m.Index != best.Index)
+            .Select(m => m.Median).DefaultIfEmpty(0).Max();
+        if (best.Median - restMax < 60) return null; // 与其余卡拉不开差距：不判定
+        return best.Index;
+    }
+
     /// <summary>区域内灰色像素计数（R≈G≈B、亮度 90~220；2px 步进采样）。</summary>
     private static int CountGray(FrameData f, double x0, double x1, double y0, double y1)
     {
@@ -332,6 +389,24 @@ public static class CnWeeklyBrain
             }
         return count;
     }
+
+    // ---------------- 挑战型活动（国服专属词） ----------------
+
+    /// <summary>
+    /// 挑战卡详情页右栏「奖励」行末端的绿勾（2026-10-17 实机 ≈(0.96,0.51)）：本卡奖励已
+    /// 领取 = 卡已完成，选中未完成的新挑战时该位置无勾。★比「首次以后的奖励」词探针
+    /// 可靠——OCR 常漏读该词（23:21 实机 24 词帧漏读后再次空开比赛）。
+    /// </summary>
+    public static bool ChallengeRewardClaimed(FrameData frame)
+        => CountGreen(frame, 0.935, 0.985, 0.470, 0.545) >= 30;
+
+    /// <summary>
+    /// 国服挑战卡详情页识别补充（2026-10-17 第二周实机 绿茵传奇挑战赛）：卡页词为
+    /// 「完成挑战可获得对应的奖励!」「完成挑战N」，没有国际服卡页的「完成的条件」——
+    /// 半途启动（未经挑战清单）直接落在卡页时靠它激活挑战子流程。只在场景层已分类
+    /// EventHome/EventHomeTour 之后调用；清单/介绍页不含该词，不受干扰。
+    /// </summary>
+    public static bool IsCnChallengeCardHome(OcrResult ocr) => ocr.ContainsJoined("完成挑战");
 
     // ---------------- 选择比赛难度页（2026-10-17 实机 cn_tour_difficulty.png） ----------------
 

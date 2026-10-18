@@ -69,7 +69,10 @@ public sealed class BackgroundParker
         }
 
         IsParked = true;
-        SaveParkRecord(_hwnd); // 落盘：强制关闭/更新/崩溃等非正常退出后，下次启动自动还原
+        // 落盘：强制关闭/更新/崩溃等非正常退出后，下次启动自动还原。
+        // 必须存移出前的原矩形（_original）——此刻窗口已在屏幕外，读当前坐标会把
+        // 屏幕外坐标当原位置存下来，之后所有还原路径都等于没还原（游戏永远回不来）。
+        SaveParkRecord(_hwnd, _original);
         _log("后台停靠已开启：游戏窗口已移出屏幕（主屏幕不可见，点击其他软件不会跳出；停止挂机后自动还原位置）", LogLevel.Success);
         _cts = new CancellationTokenSource();
         _ = Task.Run(() => WatchAsync(_hwnd, _cts.Token));
@@ -157,6 +160,8 @@ public sealed class BackgroundParker
         catch { /* 看门狗异常静默：停靠失败不影响挂机主流程 */ }
     }
 
+    private const int SM_CXFULLSCREEN = 16; // 主屏幕宽（不含任务栏）
+    private const int SM_CYFULLSCREEN = 17; // 主屏幕高（不含任务栏）
     private const int SM_XVIRTUALSCREEN = 76;
     private const int SM_CXVIRTUALSCREEN = 78;
     private const uint SWP_NOSIZE = 0x0001;
@@ -181,9 +186,9 @@ public sealed class BackgroundParker
 
     private sealed record ParkRecord(string ProcessName, nint Hwnd, int Left, int Top, int Width, int Height, string ParkedAt);
 
-    /// <summary>停靠成功后落盘：进程名 + 原矩形。强制关闭/更新/崩溃等非正常退出后，
+    /// <summary>停靠成功后落盘：进程名 + 移出前的原矩形。强制关闭/更新/崩溃等非正常退出后，
     /// 下次启动按记录还原（正常停止走 Stop 还原并删除记录）。</summary>
-    private static void SaveParkRecord(nint hwnd)
+    private static void SaveParkRecord(nint hwnd, RECT original)
     {
         try
         {
@@ -195,9 +200,9 @@ public sealed class BackgroundParker
                 procName = p.ProcessName;
             }
             catch { }
-            GetWindowRect(hwnd, out var rc);
-            var rec = new ParkRecord(procName, hwnd, rc.Left, rc.Top,
-                rc.Right - rc.Left, rc.Bottom - rc.Top, DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
+            var rec = new ParkRecord(procName, hwnd, original.Left, original.Top,
+                original.Right - original.Left, original.Bottom - original.Top,
+                DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             Directory.CreateDirectory(Path.GetDirectoryName(ParkRecordPath)!);
             File.WriteAllText(ParkRecordPath, JsonSerializer.Serialize(rec, new JsonSerializerOptions { WriteIndented = true }));
         }
@@ -228,12 +233,21 @@ public sealed class BackgroundParker
     }
 
     public static void TryRestoreFromRecord()
+        => TryRestoreFromRecord(out _);
+
+    /// <summary>带结果版：返回是否实际还原了窗口（游戏已关闭/无记录=false，message 说明原因）。</summary>
+    public static bool TryRestoreFromRecord(out string message)
     {
+        message = "";
         try
         {
-            if (!File.Exists(ParkRecordPath)) return;
+            if (!File.Exists(ParkRecordPath))
+            {
+                message = "没有停靠记录";
+                return false;
+            }
             var rec = JsonSerializer.Deserialize<ParkRecord>(File.ReadAllText(ParkRecordPath));
-            if (rec is null) { DeleteParkRecord(); return; }
+            if (rec is null) { DeleteParkRecord(); message = "停靠记录损坏已清除"; return false; }
 
             nint hwnd = rec.Hwnd;
             bool valid = hwnd != nint.Zero && IsWindow(hwnd);
@@ -256,7 +270,8 @@ public sealed class BackgroundParker
             {
                 // 游戏窗口已关闭：无需还原
                 DeleteParkRecord();
-                return;
+                message = "游戏窗口已关闭，无需还原";
+                return false;
             }
 
             if (IsIconic(hwnd))
@@ -264,11 +279,74 @@ public sealed class BackgroundParker
             SetWindowPos(hwnd, nint.Zero, rec.Left, rec.Top, rec.Width, rec.Height,
                 SWP_NOZORDER | SWP_NOACTIVATE);
             DeleteParkRecord();
+            message = $"已按停靠记录把游戏窗口还原到原位置（{rec.Left},{rec.Top}）";
+            return true;
         }
-        catch
+        catch (Exception ex)
         {
             // 还原失败不抛出（各调用点均为兜底路径）
+            message = $"还原停靠记录失败：{ex.Message}";
             try { DeleteParkRecord(); } catch { }
+            return false;
+        }
+    }
+
+    // ---------------- 窗口防卡死（手动一键拉回） ----------------
+
+    /// <summary>两服游戏进程名（国际服 eFootball 系 + 国服 eFootballOnline）。</summary>
+    private static readonly string[] GameProcessNames =
+        { "eFootball", "eFootball2024", "efootballsteam", "eFootballOnline" };
+
+    /// <summary>
+    /// 窗口防卡死：游戏窗口被留在屏幕外回不来时的一键恢复。
+    /// ① 有停靠记录 → 按记录还原原位置；② 无记录/还原失败 → 找到两服任一游戏窗口
+    /// 居中到主屏幕（保留窗口尺寸）。无论窗口当年是怎么跑出屏幕的都能拉回来。
+    /// </summary>
+    public static void RescueGameWindow(Action<string, LogLevel> log)
+    {
+        if (HasParkRecord())
+        {
+            log("检测到停靠记录，正在把游戏窗口还原到原位置…", LogLevel.Info);
+            if (TryRestoreFromRecord(out string msg))
+            {
+                log(msg, LogLevel.Success);
+                return;
+            }
+            log(msg + "，改为把游戏窗口居中到主屏幕", LogLevel.Info);
+        }
+
+        GameWindowInfo? win = null;
+        foreach (var name in GameProcessNames)
+        {
+            win = GameWindow.FindFirst(name);
+            if (win is not null) break;
+        }
+        if (win is null)
+        {
+            log("窗口防卡死：未发现正在运行的游戏窗口，无需处理", LogLevel.Warn);
+            return;
+        }
+
+        try
+        {
+            if (IsIconic(win.Handle))
+                ShowWindow(win.Handle, SW_RESTORE);
+            if (!GetWindowRect(win.Handle, out var rc))
+            {
+                log("窗口防卡死：读取游戏窗口尺寸失败", LogLevel.Error);
+                return;
+            }
+            int w = rc.Right - rc.Left, h = rc.Bottom - rc.Top;
+            int x = Math.Max(0, (GetSystemMetrics(SM_CXFULLSCREEN) - w) / 2);
+            int y = Math.Max(0, (GetSystemMetrics(SM_CYFULLSCREEN) - h) / 2);
+            if (SetWindowPos(win.Handle, nint.Zero, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE))
+                log($"窗口防卡死：已把游戏窗口移回主屏幕中央（{x},{y}）", LogLevel.Success);
+            else
+                log("窗口防卡死：移动游戏窗口被系统拒绝（游戏若以管理员运行，请以管理员身份运行本程序后再试）", LogLevel.Error);
+        }
+        catch (Exception ex)
+        {
+            log($"窗口防卡死失败：{ex.Message}", LogLevel.Error);
         }
     }
 

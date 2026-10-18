@@ -147,6 +147,19 @@
                         </StackPanel>
                     </RadioButton>
 
+                    <!-- 窗口防卡死：游戏窗口被留在屏幕外回不来时一键拉回（还原原位置/主屏居中） -->
+                    <Button x:Name="BtnWindowRescue" Style="{StaticResource NavToolBtn}" Click="BtnWindowRescue_Click"
+                            Margin="0,8,0,0"
+                            ToolTip="游戏窗口不在屏幕上、找不到或被停靠后回不来时，点此把它移回原位置或主屏幕中央（国服/国际服通用）">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Width="15" Height="15" Stretch="Uniform" StrokeThickness="1.7"
+                                  StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"
+                                  Data="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9 M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9 M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15 M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15 M9.5 12h5 M12 9.5v5"/>
+                            <TextBlock Text="窗口防卡死" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                        </StackPanel>
+                    </Button>
+
                     <!-- 工具 -->
                     <TextBlock Text="工具" Style="{StaticResource SectionLabel}" Margin="4,14,0,8"/>
                     <Button x:Name="BtnSettings" Style="{StaticResource NavToolBtn}" Click="BtnSettings_Click">

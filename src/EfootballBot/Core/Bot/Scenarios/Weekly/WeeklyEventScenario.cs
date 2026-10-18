@@ -174,7 +174,7 @@ public sealed class WeeklyEventScenario : IScenario
         if (weeklyWait is not null) return 1500;
         // wk==None 且阶段已交回共享流程：走共用决策（比赛中/终场/弹窗/逃生）
 
-        var action = MyLeagueBrain.Decide(ml, obs.Ocr, _streak, matchContext);
+        var action = MyLeagueBrain.Decide(ml, obs.Ocr, _streak, matchContext, obs.Frame);
         ScenarioShared.DecisionSnapshot(_log, "周活动", ml, _streak, action, obs.Ocr);
 
         // 标题画面宽限（共享实现，含赛后弹窗链 90s 档）：比赛上下文中的「eFootball™+X」帧
@@ -207,6 +207,11 @@ public sealed class WeeklyEventScenario : IScenario
                 _log($"[周活动] 弹窗上移确认：{action.Target}", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Up);
                 await _engine.Pad.Confirm();
+                break;
+
+            case MlActionKind.PadStartPress:
+                _log($"[周活动] {action.Target}", LogLevel.Info);
+                await _engine.Pad.Start();
                 break;
 
             case MlActionKind.PadXPress:
