@@ -31,7 +31,6 @@ public sealed class HidMaestroPad : IVirtualPad
     private readonly Action<string>? _log;
     private object? _controller;          // HMController
     private object? _profile;             // HMProfile（xbox-360-wired）
-    private int _userIndex = -1;
     private volatile bool _connected;
 
     // 状态镜像：每次 Set* 更新镜像后整体 SubmitState（与 ViGEm 手动提交语义一致）
