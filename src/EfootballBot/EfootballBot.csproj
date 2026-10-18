@@ -47,6 +47,9 @@
     <!-- DXGI Desktop Duplication 捕获实现（SharpDX 统一锁定 4.2.0） -->
     <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
     <PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
+    <!-- 捕获家族新实现（默认）：Vortice.Direct3D11 会传递引入 Vortice.DXGI / SharpGen.Runtime。
+         与 SharpDX 是两套 COM 包装，绝不可混挂同一设备指针；家族切换见 ModuleFallback.UseSharpDxCapture -->
+    <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <!-- PP-OCRv6 本地离线 OCR（ONNX Runtime，包自带 v5 检测/方向分类模型） -->
     <PackageReference Include="RapidOcrNet" Version="4.2.0" />
     <!-- 推理引擎：统一 1.31.0（RapidOcrNet 4.2.0 程序集级要求 ORT >= 1.29.0，1.31 满足；

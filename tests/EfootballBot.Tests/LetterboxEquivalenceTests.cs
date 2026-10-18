@@ -22,7 +22,7 @@ public class LetterboxEquivalenceTests
     {
         new object[] { Path.Combine("TestData", "cnweekly", "cn_challenge_list_all_checked.png") },
         new object[] { Path.Combine("TestData", "weekly", "weekly_event_home.png") },
-        new object[] { Path.Combine("TestData", "difficulty_standard_focus.png") },
+        new object[] { Path.Combine("TestData", "focus_state_2.png") },
     };
 
     [Theory]

@@ -51,10 +51,13 @@ public sealed class BotEngine : IDisposable
 
     private readonly AppConfig _cfg;
     public AppConfig Config => _cfg;
+    /// <summary>捕获家族开关：true=整个捕获家族走旧 SharpDX 实现（回退），false=Vortice 新实现（默认）。</summary>
+    private readonly bool _captureUseSharpDx;
     public readonly VirtualGamepad360 Pad360;
     public readonly Pad Pad;
-    public readonly WindowCapture Capture = new();
-    private DxgiDesktopCapture? _dxgi;
+    public readonly WindowCapture Capture;
+    /// <summary>DXGI 桌面复制捕获器（Vortice/SharpDX 按 _captureUseSharpDx 二选一，均实现 ICaptureProvider）。</summary>
+    private ICaptureProvider? _dxgi;
     private bool _dxgiStepWired;
     private GdiWindowCapture? _gdi;
     public readonly OcrRecognizer Ocr;
@@ -119,6 +122,10 @@ public sealed class BotEngine : IDisposable
     public BotEngine(AppConfig cfg)
     {
         _cfg = cfg;
+        // 捕获家族整体切换（ModuleFallback.UseSharpDxCapture，默认 false=Vortice）：
+        // WGC 设备/GPU 缩放（WindowCapture）与 DXGI 捕获器必须走同一家族，绝不混挂设备指针
+        _captureUseSharpDx = cfg.ModuleFallback.UseSharpDxCapture;
+        Capture = new WindowCapture(_captureUseSharpDx);
         Pad360 = new VirtualGamepad360();
         Pad = new Pad(Pad360, cfg.Timing);
 
@@ -128,6 +135,7 @@ public sealed class BotEngine : IDisposable
             downscaleLongSide: cfg.ModuleFallback.DisableOcrDownscale ? 0 : OcrRecognizer.DefaultDownscaleLongSide,
             preferInt8: !cfg.ModuleFallback.UseFp32Ocr);
         LogInternal($"OCR 引擎：{Ocr.LanguageTag}（{Ocr.EngineKind}）", LogLevel.Info);
+        LogInternal($"捕获家族：{(_captureUseSharpDx ? "SharpDX（回退）" : "Vortice（默认）")}", LogLevel.Info);
 
         Observation = new ObservationService(Capture, Ocr, cfg);
         Observation.Log = LogInternal;
@@ -533,10 +541,20 @@ public sealed class BotEngine : IDisposable
         {
             try
             {
-                _dxgi ??= new DxgiDesktopCapture();
+                _dxgi ??= _captureUseSharpDx
+                    ? new DxgiDesktopCapture()
+                    : (ICaptureProvider)new DxgiDesktopCaptureVortice();
                 if (!_dxgiStepWired)
                 {
-                    _dxgi.StepLog += s => LogInternal($"[捕获] {s}", LogLevel.Info);
+                    switch (_dxgi)
+                    {
+                        case DxgiDesktopCapture sharp:
+                            sharp.StepLog += s => LogInternal($"[捕获] {s}", LogLevel.Info);
+                            break;
+                        case DxgiDesktopCaptureVortice vortice:
+                            vortice.StepLog += s => LogInternal($"[捕获] {s}", LogLevel.Info);
+                            break;
+                    }
                     _dxgiStepWired = true;
                 }
                 if (!_dxgi.IsRunning)

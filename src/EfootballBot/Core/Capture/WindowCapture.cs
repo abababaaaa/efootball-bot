@@ -21,10 +21,13 @@ public sealed record FrameData(byte[] Bgra, int Width, int Height, long Timestam
 public sealed class WindowCapture : ICaptureProvider
 {
     private readonly object _gate = new();
+    private readonly bool _useSharpDx;   // 捕获家族开关：true=SharpDX 旧实现（回退），false=Vortice 新实现（默认）
     private nint _hwnd;
     private nint _d3dDevicePtr;
     /// <summary>SharpDX 设备包装（持有 D3D11 设备生命周期；NativePointer 供 GpuVideoScaler/WGC 用）。</summary>
     private SharpDX.Direct3D11.Device? _sharpDevice;
+    /// <summary>Vortice 设备包装（Vortice 家族持有 D3D11 设备生命周期，与 _sharpDevice 互斥，绝不并存）。</summary>
+    private Vortice.Direct3D11.ID3D11Device? _vorticeDevice;
     private IDirect3DDevice? _winrtDevice;
     private Direct3D11CaptureFramePool? _pool;
     private GraphicsCaptureSession? _session;
@@ -32,6 +35,7 @@ public sealed class WindowCapture : ICaptureProvider
     private FrameData? _latest;
     private long _lastProduceTick;
     private GpuVideoScaler? _gpuScaler;
+    private GpuVideoScalerVortice? _gpuScalerVortice;
     private bool _gpuFailed;          // 本捕获会话 GPU 缩放不可用后静默回退 CPU
     private bool _running;
     private DateTime _lastFrameAt = DateTime.MinValue;
@@ -49,6 +53,15 @@ public sealed class WindowCapture : ICaptureProvider
     /// <summary>诊断日志（捕获初始化各步骤）。</summary>
     public event Action<string>? StepLog;
     private void Step(string s) => StepLog?.Invoke(s);
+
+    /// <summary>
+    /// useSharpDx = true 时整个捕获家族（D3D 设备创建 + GPU 缩放）走旧 SharpDX 实现（回退路径）；
+    /// false（默认）走 Vortice 新实现。默认 true 保持既有调用方（--dump 命令行模式等）行为不变。
+    /// </summary>
+    public WindowCapture(bool useSharpDx = true)
+    {
+        _useSharpDx = useSharpDx;
+    }
 
     public bool IsRunning => _running;
     public nint Hwnd => _hwnd;
@@ -234,6 +247,14 @@ public sealed class WindowCapture : ICaptureProvider
 
     private void CreateDevice()
     {
+        // 家族整体切换：Vortice（默认）或 SharpDX（回退）。同一指针绝不被两套 COM 包装同时持有，
+        // 设备创建与后续 GpuVideoScaler 构造必须走同一家族。
+        if (!_useSharpDx)
+        {
+            CreateDeviceVortice();
+            return;
+        }
+
         // 兼容模式：硬件设备 WGC 在虚拟显示器/远程会话机器上反复无帧（跨适配器表面失效），
         // 观察服务熔断前强制切 WARP——表面为系统内存，CPU 拷贝必达（即 v1.x 实际运行形态）。
         if (ForceWarpDevice)
@@ -285,6 +306,66 @@ public sealed class WindowCapture : ICaptureProvider
         }
 
         var device = _sharpDevice ?? throw new InvalidOperationException("D3D11 设备创建失败");
+        _d3dDevicePtr = device.NativePointer;
+        _winrtDevice = CaptureInterop.CreateDirect3DDevice(_d3dDevicePtr);
+    }
+
+    /// <summary>
+    /// Vortice 家族设备创建：三路径与 SharpDX 版 CreateDevice 一一对应
+    /// （ForceWarpDevice 兼容模式 → 显式硬件适配器（CaptureInteropVortice 同款挑选规则）→ 默认硬件适配器）。
+    /// 适配器枚举走 CaptureInteropVortice，设备包装为 Vortice.ID3D11Device，与 _sharpDevice 互斥。
+    /// WGC 的 WinRT 投影（IDirect3DDevice/帧池）与家族无关，仍走 CaptureInterop.CreateDirect3DDevice。
+    /// </summary>
+    private void CreateDeviceVortice()
+    {
+        // 兼容模式：与 SharpDX 版同因（虚拟显示器/远程会话机器跨适配器表面失效）
+        if (ForceWarpDevice)
+        {
+            _vorticeDevice = Vortice.Direct3D11.D3D11.D3D11CreateDevice(
+                Vortice.Direct3D.DriverType.Warp,
+                Vortice.Direct3D11.DeviceCreationFlags.BgraSupport);
+            Step("[捕获] 帧池使用 WARP 软渲染设备（虚拟显示器/远程环境兼容模式，CPU 拷贝帧）");
+            _d3dDevicePtr = _vorticeDevice.NativePointer;
+            _winrtDevice = CaptureInterop.CreateDirect3DDevice(_d3dDevicePtr);
+            return;
+        }
+
+        // 常规路径两级尝试：显式硬件适配器（显存最大/有输出优先）→ 默认硬件适配器；任一成功即用。
+        // 不走 WARP 的原因同 SharpDX 版（WGC 帧池建在 WARP 设备上会触发 dwm.exe 崩溃）。
+        var adapter = CaptureInteropVortice.PickHardwareAdapter(out var adapterName, out var pickedForOutputs);
+        bool boundExplicit = false;
+        if (adapter is not null)
+        {
+            // 传显式适配器时 DriverType 必须为 Unknown（D3D11CreateDevice 规范）；
+            // 此重载返回 Result 而非抛异常，失败时保持与 SharpDX 版相同的"改试默认适配器"日志
+            var result = Vortice.Direct3D11.D3D11.D3D11CreateDevice(adapter,
+                Vortice.Direct3D.DriverType.Unknown, Vortice.Direct3D11.DeviceCreationFlags.BgraSupport, null,
+                out var candidate);
+            if (result.Success && candidate is not null)
+            {
+                _vorticeDevice = candidate;
+                boundExplicit = true;
+                Step(pickedForOutputs
+                    ? $"[捕获] D3D11 设备绑定硬件 GPU：{adapterName}（显存最大的独显无显示输出，为保帧流改绑有输出的显卡）"
+                    : $"[捕获] D3D11 设备绑定硬件 GPU：{adapterName}");
+            }
+            else
+            {
+                Step($"[捕获] 绑定硬件 GPU {adapterName} 失败（0x{result.Code:X8}），改试默认适配器");
+            }
+            adapter.Dispose();
+        }
+
+        if (!boundExplicit)
+        {
+            // 默认硬件适配器；无硬件 GPU 时直接抛出（无硬件则创建失败），由引擎降级链改走 DXGI/GDI
+            _vorticeDevice = Vortice.Direct3D11.D3D11.D3D11CreateDevice(
+                Vortice.Direct3D.DriverType.Hardware,
+                Vortice.Direct3D11.DeviceCreationFlags.BgraSupport);
+            Step("[捕获] D3D11 设备使用默认硬件适配器");
+        }
+
+        var device = _vorticeDevice ?? throw new InvalidOperationException("D3D11 设备创建失败");
         _d3dDevicePtr = device.NativePointer;
         _winrtDevice = CaptureInterop.CreateDirect3DDevice(_d3dDevicePtr);
     }
@@ -365,8 +446,17 @@ public sealed class WindowCapture : ICaptureProvider
             {
                 try
                 {
-                    _gpuScaler ??= new GpuVideoScaler(_d3dDevicePtr, Step);
-                    data = _gpuScaler.ScaleToBgra(frame.Surface, _size.Width, _size.Height, out ow, out oh);
+                    // GPU 缩放器与设备创建走同一家族（_d3dDevicePtr 属于哪家包装就交给谁）
+                    if (_useSharpDx)
+                    {
+                        _gpuScaler ??= new GpuVideoScaler(_d3dDevicePtr, Step);
+                        data = _gpuScaler.ScaleToBgra(frame.Surface, _size.Width, _size.Height, out ow, out oh);
+                    }
+                    else
+                    {
+                        _gpuScalerVortice ??= new GpuVideoScalerVortice(_d3dDevicePtr, Step);
+                        data = _gpuScalerVortice.ScaleToBgra(frame.Surface, _size.Width, _size.Height, out ow, out oh);
+                    }
                     gpuDone = true;
                 }
                 catch (Exception gex)
@@ -433,6 +523,8 @@ public sealed class WindowCapture : ICaptureProvider
             ReleaseHeldFrames();
             try { _gpuScaler?.Dispose(); } catch { }
             _gpuScaler = null;
+            try { _gpuScalerVortice?.Dispose(); } catch { }
+            _gpuScalerVortice = null;
             _gpuFailed = false;
             try { _session?.Dispose(); } catch { }
             try { _pool?.Dispose(); } catch { }
@@ -451,9 +543,11 @@ public sealed class WindowCapture : ICaptureProvider
             _winrtDevice = null;
         }
         _d3dDevicePtr = 0;
-        // D3D 设备生命周期由 SharpDX 包装持有，Dispose 即释放（勿再对指针 Marshal.Release）
+        // D3D 设备生命周期由所属家族的包装持有，Dispose 即释放（勿再对指针 Marshal.Release）
         try { _sharpDevice?.Dispose(); } catch { }
         _sharpDevice = null;
+        try { _vorticeDevice?.Dispose(); } catch { }
+        _vorticeDevice = null;
     }
 
     public void Dispose()
