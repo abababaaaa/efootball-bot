@@ -29,9 +29,9 @@ public enum PadDir { Up, Down, Left, Right }
 /// <summary>
 /// ViGEm 虚拟 Xbox 360 手柄（托管封装）。系统按 XInput 轮询，
 /// 游戏窗口失去焦点 / 位于后台时输入依然持续生效。
-/// 依赖 ViGEmBus 驱动（内核服务）。
+/// 依赖 ViGEmBus 驱动（内核服务）。默认手柄后端；实验后端见 <see cref="HidMaestroPad"/>。
 /// </summary>
-public sealed class VirtualGamepad360 : IDisposable
+public sealed class VirtualGamepad360 : IVirtualPad
 {
     private ViGEmClient? _client;
     private IXbox360Controller? _pad;
@@ -54,7 +54,7 @@ public sealed class VirtualGamepad360 : IDisposable
     }
 
     /// <summary>XInput 玩家 1（slot 0）当前是否被占用。</summary>
-    public static bool IsSlot0Occupied() => XInputGetState(0, out _) == 0;
+    public static bool IsSlot0Occupied() => PadBackendProbe.IsSlot0Occupied();
 
     /// <summary>
     /// eFootball 菜单只响应 XInput Player 1（slot 0）。
@@ -73,13 +73,11 @@ public sealed class VirtualGamepad360 : IDisposable
             throw new InvalidOperationException("未检测到 ViGEmBus 驱动，请先安装 ViGEmBus Setup。");
 
         // slot 0 被真实手柄占用时，虚拟手柄必然分到 slot 1+，游戏不响应 → 直接阻断
-        if (SlotZeroOccupiedMessage(XInputGetState(0, out _) == 0) is { } blockMsg)
+        if (PadBackendProbe.SlotZeroOccupiedMessage(PadBackendProbe.IsSlot0Occupied()) is { } blockMsg)
             throw new InvalidOperationException(blockMsg);
 
         // 连接前快照已占用槽位，连接后用 XInput 轮询找到新设备，即虚拟手柄真实 slot
-        var before = new HashSet<int>();
-        for (int i = 0; i < 4; i++)
-            if (XInputGetState(i, out _) == 0) before.Add(i);
+        var before = PadBackendProbe.SnapshotOccupiedSlots();
 
         try
         {
@@ -94,31 +92,13 @@ public sealed class VirtualGamepad360 : IDisposable
         }
 
         // 库本身常回报 -1，主动探测真实 slot（最多等约 2.5 秒系统注册设备）
-        UserIndex = -1;
-        for (int attempt = 0; attempt < 10 && UserIndex < 0; attempt++)
-        {
-            Thread.Sleep(250);
-            for (int i = 0; i < 4; i++)
-                if (!before.Contains(i) && XInputGetState(i, out _) == 0) { UserIndex = i; break; }
-        }
+        UserIndex = PadBackendProbe.ProbeNewSlot(before);
 
         _connected = true;
 
         // 上电后先提交一次“全释放”状态，确保游戏识别到手柄
         _pad.ResetReport();
         _pad.SubmitReport();
-    }
-
-    [DllImport("xinput1_4.dll")]
-    private static extern int XInputGetState(int dwUserIndex, out XInputState pState);
-
-    [StructLayout(LayoutKind.Sequential)]
-    private struct XInputState
-    {
-        public uint dwPacketNumber;
-        public ushort wButtons;
-        public byte bLeftTrigger, bRightTrigger;
-        public short sThumbLX, sThumbLY, sThumbRX, sThumbRY;
     }
 
     // ---- 状态操作 ----

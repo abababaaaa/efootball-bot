@@ -5,12 +5,12 @@ namespace EfootballBot.Core.Input;
 /// <summary>手柄语义动作：全部对应 eFootball 国际服默认键位（下一步=A，返回=B，方向=方向键）。</summary>
 public sealed class Pad
 {
-    private readonly VirtualGamepad360 _vg;
+    private readonly IVirtualPad _vg;
     private readonly TimingConfig _t;
     private readonly Random _rnd = new();
     private readonly HumanPacer? _pace;
 
-    public Pad(VirtualGamepad360 vg, TimingConfig timing)
+    public Pad(IVirtualPad vg, TimingConfig timing)
     {
         _vg = vg;
         _t = timing;

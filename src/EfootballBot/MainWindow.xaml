@@ -214,7 +214,7 @@
                             <StackPanel Orientation="Horizontal" Margin="0,3">
                                 <Ellipse x:Name="DotVigem" Width="8" Height="8" Fill="{DynamicResource ModuleDot}"
                                          Margin="1,0,8,0" VerticalAlignment="Center"/>
-                                <TextBlock Text="ViGEmBus 驱动" FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
+                                <TextBlock x:Name="TxtVigem" Text="ViGEmBus 驱动" FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,3">
                                 <Ellipse x:Name="DotWgc" Width="8" Height="8" Fill="{DynamicResource ModuleDot}"

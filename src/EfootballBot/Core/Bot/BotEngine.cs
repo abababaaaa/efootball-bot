@@ -53,7 +53,7 @@ public sealed class BotEngine : IDisposable
     public AppConfig Config => _cfg;
     /// <summary>捕获家族开关：true=整个捕获家族走旧 SharpDX 实现（回退），false=Vortice 新实现（默认）。</summary>
     private readonly bool _captureUseSharpDx;
-    public readonly VirtualGamepad360 Pad360;
+    public readonly IVirtualPad Pad360;
     public readonly Pad Pad;
     public readonly WindowCapture Capture;
     /// <summary>DXGI 桌面复制捕获器（Vortice/SharpDX 按 _captureUseSharpDx 二选一，均实现 ICaptureProvider）。</summary>
@@ -126,7 +126,26 @@ public sealed class BotEngine : IDisposable
         // WGC 设备/GPU 缩放（WindowCapture）与 DXGI 捕获器必须走同一家族，绝不混挂设备指针
         _captureUseSharpDx = cfg.ModuleFallback.UseSharpDxCapture;
         Capture = new WindowCapture(_captureUseSharpDx);
-        Pad360 = new VirtualGamepad360();
+        // 手柄后端（ModuleFallback.EnableHidMaestro，默认 false=ViGEmBus）。
+        // HIDMaestro 为实验后端：SDK 下载/反射加载/驱动安装任一步失败即回退 ViGEmBus 并告警；
+        // 两者绝不同时建手柄（会出现两个相同 VID/PID 设备）。
+        if (cfg.ModuleFallback.EnableHidMaestro)
+        {
+            try
+            {
+                Pad360 = new HidMaestroPad(m => LogInternal(m, LogLevel.Info));
+                LogInternal("虚拟手柄后端：HIDMaestro（实验）", LogLevel.Info);
+            }
+            catch (Exception ex)
+            {
+                LogInternal($"HIDMaestro 后端不可用，回退 ViGEmBus：{ex.Message}", LogLevel.Warn);
+                Pad360 = new VirtualGamepad360();
+            }
+        }
+        else
+        {
+            Pad360 = new VirtualGamepad360();
+        }
         Pad = new Pad(Pad360, cfg.Timing);
 
         // EP 降级工厂：OCR 与 YOLO 共享同一 SessionOptions（进程内仅一份 onnxruntime.dll）
@@ -371,9 +390,10 @@ public sealed class BotEngine : IDisposable
             LogInternal($"独显偏好检查失败（不影响使用）：{ex.Message}", LogLevel.Debug);
         }
 
-        if (connectPad && !VirtualGamepad360.IsDriverInstalled())
+        if (connectPad && Pad360 is not HidMaestroPad && !VirtualGamepad360.IsDriverInstalled())
         {
-            // 自动安装内嵌的 ViGEmBus 驱动（提权静默装），不再直接失败让用户手动去环境检测
+            // 自动安装内嵌的 ViGEmBus 驱动（提权静默装），不再直接失败让用户手动去环境检测。
+            // HIDMaestro 后端不走此路径（驱动在首次 Connect 时经 SDK 幂等安装）。
             LogInternal("未检测到 ViGEmBus 驱动：自动开始安装（请在弹出的授权窗口点「是」）…", LogLevel.Warn);
             var installCts = new CancellationTokenSource(TimeSpan.FromMinutes(6));
             var result = await new DriverInstaller(m => LogInternal(m, LogLevel.Info)).InstallAsync(installCts.Token);

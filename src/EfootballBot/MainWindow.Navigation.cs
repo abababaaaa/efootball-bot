@@ -100,10 +100,24 @@ public partial class MainWindow
 
     private void RunEnvChecks()
     {
-        // ViGEmBus
-        bool vigem = VirtualGamepad360.IsDriverInstalled();
-        DotVigem.Fill = vigem ? BrushOk : BrushBad;
-        BtnInstallVigem.Visibility = vigem ? Visibility.Collapsed : Visibility.Visible;
+        // 虚拟手柄驱动：按当前后端切换探测（ModuleFallback.EnableHidMaestro，默认 ViGEmBus）
+        bool padMissing;
+        if (_cfg.ModuleFallback.EnableHidMaestro)
+        {
+            bool hidm = HidMaestroPad.IsDriverInstalled();
+            DotVigem.Fill = hidm ? BrushOk : BrushBad;
+            TxtVigem.Text = hidm ? "虚拟手柄驱动（HIDMaestro）" : "HIDMaestro 驱动未安装（开始挂机时自动装）";
+            BtnInstallVigem.Visibility = Visibility.Collapsed;
+            padMissing = !hidm;
+        }
+        else
+        {
+            bool vigem = VirtualGamepad360.IsDriverInstalled();
+            DotVigem.Fill = vigem ? BrushOk : BrushBad;
+            TxtVigem.Text = "ViGEmBus 驱动";
+            BtnInstallVigem.Visibility = vigem ? Visibility.Collapsed : Visibility.Visible;
+            padMissing = !vigem;
+        }
 
         // WGC 后台捕获
         bool wgc = WindowCapture.IsSupported();
@@ -137,8 +151,12 @@ public partial class MainWindow
         var win = GameWindow.FindFirst(ActiveProcessName);
         DotGame.Fill = win is not null ? BrushOk : BrushIdle;
 
-        if (!vigem)
-            AppendLog("未检测到 ViGEmBus 驱动，虚拟手柄无法工作。点击左侧「安装 ViGEmBus 驱动」，装完重启本程序。", LogLevel.Warn);
+        if (padMissing)
+        {
+            AppendLog(_cfg.ModuleFallback.EnableHidMaestro
+                ? "HIDMaestro 驱动未安装：开始挂机时会自动下载 SDK 并安装（需管理员授权，首次约 5-15 秒）；若安装失败可到更新页取消勾选「启用 HIDMaestro」回退 ViGEmBus。"
+                : "未检测到 ViGEmBus 驱动，虚拟手柄无法工作。点击左侧「安装 ViGEmBus 驱动」，装完重启本程序。", LogLevel.Warn);
+        }
         if (win is null)
             AppendLog(cn
                 ? "未找到国服游戏窗口（eFootballOnline / 实况足球在线），请先启动游戏（无需置顶）。"
