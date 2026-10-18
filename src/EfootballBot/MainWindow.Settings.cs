@@ -194,6 +194,14 @@ public partial class MainWindow
         ChkIncludePrerelease.IsChecked = _cfg.Update.IncludePrerelease;
         ChkAutoDownloadInstall.IsChecked = _cfg.Update.AutoDownloadInstall;
 
+        // 模块回退（更新页卡片，下次开始挂机生效）
+        ChkFbSharpDxCapture.IsChecked = _cfg.ModuleFallback.UseSharpDxCapture;
+        ChkFbFp32Ocr.IsChecked = _cfg.ModuleFallback.UseFp32Ocr;
+        ChkFbNoOcrDownscale.IsChecked = _cfg.ModuleFallback.DisableOcrDownscale;
+        ChkFbHidMaestro.IsChecked = _cfg.ModuleFallback.EnableHidMaestro;
+        ChkFbNoMouseTrajectory.IsChecked = _cfg.ModuleFallback.DisableMouseTrajectory;
+        ChkFbNoFailureDumps.IsChecked = _cfg.ModuleFallback.DisableFailureDumps;
+
         // 手柄隔离（赋值会触发 Changed：加载期间必须屏蔽，否则每次启动误弹一次提权配置）
         _loadingConfig = true;
         ChkHidHideEnabled.IsChecked = _cfg.HidHide.Enabled;
@@ -311,6 +319,14 @@ public partial class MainWindow
         _cfg.Update.CheckOnStartup = ChkCheckOnStartup.IsChecked == true;
         _cfg.Update.IncludePrerelease = ChkIncludePrerelease.IsChecked == true;
         _cfg.Update.AutoDownloadInstall = ChkAutoDownloadInstall.IsChecked == true;
+
+        // 模块回退
+        _cfg.ModuleFallback.UseSharpDxCapture = ChkFbSharpDxCapture.IsChecked == true;
+        _cfg.ModuleFallback.UseFp32Ocr = ChkFbFp32Ocr.IsChecked == true;
+        _cfg.ModuleFallback.DisableOcrDownscale = ChkFbNoOcrDownscale.IsChecked == true;
+        _cfg.ModuleFallback.EnableHidMaestro = ChkFbHidMaestro.IsChecked == true;
+        _cfg.ModuleFallback.DisableMouseTrajectory = ChkFbNoMouseTrajectory.IsChecked == true;
+        _cfg.ModuleFallback.DisableFailureDumps = ChkFbNoFailureDumps.IsChecked == true;
 
         // 手柄隔离（Enabled/GameImagePath/AppliedBlacklist 由开关提权动作维护，此处只同步复选框）
         _cfg.HidHide.HidePhysicalGamepad = ChkHidePhysical.IsChecked == true;

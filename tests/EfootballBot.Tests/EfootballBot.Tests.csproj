@@ -12,6 +12,10 @@
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.12.0" />
     <PackageReference Include="xunit" Version="2.9.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.8.2" />
+    <!-- 仅测试用：21 个测试文件的历史 LoadPngBgra 加载器 + letterbox 等价性对照的参照实现。
+         主工程已移除 OpenCvSharp（见主 csproj），此引用不随发布 -->
+    <PackageReference Include="OpenCvSharp4" Version="4.10.0.20240615" />
+    <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240615" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1140,7 +1140,7 @@ public sealed class CnWeeklyScenario : IScenario
             {
                 _log("[国服周活动] 挑战清单多次刷新仍无法进入挑战卡，停止挂机（请手动检查活动状态）", LogLevel.Error);
             }
-            _engine.Stop();
+            _engine.StopWithError("挑战清单多次刷新仍无法进卡");
             return 0;
         }
         _chRetreatReenter = true;
@@ -1182,7 +1182,7 @@ public sealed class CnWeeklyScenario : IScenario
         {
             ResetChallengeState();
             _log("[国服周活动] 已退出挑战活动，停止挂机（若非预期请回报日志）", LogLevel.Error);
-            _engine.Stop();
+            _engine.StopWithError("挑战活动异常退出");
             return 0;
         }
         if (ml == MlScreen.HasConfirm)

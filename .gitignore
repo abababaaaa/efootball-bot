@@ -38,3 +38,15 @@ survey/
 
 # Tool-local config
 .zcodeignore
+
+# int8 量化工具链与候选模型（本地自建便携 Python,不随仓库分发）
+tools/python/
+tools/python-embed.zip
+tools/get-pip.py
+tools/_prep/
+tools/quantize_run.log
+tools/int8_candidate_v1/
+tools/int8_det_candidate/
+.zcode/
+tools/*.data
+tools/sym_shape_infer_temp.onnx

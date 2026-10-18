@@ -664,7 +664,7 @@ public sealed class WeeklyEventScenario : IScenario
             if (++_chStuckBouts > 8)
             {
                 _log("[周活动·挑战] 已放弃的挑战活动清单反复弹回，退出受阻，停止挂机（请手动检查活动状态）", LogLevel.Error);
-                _engine.Stop();
+                _engine.StopWithError("挑战清单反复弹回退出受阻");
                 return 0;
             }
             SetPhase(WkPhase.ChallengeRetreat);

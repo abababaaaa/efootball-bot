@@ -5,6 +5,7 @@ namespace EfootballBot.Core.Input;
 /// <summary>
 /// 全局真实鼠标输入（SendInput + SetCursorPos）。
 /// 仅对当前前台/激活窗口可靠，属于“点击瞬间需置前”的方案，作为后台消息失效时的兜底。
+/// 点击前按拟人轨迹多段移动真实光标（与 BackgroundMouse 同款贝塞尔路径），ModuleFallback.DisableMouseTrajectory 可关。
 /// </summary>
 public sealed class ForegroundMouse
 {
@@ -20,12 +21,24 @@ public sealed class ForegroundMouse
     private const uint MOUSEEVENTF_LEFTDOWN = 0x0002;
     private const uint MOUSEEVENTF_LEFTUP = 0x0004;
 
+    private readonly HumanPacer _pacer;
+    private readonly bool _humanTrajectory;
+    private readonly Random _rnd = new();
+    private int? _lastX;
+    private int? _lastY;
+
     [StructLayout(LayoutKind.Sequential)]
     private struct INPUT { public uint Type; public MOUSEINPUT Mi; public int Pad1; public int Pad2; }
     [StructLayout(LayoutKind.Sequential)]
     private struct MOUSEINPUT { public int Dx, Dy; public uint MouseData, Flags, Time; public IntPtr ExtraInfo; }
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X, Y; }
+
+    public ForegroundMouse(HumanPacer? pacer = null, bool humanTrajectory = true)
+    {
+        _pacer = pacer ?? new HumanPacer();
+        _humanTrajectory = humanTrajectory;
+    }
 
     /// <summary>将窗口还原并置前，返回此前前台窗口（便于恢复）。</summary>
     public IntPtr BringToFront(IntPtr hWnd)
@@ -44,11 +57,28 @@ public sealed class ForegroundMouse
         if (hWnd != IntPtr.Zero) SetForegroundWindow(hWnd);
     }
 
-    /// <summary>移动真实光标到屏幕坐标并左键点击。</summary>
+    /// <summary>移动真实光标到屏幕坐标并左键点击（拟人轨迹移动）。</summary>
     public async Task ClickScreenAsync(int screenX, int screenY, int downHoldMs = 60, CancellationToken ct = default)
     {
-        SetCursorPos(screenX, screenY);
-        await Task.Delay(50, ct);
+        int? x0 = _lastX, y0 = _lastY;
+        _lastX = screenX;
+        _lastY = screenY;
+
+        if (_humanTrajectory && x0 is not null && y0 is not null)
+        {
+            foreach (var (px, py) in BackgroundMouse.BuildTrajectory(x0.Value, y0.Value, screenX, screenY, _rnd))
+            {
+                SetCursorPos(px, py);
+                await Task.Delay(_pacer.Sample(14, 6, 60), ct);
+            }
+            await Task.Delay(_pacer.Sample(20, 8, 80), ct);
+        }
+        else
+        {
+            SetCursorPos(screenX, screenY);
+            await Task.Delay(50, ct);
+        }
+
         Send(0, MOUSEEVENTF_LEFTDOWN);
         await Task.Delay(downHoldMs, ct);
         Send(0, MOUSEEVENTF_LEFTUP);

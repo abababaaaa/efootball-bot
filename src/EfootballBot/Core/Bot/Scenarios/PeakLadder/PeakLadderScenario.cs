@@ -32,7 +32,7 @@ public sealed class PeakLadderScenario : IScenario
 
     private readonly BotEngine _engine;
     private readonly Action<string, LogLevel> _log;
-    private readonly BackgroundMouse _mouse = new();
+    private readonly BackgroundMouse _mouse;
     private readonly MlFlowMemory _memory = new();
     private readonly MatchSessionTracker _matchSession = new();
     private readonly Random _rnd = new();
@@ -57,6 +57,7 @@ public sealed class PeakLadderScenario : IScenario
     {
         _engine = engine;
         _log = log;
+        _mouse = new BackgroundMouse(humanTrajectory: !engine.Config.ModuleFallback.DisableMouseTrajectory);
     }
 
     public async Task<int> RunOnceAsync(CancellationToken ct)

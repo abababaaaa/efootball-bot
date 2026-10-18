@@ -1611,6 +1611,30 @@
                                        FontSize="11" Margin="0,8,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
+
+                    <!-- ===== 模块回退（新版实现的手动退路） ===== -->
+                    <Border Style="{StaticResource Card}">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Style="{StaticResource H2}">
+                                    <Run Text="★ " Foreground="{DynamicResource Warning}"/>模块回退
+                                </TextBlock>
+                            </StackPanel>
+                            <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                       TextWrapping="Wrap">
+                                <Run Text="各功能默认使用新版实现。若某个功能表现异常，可单独勾选退回旧版行为；"/>
+                                <Run Text="更改在下次开始挂机时生效" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="。"/>
+                            </TextBlock>
+                            <CheckBox x:Name="ChkFbSharpDxCapture" Content="画面捕获用旧版引擎（出现黑屏 / 黑画面时勾选）" Margin="0,12,0,0"/>
+                            <CheckBox x:Name="ChkFbFp32Ocr" Content="文字识别退回原版精度模式（提速版出现读错 / 漏字时勾选）" Margin="0,4,0,0"/>
+                            <CheckBox x:Name="ChkFbNoOcrDownscale" Content="文字识别关闭高分辨率压缩（高分屏识别变差时勾选）" Margin="0,4,0,0"/>
+                            <CheckBox x:Name="ChkFbHidMaestro" Content="启用 HIDMaestro 虚拟手柄（实验功能，默认使用 ViGEmBus）" Margin="0,4,0,0"/>
+                            <CheckBox x:Name="ChkFbNoMouseTrajectory" Content="鼠标点击关闭拟人移动（直接跳到目标位置）" Margin="0,4,0,0"/>
+                            <CheckBox x:Name="ChkFbNoFailureDumps" Content="异常停止时不保存画面截图留档" Margin="0,4,0,0"/>
+                        </StackPanel>
+                    </Border>
                 </StackPanel>
             </ScrollViewer>
 

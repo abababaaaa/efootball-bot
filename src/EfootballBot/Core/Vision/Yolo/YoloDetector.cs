@@ -3,12 +3,11 @@ using EfootballBot.Core.Capture;
 using EfootballBot.Core.Inference;
 using Microsoft.ML.OnnxRuntime;
 using Microsoft.ML.OnnxRuntime.Tensors;
-using OpenCvSharp;
 
 namespace EfootballBot.Core.Vision.Yolo;
 
 /// <summary>
-/// YOLO26n 目标检测器：OpenCV letterbox 预处理 → ONNX Runtime 推理 → NMS 后处理。
+/// YOLO26n 目标检测器：自写 letterbox 预处理（双线性 + 114 灰边，见 ImageScaling）→ ONNX Runtime 推理 → NMS 后处理。
 /// 自动兼容两种导出格式：
 /// ① 端到端 NMS-free（YOLO26 官方导出）：输出 [1, N, 6]（cx,cy,w,h,score,cls）或转置；
 /// ② 常规预测头（v8/11/26 未含 NMS）：输出 [1, 4+nc, N] 或 [1, N, 4+nc]，本地做 NMS。
@@ -27,9 +26,7 @@ public sealed class YoloDetector : IDisposable
 
     // 预处理复用缓冲（Detect 单线程串行调用）：此前每次检测新建 bgr/resized/letterbox 三个
     // Mat + ~4.9MB DenseTensor，约 8MB/次的 LOH churn；形状固定后全部预分配复用
-    private readonly Mat _letterbox;
-    private readonly Mat _bgr = new();
-    private readonly Mat _resized = new();
+    private readonly byte[] _letterboxRgb;
     private readonly DenseTensor<float> _inputTensor;
 
     public bool Enabled => true;
@@ -48,7 +45,7 @@ public sealed class YoloDetector : IDisposable
         // 输入尺寸：优先从模型元数据读取，动态维或读不到时回退 640
         (_inputW, _inputH) = ResolveInputSize();
         _outputName = ResolveOutputName();
-        _letterbox = new Mat(_inputH, _inputW, MatType.CV_8UC3);
+        _letterboxRgb = new byte[_inputH * _inputW * 3];
         _inputTensor = new DenseTensor<float>(new[] { 1, 3, _inputH, _inputW });
 
         ModelLabel = $"{Path.GetFileName(modelPath)} {_inputW}×{_inputH} {_classes.Length}类";
@@ -109,49 +106,43 @@ public sealed class YoloDetector : IDisposable
     // ---------------- 预处理 ----------------
 
     /// <summary>
-    /// BGRA 帧 → letterbox 缩放到模型输入尺寸（等比 + 灰边填充），输出 RGB Mat。
-    /// 返回复用的 _letterbox（调用方不持有/不释放）；仅 Detect 单线程调用。
+    /// BGRA 帧 → letterbox 缩放到模型输入尺寸（等比 + 114 灰边填充），输出 RGB 字节缓冲。
+    /// 插值语义对齐原 OpenCV 路径（BGRA→BGR 缩放 INTER_LINEAR → 灰边居中 → RGB）。
+    /// 返回复用的 _letterboxRgb（调用方不持有）；仅 Detect 单线程调用。
     /// </summary>
-    internal Mat Letterbox(FrameData frame, out float scale, out int padX, out int padY)
+    internal byte[] Letterbox(FrameData frame, out float scale, out int padX, out int padY)
     {
         scale = Math.Min((float)_inputW / frame.Width, (float)_inputH / frame.Height);
-        int newW = Math.Max(1, (int)Math.Round(frame.Width * scale));
-        int newH = Math.Max(1, (int)Math.Round(frame.Height * scale));
-        padX = (_inputW - newW) / 2;
-        padY = (_inputH - newH) / 2;
-
-        using var bgra = Mat.FromPixelData(frame.Height, frame.Width, MatType.CV_8UC4, frame.Bgra);
-        Cv2.CvtColor(bgra, _bgr, ColorConversionCodes.BGRA2BGR);
-
-        var dst = _letterbox;
-        dst.SetTo(new Scalar(114, 114, 114));
-        Cv2.Resize(_bgr, _resized, new OpenCvSharp.Size(newW, newH));
-        _resized.CopyTo(dst[new Rect(padX, padY, newW, newH)]);
-        Cv2.CvtColor(dst, dst, ColorConversionCodes.BGR2RGB);
-        return dst;
+        unsafe
+        {
+            fixed (byte* pSrc = frame.Bgra, pDst = _letterboxRgb)
+            {
+                ImageScaling.ResizeBilinearBgraToRgbLetterbox(
+                    pSrc, frame.Width, frame.Height,
+                    pDst, _inputW, _inputH, _inputW * 3, 114,
+                    out _, out _, out padX, out padY);
+            }
+        }
+        return _letterboxRgb;
     }
 
-    /// <summary>RGB Mat → [1,3,H,W] 归一化 Tensor（复用预分配 tensor，Span 直写）。</summary>
-    internal DenseTensor<float> ToCHWTensor(Mat rgb)
+    /// <summary>RGB 字节缓冲 → [1,3,H,W] 归一化 Tensor（复用预分配 tensor，Span 直写）。</summary>
+    internal DenseTensor<float> ToCHWTensor(byte[] rgb)
     {
         var span = _inputTensor.Buffer.Span;
         float inv = 1f / 255f;
         int plane = _inputH * _inputW;
-        unsafe
+        int stride = _inputW * 3;
+        for (int y = 0; y < _inputH; y++)
         {
-            byte* basePtr = (byte*)rgb.DataPointer;
-            int stride = (int)rgb.Step();
-            for (int y = 0; y < _inputH; y++)
+            int srcRow = y * stride;
+            int rowBase = y * _inputW;
+            for (int x = 0; x < _inputW; x++)
             {
-                byte* row = basePtr + y * stride;
-                int rowBase = y * _inputW;
-                for (int x = 0; x < _inputW; x++)
-                {
-                    int p = x * 3;
-                    span[rowBase + x] = row[p] * inv;
-                    span[plane + rowBase + x] = row[p + 1] * inv;
-                    span[2 * plane + rowBase + x] = row[p + 2] * inv;
-                }
+                int p = srcRow + x * 3;
+                span[rowBase + x] = rgb[p] * inv;
+                span[plane + rowBase + x] = rgb[p + 1] * inv;
+                span[2 * plane + rowBase + x] = rgb[p + 2] * inv;
             }
         }
         return _inputTensor;
@@ -289,8 +280,5 @@ public sealed class YoloDetector : IDisposable
     public void Dispose()
     {
         _session.Dispose();
-        _letterbox.Dispose();
-        _bgr.Dispose();
-        _resized.Dispose();
     }
 }

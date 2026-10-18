@@ -124,7 +124,9 @@ public sealed class BotEngine : IDisposable
 
         // EP 降级工厂：OCR 与 YOLO 共享同一 SessionOptions（进程内仅一份 onnxruntime.dll）
         _factory = new OnnxSessionFactory(cfg.Inference.PreferredProvider, LogInternal);
-        Ocr = new OcrRecognizer(cfg.OcrEngine, cfg.OcrLanguage);
+        Ocr = new OcrRecognizer(cfg.OcrEngine, cfg.OcrLanguage,
+            downscaleLongSide: cfg.ModuleFallback.DisableOcrDownscale ? 0 : OcrRecognizer.DefaultDownscaleLongSide,
+            preferInt8: !cfg.ModuleFallback.UseFp32Ocr);
         LogInternal($"OCR 引擎：{Ocr.LanguageTag}（{Ocr.EngineKind}）", LogLevel.Info);
 
         Observation = new ObservationService(Capture, Ocr, cfg);
@@ -309,6 +311,7 @@ public sealed class BotEngine : IDisposable
                         }
                         Stats.LastError = ex.Message;
                         LogInternal(ex.Message, LogLevel.Error);
+                        SaveFailureDump("捕获熔断终停");
                         EmitStats();
                         return;
                     }
@@ -320,6 +323,8 @@ public sealed class BotEngine : IDisposable
                         int backoffMs = Math.Min(1000 << (failStreak - 1), 8000);
                         Stats.LastError = ex.Message;
                         LogInternal($"观察循环异常（连续第 {failStreak} 次，{backoffMs / 1000.0:F0}s 后重试）：{ex.Message}", LogLevel.Warn);
+                        if (failStreak == 3)
+                            SaveFailureDump("观察循环连续异常");
                         await Task.Delay(backoffMs, token);
                     }
                 }
@@ -675,6 +680,89 @@ public sealed class BotEngine : IDisposable
         // eFootball 会把光标停靠到顶部头部的「手柄归属」图标上，重连设备的
         // Left/A 全部失效（焦点不在磁贴行）。设备在 Stop→Start 间保持存活，
         // XInput 槽位在应用退出（Dispose）时释放；如需立刻让位给真实手柄请关闭本程序。
+    }
+
+    /// <summary>异常停止（场景报错终止）：自动留档当前画面后正常停止。
+    /// 用户反馈排障从「读日志猜画面」变成直接看帧。</summary>
+    public void StopWithError(string reason)
+    {
+        SaveFailureDump(reason);
+        Stop();
+    }
+
+    /// <summary>
+    /// 异常留档：当前帧存 JPG 到 data\failures\日期\（文件名带原因），滚动保留最近 7 天 / 200MB。
+    /// ModuleFallback.DisableFailureDumps 可关；存图失败静默（留档不影响挂机）。
+    /// </summary>
+    public void SaveFailureDump(string reason)
+    {
+        if (_cfg.ModuleFallback.DisableFailureDumps) return;
+        try
+        {
+            if (LatestFrame is not { } f || f.Bgra.Length == 0) return;
+            var pixels = (byte[])f.Bgra.Clone();
+            string safeReason = new string(reason.Select(c => char.IsLetterOrDigit(c) ? c : '_').Take(40).ToArray());
+            string day = DateTime.Now.ToString("yyyyMMdd");
+            string dir = Path.Combine(AppPaths.DataDir, "failures", day);
+            LogInternal($"已保存异常画面留档：data\\failures\\{day}\\", LogLevel.Info);
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    Directory.CreateDirectory(dir);
+                    var info = new SKImageInfo(f.Width, f.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
+                    unsafe
+                    {
+                        fixed (byte* p = pixels)
+                        {
+                            using var bmp = new SKBitmap();
+                            if (!bmp.InstallPixels(info, (nint)p, info.RowBytes)) return;
+                            using var img = SKImage.FromBitmap(bmp);
+                            using var data = img.Encode(SKEncodedImageFormat.Jpeg, 85);
+                            using var fs = File.Create(Path.Combine(dir, $"{DateTime.Now:HHmmss_fff}_{safeReason}.jpg"));
+                            data.SaveTo(fs);
+                        }
+                    }
+                    CleanupFailureDumps();
+                }
+                catch { /* 留档失败静默 */ }
+            });
+        }
+        catch { }
+    }
+
+    /// <summary>failure 留档滚动清理：删 7 天前的日目录；总量超 200MB 从最旧开始删。</summary>
+    private static void CleanupFailureDumps()
+    {
+        try
+        {
+            string root = Path.Combine(AppPaths.DataDir, "failures");
+            if (!Directory.Exists(root)) return;
+            var cutoff = DateTime.Now.AddDays(-7);
+            long totalBytes = 0;
+            var dayDirs = Directory.GetDirectories(root).OrderBy(d => d).ToList();
+            foreach (var d in dayDirs.Where(d => global::System.DateTime.TryParseExact(
+                         Path.GetFileName(d), "yyyyMMdd", null,
+                         global::System.Globalization.DateTimeStyles.None, out var t) && t < cutoff).ToList())
+            {
+                try { Directory.Delete(d, recursive: true); } catch { }
+            }
+            dayDirs = Directory.GetDirectories(root).OrderBy(d => d).ToList();
+            var files = dayDirs.SelectMany(Directory.EnumerateFiles).Select(f => new FileInfo(f)).ToList();
+            totalBytes = files.Sum(fi => fi.Length);
+            const long cap = 200L * 1024 * 1024;
+            foreach (var fi in files)
+            {
+                if (totalBytes <= cap) break;
+                try
+                {
+                    totalBytes -= fi.Length;
+                    fi.Delete();
+                }
+                catch { }
+            }
+        }
+        catch { }
     }
 
     // ---------------- 感知观察 ----------------

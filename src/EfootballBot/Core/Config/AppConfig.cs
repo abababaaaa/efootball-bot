@@ -206,6 +206,32 @@ public sealed class UpdateConfig
     public bool AutoDownloadInstall { get; set; } = false;
 }
 
+/// <summary>
+/// 模块回退开关：每个升级过的内部模块保留一条手动退路，全部默认走新版实现。
+/// 更改在下次开始挂机时生效（Worker 每次 start 用最新配置重建引擎，不做运行中热切换）。
+/// </summary>
+public sealed class ModuleFallbackConfig
+{
+    /// <summary>true = 画面捕获退回旧 SharpDX 实现（新 Vortice 实现出现黑屏/黑画面时勾选）。</summary>
+    public bool UseSharpDxCapture { get; set; } = false;
+
+    /// <summary>true = OCR 用原版 fp32 模型（默认用 int8 提速版；int8 模型缺失或读取异常时同样自动回退 fp32）。</summary>
+    public bool UseFp32Ocr { get; set; } = false;
+
+    /// <summary>true = OCR 关闭高分辨率降采样（4K 级画面默认压缩到 1080p 再识别；高分屏识别变差时勾选）。</summary>
+    public bool DisableOcrDownscale { get; set; } = false;
+
+    /// <summary>true = 虚拟手柄改用 HIDMaestro 驱动（实验功能）；默认 false = ViGEmBus。
+    /// 注意与其它项语义相反：这是「启用新版」，勾上才算切换，取消勾选即回 ViGEmBus。</summary>
+    public bool EnableHidMaestro { get; set; } = false;
+
+    /// <summary>true = 鼠标点击关闭拟人移动轨迹（回退单步跳变到目标位置）。</summary>
+    public bool DisableMouseTrajectory { get; set; } = false;
+
+    /// <summary>true = 挂机异常停止时不自动保存画面截图留档。</summary>
+    public bool DisableFailureDumps { get; set; } = false;
+}
+
 /// <summary>手柄隔离（HidHide）配置。驱动侧持久化到注册表，此处仅存 UI 快照与回滚清单。</summary>
 public sealed class HidHideConfig
 {
@@ -413,6 +439,9 @@ public sealed class AppConfig
     // —— 全局停止热键 ——
     public HotkeyConfig Hotkey { get; set; } = new();
     public UpdateConfig Update { get; set; } = new();
+
+    // —— 模块回退（新版实现出问题时的手动退路，更新页可改）——
+    public ModuleFallbackConfig ModuleFallback { get; set; } = new();
 
     // —— 手柄隔离（HidHide）——
     public HidHideConfig HidHide { get; set; } = new();

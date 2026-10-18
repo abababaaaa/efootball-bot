@@ -226,18 +226,32 @@ public sealed class OcrRecognizer : IDisposable
     /// <summary>旧签名兼容：默认使用 PP-OCRv6（离线命令行自检 --check-frame/--dump 走此入口）。</summary>
     public OcrRecognizer(string? preferredTag = null) : this(OcrEngineKind.RapidV6, preferredTag) { }
 
-    public OcrRecognizer(OcrEngineKind engine, string? preferredTag = null)
+    /// <param name="downscaleLongSide">OCR 输入降采样上限（帧长边超过该值先等比缩小再识别）。
+    /// 0 = 关闭。4K 级画面降采样到 1080p 后 det 像素量约为原来 1/4，UI 文字在 720p 实测帧即可读全；
+    /// 词块坐标按归一化输出，降采样不影响 0~1 坐标契约。</param>
+    /// <param name="preferInt8">true = PP-OCRv6 优先加载 int8 量化模型（缺失自动回退 fp32）。</param>
+    public OcrRecognizer(OcrEngineKind engine, string? preferredTag = null,
+        int downscaleLongSide = DefaultDownscaleLongSide, bool preferInt8 = true)
     {
         EngineKind = engine;
+        _downscaleLongSide = downscaleLongSide;
         _backend = engine switch
         {
             OcrEngineKind.Windows => new WindowsOcrBackend(preferredTag),
-            _ => new RapidV6OcrBackend(),
+            _ => new RapidV6OcrBackend(preferInt8),
         };
     }
 
+    /// <summary>降采样上限默认值（1080p 长边）。</summary>
+    public const int DefaultDownscaleLongSide = 1920;
+
+    private readonly int _downscaleLongSide;
+
     public Task<OcrResult> RecognizeAsync(FrameData frame, CancellationToken ct = default)
-        => _backend.RecognizeAsync(frame, ct);
+    {
+        var scaled = ImageScaling.DownscaleBilinear(frame, _downscaleLongSide);
+        return _backend.RecognizeAsync(scaled, ct);
+    }
 
     public void Dispose() => _backend.Dispose();
 }
@@ -308,26 +322,80 @@ internal sealed class RapidV6OcrBackend : IOcrBackend
     private readonly RapidOcrNet.RapidOcr _ocr;
     private readonly RapidOcrOptions _options;
 
-    public string Label => LabelText;
+    public string Label { get; }
 
-    public RapidV6OcrBackend()
+    /// <param name="preferInt8">true = 优先加载 models/v6/int8 下的 int8 量化模型（CPU 推理约 2-4x）；
+    /// int8 文件缺失或加载失败（损坏/ORT 不兼容）时自动回退 fp32，绝不因量化模型问题而启动失败。</param>
+    public RapidV6OcrBackend(bool preferInt8 = true)
     {
         // 单文件发布时模型在临时解压目录；普通发布在 exe 同级 models，FindBundledFile 两种都兼容
-        string detPath = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "PP-OCRv6_det_small.onnx")
+        var fp32Det = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "PP-OCRv6_det_small.onnx")
             ?? throw ModelMissing("models/v6/PP-OCRv6_det_small.onnx");
-        string recPath = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "PP-OCRv6_rec_small.onnx")
+        var fp32Rec = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "PP-OCRv6_rec_small.onnx")
             ?? throw ModelMissing("models/v6/PP-OCRv6_rec_small.onnx");
-        string keysPath = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "ppocrv6_small_dict.txt")
+        var keysPath = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "ppocrv6_small_dict.txt")
             ?? throw ModelMissing("models/v6/ppocrv6_small_dict.txt");
-        string clsPath = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v5", "ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx")
+        var clsPath = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v5", "ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx")
             ?? throw ModelMissing("models/v5/ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx");
 
-        _ocr = new RapidOcrNet.RapidOcr();
-        // RapidOcrNet 4.2.0 自管 InferenceSession（CPU，不接受外部 SessionOptions）；
-        // GPU 加速仅覆盖 YOLO 检测（OnnxSessionFactory），OCR 走包内默认 CPU 会话
-        _ocr.InitModels(detPath, clsPath, recPath, keysPath);
+        string detPath = fp32Det, recPath = fp32Rec;
+        string int8Grade = "";
+        RapidOcrNet.RapidOcr ocr;
+        if (preferInt8)
+        {
+            // int8 降级阶梯：识别模型动态量化精度无损（实测文本逐字一致）优先启用；
+            // 检测模型静态量化对 DBNet 概率图敏感（MinMax 校准实测大面积漏检），
+            // det int8 只有在通过全量 RealFrame 回归后才随包发布。逐级尝试加载。
+            var recInt8 = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "int8", "PP-OCRv6_rec_small_int8.onnx");
+            var detInt8 = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "int8", "PP-OCRv6_det_small_int8.onnx");
+            static string Grade(string? d, string? r) =>
+                d is null && r is null ? "" : $"（{(d is not null ? "det" : "")}{(d is not null && r is not null ? "+" : "")}{(r is not null ? "rec" : "")} int8）";
+
+            (string det, string rec, string grade)[] ladder =
+            [
+                (detInt8 ?? fp32Det, recInt8 ?? fp32Rec, Grade(detInt8, recInt8)),
+                (fp32Det, recInt8 ?? fp32Rec, Grade(null, recInt8)),
+                (fp32Det, fp32Rec, ""),
+            ];
+
+            RapidOcrNet.RapidOcr? loaded = null;
+            foreach (var (det, rec, grade) in ladder)
+            {
+                try
+                {
+                    loaded = CreateOcr(det, clsPath, rec, keysPath);
+                    detPath = det;
+                    recPath = rec;
+                    int8Grade = grade;
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    // 量化模型损坏/不兼容：降级到下一级（放弃 int8 只损失速度，不该损失可用性）
+                    global::System.Diagnostics.Debug.WriteLine($"[OCR] 模型加载失败（det={Path.GetFileName(det)} rec={Path.GetFileName(rec)}），降级重试：{ex.Message}");
+                }
+            }
+            ocr = loaded ?? CreateOcr(fp32Det, clsPath, fp32Rec, keysPath);
+        }
+        else
+        {
+            ocr = CreateOcr(fp32Det, clsPath, fp32Rec, keysPath);
+        }
+
+        _ocr = ocr;
+        Label = LabelText + int8Grade;
+
         // PPOCRv6 预处理（短边自适应 736、不加白边）；游戏界面文字不会倒置，跳过 180° 分类
         _options = RapidOcrOptions.PPOCRv6 with { DoAngle = false };
+    }
+
+    private static RapidOcrNet.RapidOcr CreateOcr(string detPath, string clsPath, string recPath, string keysPath)
+    {
+        // RapidOcrNet 4.2.0 自管 InferenceSession（CPU，不接受外部 SessionOptions）；
+        // GPU 加速仅覆盖 YOLO 检测（OnnxSessionFactory），OCR 走包内默认 CPU 会话
+        var ocr = new RapidOcrNet.RapidOcr();
+        ocr.InitModels(detPath, clsPath, recPath, keysPath);
+        return ocr;
     }
 
     private static InvalidOperationException ModelMissing(string rel) => new(
