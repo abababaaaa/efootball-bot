@@ -1,11 +1,9 @@
 namespace EfootballBot.Core.Input;
 
 /// <summary>
-/// 虚拟手柄的后端抽象。三个实现：
-/// <see cref="VirtualDs4Pad"/>（ViGEm DualShock4，纯 HID，默认）、
-/// <see cref="HidMaestroPad"/>（HIDMaestro 用户态驱动，纯 HID，实验）与
-/// <see cref="VirtualGamepad360"/>（ViGEm Xbox 360，XInput 系统级，兼容回退）。
-/// 语义动作（Tap/Flick）以默认接口成员实现在原语之上，三个后端共享同一套按压节奏。
+/// 虚拟手柄的后端抽象。实现：<see cref="HidMaestroPad"/>（HIDMaestro 用户态驱动，
+/// 纯 HID，唯一后端；ViGEm 两档已随 3.0 移除）。
+/// 语义动作（Tap/Flick）以默认接口成员实现在原语之上。
 /// </summary>
 public interface IVirtualPad : IDisposable
 {

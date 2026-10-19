@@ -212,9 +212,9 @@
                     <Border Background="{DynamicResource Surface2}" CornerRadius="10" Padding="11,9">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,3">
-                                <Ellipse x:Name="DotVigem" Width="8" Height="8" Fill="{DynamicResource ModuleDot}"
+                                <Ellipse x:Name="DotPad" Width="8" Height="8" Fill="{DynamicResource ModuleDot}"
                                          Margin="1,0,8,0" VerticalAlignment="Center"/>
-                                <TextBlock x:Name="TxtVigem" Text="ViGEmBus 驱动" FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
+                                <TextBlock x:Name="TxtPad" Text="虚拟手柄驱动" FontSize="12" Foreground="{DynamicResource TextSecondary}"/>
                             </StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,3">
                                 <Ellipse x:Name="DotWgc" Width="8" Height="8" Fill="{DynamicResource ModuleDot}"
@@ -236,10 +236,6 @@
                             <Button x:Name="BtnRecheck" Content="重新检测" Style="{StaticResource GhostBtn}"
                                     HorizontalAlignment="Left" Margin="1,9,0,0" Padding="11,4" FontSize="11"
                                     Click="BtnRecheck_Click"/>
-                            <Button x:Name="BtnInstallVigem" Content="安装内置驱动" Style="{StaticResource GhostBtn}"
-                                    HorizontalAlignment="Left" Margin="1,5,0,0" Padding="11,4" FontSize="11"
-                                    Click="BtnInstallVigem_Click"
-                                    ToolTip="使用内置安装包离线安装 ViGEmBus 驱动（需管理员授权，无需联网）"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
@@ -1304,36 +1300,6 @@
 
                     <!-- ============ 二级页：手柄与输入 ============ -->
                     <StackPanel x:Name="SetTabInput" Visibility="Collapsed">
-                    <!-- ===== 虚拟手柄后端 ===== -->
-                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Text="虚拟手柄后端" Style="{StaticResource H2}"/>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal">
-                                <TextBlock Text="手柄模拟方式" Style="{StaticResource FieldLabel}"/>
-                                <ComboBox x:Name="CmbPadBackend" Width="300" Margin="10,0,0,0" SelectedIndex="0">
-                                    <ComboBoxItem Content="DualShock4 隔离（推荐）"/>
-                                    <ComboBoxItem Content="HIDMaestro 隔离（实验）"/>
-                                    <ComboBoxItem Content="Xbox 360 旧版（兼容回退）"/>
-                                </ComboBox>
-                            </StackPanel>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,6,0,0">
-                                <Run Text="默认模拟为 DualShock4 手柄（纯 HID 设备）："/>
-                                <Run Text="其他应用和游戏完全看不到这只手柄" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
-                                <Run Text="，挂机时你玩别的游戏不会收到机器人按键；配合下方「手柄隔离」，全系统只有游戏可见。"/>
-                            </TextBlock>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,4,0,0">
-                                <Run Text="若游戏不认 DualShock4 手柄（开始挂机后游戏毫无反应），切到"/>
-                                <Run Text="Xbox 360 旧版" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
-                                <Run Text="：兼容性最好，但所有游戏都能看到这只手柄。"/>
-                                <Run Text="更改在下次开始挂机时生效" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
-                                <Run Text="。"/>
-                            </TextBlock>
-                        </StackPanel>
-                    </Border>
-
                     <!-- ===== 手柄隔离 ===== -->
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                         <StackPanel>

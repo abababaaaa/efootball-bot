@@ -464,7 +464,7 @@ public partial class MainWindow : Window
     {
         try
         {
-            bool padHoldingSlot0 = VirtualGamepad360.IsSlot0Occupied()
+            bool padHoldingSlot0 = PadBackendProbe.IsSlot0Occupied()
                 && HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0;
             if (!padHoldingSlot0 || await Task.Run(HidHideManager.TasksReady))
                 return;

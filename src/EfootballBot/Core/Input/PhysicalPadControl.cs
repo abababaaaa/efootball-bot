@@ -212,10 +212,10 @@ public static class PhysicalPadControl
         var deadline = DateTime.Now + timeout;
         while (DateTime.Now < deadline)
         {
-            if (!VirtualGamepad360.IsSlot0Occupied()) return true;
+            if (!PadBackendProbe.IsSlot0Occupied()) return true;
             Thread.Sleep(250);
         }
-        return !VirtualGamepad360.IsSlot0Occupied();
+        return !PadBackendProbe.IsSlot0Occupied();
     }
 
     [DllImport("cfgmgr32.dll")]

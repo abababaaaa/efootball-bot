@@ -36,15 +36,6 @@ public partial class App : Application
                 Shutdown();
             };
         }
-        else if (args.Length > 0 && args[0] == "--slots")
-        {
-            Startup += (_, _) =>
-            {
-                try { Console.OutputEncoding = System.Text.Encoding.UTF8; RunSlots(); }
-                catch (Exception ex) { Console.WriteLine($"SLOTS FAIL: {ex}"); }
-                Shutdown();
-            };
-        }
         else if (args.Length > 0 && args[0] == "--worker")
         {
             // 无头工作进程：不获取单实例 Mutex、不检查更新、不显示主窗口。
@@ -144,7 +135,7 @@ public partial class App : Application
         catch { }
     }
 
-    // ================= 单实例（仅 GUI 模式；--dump/--slots 诊断命令不受限） =================
+    // ================= 单实例（仅 GUI 模式；--dump 诊断命令不受限） =================
 
     private const string SingleMutexName = @"Local\EfootballBot-SingleInstance-Mutex";
     private const string SinglePipeName = "EfootballBot-SingleInstance-Pipe";
@@ -247,33 +238,6 @@ public partial class App : Application
         }
     }
 
-    /// <summary>对比连接 ViGEm 虚拟手柄前后 XInput 四个槽位的占用情况。</summary>
-    private static void RunSlots()
-    {
-        Console.WriteLine("连接前：");
-        PrintSlots();
-
-        using var vg = new VirtualGamepad360();
-        vg.Connect();
-        Console.WriteLine($"ViGEm 报告 UserIndex = {vg.UserIndex}");
-        Thread.Sleep(1200);
-
-        Console.WriteLine("连接后：");
-        PrintSlots();
-    }
-
-    private static void PrintSlots()
-    {
-        for (int i = 0; i < 4; i++)
-        {
-            var st = SlotProbe.GetState(i, out var state);
-            SlotProbe.GetCapabilities(i, out var cap);
-            Console.WriteLine(st == 0
-                ? $"  slot {i}: 已连接 type={cap.Type} subtype={cap.SubType} buttons=0x{state.Buttons:X4}"
-                : $"  slot {i}: 空");
-        }
-    }
-
     /// <summary>
     /// 离线帧自检：EfootballBot --check-frame &lt;png&gt; [cropY=0] [cropH=0] [frameW=1296] [frameH=759]
     /// 加载 PNG（可选纵向裁剪）→ 缩放为标准整窗帧 → 用真实 OCR 输出关键词。
@@ -360,7 +324,7 @@ public partial class App : Application
         Console.WriteLine($"目标窗口：{win.Title}（{win.ProcessName}）客户区 {w}×{h}");
         capture.Start(win.Handle, w, h);
 
-        VirtualGamepad360? vg = null;
+        HidMaestroPad? vg = null;
         var mouse = new BackgroundMouse();
         var fgMouse = new ForegroundMouse();
         var oldFg = new IntPtr[1];
@@ -372,9 +336,9 @@ public partial class App : Application
                     .Any(t => t.ToUpperInvariant() is "L" or "R" or "U" or "D" or "A" or "B" or "X" or "Y" or "START" or "RT");
                 if (needPad)
                 {
-                    vg = new VirtualGamepad360();
+                    vg = new HidMaestroPad(Console.WriteLine);
                     vg.Connect();
-                    Console.WriteLine($"虚拟手柄已连接（XInput 玩家 {vg.UserIndex + 1}）");
+                    Console.WriteLine("虚拟手柄已连接（HIDMaestro 纯 HID）");
                 }
                 var pad = vg is null ? null : new Pad(vg, new TimingConfig());
                 Console.WriteLine($"执行动作：{actions}");
@@ -475,33 +439,4 @@ public partial class App : Application
         enc.Frames.Add(BitmapFrame.Create(wb));
         enc.Save(fs);
     }
-}
-
-/// <summary>XInput 槽位探测（仅诊断用）。</summary>
-internal static class SlotProbe
-{
-    [System.Runtime.InteropServices.DllImport("xinput1_4.dll")]
-    private static extern int XInputGetState(int i, out XState s);
-    [System.Runtime.InteropServices.DllImport("xinput1_4.dll")]
-    private static extern int XInputGetCapabilities(int i, int flags, out XCap c);
-
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    public struct XState
-    {
-        public uint EventNumber;
-        public ushort Buttons;
-        public byte LeftTrigger, RightTrigger;
-        public short Lx, Ly, Rx, Ry;
-    }
-    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
-    public struct XCap
-    {
-        public byte Type, SubType;
-        public ushort Flags;
-        public XState State;
-        public short Lv, Rv;
-    }
-
-    public static int GetState(int i, out XState s) => XInputGetState(i, out s);
-    public static int GetCapabilities(int i, out XCap c) => XInputGetCapabilities(i, 0, out c);
 }

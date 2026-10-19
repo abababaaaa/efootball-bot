@@ -7,11 +7,11 @@ using System.Security.Cryptography;
 namespace EfootballBot.Core.Input;
 
 /// <summary>
-/// HIDMaestro 虚拟手柄后端（实验）：纯用户态 UMDF2 驱动（ViGEmBus 退役后的继任者），MIT。
+/// HIDMaestro 虚拟手柄后端（唯一后端）：纯用户态 UMDF2 驱动（ViGEmBus 退役后的继任者），MIT。
 /// SDK 无 NuGet 包、单 DLL 61MB（驱动/签名工具全内嵌）——不随发布包携带，
 /// 首次启用时按需下载官方 Release zip，锁定 DLL SHA256 后解压到 data\hidmaestro\，
 /// 经独立 AssemblyLoadContext 反射加载（隔离其 net10.0-windows10.0.26100 TFM 的 SDK 投影依赖）。
-/// 加载/安装任一步失败抛清晰异常，由引擎回退 ViGEmBus 并告警。
+/// 加载/安装任一步失败抛清晰异常，由引擎告警并终止本次启动。
 /// 映射：PadButton.A/B/X/Y → HMButton Cross/Circle/Square/Y（xbox-360-wired 按方位），
 /// 十字键 → HMHat，摇杆 ±1/扳机 0~1 交 HMGamepadStateHelpers.StandardAxes 按档位映射。
 /// 槽位=创建顺序的经验保证（非文档保证），玩家 1 强保证仍依赖 HidHide 隐藏真实手柄。
@@ -102,7 +102,7 @@ public sealed class HidMaestroPad : IVirtualPad
                         catch (UnauthorizedAccessException)
                         {
                             throw new InvalidOperationException(
-                                "HIDMaestro 驱动安装需要管理员权限。请以管理员身份运行本程序后重试，或取消勾选「启用 HIDMaestro 虚拟手柄」继续使用 ViGEmBus。");
+                                "HIDMaestro 驱动安装需要管理员权限。请以管理员身份运行本程序后重试。");
                         }
                         installed = (bool)(tCtx.GetProperty("IsDriverInstalled")!.GetValue(_ctx) ?? false);
                         if (!installed)

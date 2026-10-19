@@ -237,22 +237,20 @@ public sealed class ModuleFallbackConfig
 public sealed class PadConfig
 {
     /// <summary>
-    /// 虚拟手柄后端。默认 HidDs4（纯 HID 设备，XInput-only 应用不可见）；
-    /// 2026-10-19 实机验证：游戏对 DS4 手柄响应正常（此前误判为不识别，实为真实手柄未禁用干扰）。
+    /// 虚拟手柄后端。唯一后端 HidMaestro（纯 HID，XInput-only 应用不可见）；
+    /// 旧配置里的 ViGEm 档位（0=DualShock4 / 2=Xbox 360）加载时归一化。
     /// </summary>
-    public PadBackendKind Backend { get; set; } = PadBackendKind.HidDs4;
+    public PadBackendKind Backend { get; set; } = PadBackendKind.HidMaestro;
 
     /// <summary>
-    /// 旧版布尔开关迁移：EnableHidMaestro=true → HidMaestro 后端；迁移后清零旧开关，
-    /// 防止每次加载反复覆盖用户在 UI 里的新选择。
+    /// 旧版布尔开关迁移：EnableHidMaestro=true → 清零旧开关（后端本就只有 HidMaestro 一档）。
+    /// 同时把旧配置遗留的 ViGEm 枚举值归一化到 HidMaestro，防止下次保存把废值写回磁盘。
     /// </summary>
     public void MigrateFrom(ModuleFallbackConfig legacy)
     {
-        if (legacy.EnableHidMaestro)
-        {
+        if (Backend != PadBackendKind.HidMaestro)
             Backend = PadBackendKind.HidMaestro;
-            legacy.EnableHidMaestro = false;
-        }
+        legacy.EnableHidMaestro = false;
     }
 }
 

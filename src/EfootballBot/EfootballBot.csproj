@@ -42,8 +42,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- 自带原生 vigemclient.dll（x64），用于与 ViGEmBus 驱动通信 -->
-    <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.256" />
     <!-- DXGI Desktop Duplication 捕获实现（SharpDX 统一锁定 4.2.0） -->
     <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
     <PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
@@ -68,13 +66,6 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
     </Content>
-  </ItemGroup>
-
-  <ItemGroup>
-    <!-- 内置 ViGEmBus 1.22.0 官方三架构安装器（离线安装，Advanced Installer 打包） -->
-    <EmbeddedResource Include="..\..\assets\ViGEmBusSetup.exe">
-      <LogicalName>EfootballBot.ViGEmBusSetup.exe</LogicalName>
-    </EmbeddedResource>
   </ItemGroup>
 
   <ItemGroup>

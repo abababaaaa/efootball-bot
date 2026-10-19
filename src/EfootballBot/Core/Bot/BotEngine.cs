@@ -127,8 +127,7 @@ public sealed class BotEngine : IDisposable
         // WGC 设备/GPU 缩放（WindowCapture）与 DXGI 捕获器必须走同一家族，绝不混挂设备指针
         _captureUseSharpDx = cfg.ModuleFallback.UseSharpDxCapture;
         Capture = new WindowCapture(_captureUseSharpDx);
-        // 手柄后端（AppConfig.Pad.Backend，默认 HidDs4=纯 HID、其他应用不可见）。
-        // 构造只做选择；连接失败按回退链换实例重连（见 PrepareSessionAsync）。
+        // 手柄后端（AppConfig.Pad.Backend，唯一后端 HidMaestro=纯 HID、其他应用不可见）。
         // 任一时刻只存在一只虚拟手柄（同 VID/PID 双设备会扰乱枚举）。
         Pad360 = CreatePad(cfg.Pad.Backend);
         LogInternal($"虚拟手柄后端：{PadBackendInfo.DisplayName(cfg.Pad.Backend)}", LogLevel.Info);
@@ -376,21 +375,6 @@ public sealed class BotEngine : IDisposable
             LogInternal($"独显偏好检查失败（不影响使用）：{ex.Message}", LogLevel.Debug);
         }
 
-        if (connectPad && Pad360.Kind != PadBackendKind.HidMaestro && !VirtualGamepad360.IsDriverInstalled())
-        {
-            // 自动安装内嵌的 ViGEmBus 驱动（提权静默装），不再直接失败让用户手动去环境检测。
-            // ViGEm 两档后端（DualShock4 默认 / Xbox 360 回退）共用该驱动；
-            // HIDMaestro 后端不走此路径（驱动在首次 Connect 时经 SDK 幂等安装）。
-            LogInternal("未检测到 ViGEmBus 驱动：自动开始安装（请在弹出的授权窗口点「是」）…", LogLevel.Warn);
-            var installCts = new CancellationTokenSource(TimeSpan.FromMinutes(6));
-            var result = await new DriverInstaller(m => LogInternal(m, LogLevel.Info)).InstallAsync(installCts.Token);
-            LogInternal(result.Message, result.DriverReady ? LogLevel.Success : LogLevel.Error);
-            if (result.Kind == DriverSetupResultKind.RebootRequired)
-                throw new InvalidOperationException("ViGEmBus 驱动安装完成，需要重启电脑后再开始挂机。");
-            if (!result.DriverReady)
-                throw new InvalidOperationException("ViGEmBus 驱动未就绪：" + result.Message);
-        }
-
         processName ??= GameWindow.GlobalProcessName;
         _window = GameWindow.FindFirst(processName)
             ?? throw new InvalidOperationException(processName.Contains("Online")
@@ -457,9 +441,7 @@ public sealed class BotEngine : IDisposable
             }
             await ConnectPadWithFallbackAsync();
             _ = Task.Run(EnsureHidHideIsolation); // 静默检查虚拟手柄黑名单覆盖（不阻塞启动）
-            LogInternal(PadBackendInfo.IsXInputVisible(Pad360.Kind)
-                ? $"虚拟手柄已连接（XInput 玩家 {Pad360.UserIndex + 1}；旧后端：其他应用也能看到这只手柄）"
-                : "虚拟手柄已连接（纯 HID 独占：其他应用/游戏完全看不到这只手柄）",
+            LogInternal("虚拟手柄已连接（纯 HID 独占：其他应用/游戏完全看不到这只手柄）",
                 LogLevel.Success);
         }
         else
@@ -474,18 +456,12 @@ public sealed class BotEngine : IDisposable
         return _cts.Token;
     }
 
-    /// <summary>按后端种类创建虚拟手柄实例（仅构造不连接；连接回退见 ConnectPadWithFallbackAsync）。</summary>
-    private IVirtualPad CreatePad(PadBackendKind kind) => kind switch
-    {
-        PadBackendKind.HidMaestro => new HidMaestroPad(m => LogInternal(m, LogLevel.Info)),
-        PadBackendKind.Xbox360 => new VirtualGamepad360(),
-        _ => new VirtualDs4Pad(),
-    };
+    /// <summary>按后端种类创建虚拟手柄实例（仅构造不连接）。ViGEm 两档移除后仅剩 HIDMaestro。</summary>
+    private IVirtualPad CreatePad(PadBackendKind kind) => new HidMaestroPad(m => LogInternal(m, LogLevel.Info));
 
     /// <summary>
-    /// 连接虚拟手柄；失败时按 <see cref="PadBackendInfo.FallbackChain"/> 换实例重试
-    /// （纯 HID 档互为回退，最终落 Xbox 360 旧版保底）。回退必告警：隔离等级在降级。
-    /// 任一时刻全系统只有一只虚拟手柄（回退前先拔掉旧实例）。
+    /// 连接虚拟手柄。单后端后无回退可言（保留换实例重连的骨架：连接失败时重建一次实例再试，
+    /// HIDMaestro 的反射加载状态是进程级共享的，重建实例可跳过已损坏的控制器对象）。
     /// </summary>
     private async Task ConnectPadWithFallbackAsync()
     {
@@ -503,7 +479,7 @@ public sealed class BotEngine : IDisposable
             {
                 Pad360.Connect();
                 if (i > 0)
-                    LogInternal($"已回退到 {PadBackendInfo.DisplayName(chain[i])}（手柄隔离等级降级：该后端对其他应用可见）", LogLevel.Warn);
+                    LogInternal($"已回退到 {PadBackendInfo.DisplayName(chain[i])}", LogLevel.Warn);
                 return;
             }
             catch (Exception ex)
@@ -511,7 +487,7 @@ public sealed class BotEngine : IDisposable
                 LogInternal($"{PadBackendInfo.DisplayName(chain[i])} 连接失败：{ex.Message}", LogLevel.Warn);
             }
         }
-        throw new InvalidOperationException("所有虚拟手柄后端均连接失败，请查看上方日志；也可到 设置→手柄与输入 更换后端后重试。");
+        throw new InvalidOperationException("虚拟手柄连接失败，请查看上方日志后重试。");
     }
 
     /// <summary>

@@ -327,55 +327,12 @@ public static class HidHideManager
     }
 
     /// <summary>
-    /// 枚举虚拟手柄实例；设备当前不在线（用户没在挂机）时按配置后端临时创建一个探测，
-    /// 枚举完即断开（HIDMaestro 探测需下载 SDK，不做临时创建——挂机中同步时设备必在线）。
-    /// 实例路径真机实测跨连接稳定（同机同序列），且黑名单持久化，故配置时不要求挂机正在运行。
+    /// 枚举虚拟手柄实例。ViGEm 时代的「设备不在线时临时创建探测」已随其移除——
+    /// HIDMaestro 探测需下载 SDK，不做临时创建；挂机中同步时设备必在线，
+    /// 且实例路径真机实测跨连接稳定（同机同序列）、黑名单持久化。
     /// </summary>
     private static List<string> FindVirtualPadInstancesWithProbe()
-    {
-        var vpad = HidDeviceEnumerator.FindVirtualPadInstances();
-        if (vpad.Count > 0) return vpad;
-
-        var kind = LoadConfiguredBackend();
-        if (kind == PadBackendKind.HidMaestro) return vpad;
-
-        IVirtualPad? probe = null;
-        try
-        {
-            probe = kind == PadBackendKind.Xbox360 ? new VirtualGamepad360() : new VirtualDs4Pad();
-            probe.Connect();
-            // 等集合数量稳定再返回：DS4 有多个 HID 集合且注册有先后，只取先到的
-            // 会导致另一个集合不被拉黑（泄漏通道）
-            int lastCount = -1;
-            var stableSince = DateTime.MinValue;
-            var deadline = DateTime.Now.AddSeconds(8);
-            while (DateTime.Now < deadline)
-            {
-                vpad = HidDeviceEnumerator.FindVirtualPadInstances();
-                if (vpad.Count != lastCount)
-                {
-                    lastCount = vpad.Count;
-                    stableSince = DateTime.Now;
-                }
-                else if (vpad.Count > 0 && (DateTime.Now - stableSince).TotalMilliseconds >= 1500)
-                    break;
-                Thread.Sleep(300);
-            }
-        }
-        catch { /* ViGEmBus 未装等情况：返回空，由调用方报错 */ }
-        finally
-        {
-            try { probe?.Dispose(); } catch { }
-        }
-        return vpad;
-    }
-
-    /// <summary>读配置里的手柄后端（提权子进程与 GUI 共享同一 config.json）；读取失败按默认 DS4。</summary>
-    private static PadBackendKind LoadConfiguredBackend()
-    {
-        try { return EfootballBot.Core.Config.AppConfig.Load().Pad.Backend; }
-        catch { return PadBackendKind.HidDs4; }
-    }
+        => HidDeviceEnumerator.FindVirtualPadInstances();
 
     /// <summary>
     /// 应用隔离：白名单并入游戏与本程序的完整镜像路径（游戏未传则自动从运行中的游戏进程解析；

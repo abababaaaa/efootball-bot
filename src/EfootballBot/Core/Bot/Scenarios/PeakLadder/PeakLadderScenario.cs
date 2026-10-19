@@ -14,7 +14,7 @@ namespace EfootballBot.Core.Bot.Scenarios.PeakLadder;
 /// 上×2+A 选单场比赛（手柄光标默认在取消）→ 可能的后续弹窗 A 推进 → 开赛（教练模式 AI 自动踢，
 /// 交共用比赛流程）。赛后回活动主页重读场次循环，直到场次为 0。
 /// 输入注意：国服游戏为提权进程，鼠标必须走后台 PostMessage 且本程序须以管理员运行
-/// （UIPI 拦截低权限注入；手柄 ViGEm 走内核不受限）；比赛起始页确认键是 RT 而非 A（国服特有）。
+/// （UIPI 拦截低权限注入；虚拟手柄输入不受限）；比赛起始页确认键是 RT 而非 A（国服特有）。
 /// 判定只用固定 UI 词；段位名/积分/赛季数/剩余天数等可变内容不作判定点。
 /// </summary>
 public sealed class PeakLadderScenario : IScenario

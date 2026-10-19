@@ -198,7 +198,6 @@ public partial class MainWindow
         ChkFbSharpDxCapture.IsChecked = _cfg.ModuleFallback.UseSharpDxCapture;
         ChkFbFp32Ocr.IsChecked = _cfg.ModuleFallback.UseFp32Ocr;
         ChkFbNoOcrDownscale.IsChecked = _cfg.ModuleFallback.DisableOcrDownscale;
-        CmbPadBackend.SelectedIndex = Math.Clamp((int)_cfg.Pad.Backend, 0, 2);
         ChkFbNoMouseTrajectory.IsChecked = _cfg.ModuleFallback.DisableMouseTrajectory;
         ChkFbNoFailureDumps.IsChecked = _cfg.ModuleFallback.DisableFailureDumps;
 
@@ -324,7 +323,6 @@ public partial class MainWindow
         _cfg.ModuleFallback.UseSharpDxCapture = ChkFbSharpDxCapture.IsChecked == true;
         _cfg.ModuleFallback.UseFp32Ocr = ChkFbFp32Ocr.IsChecked == true;
         _cfg.ModuleFallback.DisableOcrDownscale = ChkFbNoOcrDownscale.IsChecked == true;
-        _cfg.Pad.Backend = (PadBackendKind)Math.Clamp(CmbPadBackend.SelectedIndex, 0, 2);
         _cfg.ModuleFallback.DisableMouseTrajectory = ChkFbNoMouseTrajectory.IsChecked == true;
         _cfg.ModuleFallback.DisableFailureDumps = ChkFbNoFailureDumps.IsChecked == true;
 

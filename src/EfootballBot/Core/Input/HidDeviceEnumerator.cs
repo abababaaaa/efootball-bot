@@ -6,15 +6,16 @@ using Microsoft.Win32.SafeHandles;
 namespace EfootballBot.Core.Input;
 
 /// <summary>
-/// HID 设备枚举：ViGEm 虚拟手柄实例（路径前缀判定）与物理手柄实例（HID Usage 判定）。
+/// HID 设备枚举：虚拟手柄实例（路径前缀/驱动特征判定）与物理手柄实例（HID Usage 判定）。
 /// 黑名单条目格式 = 设备实例路径（如 HID\VID_045E&PID_028E\6&2DF92C3&0&0000）。
+/// ViGEm 前缀常量保留：旧版本写入 HidHide 黑名单的 ViGEm 实例条目仍需识别以精确清理。
 /// </summary>
 public static class HidDeviceEnumerator
 {
-    /// <summary>ViGEm 虚拟 Xbox360 手柄在 HID 层的固定硬件 ID 前缀（真实微软手柄走 XUSB 枚举器，不撞此路径）。</summary>
+    /// <summary>旧 ViGEm 虚拟 Xbox360 手柄在 HID 层的固定硬件 ID 前缀（仅用于清理旧黑名单条目）。</summary>
     public const string ViGEmInstancePrefix = @"HID\VID_045E&PID_028E";
 
-    /// <summary>ViGEm 虚拟 DualShock4 手柄的硬件 ID 前缀（与真实 DS4 同形，靠父设备判真假）。</summary>
+    /// <summary>旧 ViGEm 虚拟 DualShock4 手柄的硬件 ID 前缀（与真实 DS4 同形，靠父设备判真假）。</summary>
     public const string ViGEmDs4InstancePrefix = @"HID\VID_054C&PID_05C4";
 
     public static bool IsViGEmInstance(string instancePath)
@@ -113,22 +114,7 @@ public static class HidDeviceEnumerator
         catch { return null; }
     }
 
-    /// <summary>当前存在的 ViGEm 虚拟手柄实例路径（前缀 + 祖先链虚拟判定双重过滤）。</summary>
-    public static List<string> FindViGEmInstances()
-    {
-        var result = new List<string>();
-        foreach (var inst in EnumerateAllInstances())
-        {
-            if (!IsViGEmInstance(inst.InstancePath)) continue;
-            if (IsVirtualBusChild(inst.DevInst)) result.Add(inst.InstancePath);
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// 当前存在的虚拟手柄实例路径（全部后端：ViGEm Xbox 360 / ViGEm DS4 / HIDMaestro）。
-    /// HidHide 黑名单以此为准——DS4 默认后端的实例与真实 DS4 同形，必须经父设备双重判定。
-    /// </summary>
+    /// <summary>当前存在的虚拟手柄实例路径（当前仅 HIDMaestro；含旧黑名单里的 ViGEm 条目形态）。</summary>
     public static List<string> FindVirtualPadInstances()
     {
         var result = new List<string>();

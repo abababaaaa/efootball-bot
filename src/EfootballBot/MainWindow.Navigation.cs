@@ -100,26 +100,11 @@ public partial class MainWindow
 
     private void RunEnvChecks()
     {
-        // 虚拟手柄驱动：按当前后端切换探测（AppConfig.Pad.Backend，默认 HidDs4=ViGEm 双档共用 ViGEmBus）
-        bool padMissing;
-        if (_cfg.Pad.Backend == PadBackendKind.HidMaestro)
-        {
-            bool hidm = HidMaestroPad.IsDriverInstalled();
-            DotVigem.Fill = hidm ? BrushOk : BrushBad;
-            TxtVigem.Text = hidm ? "虚拟手柄驱动（HIDMaestro）" : "HIDMaestro 驱动未安装（开始挂机时自动装）";
-            BtnInstallVigem.Visibility = Visibility.Collapsed;
-            padMissing = !hidm;
-        }
-        else
-        {
-            bool vigem = VirtualGamepad360.IsDriverInstalled();
-            DotVigem.Fill = vigem ? BrushOk : BrushBad;
-            TxtVigem.Text = _cfg.Pad.Backend == PadBackendKind.Xbox360
-                ? "ViGEmBus 驱动（Xbox 360 旧版）"
-                : "ViGEmBus 驱动（DualShock4 隔离）";
-            BtnInstallVigem.Visibility = vigem ? Visibility.Collapsed : Visibility.Visible;
-            padMissing = !vigem;
-        }
+        // 虚拟手柄驱动：HIDMaestro（唯一后端，驱动在开始挂机首次连接时经 SDK 幂等安装）
+        bool hidm = HidMaestroPad.IsDriverInstalled();
+        DotPad.Fill = hidm ? BrushOk : BrushBad;
+        TxtPad.Text = hidm ? "虚拟手柄驱动（HIDMaestro）" : "HIDMaestro 驱动未安装（开始挂机时自动装）";
+        bool padMissing = !hidm;
 
         // WGC 后台捕获
         bool wgc = WindowCapture.IsSupported();
@@ -155,9 +140,7 @@ public partial class MainWindow
 
         if (padMissing)
         {
-            AppendLog(_cfg.Pad.Backend == PadBackendKind.HidMaestro
-                ? "HIDMaestro 驱动未安装：开始挂机时会自动下载 SDK 并安装（需管理员授权，首次约 5-15 秒）；若安装失败可到 设置→手柄与输入 换回 DualShock4 后端。"
-                : "未检测到 ViGEmBus 驱动，虚拟手柄无法工作。点击左侧「安装 ViGEmBus 驱动」，装完重启本程序。", LogLevel.Warn);
+            AppendLog("HIDMaestro 驱动未安装：开始挂机时会自动下载 SDK 并安装（需管理员授权，首次约 5-15 秒）。", LogLevel.Warn);
         }
         if (win is null)
             AppendLog(cn
@@ -181,7 +164,7 @@ public partial class MainWindow
             HidHideManager.WriteShimScripts();
 
             bool padHoldingSlot0 = await Task.Run(() =>
-                VirtualGamepad360.IsSlot0Occupied()
+                PadBackendProbe.IsSlot0Occupied()
                 && HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0);
             if (padHoldingSlot0 && !await Task.Run(HidHideManager.TasksReady))
             {
@@ -210,39 +193,6 @@ public partial class MainWindow
     private void BtnWindowRescue_Click(object sender, RoutedEventArgs e)
         => EfootballBot.Core.System.BackgroundParker.RescueGameWindow(
             (msg, lv) => Dispatcher.BeginInvoke(() => AppendLog(msg, lv)));
-
-    private async void BtnInstallVigem_Click(object sender, RoutedEventArgs e)
-    {
-        BtnInstallVigem.IsEnabled = false;
-        BtnInstallVigem.Content = "正在安装…";
-        try
-        {
-            var installer = new DriverInstaller(msg => AppendLog(msg, LogLevel.Info));
-            DriverSetupResult result = await installer.InstallAsync();
-
-            LogLevel level = result.Kind switch
-            {
-                DriverSetupResultKind.Installed or DriverSetupResultKind.AlreadyPresent when result.DriverReady
-                    => LogLevel.Success,
-                DriverSetupResultKind.RebootRequired => LogLevel.Warn,
-                DriverSetupResultKind.UserCancelled or DriverSetupResultKind.Timeout => LogLevel.Warn,
-                DriverSetupResultKind.Failed => LogLevel.Error,
-                _ => LogLevel.Warn,
-            };
-
-            AppendLog(result.Message, level);
-            RunEnvChecks();
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"驱动安装异常：{ex}", LogLevel.Error);
-        }
-        finally
-        {
-            BtnInstallVigem.Content = "安装内置驱动";
-            BtnInstallVigem.IsEnabled = true;
-        }
-    }
 
     // ---------------- 左栏导航切换 ----------------
 
