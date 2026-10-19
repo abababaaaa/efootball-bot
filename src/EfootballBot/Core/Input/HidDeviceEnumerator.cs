@@ -14,8 +14,37 @@ public static class HidDeviceEnumerator
     /// <summary>ViGEm 虚拟 Xbox360 手柄在 HID 层的固定硬件 ID 前缀（真实微软手柄走 XUSB 枚举器，不撞此路径）。</summary>
     public const string ViGEmInstancePrefix = @"HID\VID_045E&PID_028E";
 
+    /// <summary>ViGEm 虚拟 DualShock4 手柄的硬件 ID 前缀（与真实 DS4 同形，靠父设备判真假）。</summary>
+    public const string ViGEmDs4InstancePrefix = @"HID\VID_054C&PID_05C4";
+
     public static bool IsViGEmInstance(string instancePath)
         => instancePath.StartsWith(ViGEmInstancePrefix, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 黑名单/名单用的「虚拟手柄实例路径」判定（纯字符串，不打开设备）：
+    /// ViGEm Xbox360 前缀 ∥ ViGEm DS4 前缀 ∥ HIDMaestro 驱动特征（设备路径含驱动名，
+    /// 具体形态待实机校准，先宽匹配）。真实 DS4 与虚拟 DS4 路径同形——凡需分辨真假
+    /// （如禁用物理手柄）必须再过父设备判定，此处仅用于「我们加入黑名单的虚拟设备」。
+    /// </summary>
+    public static bool IsVirtualPadInstancePath(string instancePath)
+        => IsViGEmInstance(instancePath)
+           || instancePath.StartsWith(ViGEmDs4InstancePrefix, StringComparison.OrdinalIgnoreCase)
+           || instancePath.Contains("HIDMAESTRO", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>设备节点的父设备是否为虚拟手柄总线（ViGEmBus / HIDMaestro）。</summary>
+    public static bool IsVirtualBusChild(int devInst)
+    {
+        try
+        {
+            if (CM_Get_Parent(out int parent, devInst, 0) != 0) return true; // 无法判定→按虚拟兜底
+            var sb = new StringBuilder(512);
+            if (CM_Get_Device_ID(parent, sb, sb.Capacity, 0) != 0) return true;
+            var id = sb.ToString();
+            return id.StartsWith("ViGEmBus", StringComparison.OrdinalIgnoreCase)
+                   || id.Contains("HIDMAESTRO", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return true; }
+    }
 
     /// <summary>
     /// 设备接口路径 → 设备实例路径：
@@ -99,6 +128,21 @@ public static class HidDeviceEnumerator
     }
 
     /// <summary>
+    /// 当前存在的虚拟手柄实例路径（全部后端：ViGEm Xbox 360 / ViGEm DS4 / HIDMaestro）。
+    /// HidHide 黑名单以此为准——DS4 默认后端的实例与真实 DS4 同形，必须经父设备双重判定。
+    /// </summary>
+    public static List<string> FindVirtualPadInstances()
+    {
+        var result = new List<string>();
+        foreach (var inst in EnumerateAllInstances())
+        {
+            if (!IsVirtualPadInstancePath(inst.InstancePath)) continue;
+            if (IsVirtualBusChild(inst.DevInst)) result.Add(inst.InstancePath);
+        }
+        return result;
+    }
+
+    /// <summary>
     /// XInput 可见手柄的 HID 集合实例路径特征：XUSB/xinputhid 子设备必带 &amp;IG_00…IG_03 段
     /// （Xbox 360/One/兼容 pad 均如此）。仅凭路径判定、不需要打开设备——
     /// HidHide Active 时对非白名单进程连 access=0 的查询打开都会拒绝，
@@ -110,16 +154,33 @@ public static class HidDeviceEnumerator
             global::System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     /// <summary>
-    /// 当前存在的物理（XInput 可见）手柄设备节点：IG 段特征 + 父设备非 ViGEmBus
-    /// （排除本程序自己的虚拟手柄——其路径与真实 360 手柄完全同形）。全程不打开设备。
+    /// 真实 PlayStation 系手柄的硬件 ID 前缀（DS4 两代/DualSense/Edge）：
+    /// 不带 XInput 的 &amp;IG_ 段，旧正则看不见——纯 HID 后端下它们会经 DirectInput
+    /// 路径与虚拟手柄同时驱动游戏，禁用清单必须覆盖（靠父设备判定排除虚拟 DS4）。
+    /// </summary>
+    private static readonly string[] PhysicalPlayStationPrefixes =
+    {
+        @"HID\VID_054C&PID_05C4", // DualShock4 一代
+        @"HID\VID_054C&PID_09CC", // DualShock4 二代
+        @"HID\VID_054C&PID_0CE6", // DualSense
+        @"HID\VID_054C&PID_0E5F", // DualSense Edge
+    };
+
+    /// <summary>
+    /// 当前存在的物理手柄设备节点：XInput 可见（&amp;IG_ 段特征）或 PlayStation 系前缀，
+    /// 且父设备非虚拟总线（排除本程序自己的虚拟手柄——Xbox360 档与真实 360 手柄、
+    /// DS4 档与真实 DS4 路径均完全同形）。全程不打开设备。
     /// </summary>
     public static List<HidInstance> FindPhysicalGamepadDevNodes()
     {
         var result = new List<HidInstance>();
         foreach (var inst in EnumerateAllInstances())
         {
-            if (!IsXInputStyleInstance(inst.InstancePath)) continue;
-            if (IsViGEmBusChild(inst.DevInst)) continue;
+            bool gamepad = IsXInputStyleInstance(inst.InstancePath)
+                || PhysicalPlayStationPrefixes.Any(p =>
+                    inst.InstancePath.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+            if (!gamepad) continue;
+            if (IsVirtualBusChild(inst.DevInst)) continue;
             result.Add(inst);
         }
         return result;

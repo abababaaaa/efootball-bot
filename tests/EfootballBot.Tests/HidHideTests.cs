@@ -114,17 +114,18 @@ public class HidHideTests
     }
 
     [Fact]
-    public void IsolateVigemPrefixEntries_Splits()
+    public void IsolateVirtualPrefixEntries_Splits()
     {
         var bl = new List<string>
         {
-            @"HID\VID_045E&PID_028E\6&2DF92C3&0&0000",
+            @"HID\VID_045E&PID_028E\6&2DF92C3&0&0000", // 虚拟 Xbox360
             @"HID\VID_045E&PID_028E\9&OLDINSTANCE",
+            @"HID\VID_054C&PID_05C4\6&DS4INSTANCE",    // 虚拟 DS4（与真实 DS4 同形，字符串层面同判）
             @"HID\VID_1532&PID_0900\6&abcd",
         };
-        var (keep, vigemEntries) = HidHideManager.SplitByVigemPrefix(bl);
+        var (keep, virtualEntries) = HidHideManager.SplitByVirtualPrefix(bl);
         Assert.Single(keep);
-        Assert.Equal(2, vigemEntries.Count);
+        Assert.Equal(3, virtualEntries.Count);
     }
 
     // ---------- 配置序列化 ----------

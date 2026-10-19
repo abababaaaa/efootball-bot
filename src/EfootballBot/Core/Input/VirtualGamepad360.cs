@@ -27,15 +27,18 @@ public enum PadButton : ushort
 public enum PadDir { Up, Down, Left, Right }
 
 /// <summary>
-/// ViGEm 虚拟 Xbox 360 手柄（托管封装）。系统按 XInput 轮询，
-/// 游戏窗口失去焦点 / 位于后台时输入依然持续生效。
-/// 依赖 ViGEmBus 驱动（内核服务）。默认手柄后端；实验后端见 <see cref="HidMaestroPad"/>。
+/// ViGEm 虚拟 Xbox 360 手柄（托管封装）。XInput 系统级设备：槽位全机共享、
+/// 所有游戏都能看到并响应其输入（旧后端输入泄漏的根源；HidHide 对 XInput 无效，实测）。
+/// 仅作兼容回退——游戏不认纯 HID 手柄时切到这一档保底。
+/// 依赖 ViGEmBus 驱动（内核服务）；纯 HID 默认后端见 <see cref="VirtualDs4Pad"/>。
 /// </summary>
 public sealed class VirtualGamepad360 : IVirtualPad
 {
     private ViGEmClient? _client;
     private IXbox360Controller? _pad;
     private volatile bool _connected;
+
+    public PadBackendKind Kind => PadBackendKind.Xbox360;
 
     /// <summary>手柄在系统中的序号（0-3），-1 表示尚未取得。</summary>
     public int UserIndex { get; private set; } = -1;

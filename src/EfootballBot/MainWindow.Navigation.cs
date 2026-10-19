@@ -100,9 +100,9 @@ public partial class MainWindow
 
     private void RunEnvChecks()
     {
-        // 虚拟手柄驱动：按当前后端切换探测（ModuleFallback.EnableHidMaestro，默认 ViGEmBus）
+        // 虚拟手柄驱动：按当前后端切换探测（AppConfig.Pad.Backend，默认 HidDs4=ViGEm 双档共用 ViGEmBus）
         bool padMissing;
-        if (_cfg.ModuleFallback.EnableHidMaestro)
+        if (_cfg.Pad.Backend == PadBackendKind.HidMaestro)
         {
             bool hidm = HidMaestroPad.IsDriverInstalled();
             DotVigem.Fill = hidm ? BrushOk : BrushBad;
@@ -114,7 +114,9 @@ public partial class MainWindow
         {
             bool vigem = VirtualGamepad360.IsDriverInstalled();
             DotVigem.Fill = vigem ? BrushOk : BrushBad;
-            TxtVigem.Text = "ViGEmBus 驱动";
+            TxtVigem.Text = _cfg.Pad.Backend == PadBackendKind.Xbox360
+                ? "ViGEmBus 驱动（Xbox 360 旧版）"
+                : "ViGEmBus 驱动（DualShock4 隔离）";
             BtnInstallVigem.Visibility = vigem ? Visibility.Collapsed : Visibility.Visible;
             padMissing = !vigem;
         }
@@ -153,8 +155,8 @@ public partial class MainWindow
 
         if (padMissing)
         {
-            AppendLog(_cfg.ModuleFallback.EnableHidMaestro
-                ? "HIDMaestro 驱动未安装：开始挂机时会自动下载 SDK 并安装（需管理员授权，首次约 5-15 秒）；若安装失败可到更新页取消勾选「启用 HIDMaestro」回退 ViGEmBus。"
+            AppendLog(_cfg.Pad.Backend == PadBackendKind.HidMaestro
+                ? "HIDMaestro 驱动未安装：开始挂机时会自动下载 SDK 并安装（需管理员授权，首次约 5-15 秒）；若安装失败可到 设置→手柄与输入 换回 DualShock4 后端。"
                 : "未检测到 ViGEmBus 驱动，虚拟手柄无法工作。点击左侧「安装 ViGEmBus 驱动」，装完重启本程序。", LogLevel.Warn);
         }
         if (win is null)

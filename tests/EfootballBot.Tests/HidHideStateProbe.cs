@@ -10,7 +10,7 @@ public class HidHideStateProbe
     public void Probe()
     {
         var s = HidHideManager.QueryStatus();
-        _out.WriteLine($"DriverInstalled={s.DriverInstalled} Active={s.Active} VigemHidden={s.VigemHidden} VigemCount={s.VigemInstanceCount} Err={s.Error}");
+        _out.WriteLine($"DriverInstalled={s.DriverInstalled} Active={s.Active} VirtualHidden={s.VirtualHidden} VirtualCount={s.VirtualInstanceCount} Err={s.Error}");
         _out.WriteLine("WHITELIST:");
         foreach (var w in s.Whitelist) _out.WriteLine("  " + w);
         _out.WriteLine("BLACKLIST:");

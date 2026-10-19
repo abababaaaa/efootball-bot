@@ -53,8 +53,9 @@ public sealed class BotEngine : IDisposable
     public AppConfig Config => _cfg;
     /// <summary>捕获家族开关：true=整个捕获家族走旧 SharpDX 实现（回退），false=Vortice 新实现（默认）。</summary>
     private readonly bool _captureUseSharpDx;
-    public readonly IVirtualPad Pad360;
-    public readonly Pad Pad;
+    /// <summary>虚拟手柄（连接失败按 <see cref="PadBackendInfo.FallbackChain"/> 回退时整体换实例）。</summary>
+    public IVirtualPad Pad360 { get; private set; }
+    public Pad Pad { get; private set; }
     public readonly WindowCapture Capture;
     /// <summary>DXGI 桌面复制捕获器（Vortice/SharpDX 按 _captureUseSharpDx 二选一，均实现 ICaptureProvider）。</summary>
     private ICaptureProvider? _dxgi;
@@ -126,26 +127,11 @@ public sealed class BotEngine : IDisposable
         // WGC 设备/GPU 缩放（WindowCapture）与 DXGI 捕获器必须走同一家族，绝不混挂设备指针
         _captureUseSharpDx = cfg.ModuleFallback.UseSharpDxCapture;
         Capture = new WindowCapture(_captureUseSharpDx);
-        // 手柄后端（ModuleFallback.EnableHidMaestro，默认 false=ViGEmBus）。
-        // HIDMaestro 为实验后端：SDK 下载/反射加载/驱动安装任一步失败即回退 ViGEmBus 并告警；
-        // 两者绝不同时建手柄（会出现两个相同 VID/PID 设备）。
-        if (cfg.ModuleFallback.EnableHidMaestro)
-        {
-            try
-            {
-                Pad360 = new HidMaestroPad(m => LogInternal(m, LogLevel.Info));
-                LogInternal("虚拟手柄后端：HIDMaestro（实验）", LogLevel.Info);
-            }
-            catch (Exception ex)
-            {
-                LogInternal($"HIDMaestro 后端不可用，回退 ViGEmBus：{ex.Message}", LogLevel.Warn);
-                Pad360 = new VirtualGamepad360();
-            }
-        }
-        else
-        {
-            Pad360 = new VirtualGamepad360();
-        }
+        // 手柄后端（AppConfig.Pad.Backend，默认 HidDs4=纯 HID、其他应用不可见）。
+        // 构造只做选择；连接失败按回退链换实例重连（见 PrepareSessionAsync）。
+        // 任一时刻只存在一只虚拟手柄（同 VID/PID 双设备会扰乱枚举）。
+        Pad360 = CreatePad(cfg.Pad.Backend);
+        LogInternal($"虚拟手柄后端：{PadBackendInfo.DisplayName(cfg.Pad.Backend)}", LogLevel.Info);
         Pad = new Pad(Pad360, cfg.Timing);
 
         // EP 降级工厂：OCR 与 YOLO 共享同一 SessionOptions（进程内仅一份 onnxruntime.dll）
@@ -390,9 +376,10 @@ public sealed class BotEngine : IDisposable
             LogInternal($"独显偏好检查失败（不影响使用）：{ex.Message}", LogLevel.Debug);
         }
 
-        if (connectPad && Pad360 is not HidMaestroPad && !VirtualGamepad360.IsDriverInstalled())
+        if (connectPad && Pad360.Kind != PadBackendKind.HidMaestro && !VirtualGamepad360.IsDriverInstalled())
         {
             // 自动安装内嵌的 ViGEmBus 驱动（提权静默装），不再直接失败让用户手动去环境检测。
+            // ViGEm 两档后端（DualShock4 默认 / Xbox 360 回退）共用该驱动；
             // HIDMaestro 后端不走此路径（驱动在首次 Connect 时经 SDK 幂等安装）。
             LogInternal("未检测到 ViGEmBus 驱动：自动开始安装（请在弹出的授权窗口点「是」）…", LogLevel.Warn);
             var installCts = new CancellationTokenSource(TimeSpan.FromMinutes(6));
@@ -447,28 +434,34 @@ public sealed class BotEngine : IDisposable
 
         if (connectPad)
         {
-            // 真实手柄占用玩家 1 时：按设置自动禁用真实手柄（设备管理器级）释放玩家 1，
-            // 无需用户拔下手柄或重启游戏。不走 HidHide 黑名单——它只过滤 HID 层打开，
-            // XInput（XUSB IOCTL）不吃这套（2026-10-12 实机：黑名单+Active=1 仍占 slot0），
-            // 设备节点禁用对 XInput/DInput 全部生效。全局生效：挂机期间真实手柄不可见，
-            // 关闭本程序时由 GUI 触发恢复任务自动还原。
+            // 存在已启用的物理手柄时：按设置自动禁用（设备管理器级）——XInput 手柄释放玩家 1，
+            // PS 系手柄堵住 DirectInput 并发通道，虚拟手柄成为游戏唯一可见的手柄。
+            // 不走 HidHide 黑名单——它只过滤 HID 层打开，XInput（XUSB IOCTL）不吃这套
+            //（2026-10-12 实机：黑名单+Active=1 仍占 slot0），设备节点禁用对全部路径生效。
+            // 全局生效：挂机期间真实手柄不可见，停止挂机时自动恢复。
+            // 触发条件用「物理节点存在」而非仅 slot0 占用：停止→立即重启时，恢复任务可能
+            // 在本次检测之后才重新启用手柄，仅查 XInput 槽位会漏掉这个竞态与 PS 手柄。
             // 本进程已持有虚拟手柄（Stop→Start 热重启）时 slot0 是我们自己的，直接跳过。
-            if (!Pad360.IsConnected && Input.VirtualGamepad360.IsSlot0Occupied()
-                && _cfg.HidHide.HidePhysicalGamepad)
+            if (!Pad360.IsConnected && _cfg.HidHide.HidePhysicalGamepad
+                && Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0)
             {
-                LogInternal("玩家 1 被真实手柄占用：自动禁用真实手柄以释放玩家 1（退出程序后自动恢复）…", LogLevel.Warn);
+                LogInternal("检测到真实手柄：自动禁用以让虚拟手柄独占游戏输入（停止挂机时自动恢复）…", LogLevel.Warn);
                 Input.HidHideManager.RequestPadHide();
                 var deadline = DateTime.Now.AddSeconds(20);
-                while (Input.VirtualGamepad360.IsSlot0Occupied() && DateTime.Now < deadline)
+                while (Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0
+                       && DateTime.Now < deadline)
                     await Task.Delay(500);
-                if (Input.VirtualGamepad360.IsSlot0Occupied())
-                    LogInternal("自动禁用未生效（提权计划任务未注册或执行失败）", LogLevel.Warn);
+                if (Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0)
+                    LogInternal("自动禁用未生效（提权计划任务未注册或执行失败）——真实手柄可能与虚拟手柄同时生效", LogLevel.Warn);
                 else
-                    LogInternal("玩家 1 已释放（真实手柄已禁用，关闭本程序后自动恢复）", LogLevel.Success);
+                    LogInternal("真实手柄已暂时禁用（虚拟手柄独占输入）", LogLevel.Success);
             }
-            Pad360.Connect();
+            await ConnectPadWithFallbackAsync();
             _ = Task.Run(EnsureHidHideIsolation); // 静默检查虚拟手柄黑名单覆盖（不阻塞启动）
-            LogInternal($"虚拟手柄已连接（XInput 玩家 {Pad360.UserIndex + 1}）", LogLevel.Success);
+            LogInternal(PadBackendInfo.IsXInputVisible(Pad360.Kind)
+                ? $"虚拟手柄已连接（XInput 玩家 {Pad360.UserIndex + 1}；旧后端：其他应用也能看到这只手柄）"
+                : "虚拟手柄已连接（纯 HID 独占：其他应用/游戏完全看不到这只手柄）",
+                LogLevel.Success);
         }
         else
         {
@@ -478,6 +471,46 @@ public sealed class BotEngine : IDisposable
         Stats.StartedAt = DateTime.Now;
         _cts = new CancellationTokenSource();
         return _cts.Token;
+    }
+
+    /// <summary>按后端种类创建虚拟手柄实例（仅构造不连接；连接回退见 ConnectPadWithFallbackAsync）。</summary>
+    private IVirtualPad CreatePad(PadBackendKind kind) => kind switch
+    {
+        PadBackendKind.HidMaestro => new HidMaestroPad(m => LogInternal(m, LogLevel.Info)),
+        PadBackendKind.Xbox360 => new VirtualGamepad360(),
+        _ => new VirtualDs4Pad(),
+    };
+
+    /// <summary>
+    /// 连接虚拟手柄；失败时按 <see cref="PadBackendInfo.FallbackChain"/> 换实例重试
+    /// （纯 HID 档互为回退，最终落 Xbox 360 旧版保底）。回退必告警：隔离等级在降级。
+    /// 任一时刻全系统只有一只虚拟手柄（回退前先拔掉旧实例）。
+    /// </summary>
+    private async Task ConnectPadWithFallbackAsync()
+    {
+        PadBackendKind[] chain = PadBackendInfo.FallbackChain(_cfg.Pad.Backend);
+        for (int i = 0; i < chain.Length; i++)
+        {
+            if (Pad360.Kind != chain[i])
+            {
+                try { Pad360.Dispose(); } catch { }
+                Pad360 = CreatePad(chain[i]);
+                Pad = new Pad(Pad360, _cfg.Timing);
+            }
+
+            try
+            {
+                Pad360.Connect();
+                if (i > 0)
+                    LogInternal($"已回退到 {PadBackendInfo.DisplayName(chain[i])}（手柄隔离等级降级：该后端对其他应用可见）", LogLevel.Warn);
+                return;
+            }
+            catch (Exception ex)
+            {
+                LogInternal($"{PadBackendInfo.DisplayName(chain[i])} 连接失败：{ex.Message}", LogLevel.Warn);
+            }
+        }
+        throw new InvalidOperationException("所有虚拟手柄后端均连接失败，请查看上方日志；也可到 设置→手柄与输入 更换后端后重试。");
     }
 
     /// <summary>
@@ -492,21 +525,21 @@ public sealed class BotEngine : IDisposable
             var hh = _cfg.HidHide;
             if (!hh.Enabled || !Input.HidHideManager.IsDriverInstalled()) return;
 
-            // ViGEm 设备经系统注册有延迟，最多等 3 秒
-            List<string> vigem = new();
+            // 虚拟手柄设备经系统注册有延迟，最多等 3 秒
+            List<string> vpad = new();
             for (int i = 0; i < 10; i++)
             {
-                vigem = Input.HidDeviceEnumerator.FindViGEmInstances();
-                if (vigem.Count > 0) break;
+                vpad = Input.HidDeviceEnumerator.FindVirtualPadInstances();
+                if (vpad.Count > 0) break;
                 await Task.Delay(300);
             }
-            if (vigem.Count == 0) return;
+            if (vpad.Count == 0) return;
 
             var bl = Input.HidHideIoctl.GetMultiString(Input.HidHideIoctl.IoctlGetBlacklist);
-            if (vigem.All(v => bl.Contains(v, StringComparer.OrdinalIgnoreCase)))
+            if (vpad.All(v => bl.Contains(v, StringComparer.OrdinalIgnoreCase)))
                 return; // 已覆盖
 
-            LogInternal($"检测到虚拟手柄实例未加入 HidHide 黑名单（{string.Join(";", vigem)}），触发静默同步", LogLevel.Info);
+            LogInternal($"检测到虚拟手柄实例未加入 HidHide 黑名单（{string.Join(";", vpad)}），触发静默同步", LogLevel.Info);
             Input.HidHideManager.RunSyncTaskSilently();
             await Task.Delay(2500);
 
@@ -514,7 +547,7 @@ public sealed class BotEngine : IDisposable
             for (int i = 0; i < 12; i++)
             {
                 var st = Input.HidHideManager.QueryStatus();
-                if (st.Active && st.VigemHidden)
+                if (st.Active && st.VirtualHidden)
                 {
                     var gamePath = string.IsNullOrEmpty(hh.GameImagePath)
                         ? Input.HidHideManager.ResolveGameImagePath()
@@ -706,6 +739,12 @@ public sealed class BotEngine : IDisposable
     {
         try { _cts?.Cancel(); } catch { }
         try { Pad360.ResetAll(); } catch { }
+        // 停止即拔掉虚拟手柄：其他应用立即看不到任何手柄（旧实现保持在线到引擎销毁，
+        // 用户停了挂机别的游戏里还挂着一只“幽灵手柄”）。下次开始重新连接。
+        try { Pad360.Disconnect(); } catch { }
+        // 本次挂机禁用过真实手柄：停止即恢复（不再等退出程序），把手柄还给用户
+        if (_cfg.HidHide.HidePhysicalGamepad && Input.PhysicalPadControl.HasPendingRestore())
+            Input.HidHideManager.RunTaskSilently(Input.HidHideManager.PadRestoreTaskName);
         // 先还原后台停靠的窗口位置，再断捕获（还原依赖窗口仍在捕获会话里无影响，但先还原能让用户立刻看到游戏）
         try { _parker?.Stop(); } catch { }
         // 显式停止捕获会话：挂机停止后不再后台抓帧。

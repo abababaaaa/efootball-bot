@@ -2,6 +2,7 @@ using System.Globalization;
 using System.IO;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using EfootballBot.Core.Input;
 using EfootballBot.Core.System;
 using EfootballBot.Core.Vision;
 
@@ -221,8 +222,8 @@ public sealed class ModuleFallbackConfig
     /// <summary>true = OCR 关闭高分辨率降采样（4K 级画面默认压缩到 1080p 再识别；高分屏识别变差时勾选）。</summary>
     public bool DisableOcrDownscale { get; set; } = false;
 
-    /// <summary>true = 虚拟手柄改用 HIDMaestro 驱动（实验功能）；默认 false = ViGEmBus。
-    /// 注意与其它项语义相反：这是「启用新版」，勾上才算切换，取消勾选即回 ViGEmBus。</summary>
+    /// <summary>true = 虚拟手柄改用 HIDMaestro 驱动（旧开关，已由 Pad.Backend 取代：
+    /// 仅保留 JSON 反序列化兼容，加载时迁移进 Pad.Backend 后清零，UI 不再读写）。</summary>
     public bool EnableHidMaestro { get; set; } = false;
 
     /// <summary>true = 鼠标点击关闭拟人移动轨迹（回退单步跳变到目标位置）。</summary>
@@ -230,6 +231,29 @@ public sealed class ModuleFallbackConfig
 
     /// <summary>true = 挂机异常停止时不自动保存画面截图留档。</summary>
     public bool DisableFailureDumps { get; set; } = false;
+}
+
+/// <summary>虚拟手柄后端配置。</summary>
+public sealed class PadConfig
+{
+    /// <summary>
+    /// 虚拟手柄后端。默认 HidDs4（纯 HID 设备，其他应用/游戏完全不可见，输入不再泄漏）；
+    /// 游戏不认纯 HID 手柄时切 Xbox360 旧版保底（输入会到达所有游戏，隔离降级）。
+    /// </summary>
+    public PadBackendKind Backend { get; set; } = PadBackendKind.HidDs4;
+
+    /// <summary>
+    /// 旧版布尔开关迁移：EnableHidMaestro=true → HidMaestro 后端；迁移后清零旧开关，
+    /// 防止每次加载反复覆盖用户在 UI 里的新选择。
+    /// </summary>
+    public void MigrateFrom(ModuleFallbackConfig legacy)
+    {
+        if (legacy.EnableHidMaestro)
+        {
+            Backend = PadBackendKind.HidMaestro;
+            legacy.EnableHidMaestro = false;
+        }
+    }
 }
 
 /// <summary>手柄隔离（HidHide）配置。驱动侧持久化到注册表，此处仅存 UI 快照与回滚清单。</summary>
@@ -446,6 +470,9 @@ public sealed class AppConfig
     // —— 手柄隔离（HidHide）——
     public HidHideConfig HidHide { get; set; } = new();
 
+    // —— 虚拟手柄后端 ——
+    public PadConfig Pad { get; set; } = new();
+
     // —— 我的联赛道具 ——
     public MyLeagueConfig MyLeague { get; set; } = new();
 
@@ -490,6 +517,7 @@ public sealed class AppConfig
                 var cfg = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(ConfigPath), JsonOpts) ?? new AppConfig();
                 cfg.Timing.MigrateIdleTapDefaults();
                 cfg.HidHide.MigrateDefaults();
+                cfg.Pad.MigrateFrom(cfg.ModuleFallback);
                 return cfg;
             }
         }

@@ -42,6 +42,8 @@ public sealed class HidMaestroPad : IVirtualPad
     public int UserIndex { get; private set; } = -1;
     public bool IsConnected => _connected;
 
+    public PadBackendKind Kind => PadBackendKind.HidMaestro;
+
     public HidMaestroPad(Action<string>? log = null) => _log = log;
 
     /// <summary>驱动是否已安装（离线判据：DriverStore 同时存在两份 inf 目录；GUI 环境检测用，不加载 DLL）。</summary>
@@ -68,10 +70,7 @@ public sealed class HidMaestroPad : IVirtualPad
     {
         if (_connected) return;
 
-        if (PadBackendProbe.SlotZeroOccupiedMessage(PadBackendProbe.IsSlot0Occupied()) is { } blockMsg)
-            throw new InvalidOperationException(blockMsg);
-
-        var before = PadBackendProbe.SnapshotOccupiedSlots();
+        // 纯 HID 后端无 XInput 槽位概念：不做玩家 1 占用阻断，也不做 XInput 槽位探测
         var dllPath = EnsureSdk();
 
         try
@@ -134,7 +133,6 @@ public sealed class HidMaestroPad : IVirtualPad
         }
 
         _connected = true;
-        UserIndex = PadBackendProbe.ProbeNewSlot(before);
         ResetAll();
     }
 

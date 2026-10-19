@@ -198,7 +198,7 @@ public partial class MainWindow
         ChkFbSharpDxCapture.IsChecked = _cfg.ModuleFallback.UseSharpDxCapture;
         ChkFbFp32Ocr.IsChecked = _cfg.ModuleFallback.UseFp32Ocr;
         ChkFbNoOcrDownscale.IsChecked = _cfg.ModuleFallback.DisableOcrDownscale;
-        ChkFbHidMaestro.IsChecked = _cfg.ModuleFallback.EnableHidMaestro;
+        CmbPadBackend.SelectedIndex = Math.Clamp((int)_cfg.Pad.Backend, 0, 2);
         ChkFbNoMouseTrajectory.IsChecked = _cfg.ModuleFallback.DisableMouseTrajectory;
         ChkFbNoFailureDumps.IsChecked = _cfg.ModuleFallback.DisableFailureDumps;
 
@@ -324,7 +324,7 @@ public partial class MainWindow
         _cfg.ModuleFallback.UseSharpDxCapture = ChkFbSharpDxCapture.IsChecked == true;
         _cfg.ModuleFallback.UseFp32Ocr = ChkFbFp32Ocr.IsChecked == true;
         _cfg.ModuleFallback.DisableOcrDownscale = ChkFbNoOcrDownscale.IsChecked == true;
-        _cfg.ModuleFallback.EnableHidMaestro = ChkFbHidMaestro.IsChecked == true;
+        _cfg.Pad.Backend = (PadBackendKind)Math.Clamp(CmbPadBackend.SelectedIndex, 0, 2);
         _cfg.ModuleFallback.DisableMouseTrajectory = ChkFbNoMouseTrajectory.IsChecked == true;
         _cfg.ModuleFallback.DisableFailureDumps = ChkFbNoFailureDumps.IsChecked == true;
 
@@ -766,7 +766,7 @@ public partial class MainWindow
             else if (_cfg.HidHide.Enabled)
             {
                 // 设备离线（未挂机）时不打扰：Active 且已有快照即视为已配置，变化由计划任务 sync 兜底
-                bool onlineUnhidden = status.VigemInstanceCount > 0 && !status.VigemHidden;
+                bool onlineUnhidden = status.VirtualInstanceCount > 0 && !status.VirtualHidden;
                 TxtHidHideStatus.Text = (!status.Active || onlineUnhidden)
                     ? "待配置：尚未对当前虚拟手柄生效"
                     : "已开启：虚拟手柄仅游戏内可见";

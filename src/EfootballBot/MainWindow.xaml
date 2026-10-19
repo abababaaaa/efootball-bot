@@ -1304,6 +1304,36 @@
 
                     <!-- ============ 二级页：手柄与输入 ============ -->
                     <StackPanel x:Name="SetTabInput" Visibility="Collapsed">
+                    <!-- ===== 虚拟手柄后端 ===== -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Text="虚拟手柄后端" Style="{StaticResource H2}"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="手柄模拟方式" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="CmbPadBackend" Width="300" Margin="10,0,0,0" SelectedIndex="0">
+                                    <ComboBoxItem Content="DualShock4 隔离（推荐）"/>
+                                    <ComboBoxItem Content="HIDMaestro 隔离（实验）"/>
+                                    <ComboBoxItem Content="Xbox 360 旧版（兼容回退）"/>
+                                </ComboBox>
+                            </StackPanel>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,6,0,0">
+                                <Run Text="默认模拟为 DualShock4 手柄（纯 HID 设备）："/>
+                                <Run Text="其他应用和游戏完全看不到这只手柄" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="，挂机时你玩别的游戏不会收到机器人按键；配合下方「手柄隔离」，全系统只有游戏可见。"/>
+                            </TextBlock>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,4,0,0">
+                                <Run Text="若游戏不认 DualShock4 手柄（开始挂机后游戏毫无反应），切到"/>
+                                <Run Text="Xbox 360 旧版" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="：兼容性最好，但所有游戏都能看到这只手柄。"/>
+                                <Run Text="更改在下次开始挂机时生效" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="。"/>
+                            </TextBlock>
+                        </StackPanel>
+                    </Border>
+
                     <!-- ===== 手柄隔离 ===== -->
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                         <StackPanel>
@@ -1333,7 +1363,7 @@
                                     <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}"
                                                TextWrapping="Wrap" MaxWidth="520" Margin="0,3,0,0">
                                         <Run Text="真实手柄会占用玩家 1，虚拟手柄输入将被游戏忽略。开启后"/>
-                                        <Run Text="启动挂机自动禁用真实手柄、退出自动恢复" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                        <Run Text="启动挂机自动禁用真实手柄、停止挂机即自动恢复" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
                                         <Run Text="；首次需管理员授权注册系统任务，之后"/>
                                         <Run Text="全自动" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
                                         <Run Text="。"/>
@@ -1630,7 +1660,6 @@
                             <CheckBox x:Name="ChkFbSharpDxCapture" Content="画面捕获用旧版引擎（出现黑屏 / 黑画面时勾选）" Margin="0,12,0,0"/>
                             <CheckBox x:Name="ChkFbFp32Ocr" Content="文字识别退回原版精度模式（提速版出现读错 / 漏字时勾选）" Margin="0,4,0,0"/>
                             <CheckBox x:Name="ChkFbNoOcrDownscale" Content="文字识别关闭高分辨率压缩（高分屏识别变差时勾选）" Margin="0,4,0,0"/>
-                            <CheckBox x:Name="ChkFbHidMaestro" Content="启用 HIDMaestro 虚拟手柄（实验功能，默认使用 ViGEmBus）" Margin="0,4,0,0"/>
                             <CheckBox x:Name="ChkFbNoMouseTrajectory" Content="鼠标点击关闭拟人移动（直接跳到目标位置）" Margin="0,4,0,0"/>
                             <CheckBox x:Name="ChkFbNoFailureDumps" Content="异常停止时不保存画面截图留档" Margin="0,4,0,0"/>
                         </StackPanel>

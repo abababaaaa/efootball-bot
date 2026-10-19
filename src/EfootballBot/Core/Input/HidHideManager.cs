@@ -7,8 +7,8 @@ namespace EfootballBot.Core.Input;
 public sealed record HidHideStatus(
     bool DriverInstalled,
     bool Active,
-    bool VigemHidden,
-    int VigemInstanceCount,
+    bool VirtualHidden,
+    int VirtualInstanceCount,
     List<string> Whitelist,
     List<string> Blacklist,
     string? Error);
@@ -23,7 +23,7 @@ public sealed record HidHideStatus(
 /// </summary>
 public static class HidHideManager
 {
-    /// <summary>同步任务：登录/启动时拉服务、刷新 ViGEm 黑名单、恢复被禁用的真实手柄。</summary>
+    /// <summary>同步任务：登录/启动时拉服务、刷新虚拟手柄黑名单、恢复被禁用的真实手柄。</summary>
     public const string SyncTaskName = "EfootballBotHidHideSync";
     /// <summary>禁用真实手柄任务（挂机启动前由 Worker 触发；请求凭证防登录误触发）。</summary>
     public const string PadHideTaskName = "EfootballBotPadHide";
@@ -93,10 +93,10 @@ public static class HidHideManager
             var wl = HidHideIoctl.GetMultiString(HidHideIoctl.IoctlGetWhitelist);
             var bl = HidHideIoctl.GetMultiString(HidHideIoctl.IoctlGetBlacklist);
             bool active = HidHideIoctl.GetActive();
-            var vigem = SafeEnumerateViGEm();
+            var vpad = SafeEnumerateVirtualPads();
             return new HidHideStatus(true, active,
-                vigem.Count > 0 && vigem.All(v => bl.Contains(v, StringComparer.OrdinalIgnoreCase)),
-                vigem.Count, wl, bl, null);
+                vpad.Count > 0 && vpad.All(v => bl.Contains(v, StringComparer.OrdinalIgnoreCase)),
+                vpad.Count, wl, bl, null);
         }
         catch (global::System.ComponentModel.Win32Exception ex) when (ex.NativeErrorCode == 2)
         {
@@ -109,9 +109,9 @@ public static class HidHideManager
         }
     }
 
-    private static List<string> SafeEnumerateViGEm()
+    private static List<string> SafeEnumerateVirtualPads()
     {
-        try { return HidDeviceEnumerator.FindViGEmInstances(); }
+        try { return HidDeviceEnumerator.FindVirtualPadInstances(); }
         catch { return new List<string>(); }
     }
 
@@ -261,18 +261,18 @@ public static class HidHideManager
         return existing.Where(p => !rm.Contains(p)).ToList();
     }
 
-    /// <summary>按 ViGEm 前缀拆分：返回（保留的非 ViGEm 条目, 被拆出的 ViGEm 条目）。</summary>
-    public static (List<string> Keep, List<string> VigemEntries) SplitByVigemPrefix(
+    /// <summary>按虚拟手柄特征拆分：返回（保留的非虚拟手柄条目, 被拆出的虚拟手柄条目）。</summary>
+    public static (List<string> Keep, List<string> VirtualEntries) SplitByVirtualPrefix(
         IReadOnlyList<string> list)
     {
         var keep = new List<string>();
-        var vigem = new List<string>();
+        var vpad = new List<string>();
         foreach (var p in list)
         {
-            if (HidDeviceEnumerator.IsViGEmInstance(p)) vigem.Add(p);
+            if (HidDeviceEnumerator.IsVirtualPadInstancePath(p)) vpad.Add(p);
             else keep.Add(p);
         }
-        return (keep, vigem);
+        return (keep, vpad);
     }
 
     // ---------- 写操作（提权上下文调用）----------
@@ -325,24 +325,27 @@ public static class HidHideManager
     }
 
     /// <summary>
-    /// 枚举 ViGEm 虚拟手柄实例；设备当前不在线（用户没在挂机）时临时创建一个，
-    /// 枚举完即断开。实例路径真机实测跨连接稳定（同机同序列），且黑名单持久化，
-    /// 故配置时不要求挂机正在运行。
+    /// 枚举虚拟手柄实例；设备当前不在线（用户没在挂机）时按配置后端临时创建一个探测，
+    /// 枚举完即断开（HIDMaestro 探测需下载 SDK，不做临时创建——挂机中同步时设备必在线）。
+    /// 实例路径真机实测跨连接稳定（同机同序列），且黑名单持久化，故配置时不要求挂机正在运行。
     /// </summary>
-    private static List<string> FindViGEmInstancesWithProbe()
+    private static List<string> FindVirtualPadInstancesWithProbe()
     {
-        var vigem = HidDeviceEnumerator.FindViGEmInstances();
-        if (vigem.Count > 0) return vigem;
+        var vpad = HidDeviceEnumerator.FindVirtualPadInstances();
+        if (vpad.Count > 0) return vpad;
 
-        VirtualGamepad360? probe = null;
+        var kind = LoadConfiguredBackend();
+        if (kind == PadBackendKind.HidMaestro) return vpad;
+
+        IVirtualPad? probe = null;
         try
         {
-            probe = new VirtualGamepad360();
+            probe = kind == PadBackendKind.Xbox360 ? new VirtualGamepad360() : new VirtualDs4Pad();
             probe.Connect();
             for (int i = 0; i < 10; i++)
             {
-                vigem = HidDeviceEnumerator.FindViGEmInstances();
-                if (vigem.Count > 0) return vigem;
+                vpad = HidDeviceEnumerator.FindVirtualPadInstances();
+                if (vpad.Count > 0) return vpad;
                 Thread.Sleep(300);
             }
         }
@@ -351,13 +354,21 @@ public static class HidHideManager
         {
             try { probe?.Dispose(); } catch { }
         }
-        return vigem;
+        return vpad;
+    }
+
+    /// <summary>读配置里的手柄后端（提权子进程与 GUI 共享同一 config.json）；读取失败按默认 DS4。</summary>
+    private static PadBackendKind LoadConfiguredBackend()
+    {
+        try { return EfootballBot.Core.Config.AppConfig.Load().Pad.Backend; }
+        catch { return PadBackendKind.HidDs4; }
     }
 
     /// <summary>
-    /// 应用隔离：白名单并入游戏完整镜像路径（未传则自动从运行中的游戏进程解析）；
-    /// 黑名单并入当前 ViGEm 实例（设备不在线时临时创建探测）。
-    /// 物理手柄不再进黑名单（对 XInput 无效，见类注释）——反而把当前物理手柄实例
+    /// 应用隔离：白名单并入游戏与本程序的完整镜像路径（游戏未传则自动从运行中的游戏进程解析；
+    /// 本程序自身也要能看到虚拟手柄——HIDMaestro 重连需重新打开设备句柄）；
+    /// 黑名单并入当前虚拟手柄实例（设备不在线时按配置后端临时创建探测）。
+    /// 物理手柄不进黑名单（对 XInput 无效，见类注释）——反而把已知物理手柄实例
     /// 从黑名单移除（旧版本遗留条目会让 HID 层应用在挂机结束后仍看不到手柄）。
     /// 返回本次确认由本功能托管的黑名单条目全量（供解除隔离时精确回滚）。
     /// </summary>
@@ -372,20 +383,23 @@ public static class HidHideManager
             var managed = new List<string>();
             if (hideVigem)
             {
-                var vigem = FindViGEmInstancesWithProbe();
-                if (vigem.Count == 0)
-                    return (false, "未枚举到 ViGEm 虚拟手柄设备（请确认 ViGEmBus 驱动已安装）", new(), gameImagePath ?? "");
-                managed.AddRange(vigem);
+                var vpad = FindVirtualPadInstancesWithProbe();
+                if (vpad.Count == 0)
+                    return (false, "未枚举到虚拟手柄设备（请确认手柄驱动已安装且挂机已连接过一次）", new(), gameImagePath ?? "");
+                managed.AddRange(vpad);
             }
 
-            // 白名单路径：显式传入优先；否则尝试从运行中的游戏进程快照
+            // 白名单路径：游戏显式传入优先，否则尝试从运行中的游戏进程快照；本程序自身必须放行
             string? resolved = string.IsNullOrWhiteSpace(gameImagePath)
                 ? ResolveGameImagePath()
                 : gameImagePath;
+            string? botPath = Environment.ProcessPath;
 
-            var newWl = string.IsNullOrWhiteSpace(resolved)
-                ? wl.ToList()
-                : MergeInto(wl, new[] { resolved! });
+            var newWl = wl.ToList();
+            if (!string.IsNullOrWhiteSpace(resolved))
+                newWl = MergeInto(newWl, new[] { resolved! });
+            if (!string.IsNullOrWhiteSpace(botPath))
+                newWl = MergeInto(newWl, new[] { botPath! });
             var newBl = MergeInto(bl, managed);
             // 迁移清理：物理手柄可见性改由设备节点禁用机制管理，黑名单里的旧条目全部摘除
             newBl = RemoveAll(newBl, SafePhysicalGamepadInstances());
@@ -412,7 +426,7 @@ public static class HidHideManager
     }
 
     /// <summary>
-    /// 解除隔离：黑名单移除全部 ViGEm 前缀条目 + 快照条目；白名单移除游戏路径；Active 关闭。
+    /// 解除隔离：黑名单移除全部虚拟手柄条目 + 快照条目；白名单移除游戏路径；Active 关闭。
     /// </summary>
     public static (bool Success, string Error) ClearIsolation(
         IReadOnlyList<string> appliedBlacklist, string gameImagePath)
@@ -420,7 +434,7 @@ public static class HidHideManager
         try
         {
             var bl = HidHideIoctl.GetMultiString(HidHideIoctl.IoctlGetBlacklist);
-            var (keep, _) = SplitByVigemPrefix(bl);
+            var (keep, _) = SplitByVirtualPrefix(bl);
             var newBl = RemoveAll(keep, appliedBlacklist);
             HidHideIoctl.SetMultiString(HidHideIoctl.IoctlSetBlacklist, newBl);
 
