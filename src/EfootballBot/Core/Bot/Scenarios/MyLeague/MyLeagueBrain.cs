@@ -49,6 +49,10 @@ public enum MlScreen
     /// <summary>付款确认弹窗（抽取页误按后）：标题「付款确认」+「取消」。光标默认在取消，
     /// 直接按 A 即取消；★绝不能落入 HasConfirm 的「有取消先上移」规则——上方是付款键。</summary>
     PaymentConfirmDialog,
+    /// <summary>未登录页（掉线后仅会话失效，游戏停在主菜单壳上）：大字「未登录」+
+    /// 「请检查你的网络环境并登录游戏」+右侧 登录/退出游戏 两键。掉线重登链的第二种入口
+    /// （不经标题页）：直接 A 点默认焦点「登录」重连；登录后弹窗链由 LoginRecovery 窗口承接。</summary>
+    NotLoggedIn,
 }
 
 public enum MlActionKind
@@ -155,9 +159,10 @@ public static class MyLeagueBrain
     /// 被兜底成 InMatch 盲按 A 误开新比赛），无比赛上下文时角区探针不作为比赛证据。
     /// <paramref name="mostlyLightPage"/> 来自整幅亮度探针（Scenario 计算）：中央区域大面积
     /// 白色 = 「我的联赛」说明页（全流程唯一白底页面，深色主题下强特征）。
-    /// <paramref name="loginRecovery"/> = 流程记忆里最近（~100s）见过 BootSplash 标题页
-    /// （场景层传入）：门控掉线重登后的弹窗链识别（登录奖励/Campaign 网格/物品到收件箱等
-    /// 每周轮换页面，只认推进按钮词不认具体内容）与加载期 OCR 退化的标志帧兜底。
+    /// <paramref name="loginRecovery"/> = 流程记忆里最近（~100s）见过 BootSplash 标题页或
+    /// NotLoggedIn 未登录页（场景层传入，见 ScenarioShared.LoginRecovery）：门控掉线重登后的
+    /// 弹窗链识别（登录奖励/Campaign 网格/物品到收件箱等每周轮换页面，只认推进按钮词不认
+    /// 具体内容）与加载期 OCR 退化的标志帧兜底。
     /// </summary>
     public static MlScreen Classify(IReadOnlyList<YoloDetection> dets, OcrResult ocr,
         bool topRightHasContent = false, bool allowCornerInMatch = true, bool mostlyLightPage = false,
@@ -197,6 +202,13 @@ public static class MyLeagueBrain
         if (ocr.ContainsJoined("有限次数抽取") ||
             (ocr.ContainsJoined("查看全部") && ocr.ContainsJoined("名球员")))
             return MlScreen.GachaPage;
+
+        // 未登录页（掉线重登链第二入口，实机 2026-10-19：大字「未登录」+「请检查你的网络
+        // 环境并登录游戏」+ 登录/退出游戏 两键）。必须先于一切菜单判定——该页带主菜单页签/
+        // 磁贴词，会被 YOLO main_menu 判成 MainMenu 盲走 下×2 导航（落点不可控，最坏按在
+        // 「退出游戏」上直接退出游戏）；也先于 BootSplash（两页都是掉线入口但处置不同）
+        if (ocr.ContainsJoined("未登录") || ocr.ContainsJoined("网络环境"))
+            return MlScreen.NotLoggedIn;
 
         // 掉线重登后的弹窗链：登录奖励「继续」/ Campaign 网格「继续」/ 物品已送到收件箱「OK」/
         // 上一场比赛被放弃「OK」——页面每周轮换不认具体词，只认推进按钮词按 A。
@@ -538,6 +550,16 @@ public static class MyLeagueBrain
                 // 付款确认弹窗：光标默认在「取消」——直接按 A 即取消付款。
                 // ★绝不上移：上方是 eFootball 金币付款键（与购买弹窗方向相反）
                 return new MlAction(MlActionKind.PadConfirm, 2600, "付款确认→A 取消");
+            }
+
+            case MlScreen.NotLoggedIn:
+            {
+                // 未登录页：右侧 登录/退出游戏 两键，默认焦点在首项「登录」（页面的主 CTA，
+                // 游戏不会把破坏性的退出游戏设为默认）——直接 A 登录重连。
+                // ★绝不按 B/逃生（此页 B 无效，会空转卡死）；登录成功后的奖励弹窗链由
+                // LoginRecovery 窗口承接（本页记入记忆，见 ScenarioShared.LoginRecovery）
+                return new MlAction(MlActionKind.PadConfirm,
+                    screenStreak >= StuckStreak ? 5000 : 2600, "未登录→A 登录");
             }
 
             default:

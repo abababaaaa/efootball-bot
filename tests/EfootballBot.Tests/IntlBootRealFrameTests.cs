@@ -8,8 +8,9 @@ using Xunit.Abstractions;
 
 namespace EfootballBot.Tests;
 
-// 防掉线重登链回归（eFootball 2027 v6.1.0 实机 8 帧）：掉线/重启回落「按确认按钮」标题页
-// → 登录 → 弹窗链（登录奖励/Campaign 网格/物品到收件箱/上一场被放弃）→ 误入抽取页 → 付款确认。
+// 防掉线重登链回归（eFootball 2027 v6.1.0 实机 9 帧）：掉线/重启回落「按确认按钮」标题页
+// → 登录 → 弹窗链（登录奖励/Campaign 网格/物品到收件箱/上一场被放弃）→ 误入抽取页 → 付款确认；
+// 另有会话掉线第二入口「未登录」页（游戏不重启）。
 // 核心约定（用户 2026-10-19）：抽取界面必须 B 退出绝不消费金币；误看到付款确认必须直接按 A
 // （光标默认在取消，上方是金币付款键——绝不能套用「有取消先上移」规则）。
 // 首次运行看 Dump 输出校对 OCR 词；之后作为回归锁定（各帧分类/动作不得回退）。
@@ -57,6 +58,7 @@ public class IntlBootRealFrameTests
         {
             "boot_splash.png", "boot_splash_loading.png", "campaign_grid.png",
             "gacha_page.png", "inbox_popup.png", "login_bonus_popup.png", "payment_confirm.png",
+            "not_logged_in.png",
         })
         {
             if (File.Exists(Path.Combine(Dir, f))) Load(f, loginRecovery: true);
@@ -156,6 +158,41 @@ public class IntlBootRealFrameTests
             Array.Empty<YoloDetection>(), Ocr(("有限次数抽取:150/150", 0.8, 0.07)), loginRecovery: false));
         Assert.Equal(MlScreen.GachaPage, MyLeagueBrain.Classify(
             Array.Empty<YoloDetection>(), Ocr(("查看全部", 0.2, 0.6), ("10名球员", 0.2, 0.48)), loginRecovery: false));
+    }
+
+    [Fact]
+    public void NotLoggedIn_DirectConfirmOnLogin()
+    {
+        // 未登录页（掉线重登链第二入口，实机 2026-10-19：游戏未重启、仅会话失效，停在
+        // 主菜单壳上）。带主菜单页签/磁贴词，必须先于 MainMenu/YOLO 判定——否则盲走
+        // 下×2 导航落点不可控（最坏按在「退出游戏」上）。分类不依赖 loginRecovery
+        // （会话可在挂机任意时刻掉，附近没有标题页）
+        var (screen, _) = Load("not_logged_in.png", loginRecovery: false);
+        Assert.Equal(MlScreen.NotLoggedIn, screen);
+        var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, screenStreak: 0);
+        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+
+        // 判定词守卫（纯构造）：主判「未登录」；兜底「网络环境」（请检查你的网络环境并登录游戏）
+        Assert.Equal(MlScreen.NotLoggedIn, MyLeagueBrain.Classify(
+            Array.Empty<YoloDetection>(),
+            Ocr(("未登录", 0.6, 0.33), ("登录", 0.65, 0.54), ("退出游戏", 0.65, 0.64)),
+            loginRecovery: false));
+        Assert.Equal(MlScreen.NotLoggedIn, MyLeagueBrain.Classify(
+            Array.Empty<YoloDetection>(),
+            Ocr(("请检查你的网络环境并登录游戏", 0.65, 0.43), ("登录", 0.65, 0.54), ("退出游戏", 0.65, 0.64)),
+            loginRecovery: false));
+    }
+
+    [Fact]
+    public void LoginRecoveryWindow_CoversNotLoggedInEntry()
+    {
+        // 未登录页与标题页同样武装重登窗口：点「登录」后的奖励弹窗链只认推进词，
+        // 不依赖附近是否见过标题页（会话掉线可发生在挂机任意时刻）
+        var m = new EfootballBot.Core.Bot.Scenarios.MyLeague.MlFlowMemory();
+        var t0 = DateTime.Now;
+        m.Record(MlScreen.NotLoggedIn, t0);
+        Assert.True(EfootballBot.Core.Bot.Scenarios.ScenarioShared.LoginRecovery(m, t0.AddSeconds(50)));
+        Assert.False(EfootballBot.Core.Bot.Scenarios.ScenarioShared.LoginRecovery(m, t0.AddSeconds(101)));
     }
 
     private static OcrResult Ocr(params (string text, double x, double y)[] words)
