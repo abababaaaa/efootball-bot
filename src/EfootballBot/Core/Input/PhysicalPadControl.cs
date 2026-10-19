@@ -93,7 +93,7 @@ public static class PhysicalPadControl
         foreach (var node in HidDeviceEnumerator.EnumerateAllInstances())
         {
             if (!HidDeviceEnumerator.IsXInputStyleInstance(node.InstancePath)) continue;
-            if (HidDeviceEnumerator.IsViGEmBusChild(node.DevInst)) continue;
+            if (HidDeviceEnumerator.IsVirtualBusChild(node.DevInst)) continue;
             if (!IsDevNodeDisabled(node.DevInst)) continue;
             if (CM_Enable_DevNode(node.DevInst, 0) == CrSuccess) swept++;
         }
@@ -120,7 +120,7 @@ public static class PhysicalPadControl
         {
             return HidDeviceEnumerator.EnumerateAllInstances().Any(n =>
                 HidDeviceEnumerator.IsXInputStyleInstance(n.InstancePath)
-                && !HidDeviceEnumerator.IsViGEmBusChild(n.DevInst)
+                && !HidDeviceEnumerator.IsVirtualBusChild(n.DevInst)
                 && IsDevNodeDisabled(n.DevInst));
         }
         catch { return false; }

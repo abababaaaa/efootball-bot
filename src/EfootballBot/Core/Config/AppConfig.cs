@@ -237,8 +237,8 @@ public sealed class ModuleFallbackConfig
 public sealed class PadConfig
 {
     /// <summary>
-    /// 虚拟手柄后端。默认 HidDs4（纯 HID 设备，其他应用/游戏完全不可见，输入不再泄漏）；
-    /// 游戏不认纯 HID 手柄时切 Xbox360 旧版保底（输入会到达所有游戏，隔离降级）。
+    /// 虚拟手柄后端。默认 HidDs4（纯 HID 设备，XInput-only 应用不可见）；
+    /// 2026-10-19 实机验证：游戏对 DS4 手柄响应正常（此前误判为不识别，实为真实手柄未禁用干扰）。
     /// </summary>
     public PadBackendKind Backend { get; set; } = PadBackendKind.HidDs4;
 

@@ -170,12 +170,42 @@ public class PadBackendTests
     }
 
     [Fact]
+    public void 后端策略_下拉顺序映射_与枚举值解耦()
+    {
+        Assert.Equal(0, PadBackendInfo.UiIndexOf(PadBackendKind.HidDs4));
+        Assert.Equal(1, PadBackendInfo.UiIndexOf(PadBackendKind.HidMaestro));
+        Assert.Equal(2, PadBackendInfo.UiIndexOf(PadBackendKind.Xbox360));
+        Assert.Equal(0, PadBackendInfo.UiIndexOf((PadBackendKind)99)); // 未知值兜底默认
+
+        Assert.Equal(PadBackendKind.HidDs4, PadBackendInfo.FromUiIndex(0));
+        Assert.Equal(PadBackendKind.HidMaestro, PadBackendInfo.FromUiIndex(1));
+        Assert.Equal(PadBackendKind.Xbox360, PadBackendInfo.FromUiIndex(2));
+        Assert.Equal(PadBackendKind.HidDs4, PadBackendInfo.FromUiIndex(-1)); // 越界兜底默认
+        Assert.Equal(PadBackendKind.HidDs4, PadBackendInfo.FromUiIndex(99));
+    }
+
+    [Fact]
     public void 虚拟手柄实例路径判定_覆盖三后端且不误伤物理非PS手柄()
     {
         Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"HID\VID_045E&PID_028E\6&2DF92C3&0&0000"));
-        Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"HID\VID_054C&PID_05C4\6&DS4INSTANCE"));
+        // 实机拓扑：ViGEm DS4 带 &REV_0100 段，前缀仍须命中
+        Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"HID\VID_054C&PID_05C4&REV_0100\2&526D6D&0&0000"));
         Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"ROOT\HIDMAESTRO_EFOOTBALLBOT\1&123"));
         Assert.False(HidDeviceEnumerator.IsVirtualPadInstancePath(@"HID\VID_1532&PID_0900\6&abcd")); // Razer 鼠标等
+    }
+
+    [Fact]
+    public void 物理手柄判定_蓝牙Xbox手柄_键鼠不误伤()
+    {
+        // 实机样本：Xbox Series 手柄 BLE 连接的唯一可枚举输入节点
+        Assert.True(HidDeviceEnumerator.IsBleGamepadInstance(
+            @"BTHLEDEVICE\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&02045E_PID&0B22_REV&0522_F46AD74B3CA1\C&3633067B&3&0016"));
+        // 1812 服务也承载 BLE 键鼠：非手柄厂商 VID 不命中
+        Assert.False(HidDeviceEnumerator.IsBleGamepadInstance(
+            @"BTHLEDEVICE\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&02046D_PID&00C1_REV&0100_ABC\C&1&0001"));
+        // 非 1812（GATT 其他服务）不命中
+        Assert.False(HidDeviceEnumerator.IsBleGamepadInstance(
+            @"BTHLEDEVICE\{0000180A-0000-1000-8000-00805F9B34FB}_DEV_VID&02045E_PID&0B22_REV&0522_ABC\C&1&0009"));
     }
 
     [Fact]

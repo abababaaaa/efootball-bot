@@ -31,17 +31,33 @@ public static class HidDeviceEnumerator
            || instancePath.StartsWith(ViGEmDs4InstancePrefix, StringComparison.OrdinalIgnoreCase)
            || instancePath.Contains("HIDMAESTRO", StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>设备节点的父设备是否为虚拟手柄总线（ViGEmBus / HIDMaestro）。</summary>
+    /// <summary>
+    /// 设备节点的祖先链（最多 4 级）里是否出现虚拟总线特征——真假手柄唯一可靠判据。
+    /// 两种实机拓扑（2026-10-19 现场探测）：
+    /// ① ViGEm Xbox360：HID 集合的父即 ViGEmBus 命名节点；
+    /// ② ViGEm DS4：HID 集合 → USB\VID_054C&PID_05C4&REV_xxxx → <b>ROOT\SYSTEM\00xx</b>（根枚举，
+    ///    本机无任何名为 ViGEmBus 的节点）。真实 USB/蓝牙设备挂在集线器/ACPI 下，永不撞 ROOT\SYSTEM。
+    /// 父节点链中途查询失败按虚拟兜底（保守：宁可多拉黑不漏黑名单）；走到树根查清则如实判定。
+    /// </summary>
     public static bool IsVirtualBusChild(int devInst)
     {
         try
         {
-            if (CM_Get_Parent(out int parent, devInst, 0) != 0) return true; // 无法判定→按虚拟兜底
+            int cur = devInst;
             var sb = new StringBuilder(512);
-            if (CM_Get_Device_ID(parent, sb, sb.Capacity, 0) != 0) return true;
-            var id = sb.ToString();
-            return id.StartsWith("ViGEmBus", StringComparison.OrdinalIgnoreCase)
-                   || id.Contains("HIDMAESTRO", StringComparison.OrdinalIgnoreCase);
+            for (int depth = 0; depth <= 4; depth++)
+            {
+                if (CM_Get_Device_ID(cur, sb, sb.Capacity, 0) != 0)
+                    return true; // 节点查询失败：按虚拟兜底
+                var id = sb.ToString();
+                if (id.StartsWith("ViGEmBus", StringComparison.OrdinalIgnoreCase)
+                    || id.StartsWith(@"ROOT\SYSTEM\", StringComparison.OrdinalIgnoreCase)
+                    || id.Contains("HIDMAESTRO", StringComparison.OrdinalIgnoreCase))
+                    return true;
+                if (CM_Get_Parent(out cur, cur, 0) != 0)
+                    return false; // 到达树根：整链查清，非虚拟
+            }
+            return false; // 深度用尽未见虚拟特征：按物理
         }
         catch { return true; }
     }
@@ -84,24 +100,6 @@ public static class HidDeviceEnumerator
         return list;
     }
 
-    /// <summary>
-    /// 设备节点的父设备是否为 ViGEmBus（虚拟手柄 PDO 挂在 ViGEm 总线上，
-    /// 而真实 Xbox 手柄挂在 USB/XUSB 枚举器下）——唯一可靠的真假判据：
-    /// 真实 360 手柄的 HID 集合路径与 ViGEm 完全同形（HID\VID_045E&PID_028E&IG_xx），
-    /// 仅靠前缀无法区分。父节点不可判定时按前缀结论兜底（视为 ViGEm）。
-    /// </summary>
-    public static bool IsViGEmBusChild(int devInst)
-    {
-        try
-        {
-            if (CM_Get_Parent(out int parent, devInst, 0) != 0) return true; // 无法判定→按前缀结论兜底
-            var sb = new StringBuilder(512);
-            if (CM_Get_Device_ID(parent, sb, sb.Capacity, 0) != 0) return true;
-            return sb.ToString().StartsWith("ViGEmBus", StringComparison.OrdinalIgnoreCase);
-        }
-        catch { return true; }
-    }
-
     /// <summary>设备节点的父节点（实例路径 + 句柄）；取不到返回 null。供禁用升级/父设备判定用。</summary>
     public static HidInstance? GetParent(int devInst)
     {
@@ -115,14 +113,14 @@ public static class HidDeviceEnumerator
         catch { return null; }
     }
 
-    /// <summary>当前存在的 ViGEm 虚拟手柄实例路径（前缀 + 父设备为 ViGEmBus 双重判定）。</summary>
+    /// <summary>当前存在的 ViGEm 虚拟手柄实例路径（前缀 + 祖先链虚拟判定双重过滤）。</summary>
     public static List<string> FindViGEmInstances()
     {
         var result = new List<string>();
         foreach (var inst in EnumerateAllInstances())
         {
             if (!IsViGEmInstance(inst.InstancePath)) continue;
-            if (IsViGEmBusChild(inst.DevInst)) result.Add(inst.InstancePath);
+            if (IsVirtualBusChild(inst.DevInst)) result.Add(inst.InstancePath);
         }
         return result;
     }
@@ -167,9 +165,26 @@ public static class HidDeviceEnumerator
     };
 
     /// <summary>
-    /// 当前存在的物理手柄设备节点：XInput 可见（&amp;IG_ 段特征）或 PlayStation 系前缀，
-    /// 且父设备非虚拟总线（排除本程序自己的虚拟手柄——Xbox360 档与真实 360 手柄、
-    /// DS4 档与真实 DS4 路径均完全同形）。全程不打开设备。
+    /// 蓝牙 LE 连接的手柄：输入经 BTHLEDEVICE 的 GATT HID 服务（UUID 1812），
+    /// <b>不产生经典 HID\VID…&IG_ 集合</b>（2026-10-19 实机：Xbox Series 手柄 BLE 连接只有
+    /// BTHLEDEVICE\{00001812…}_DEV_VID&02045E_PID&0B22 一个可枚举节点）。
+    /// 1812 服务键鼠也会用，按 VID 白名单限定手柄厂商（Xbox/Sony/Nintendo/Hori/PowerA/8BitDo）。
+    /// </summary>
+    private static readonly string[] BleGamepadVidTags =
+    {
+        "_DEV_VID&02045E_", "_DEV_VID&02054C_", "_DEV_VID&02057E_",
+        "_DEV_VID&020F0D_", "_DEV_VID&0220D6_", "_DEV_VID&022DC8_",
+    };
+
+    public static bool IsBleGamepadInstance(string instancePath)
+        => instancePath.StartsWith(@"BTHLEDEVICE\{00001812-0000-1000-8000-00805F9B34FB}", StringComparison.OrdinalIgnoreCase)
+           && BleGamepadVidTags.Any(t => instancePath.Contains(t, StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// 当前存在的物理手柄设备节点：XInput 可见（&amp;IG_ 段特征）∥ PlayStation 系前缀
+    /// ∥ 蓝牙 LE 手柄（BTHLEDEVICE GATT 节点），且祖先链非虚拟总线（排除本程序自己的
+    /// 虚拟手柄——Xbox360 档与真实 360 手柄、DS4 档与真实 DS4 路径均完全同形）。
+    /// 全程不打开设备。
     /// </summary>
     public static List<HidInstance> FindPhysicalGamepadDevNodes()
     {
@@ -178,7 +193,8 @@ public static class HidDeviceEnumerator
         {
             bool gamepad = IsXInputStyleInstance(inst.InstancePath)
                 || PhysicalPlayStationPrefixes.Any(p =>
-                    inst.InstancePath.StartsWith(p, StringComparison.OrdinalIgnoreCase));
+                    inst.InstancePath.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+                || IsBleGamepadInstance(inst.InstancePath);
             if (!gamepad) continue;
             if (IsVirtualBusChild(inst.DevInst)) continue;
             result.Add(inst);

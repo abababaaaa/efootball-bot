@@ -435,23 +435,27 @@ public sealed class BotEngine : IDisposable
         if (connectPad)
         {
             // 存在已启用的物理手柄时：按设置自动禁用（设备管理器级）——XInput 手柄释放玩家 1，
-            // PS 系手柄堵住 DirectInput 并发通道，虚拟手柄成为游戏唯一可见的手柄。
-            // 不走 HidHide 黑名单——它只过滤 HID 层打开，XInput（XUSB IOCTL）不吃这套
-            //（2026-10-12 实机：黑名单+Active=1 仍占 slot0），设备节点禁用对全部路径生效。
-            // 全局生效：挂机期间真实手柄不可见，停止挂机时自动恢复。
-            // 触发条件用「物理节点存在」而非仅 slot0 占用：停止→立即重启时，恢复任务可能
-            // 在本次检测之后才重新启用手柄，仅查 XInput 槽位会漏掉这个竞态与 PS 手柄。
+            // PS 系手柄堵住 DirectInput 并发通道，蓝牙 Xbox 手柄掐断 GATT 输入节点，
+            // 虚拟手柄成为游戏唯一可见的手柄。不走 HidHide 黑名单——它只过滤 HID 层打开，
+            // XInput（XUSB IOCTL）不吃这套（2026-10-12 实机：黑名单+Active=1 仍占 slot0），
+            // 设备节点禁用对全部路径生效。全局生效：挂机期间真实手柄不可见，停止挂机时自动恢复。
+            // 触发条件 = 物理节点存在 ∥ XInput 玩家1占用（后者兜底一切 XInput 可见手柄，含
+            // 蓝牙连接的枚举漏网），并在等待循环里同判——堵「停止→重启时恢复任务晚于检测」竞态。
             // 本进程已持有虚拟手柄（Stop→Start 热重启）时 slot0 是我们自己的，直接跳过。
             if (!Pad360.IsConnected && _cfg.HidHide.HidePhysicalGamepad
-                && Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0)
+                && (Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0
+                    || Input.VirtualGamepad360.IsSlot0Occupied()))
             {
                 LogInternal("检测到真实手柄：自动禁用以让虚拟手柄独占游戏输入（停止挂机时自动恢复）…", LogLevel.Warn);
                 Input.HidHideManager.RequestPadHide();
                 var deadline = DateTime.Now.AddSeconds(20);
-                while (Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0
+                while ((Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0
+                        || Input.VirtualGamepad360.IsSlot0Occupied())
                        && DateTime.Now < deadline)
                     await Task.Delay(500);
-                if (Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0)
+                bool blocked = Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0
+                    || Input.VirtualGamepad360.IsSlot0Occupied();
+                if (blocked)
                     LogInternal("自动禁用未生效（提权计划任务未注册或执行失败）——真实手柄可能与虚拟手柄同时生效", LogLevel.Warn);
                 else
                     LogInternal("真实手柄已暂时禁用（虚拟手柄独占输入）", LogLevel.Success);

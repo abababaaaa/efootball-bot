@@ -19,6 +19,23 @@ public enum PadBackendKind
 /// <summary>后端元信息与策略纯逻辑（可单测）。</summary>
 public static class PadBackendInfo
 {
+    /// <summary>设置页下拉的展示顺序（与枚举值解耦：默认项排第一）。</summary>
+    public static readonly PadBackendKind[] UiOrder =
+    {
+        PadBackendKind.HidDs4, PadBackendKind.HidMaestro, PadBackendKind.Xbox360,
+    };
+
+    /// <summary>后端 → 下拉索引；未知值按默认（HidDs4）处理。</summary>
+    public static int UiIndexOf(PadBackendKind kind)
+    {
+        int i = Array.IndexOf(UiOrder, kind);
+        return i >= 0 ? i : 0;
+    }
+
+    /// <summary>下拉索引 → 后端；越界按默认（HidDs4）处理。</summary>
+    public static PadBackendKind FromUiIndex(int index)
+        => index >= 0 && index < UiOrder.Length ? UiOrder[index] : PadBackendKind.HidDs4;
+
     public static string DisplayName(PadBackendKind kind) => kind switch
     {
         PadBackendKind.HidDs4 => "DualShock4 隔离（默认）",
