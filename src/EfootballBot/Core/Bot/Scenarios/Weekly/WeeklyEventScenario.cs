@@ -122,7 +122,8 @@ public sealed class WeeklyEventScenario : IScenario
         // 命中周活动界面时 ml 记 Unknown（由状态机处理，不走共享决策）
         var wk = WeeklyBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light);
         var ml = wk == WkScreen.None
-            ? MyLeagueBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light)
+            ? MyLeagueBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light,
+                ScenarioShared.LoginRecovery(_memory, now))
             : MlScreen.Unknown;
         _memory.Record(ml, now);
 
@@ -192,7 +193,9 @@ public sealed class WeeklyEventScenario : IScenario
         switch (action.Kind)
         {
             case MlActionKind.PadEnterMatch:
-                _log("[周活动] 主菜单导航：下→左×6→A 进比赛页", LogLevel.Info);
+                // 主菜单进比赛卡：下×2（新 UI 进底部卡行，用户 2026-10-19 实测）→ 左×6 归位最左 → A
+                _log("[周活动] 主菜单导航：下×2→左×6→A 进比赛页", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
                 await _engine.Pad.Dpad(PadDir.Down);
                 await _engine.Pad.DpadRepeat(PadDir.Left, 6);
                 await _engine.Pad.Confirm();
@@ -217,6 +220,14 @@ public sealed class WeeklyEventScenario : IScenario
             case MlActionKind.PadXPress:
                 _log($"[周活动] {action.Target}", LogLevel.Info);
                 await _engine.Pad.X();
+                break;
+
+            case MlActionKind.PadLoginNav:
+                // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
+                _log($"[周活动] {action.Target}", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
+                await _engine.Pad.Dpad(PadDir.Right);
+                await _engine.Pad.Confirm();
                 break;
 
             case MlActionKind.GamepadBack:
@@ -290,7 +301,8 @@ public sealed class WeeklyEventScenario : IScenario
                         await _engine.Pad.Back();
                         return 2400;
                     }
-                    _log("[周活动] 主菜单导航：下→左×6→A 进比赛页", LogLevel.Info);
+                    _log("[周活动] 主菜单导航：下×2→左×6→A 进比赛页", LogLevel.Info);
+                    await _engine.Pad.Dpad(PadDir.Down);
                     await _engine.Pad.Dpad(PadDir.Down);
                     await _engine.Pad.DpadRepeat(PadDir.Left, 6);
                     await _engine.Pad.Confirm();

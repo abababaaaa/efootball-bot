@@ -76,7 +76,8 @@ public sealed class PeakLadderScenario : IScenario
             ? CnWeeklyBrain.Classify(obs.Detections, obs.Ocr)
             : CwScreen.None;
         var ml = (pl == PlScreen.None && cw == CwScreen.None)
-            ? MyLeagueBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light)
+            ? MyLeagueBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light,
+                ScenarioShared.LoginRecovery(_memory, now))
             : MlScreen.Unknown;
         _memory.Record(ml, now);
 
@@ -180,6 +181,14 @@ public sealed class PeakLadderScenario : IScenario
             case MlActionKind.PadXPress:
                 _log($"[天梯巅峰赛] {action.Target}", LogLevel.Info);
                 await _engine.Pad.X();
+                break;
+
+            case MlActionKind.PadLoginNav:
+                // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
+                _log($"[天梯巅峰赛] {action.Target}", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
+                await _engine.Pad.Dpad(PadDir.Right);
+                await _engine.Pad.Confirm();
                 break;
 
             case MlActionKind.GamepadBack:

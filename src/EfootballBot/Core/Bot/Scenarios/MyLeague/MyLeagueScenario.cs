@@ -272,8 +272,10 @@ public class MyLeagueScenario : IScenario
         switch (action.Kind)
         {
             case MlActionKind.PadEnterMatch:
-                // 主菜单 → 底部卡片行 → 最左"比赛" → A（到头多按无害，v1 盲导航）
-                _log("[我的联赛] 主菜单导航：下→左×6→A 进比赛页", LogLevel.Info);
+                // 主菜单 → 底部卡片行 → 最左"比赛" → A（v1.2 修订，用户 2026-10-19 实测：
+                // 新 UI 需 下×2 才进底部卡行，第 1 下离开页签行/第 2 下进卡行；左到头多按无害）
+                _log("[我的联赛] 主菜单导航：下×2→左×6→A 进比赛页", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
                 await _engine.Pad.Dpad(PadDir.Down);
                 await _engine.Pad.DpadRepeat(PadDir.Left, 6);
                 await _engine.Pad.Confirm();
@@ -347,6 +349,14 @@ public class MyLeagueScenario : IScenario
                 await _engine.Pad.X();
                 break;
 
+            case MlActionKind.PadLoginNav:
+                // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
+                _log($"[我的联赛] {action.Target}", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
+                await _engine.Pad.Dpad(PadDir.Right);
+                await _engine.Pad.Confirm();
+                break;
+
             case MlActionKind.MatchIdleTap:
             {
                 // 比赛中挂机点击：按 A，下一轮间隔取「挂机节奏」设置区间的随机值（拟人化）
@@ -373,10 +383,12 @@ public class MyLeagueScenario : IScenario
     /// <summary>
     /// 界面分类：右上角像素探针 + 比赛上下文 + 亮度探针 → MyLeagueBrain。
     /// 国服子类先判国服主页页签/其他模块残留页（命中记 Unknown 由拦截钩子接管），未命中回落本判定。
+    /// loginRecovery = 最近 ~100s 见过 eFootball 2027 标题页（掉线重登窗口，见 ScenarioShared）。
     /// </summary>
     protected virtual MlScreen ClassifyScreen(Observation obs, bool matchContext) =>
         MyLeagueBrain.Classify(obs.Detections, obs.Ocr, CornerHasContent(obs.Frame),
-            matchContext, IsMostlyLightPage(obs.Frame));
+            matchContext, IsMostlyLightPage(obs.Frame),
+            ScenarioShared.LoginRecovery(_memory, DateTime.Now));
 
     /// <summary>日志里的界面显示名（国服子类把主页 Unknown 显示成国服页签名，便于远程排障）。</summary>
     protected virtual string DescribeScreen(MlScreen screen) => screen.ToString();

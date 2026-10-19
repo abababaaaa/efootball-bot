@@ -142,7 +142,8 @@ public sealed class CnWeeklyScenario : IScenario
         // 未命中交 MyLeagueBrain（比赛中/终场/共用弹窗/标题画面等）
         var cw = CnWeeklyBrain.Classify(obs.Detections, obs.Ocr);
         var ml = cw == CwScreen.None
-            ? MyLeagueBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light)
+            ? MyLeagueBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light,
+                ScenarioShared.LoginRecovery(_memory, now))
             : MlScreen.Unknown;
         _memory.Record(ml, now);
 
@@ -277,6 +278,14 @@ public sealed class CnWeeklyScenario : IScenario
             case MlActionKind.PadXPress:
                 _log($"[国服周活动] {action.Target}", LogLevel.Info);
                 await _engine.Pad.X();
+                break;
+
+            case MlActionKind.PadLoginNav:
+                // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
+                _log($"[国服周活动] {action.Target}", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
+                await _engine.Pad.Dpad(PadDir.Right);
+                await _engine.Pad.Confirm();
                 break;
 
             case MlActionKind.GamepadBack:

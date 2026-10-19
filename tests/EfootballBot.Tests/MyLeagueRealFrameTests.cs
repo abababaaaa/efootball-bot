@@ -57,7 +57,7 @@ public class MyLeagueRealFrameTests
         var (screen, _) = ClassifyFrame(det, "224710_125.jpg");
         Assert.Equal(MlScreen.MainMenu, screen);
 
-        // 全手柄版：主菜单直接执行 复合导航（下→左×6→A）
+        // 全手柄版：主菜单直接执行 复合导航（下×2→左×6→A）
         var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, 0);
         Assert.Equal(MlActionKind.PadEnterMatch, action.Kind);
     }

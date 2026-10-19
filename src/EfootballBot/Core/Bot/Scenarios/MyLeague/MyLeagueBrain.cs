@@ -39,6 +39,16 @@ public enum MlScreen
     /// ★必须先于「比赛回放」弹窗判定——菜单含比赛回放词，误判 HasConfirm 会盲按 A 在
     /// 菜单与确认弹窗间死循环。处置见 Decide：有「对局获胜」小字才跳，否则 B 回比赛。</summary>
     CnMatchPause,
+    /// <summary>eFootball 2027 启动标题页（v6.1.0+，掉线/重启后回落）：按"确认"按钮 +
+    /// 底栏「Y 法律及隐私政策」。防掉线重登入口，处置见 Decide：下→右→A（登录），
+    /// 多轮无效改持续按 A；转圈加载帧（同页变暗+转圈）同判此处，加载期按键无效但无害。</summary>
+    BootSplash,
+    /// <summary>抽取界面（Special Player List 抽卡页，登录奖励链可误入）：球员卡+价格档
+    /// （1名球员/10名球员）+「有限次数抽取」+右上 B 关闭。绝不消费——按 B 退出。</summary>
+    GachaPage,
+    /// <summary>付款确认弹窗（抽取页误按后）：标题「付款确认」+「取消」。光标默认在取消，
+    /// 直接按 A 即取消；★绝不能落入 HasConfirm 的「有取消先上移」规则——上方是付款键。</summary>
+    PaymentConfirmDialog,
 }
 
 public enum MlActionKind
@@ -57,6 +67,9 @@ public enum MlActionKind
     /// <summary>暂停键（Start）：国服比赛中右上角出现「跳过比赛✅」横幅时打开暂停菜单
     /// （能否跳过由菜单里的「对局获胜」小字二次把关）。</summary>
     PadStartPress,
+    /// <summary>eFootball 2027 标题页登录序列（下→右→A）：A 落在「登录」上。
+    /// 掉线防卡死恢复动作，见 BootSplash。</summary>
+    PadLoginNav,
     Wait,
 }
 
@@ -99,6 +112,10 @@ public static class MyLeagueBrain
     /// <summary>无特征界面（比赛/过场）连续该轮数后按 B 逃生。</summary>
     public const int UnknownEscapeStreak = 6;
 
+    /// <summary>eFootball 2027 标题页前几轮走「下→右→A」登录序列的轮数上限：超过后改
+    /// 持续按 A（页面提示按「确认」按钮）。用户实机序列（2026-10-19）：下、右、A=登录。</summary>
+    public const int BootLoginNavRounds = 3;
+
     /// <summary>
     /// 比赛上下文中的无特征逃生轮数：最近见过比赛特征时（流程帧记忆），无特征界面
     /// 多为镜头切换丢了记分牌时钟——延长观察（~30 轮 ≈ 2 分钟）防误按 B 铲球。
@@ -138,9 +155,13 @@ public static class MyLeagueBrain
     /// 被兜底成 InMatch 盲按 A 误开新比赛），无比赛上下文时角区探针不作为比赛证据。
     /// <paramref name="mostlyLightPage"/> 来自整幅亮度探针（Scenario 计算）：中央区域大面积
     /// 白色 = 「我的联赛」说明页（全流程唯一白底页面，深色主题下强特征）。
+    /// <paramref name="loginRecovery"/> = 流程记忆里最近（~100s）见过 BootSplash 标题页
+    /// （场景层传入）：门控掉线重登后的弹窗链识别（登录奖励/Campaign 网格/物品到收件箱等
+    /// 每周轮换页面，只认推进按钮词不认具体内容）与加载期 OCR 退化的标志帧兜底。
     /// </summary>
     public static MlScreen Classify(IReadOnlyList<YoloDetection> dets, OcrResult ocr,
-        bool topRightHasContent = false, bool allowCornerInMatch = true, bool mostlyLightPage = false)
+        bool topRightHasContent = false, bool allowCornerInMatch = true, bool mostlyLightPage = false,
+        bool loginRecovery = false)
     {
         int Count(string name) => dets.Count(d => d.ClassName == name && d.Score >= MinScore);
 
@@ -162,6 +183,39 @@ public static class MyLeagueBrain
         if (ocr.Lines.Any(l => l.CenterY > 0.85 && l.Text.Contains("下一步")) &&
             (ocr.ContainsJoined("球场") || ocr.ContainsJoined("Stadium")))
             return MlScreen.MatchStartPage;
+
+        // ---- 防掉线重登链（eFootball 2027 v6.1.0 实机 8 帧，2026-10-19）：----
+        // 付款确认弹窗（抽取页误按后弹出）：标题「付款确认」+「取消」。★必须最先判——
+        // 弹窗底下就是抽取页（查看全部/名球员词同屏），且含「取消」若落入 HasConfirm 的
+        // 「有取消先上移」规则会把光标挪到上方的金币付款键上按 A（花金币事故）
+        if (ocr.ContainsJoined("付款确认"))
+            return MlScreen.PaymentConfirmDialog;
+
+        // 抽取界面（登录奖励链可误入的 Special Player List 抽卡页）：「有限次数抽取」唯一；
+        // 兜底「查看全部」+「名球员」（1名球员/10名球员价格档）双词同屏。内容随活动轮换
+        // （European Clubs Midfielders 等标题不参与判定）。处置=B 退出，绝不消费
+        if (ocr.ContainsJoined("有限次数抽取") ||
+            (ocr.ContainsJoined("查看全部") && ocr.ContainsJoined("名球员")))
+            return MlScreen.GachaPage;
+
+        // 掉线重登后的弹窗链：登录奖励「继续」/ Campaign 网格「继续」/ 物品已送到收件箱「OK」/
+        // 上一场比赛被放弃「OK」——页面每周轮换不认具体词，只认推进按钮词按 A。
+        // ★必须 loginRecovery 门控（最近见过标题页），否则正常流程里的同名词（联赛页
+        // 「继续」等）会被抢判。该块先于 BootSplash：弹窗盖在标题页上时按 A 先关弹窗
+        if (loginRecovery &&
+            (ocr.ContainsJoined("继续") || HasOkButton(ocr) ||
+             ocr.ContainsJoined("下一步") || ocr.ContainsJoined("确定")))
+            return MlScreen.HasConfirm;
+
+        // eFootball 2027 标题页：主判底栏「法律及隐私政策」（此页唯一）；副判「按确认按钮」
+        // 拼接词 + 页脚版权/版本词双证据；兜底 loginRecovery 期内只剩 ASCII 标志词的加载帧
+        // ——否则旧 TitleScreen 规则（纯 ASCII≤5 词含 footbal）抢判按 X，X 在此页无效会
+        // 永久卡死（防掉线恢复绝不能停在这里）
+        if (ocr.ContainsJoined("法律及隐私政策") ||
+            (ocr.ContainsJoined("确认按钮") &&
+             (ocr.ContainsJoined("footbal") || ocr.ContainsJoined("konami") || ocr.ContainsJoined("版本"))) ||
+            (loginRecovery && ocr.ContainsJoined("footbal")))
+            return MlScreen.BootSplash;
 
         // 游戏启动设定窗（画面模式/分辨率，实机 2026-10-11：启动/更新后弹「设定」需确认一次）
         // 与启动标题画面（eFootball 标志 + 「按 X」提示）：都必须先于 InMatch 角区兜底——
@@ -308,7 +362,8 @@ public static class MyLeagueBrain
         {
             case MlScreen.MainMenu:
             {
-                // 复合导航：Dpad 下（确保焦点在底部卡片行）→ 左 ×6（推到最左"比赛"，到头多按无害）→ A 进入。
+                // 复合导航：Dpad 下×2（新 UI：第 1 下离开页签行、第 2 下进底部卡片行，
+                // 用户 2026-10-19 实测）→ 左 ×6（推到最左"比赛"，到头多按无害）→ A 进入。
                 // 超过 StuckStreak 只放慢继续导航；到 NavEscapeStreak 仍无效说明有识别不到的盖层/
                 // 焦点异常，按 B 清一次盖层（主菜单 B 最坏情况是弹退出确认窗 → HasConfirm 上移+确认
                 // 退出 → 标题画面 X 重进，仍可自愈），此后每 5 轮一次——好过静默死等。
@@ -458,6 +513,31 @@ public static class MyLeagueBrain
                 if (ocr.ContainsJoined("对局获胜"))
                     return new MlAction(MlActionKind.PadConfirm, 2600, "跳过比赛（对局获胜）");
                 return new MlAction(MlActionKind.GamepadBack, 2600, "不可跳过，B 返回比赛继续");
+            }
+
+            case MlScreen.BootSplash:
+            {
+                // eFootball 2027 标题页（掉线/重启回落，防掉线恢复入口）：前几轮 下→右→A
+                // （用户实机登录序列），之后改持续按 A（页面提示按「确认」按钮）。
+                // 转圈加载帧同判此处，加载期按键无效但无害。★绝不放弃——这是真标题
+                // （掉线）恢复的唯一入口，退避停手会让挂机永久卡死（同 TitleScreen 持续按 X 先例）
+                return screenStreak < BootLoginNavRounds
+                    ? new MlAction(MlActionKind.PadLoginNav, 3500, "标题页→下右A 登录")
+                    : new MlAction(MlActionKind.PadConfirm, 4500, "标题页→A 确认登录");
+            }
+
+            case MlScreen.GachaPage:
+            {
+                // 抽取界面：绝不消费金币——按 B 退出该页（右上角即 B 关闭）。退避只放慢
+                return new MlAction(MlActionKind.GamepadBack,
+                    screenStreak >= StuckStreak ? 5000 : 2600, "抽取界面→B 退出");
+            }
+
+            case MlScreen.PaymentConfirmDialog:
+            {
+                // 付款确认弹窗：光标默认在「取消」——直接按 A 即取消付款。
+                // ★绝不上移：上方是 eFootball 金币付款键（与购买弹窗方向相反）
+                return new MlAction(MlActionKind.PadConfirm, 2600, "付款确认→A 取消");
             }
 
             default:

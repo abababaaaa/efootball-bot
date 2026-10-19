@@ -7,7 +7,7 @@ namespace EfootballBot.Core.Bot.Scenarios.AiLadder;
 
 /// <summary>
 /// 国际服 AI 天梯联赛挂机场景（eFootball™联赛·对阵AI类别）：
-/// 主菜单 下→左×6→A 进比赛页 → 卡行扫格进「eFootball™联赛」（卡片图片会变，只认文字/槽位，
+/// 主菜单 下×2→左×6→A 进比赛页（下×2=新 UI 进底部卡行，用户 2026-10-19 实测） → 卡行扫格进「eFootball™联赛」（卡片图片会变，只认文字/槽位，
 /// 从实机第 3 卡起逐格试、按 A 后屏幕级验证）→ 类别选择页饱和左移选「对阵AI类别」
 /// （卡片右下角组别角标数字/颜色会变，不作判定点）→ 组别主页盲归位（左×4+上×6）A 前往比赛
 /// → 开赛链/比赛/赛后弹窗全部交共用流程（直接前往比赛即进比赛，无难度选择页）
@@ -79,7 +79,8 @@ public sealed class AiLadderScenario : IScenario
             ? WeeklyBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light)
             : WkScreen.None;
         var ml = (al == AlScreen.None && wk == WkScreen.None)
-            ? MyLeagueBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light)
+            ? MyLeagueBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light,
+                ScenarioShared.LoginRecovery(_memory, now))
             : MlScreen.Unknown;
         _memory.Record(ml, now);
 
@@ -151,7 +152,9 @@ public sealed class AiLadderScenario : IScenario
         switch (action.Kind)
         {
             case MlActionKind.PadEnterMatch:
-                _log("[AI天梯联赛] 主菜单导航：下→左×6→A 进比赛页", LogLevel.Info);
+                // 主菜单进比赛卡：下×2（新 UI 进底部卡行，用户 2026-10-19 实测）→ 左×6 归位最左 → A
+                _log("[AI天梯联赛] 主菜单导航：下×2→左×6→A 进比赛页", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
                 await _engine.Pad.Dpad(PadDir.Down);
                 await _engine.Pad.DpadRepeat(PadDir.Left, 6);
                 await _engine.Pad.Confirm();
@@ -176,6 +179,14 @@ public sealed class AiLadderScenario : IScenario
             case MlActionKind.PadXPress:
                 _log($"[AI天梯联赛] {action.Target}", LogLevel.Info);
                 await _engine.Pad.X();
+                break;
+
+            case MlActionKind.PadLoginNav:
+                // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
+                _log($"[AI天梯联赛] {action.Target}", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
+                await _engine.Pad.Dpad(PadDir.Right);
+                await _engine.Pad.Confirm();
                 break;
 
             case MlActionKind.GamepadBack:
@@ -254,7 +265,8 @@ public sealed class AiLadderScenario : IScenario
                         await _engine.Pad.Back();
                         return 2400;
                     }
-                    _log("[AI天梯联赛] 主菜单导航：下→左×6→A 进比赛页", LogLevel.Info);
+                    _log("[AI天梯联赛] 主菜单导航：下×2→左×6→A 进比赛页", LogLevel.Info);
+                    await _engine.Pad.Dpad(PadDir.Down);
                     await _engine.Pad.Dpad(PadDir.Down);
                     await _engine.Pad.DpadRepeat(PadDir.Left, 6);
                     await _engine.Pad.Confirm();
