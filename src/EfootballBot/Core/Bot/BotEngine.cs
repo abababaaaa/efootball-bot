@@ -434,29 +434,24 @@ public sealed class BotEngine : IDisposable
 
         if (connectPad)
         {
-            // 存在已启用的物理手柄时：按设置自动禁用（设备管理器级）——XInput 手柄释放玩家 1，
-            // PS 系手柄堵住 DirectInput 并发通道，蓝牙 Xbox 手柄掐断 GATT 输入节点，
-            // 虚拟手柄成为游戏唯一可见的手柄。不走 HidHide 黑名单——它只过滤 HID 层打开，
-            // XInput（XUSB IOCTL）不吃这套（2026-10-12 实机：黑名单+Active=1 仍占 slot0），
-            // 设备节点禁用对全部路径生效。全局生效：挂机期间真实手柄不可见，停止挂机时自动恢复。
-            // 触发条件 = 物理节点存在 ∥ XInput 玩家1占用（后者兜底一切 XInput 可见手柄，含
-            // 蓝牙连接的枚举漏网），并在等待循环里同判——堵「停止→重启时恢复任务晚于检测」竞态。
-            // 本进程已持有虚拟手柄（Stop→Start 热重启）时 slot0 是我们自己的，直接跳过。
+            // 存在「已启用」的物理手柄节点时：按设置自动禁用（设备管理器级）——XInput 手柄释放
+            // 玩家 1，PS 系手柄堵住 DirectInput 并发通道，蓝牙 Xbox 手柄掐断 GATT 输入节点，
+            // 虚拟手柄成为游戏唯一可见的手柄。不走 HidHide 黑名单——XInput 不吃那套（实测）。
+            // ★触发条件只看节点，不看 XInput 玩家 1 占用：AMD Controller Emulation 等常驻
+            // 虚拟设备会永久占着玩家 1，没接手柄也会误报并空等 20 秒（实机 2026-10-19）。
+            // 纯 HID 后端不占 XInput 槽位，无需玩家 1 空闲；「已禁用」的节点不算在用，
+            // 禁用生效后本条件立即转 false，不再空等。
             if (!Pad360.IsConnected && _cfg.HidHide.HidePhysicalGamepad
-                && (Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0
-                    || Input.VirtualGamepad360.IsSlot0Occupied()))
+                && Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0)
             {
                 LogInternal("检测到真实手柄：自动禁用以让虚拟手柄独占游戏输入（停止挂机时自动恢复）…", LogLevel.Warn);
                 Input.HidHideManager.RequestPadHide();
                 var deadline = DateTime.Now.AddSeconds(20);
-                while ((Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0
-                        || Input.VirtualGamepad360.IsSlot0Occupied())
+                while (Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0
                        && DateTime.Now < deadline)
                     await Task.Delay(500);
-                bool blocked = Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0
-                    || Input.VirtualGamepad360.IsSlot0Occupied();
-                if (blocked)
-                    LogInternal("自动禁用未生效（提权计划任务未注册或执行失败）——真实手柄可能与虚拟手柄同时生效", LogLevel.Warn);
+                if (Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0)
+                    LogInternal("自动禁用未完全生效——真实手柄可能仍在向游戏输入（若蓝牙手柄仍响应请手动关闭其电源，详见 data\\hidhide-sync.log）", LogLevel.Warn);
                 else
                     LogInternal("真实手柄已暂时禁用（虚拟手柄独占输入）", LogLevel.Success);
             }
@@ -474,6 +469,8 @@ public sealed class BotEngine : IDisposable
 
         Stats.StartedAt = DateTime.Now;
         _cts = new CancellationTokenSource();
+        // 会话标记：sync 提权任务凭它跳过 pad-restore（挂机中绝不能复活被禁用的真实手柄）
+        Input.PhysicalPadControl.WriteSessionMarker();
         return _cts.Token;
     }
 
@@ -543,8 +540,39 @@ public sealed class BotEngine : IDisposable
             if (vpad.All(v => bl.Contains(v, StringComparer.OrdinalIgnoreCase)))
                 return; // 已覆盖
 
-            LogInternal($"检测到虚拟手柄实例未加入 HidHide 黑名单（{string.Join(";", vpad)}），触发静默同步", LogLevel.Info);
-            Input.HidHideManager.RunSyncTaskSilently();
+            // 提权状态下（本程序常态）进程内直接应用：绝不走 sync 计划任务——它会先
+            // RestoreAll，把本次挂机刚禁用的真实手柄中途复活（实机 2026-10-19：pad-hide 后
+            // 13 秒被 sync 复活，游戏重新听到真实手柄，bot 失效）。
+            if (Elevation.IsCurrentProcessElevated())
+            {
+                LogInternal("进程内直接应用手柄隔离（已提权，不经计划任务）", LogLevel.Info);
+                Input.HidHideManager.EnsureServiceStarted();
+                var (ok, err, applied, resolved) = Input.HidHideManager.ApplyIsolation(
+                    hideVigem: true, gameImagePath: hh.GameImagePath);
+                if (ok)
+                {
+                    var merged = Input.HidHideManager.MergeInto(hh.AppliedBlacklist, applied);
+                    bool changed = merged.Count != hh.AppliedBlacklist.Count;
+                    if (changed) hh.AppliedBlacklist = merged;
+                    if (!string.IsNullOrWhiteSpace(resolved) && !string.Equals(resolved, hh.GameImagePath, StringComparison.OrdinalIgnoreCase))
+                    {
+                        hh.GameImagePath = resolved;
+                        changed = true;
+                    }
+                    if (changed) _cfg.Save();
+                    Input.HidHideManager.EnsureTasksRegistered();
+                }
+                else
+                {
+                    LogInternal($"手柄隔离进程内应用失败：{err}", LogLevel.Warn);
+                    return;
+                }
+            }
+            else
+            {
+                LogInternal($"检测到虚拟手柄实例未加入 HidHide 黑名单（{string.Join(";", vpad)}），触发静默同步", LogLevel.Info);
+                Input.HidHideManager.RunSyncTaskSilently();
+            }
             await Task.Delay(2500);
 
             // 隔离生效验证（最多再等 6 秒）：Active + 虚拟手柄已隐藏 + 白名单含游戏
@@ -746,6 +774,8 @@ public sealed class BotEngine : IDisposable
         // 停止即拔掉虚拟手柄：其他应用立即看不到任何手柄（旧实现保持在线到引擎销毁，
         // 用户停了挂机别的游戏里还挂着一只“幽灵手柄”）。下次开始重新连接。
         try { Pad360.Disconnect(); } catch { }
+        // 会话结束：sync 任务恢复对真实手柄的恢复权限
+        try { Input.PhysicalPadControl.RemoveSessionMarker(); } catch { }
         // 本次挂机禁用过真实手柄：停止即恢复（不再等退出程序），把手柄还给用户
         if (_cfg.HidHide.HidePhysicalGamepad && Input.PhysicalPadControl.HasPendingRestore())
             Input.HidHideManager.RunTaskSilently(Input.HidHideManager.PadRestoreTaskName);

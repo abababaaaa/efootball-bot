@@ -142,14 +142,27 @@ public static class HidHideConfigJob
         {
             HidHideManager.EnsureServiceStarted(); // 重启电脑后 DEMAND_START 服务未加载时先拉起
 
-            // 恢复优先：确保上次挂机禁用的真实手柄已恢复（登录即还原，不依赖 GUI 启动）
-            var restore = PhysicalPadControl.RestoreAll();
+            // 恢复被禁用的真实手柄——但挂机进行中绝不恢复：挂机内的黑名单补同步也会走本任务，
+            // 无脑恢复会把刚禁用的真实手柄中途复活，游戏重新听到真实手柄，bot 失效
+            //（实机 2026-10-19：pad-hide 后 13 秒被 sync 的 restore 复活）。崩溃残留由下次
+            // 登录/启动（无会话标记或 PID 已死）兜底恢复。
+            string restoreMsg;
+            if (PhysicalPadControl.IsBotSessionActive())
+            {
+                restoreMsg = "挂机进行中，跳过恢复";
+                AppendSyncLog($"[sync {Now}] {restoreMsg}");
+            }
+            else
+            {
+                var restore = PhysicalPadControl.RestoreAll();
+                restoreMsg = restore.Message;
+            }
 
             var appCfg = EfootballBot.Core.Config.AppConfig.Load();
             var cfg = appCfg.HidHide;
             if (!cfg.Enabled)
             {
-                AppendSyncLog($"[sync {Now}] 隔离未启用，跳过；pad-restore: {restore.Message}");
+                AppendSyncLog($"[sync {Now}] 隔离未启用，跳过；pad-restore: {restoreMsg}");
                 return 0;
             }
 
@@ -172,7 +185,7 @@ public static class HidHideConfigJob
             }
             AppendSyncLog($"[sync {Now}] " +
                 (ok ? $"成功（托管 {applied.Count}：{string.Join(";", applied)}；game={resolved}）" : $"失败：{err}") +
-                $"；pad-restore: {restore.Message}");
+                $"；pad-restore: {restoreMsg}");
             return ok ? 0 : 1;
         }
         catch (Exception ex)

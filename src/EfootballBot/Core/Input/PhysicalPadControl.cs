@@ -22,6 +22,40 @@ public static class PhysicalPadControl
     /// <summary>pad-hide 任务的一次性执行凭证（data\tmp\ 下；挂机启动前由 Worker 写入）。</summary>
     public const string HideRequestFileName = "padhide.req";
 
+    // ---------------- 会话标记（sync 任务判断“挂机进行中，禁止恢复手柄”） ----------------
+
+    private static string SessionMarkerPath => Path.Combine(AppPaths.TempDir, "session.active");
+
+    /// <summary>挂机会话开始时写入（含 Worker PID）；sync 任务凭它跳过 pad-restore。</summary>
+    public static void WriteSessionMarker()
+    {
+        try
+        {
+            Directory.CreateDirectory(AppPaths.TempDir);
+            File.WriteAllText(SessionMarkerPath, Environment.ProcessId.ToString());
+        }
+        catch { }
+    }
+
+    public static void RemoveSessionMarker()
+    {
+        try { File.Delete(SessionMarkerPath); } catch { }
+    }
+
+    /// <summary>挂机会话是否进行中（标记存在且 PID 仍存活且进程名匹配）。进程已死＝上次崩溃残留，允许恢复。</summary>
+    public static bool IsBotSessionActive()
+    {
+        try
+        {
+            if (!File.Exists(SessionMarkerPath)) return false;
+            int pid = int.Parse(File.ReadAllText(SessionMarkerPath).Trim());
+            using var p = global::System.Diagnostics.Process.GetProcessById(pid);
+            return p is { HasExited: false }
+                && p.ProcessName.Contains("EfootballBot", StringComparison.OrdinalIgnoreCase);
+        }
+        catch { return false; }
+    }
+
     // ---------------- 提权上下文执行（计划任务 / runas 子进程内） ----------------
 
     /// <summary>
@@ -41,7 +75,7 @@ public static class PhysicalPadControl
         foreach (var (_, devInst) in leaves)
             CM_Disable_DevNode(devInst, 0);
 
-        if (WaitSlot0Free(TimeSpan.FromSeconds(4)))
+        if (WaitSlot0Free(TimeSpan.FromSeconds(8)))
             return (true, $"已禁用 {leaves.Count} 个手柄节点：{disabled}");
 
         // 升级：禁用父设备（真实 360 手柄的 XInput 接口可能挂在父节点而非 HID 集合上）
@@ -58,10 +92,13 @@ public static class PhysicalPadControl
             AppendToRecord(parents.Select(p => p.InstancePath));
             foreach (var p in parents)
                 CM_Disable_DevNode(p.DevInst, 0);
-            if (WaitSlot0Free(TimeSpan.FromSeconds(4)))
+            if (WaitSlot0Free(TimeSpan.FromSeconds(8)))
                 return (true, $"已禁用手柄节点及父设备（{parents.Count} 个父节点）：{disabled}");
         }
-        return (false, $"已禁用 {leaves.Count + parents.Count} 个节点但玩家 1 仍被占用（可能被非物理设备占据）");
+        // 节点已禁用但玩家 1 仍被占用：多为常驻虚拟手柄软件（AMD Controller Emulation 等）
+        // 占着 XInput 槽位。对纯 HID 后端（DS4/HIDMaestro）无影响，如实上报不再算彻底失败。
+        return (true, $"已禁用 {leaves.Count + parents.Count} 个节点；玩家 1 仍被其他设备占用" +
+            $"（可能为常驻虚拟手柄软件，不影响 DualShock4 后端）：{disabled}");
     }
 
     /// <summary>

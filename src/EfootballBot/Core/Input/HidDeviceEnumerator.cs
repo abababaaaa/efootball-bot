@@ -181,10 +181,10 @@ public static class HidDeviceEnumerator
            && BleGamepadVidTags.Any(t => instancePath.Contains(t, StringComparison.OrdinalIgnoreCase));
 
     /// <summary>
-    /// 当前存在的物理手柄设备节点：XInput 可见（&amp;IG_ 段特征）∥ PlayStation 系前缀
-    /// ∥ 蓝牙 LE 手柄（BTHLEDEVICE GATT 节点），且祖先链非虚拟总线（排除本程序自己的
-    /// 虚拟手柄——Xbox360 档与真实 360 手柄、DS4 档与真实 DS4 路径均完全同形）。
-    /// 全程不打开设备。
+    /// 当前存在的物理手柄设备节点（<b>仅统计已启用的</b>——上次挂机禁用过的节点依然 PRESENT）：
+    /// XInput 可见（&amp;IG_ 段特征）∥ PlayStation 系前缀 ∥ 蓝牙 LE 手柄（BTHLEDEVICE GATT 节点），
+    /// 且祖先链非虚拟总线（排除本程序自己的虚拟手柄——Xbox360 档与真实 360 手柄、
+    /// DS4 档与真实 DS4 路径均完全同形）。全程不打开设备。
     /// </summary>
     public static List<HidInstance> FindPhysicalGamepadDevNodes()
     {
@@ -197,6 +197,7 @@ public static class HidDeviceEnumerator
                 || IsBleGamepadInstance(inst.InstancePath);
             if (!gamepad) continue;
             if (IsVirtualBusChild(inst.DevInst)) continue;
+            if (IsDevNodeProblemDisabled(inst.DevInst)) continue;
             result.Add(inst);
         }
         return result;
@@ -205,6 +206,24 @@ public static class HidDeviceEnumerator
     // ---------- Win32 ----------
 
     private const uint DIGCF_PRESENT = 0x2;
+    private const uint DnHasProblem = 0x00000400;
+    private const uint CmProbDisabled = 22; // CM_PROB_DISABLED
+
+    /// <summary>设备节点是否处于「已禁用」状态（上次挂机禁用过的节点依然 PRESENT，
+    /// 等待循环若把它们算作「在用的真实手柄」就永远不会退出）。</summary>
+    public static bool IsDevNodeProblemDisabled(int devInst)
+    {
+        try
+        {
+            return CM_Get_DevNode_Status(out uint status, out uint problem, devInst, 0) == 0
+                && (status & DnHasProblem) != 0 && problem == CmProbDisabled;
+        }
+        catch { return false; }
+    }
+
+    [DllImport("cfgmgr32.dll")]
+    private static extern int CM_Get_DevNode_Status(out uint pulStatus, out uint pulProblem,
+        int dnDevInst, uint ulFlags);
 
     [DllImport("setupapi.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern IntPtr SetupDiGetClassDevs(ref Guid classGuid, IntPtr enumerator,
