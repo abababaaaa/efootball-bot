@@ -35,7 +35,9 @@ public sealed class WorkerHost : IDisposable
     /// <summary>启动 Worker 子进程并建立管道连接（与 StopAsync 互斥，重入时排队等待）。</summary>
     public async Task StartAsync(string mode)
     {
-        await _lifecycle.WaitAsync();
+        // 关闭竞态：Dispose 可能在启停进行中销毁信号量，Wait/Release 都必须容忍
+        try { await _lifecycle.WaitAsync(); }
+        catch (ObjectDisposedException) { return; }
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
@@ -50,7 +52,8 @@ public sealed class WorkerHost : IDisposable
         }
         finally
         {
-            _lifecycle.Release();
+            try { _lifecycle.Release(); }
+            catch (ObjectDisposedException) { /* 关闭中：信号量已销毁 */ }
         }
     }
 
@@ -204,14 +207,16 @@ public sealed class WorkerHost : IDisposable
     /// <summary>发送 stop 命令，等待 5s 后若仍在跑则 Kill。</summary>
     public async Task StopAsync()
     {
-        await _lifecycle.WaitAsync();
+        try { await _lifecycle.WaitAsync(); }
+        catch (ObjectDisposedException) { return; } // 关闭中：Dispose 已硬回收，无需再停
         try
         {
             await TeardownAsync(killIfAlive: true);
         }
         finally
         {
-            _lifecycle.Release();
+            try { _lifecycle.Release(); }
+            catch (ObjectDisposedException) { /* 关闭中：信号量已销毁 */ }
         }
     }
 

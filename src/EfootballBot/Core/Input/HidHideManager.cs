@@ -176,15 +176,17 @@ public static class HidHideManager
     /// <summary>挂机启动时静默触发同步（非提权：schtasks /Run 最高权限任务无 UAC 弹窗）。</summary>
     public static void RunSyncTaskSilently() => RunTaskSilently(SyncTaskName);
 
-    /// <summary>静默触发指定提权任务（无 UAC；任务不存在时 schtasks 静默失败）。</summary>
-    public static void RunTaskSilently(string taskName)
+    /// <summary>静默触发指定提权任务（无 UAC；任务不存在时 schtasks 静默失败）。
+    /// waitForExit=false 为火后不管——停止挂机的 pad-restore 不应拖慢停止流程
+    /// （等待会把 Worker 的 stop 处理拉长到数秒，放大 GUI 关闭竞态）。</summary>
+    public static void RunTaskSilently(string taskName, bool waitForExit = true)
     {
         try
         {
             using var p = Process.Start(new ProcessStartInfo("schtasks",
                 $"/Run /TN {taskName}")
             { CreateNoWindow = true, UseShellExecute = false });
-            p?.WaitForExit(10000);
+            if (waitForExit) p?.WaitForExit(10000);
         }
         catch { /* 同步失败不阻塞挂机 */ }
     }

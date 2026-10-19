@@ -776,9 +776,10 @@ public sealed class BotEngine : IDisposable
         try { Pad360.Disconnect(); } catch { }
         // 会话结束：sync 任务恢复对真实手柄的恢复权限
         try { Input.PhysicalPadControl.RemoveSessionMarker(); } catch { }
-        // 本次挂机禁用过真实手柄：停止即恢复（不再等退出程序），把手柄还给用户
+        // 本次挂机禁用过真实手柄：停止即恢复（不再等退出程序），把手柄还给用户。
+        // 火后不管：同步等待会把 Worker 的 stop 处理拖长数秒，放大 GUI 关闭竞态（曾致崩溃）
         if (_cfg.HidHide.HidePhysicalGamepad && Input.PhysicalPadControl.HasPendingRestore())
-            Input.HidHideManager.RunTaskSilently(Input.HidHideManager.PadRestoreTaskName);
+            Input.HidHideManager.RunTaskSilently(Input.HidHideManager.PadRestoreTaskName, waitForExit: false);
         // 先还原后台停靠的窗口位置，再断捕获（还原依赖窗口仍在捕获会话里无影响，但先还原能让用户立刻看到游戏）
         try { _parker?.Stop(); } catch { }
         // 显式停止捕获会话：挂机停止后不再后台抓帧。
