@@ -526,12 +526,23 @@ public sealed class BotEngine : IDisposable
             var hh = _cfg.HidHide;
             if (!hh.Enabled || !Input.HidHideManager.IsDriverInstalled()) return;
 
-            // 虚拟手柄设备经系统注册有延迟，最多等 3 秒
+            // 虚拟 DS4 有多个 HID 集合（游戏手柄接口 + 附属接口），系统注册有先后——
+            // 必须等数量稳定再拉黑：只拉黑先到的一个，另一个就裸奔给 DirectInput/WinRT
+            // 应用，操作照样映射到其他软件（实机 2026-10-19：黑名单只盖住 2 个集合中的 1 个）。
             List<string> vpad = new();
-            for (int i = 0; i < 10; i++)
+            int lastCount = -1;
+            var stableSince = DateTime.MinValue;
+            var settleDeadline = DateTime.Now.AddSeconds(8);
+            while (DateTime.Now < settleDeadline)
             {
                 vpad = Input.HidDeviceEnumerator.FindVirtualPadInstances();
-                if (vpad.Count > 0) break;
+                if (vpad.Count != lastCount)
+                {
+                    lastCount = vpad.Count;
+                    stableSince = DateTime.Now;
+                }
+                else if (vpad.Count > 0 && (DateTime.Now - stableSince).TotalMilliseconds >= 1500)
+                    break; // 数量已稳定 1.5 秒
                 await Task.Delay(300);
             }
             if (vpad.Count == 0) return;

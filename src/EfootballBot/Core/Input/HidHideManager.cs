@@ -344,10 +344,21 @@ public static class HidHideManager
         {
             probe = kind == PadBackendKind.Xbox360 ? new VirtualGamepad360() : new VirtualDs4Pad();
             probe.Connect();
-            for (int i = 0; i < 10; i++)
+            // 等集合数量稳定再返回：DS4 有多个 HID 集合且注册有先后，只取先到的
+            // 会导致另一个集合不被拉黑（泄漏通道）
+            int lastCount = -1;
+            var stableSince = DateTime.MinValue;
+            var deadline = DateTime.Now.AddSeconds(8);
+            while (DateTime.Now < deadline)
             {
                 vpad = HidDeviceEnumerator.FindVirtualPadInstances();
-                if (vpad.Count > 0) return vpad;
+                if (vpad.Count != lastCount)
+                {
+                    lastCount = vpad.Count;
+                    stableSince = DateTime.Now;
+                }
+                else if (vpad.Count > 0 && (DateTime.Now - stableSince).TotalMilliseconds >= 1500)
+                    break;
                 Thread.Sleep(300);
             }
         }
