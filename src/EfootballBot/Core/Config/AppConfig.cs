@@ -427,6 +427,10 @@ public sealed class AppConfig
     public bool AutoLaunchGame { get; set; }
     /// <summary>画面捕获后端：WGC 窗口捕获（默认，支持后台挂机/窗口被遮挡；已绑定真实 GPU 适配器）或 DXGI 桌面复制（高性能但窗口须可见）。</summary>
     public CaptureMode CaptureMode { get; set; } = CaptureMode.Wgc;
+    /// <summary>虚拟手柄设备形态档（HIDMaestro ProfileId）。默认 dualshock-4-v1（纯 HID：XInput 天生失明，
+    /// 挂机期间其他应用/前台游戏不可见）；xbox-360-wired / xbox-series-xs / xbox-elite-v2-bt-v2 为 XInput 形
+    /// （实机 2026-10-21 探针三档均被 eFootball 消费并占 slot 0，但会泄漏给前台应用）。重启挂机生效。</summary>
+    public string PadProfileId { get; set; } = HidMaestroPad.DefaultProfileId;
     public TimingConfig Timing { get; set; } = new();
 
     // —— 推理（ONNX Runtime EP 降级 + YOLO 目标检测）——

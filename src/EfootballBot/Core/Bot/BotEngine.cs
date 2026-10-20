@@ -310,6 +310,9 @@ public sealed class BotEngine : IDisposable
                         {
                             _gdiFallbackTried = true;
                             LogInternal($"捕获链路熔断，自动降级 GDI 捕获继续挂机：{ex.Message}", LogLevel.Error);
+                            // 立即落盘本机判定：下次启动直连 GDI，不再重撞探测链
+                            // （若 GDI 随后启动失败，下次启动的直连分支会自动回退完整探测链）
+                            CaptureBackendMemory.Save(CaptureBackendKind.Gdi, "WGC/DXGI 捕获熔断降级");
                             var (gw, gh) = _window is { } wwin ? GameWindow.GetClientSize(wwin.Handle) : (1280, 720);
                             if (gw <= 0 || gh <= 0) (gw, gh) = (1280, 720);
                             if (await TryStartGdiCaptureAsync(gw, gh))
@@ -456,8 +459,9 @@ public sealed class BotEngine : IDisposable
         return _cts.Token;
     }
 
-    /// <summary>按后端种类创建虚拟手柄实例（仅构造不连接）。ViGEm 两档移除后仅剩 HIDMaestro。</summary>
-    private IVirtualPad CreatePad(PadBackendKind kind) => new HidMaestroPad(m => LogInternal(m, LogLevel.Info));
+    /// <summary>按后端种类创建虚拟手柄实例（仅构造不连接）。ViGEm 两档移除后仅剩 HIDMaestro；形态档由配置注入。</summary>
+    private IVirtualPad CreatePad(PadBackendKind kind) =>
+        new HidMaestroPad(m => LogInternal(m, LogLevel.Info), _cfg.PadProfileId);
 
     /// <summary>
     /// 连接虚拟手柄。单后端后无回退可言（保留换实例重连的骨架：连接失败时重建一次实例再试，
@@ -697,6 +701,26 @@ public sealed class BotEngine : IDisposable
                 try { Capture.Stop(); } catch { }
                 failures.Add($"WGC：{ex.Message}");
                 return false;
+            }
+        }
+
+        // 上次运行的本机判定（data\capture-backend.json）：Wgc 模式下直连已验证的后端，
+        // 免撞完整探测链（虚拟显示器/无输出显卡机器上探测全程曾需约 1 分钟）。
+        // 用户显式选择 DXGI 模式时不消费记忆——那是"我就要用 DXGI"的明确意图。
+        if (_cfg.CaptureMode == CaptureMode.Wgc && CaptureBackendMemory.Load() is { } remembered)
+        {
+            switch (remembered.Kind)
+            {
+                case CaptureBackendKind.Gdi:
+                    LogInternal($"上次运行判定本机 WGC 捕获始终无帧（{remembered.At:yyyy-MM-dd HH:mm}），" +
+                        "本次直接使用 GDI 捕获。若显卡驱动已修复，删除 data\\capture-backend.json 可恢复自动探测", LogLevel.Info);
+                    if (await TryStartGdiCaptureAsync(w, h)) return;
+                    LogInternal("GDI 捕获启动失败，忽略上次判定，走完整探测链", LogLevel.Warn);
+                    break;
+                case CaptureBackendKind.Warp:
+                    Capture.ForceWarpDevice = true;
+                    LogInternal("上次运行判定本机需 WARP 兼容模式，WGC 直接以软渲染设备启动", LogLevel.Info);
+                    break;
             }
         }
 

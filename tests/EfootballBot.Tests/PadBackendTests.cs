@@ -101,6 +101,28 @@ public class PadBackendTests
     }
 
     [Fact]
+    public void HidMaestroPad_PickEntry_依赖在子目录也能按文件名挑中()
+    {
+        // v1.12.0 实测结构：Core.dll 在根目录，两个投影依赖在 HIDMaestroProfileExtractor\ 子目录
+        using var ms = new MemoryStream();
+        using (var zip = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Create, true))
+        {
+            foreach (var path in new[] { "HIDMaestro.Core.dll", "HIDMaestroProfileExtractor\\WinRT.Runtime.dll", "HIDMaestroTest\\WinRT.Runtime.dll" })
+                using (var e = zip.CreateEntry(path).Open()) { var b = new byte[] { 1 }; e.Write(b); }
+            zip.CreateEntry("blank\\Empty.dll"); // 零长度条目（含目录项）不算命中
+        }
+        ms.Position = 0;
+        using var opened = new System.IO.Compression.ZipArchive(ms, System.IO.Compression.ZipArchiveMode.Read);
+
+        Assert.Equal("HIDMaestro.Core.dll", HidMaestroPad.PickEntry(opened, "HIDMaestro.Core.dll")!.FullName);
+        var winrt = HidMaestroPad.PickEntry(opened, "WinRT.Runtime.dll");
+        Assert.NotNull(winrt);
+        Assert.Equal("HIDMaestroProfileExtractor\\WinRT.Runtime.dll", winrt!.FullName); // 目录最浅者胜出
+        Assert.Null(HidMaestroPad.PickEntry(opened, "Missing.dll"));
+        Assert.Null(HidMaestroPad.PickEntry(opened, "Empty.dll")); // 仅零长度条目 → 视为缺失
+    }
+
+    [Fact]
     public void PadBackendProbe_槽位占用提示_布尔语义()
     {
         Assert.Null(PadBackendProbe.SlotZeroOccupiedMessage(false));
@@ -124,8 +146,25 @@ public class PadBackendTests
         // 旧版写入 HidHide 黑名单的 ViGEm 条目仍须识别（精确清理），本程序已不再产生
         Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"HID\VID_045E&PID_028E\6&2DF92C3&0&0000"));
         Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"HID\VID_054C&PID_05C4&REV_0100\2&526D6D&0&0000"));
-        Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"ROOT\HIDMAESTRO_EFOOTBALLBOT\1&123"));
         Assert.False(HidDeviceEnumerator.IsVirtualPadInstancePath(@"HID\VID_1532&PID_0900\6&abcd")); // Razer 鼠标等
+    }
+
+    /// <summary>HIDMaestro 真实节点形态（2026-10-20 提权探针实测定案）：
+    /// 虚拟总线 ROOT\HIDCLASS\HM_&lt;hash&gt; + HID 集合 HID\HIDCLASS\1&amp;&lt;hash&gt;&amp;0&amp;0000。
+    /// 路径不含 VID/PID 也不含"HIDMAESTRO"字样——旧 Contains("HIDMAESTRO") 宽匹配恒空，
+    /// 导致 ApplyIsolation 报"未枚举到虚拟手柄"整体空转（隔离承诺落空）。</summary>
+    [Fact]
+    public void HIDMaestro真实节点形态_必须被虚拟手柄判定命中()
+    {
+        Assert.True(HidDeviceEnumerator.IsHidMaestroInstance(@"ROOT\HIDCLASS\HM_8508B0621FDA339A"));
+        Assert.True(HidDeviceEnumerator.IsHidMaestroInstance(@"HID\HIDCLASS\1&8508B062&0&0000"));
+        Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"ROOT\HIDCLASS\HM_627243559F81D525"));
+
+        // 真实设备不得误伤：ViGEm 时代的 DS4 幻影节点与真实 DS4/XInput 手柄路径
+        Assert.False(HidDeviceEnumerator.IsHidMaestroInstance(@"HID\VID_054C&PID_05C4&REV_0100\2&526D6D&0&0000"));
+        Assert.False(HidDeviceEnumerator.IsHidMaestroInstance(@"HID\VID_045E&PID_02E0&IG_00\6&2DF92C3&0&0000"));
+        Assert.False(HidDeviceEnumerator.IsHidMaestroInstance(
+            @"BTHLEDEVICE\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&02045E_PID&0B22_REV&0522_ABC\C&1&0009"));
     }
 
     [Fact]

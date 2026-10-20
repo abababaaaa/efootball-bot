@@ -50,3 +50,6 @@ tools/int8_det_candidate/
 .zcode/
 tools/*.data
 tools/sym_shape_infer_temp.onnx
+
+# Local probe/scratch workspace
+build_local/

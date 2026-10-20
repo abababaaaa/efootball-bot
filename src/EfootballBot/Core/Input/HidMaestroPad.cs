@@ -12,10 +12,9 @@ namespace EfootballBot.Core.Input;
 /// 首次启用时按需下载官方 Release zip，锁定 DLL SHA256 后解压到 data\hidmaestro\，
 /// 经独立 AssemblyLoadContext 反射加载（隔离其 net10.0-windows10.0.26100 TFM 的 SDK 投影依赖）。
 /// 加载/安装任一步失败抛清晰异常，由引擎告警并终止本次启动。
-/// ★设备形态用 DualShock4 v1 档（dualshock-4-v1，VID_054C&PID_05C4——与原 ViGEm DS4 逐字节同形）：
-/// 实机 2026-10-20 对照实验：xbox-360-wired(XInput 形) eFootball 完全不消费（4 轮导航画面不动），
-/// DS4 形（ViGEm 时代与 HIDMaestro 同测试）秒认。DS4 是纯 HID，XInput 天然失明，不泄输入；
-/// 且 PID_05C4 命中 HidHide 虚拟设备识别前缀，自动黑名单同步照常工作。
+/// ★设备形态档可配（PadProfileId）：默认 dualshock-4-v1（VID_054C&PID_05C4——与原 ViGEm DS4 逐字节同形），
+/// 纯 HID、XInput 失明不泄输入；xbox 形档同样被 eFootball 消费（2026-10-21 探针三档实测，
+/// 早前"零消费"结论系停靠缩窗冤案）但 XInput 可见会泄给前台应用。
 /// 映射：PadButton.A/B/X/Y → HMButton Cross/Circle/Square/Y（DS4 按方位），十字键 → HMHat，
 /// 摇杆 ±1/扳机 0~1 交 HMGamepadStateHelpers.StandardAxes 按档位映射。
 /// 槽位=创建顺序的经验保证（非文档保证），玩家 1 强保证仍依赖 HidHide 隐藏真实手柄。
@@ -24,9 +23,14 @@ public sealed class HidMaestroPad : IVirtualPad
 {
     public const string SdkVersion = "v1.12.0";
     public const string SdkZipUrl = "https://github.com/hifihedgehog/HIDMaestro/releases/download/" + SdkVersion + "/HIDMaestro-v1.12.0.zip";
-    /// <summary>虚拟设备形态档：DualShock4 v1（VID_054C&PID_05C4，与原 ViGEm DS4 同形）。
-    /// 实机对照：eFootball 不消费 xbox-360-wired 形态，DS4 形态秒认（2026-10-20 反馈包实锤）。</summary>
-    public const string ProfileId = "dualshock-4-v1";
+    /// <summary>默认虚拟设备形态档：DualShock4 v1（VID_054C&PID_05C4，与原 ViGEm DS4 同形）。
+    /// 纯 HID——XInput 天生失明，不泄输入给前台应用；eFootball 经 DInput 路径正常消费（探针实测）。
+    /// Xbox 形档（xbox-360-wired / xbox-series-xs / xbox-elite-v2-bt-v2）2026-10-21 探针实测同样被
+    /// eFootball 消费并占 XInput slot 0（早前"零消费"结论系停靠缩窗冤案），但会泄漏给前台应用，作可选档。
+    /// 生效档由配置 PadProfileId 决定（<see cref="DefaultProfileId"/> 为默认）。</summary>
+    public const string DefaultProfileId = "dualshock-4-v1";
+    /// <summary>生效的设备形态档（构造时由配置注入，默认 <see cref="DefaultProfileId"/>）。</summary>
+    private readonly string _profileId;
     /// <summary>官方 Release zip 的 SHA256（升级 SDK 版本时必须同步更新；zip 锁住即锁住全部解包产物）。</summary>
     public const string SdkZipSha256 = "CF03347A0BC88BFB198A606C0FF8375BC4A9420FA80C07EF336186986D79B244";
     /// <summary>官方 Release 内 HIDMaestro.Core.dll 的 SHA256（升级 SDK 版本时必须同步更新）。</summary>
@@ -53,7 +57,11 @@ public sealed class HidMaestroPad : IVirtualPad
 
     public PadBackendKind Kind => PadBackendKind.HidMaestro;
 
-    public HidMaestroPad(Action<string>? log = null) => _log = log;
+    public HidMaestroPad(Action<string>? log = null, string? profileId = null)
+    {
+        _log = log;
+        _profileId = string.IsNullOrWhiteSpace(profileId) ? DefaultProfileId : profileId!;
+    }
 
     /// <summary>驱动是否已安装（离线判据：DriverStore 同时存在两份 inf 目录；GUI 环境检测用，不加载 DLL）。</summary>
     public static bool IsDriverInstalled()
@@ -120,8 +128,8 @@ public sealed class HidMaestroPad : IVirtualPad
                     }
 
                     _profile = tCtx.GetMethod("GetProfile", [typeof(string)])!
-                        .Invoke(_ctx, [ProfileId])
-                        ?? throw new InvalidOperationException($"未找到 {ProfileId} 设备档（SDK 内置档缺失？）");
+                        .Invoke(_ctx, [_profileId])
+                        ?? throw new InvalidOperationException($"未找到 {_profileId} 设备档（SDK 内置档缺失？）");
                 }
 
                 // CreateController 的接收者是 HMContext（HMController 只是返回值类型——在它上面 GetMethod
@@ -146,21 +154,27 @@ public sealed class HidMaestroPad : IVirtualPad
 
         _connected = true;
         ResetAll();
-        _log?.Invoke($"HIDMaestro 控制器已创建（设备档 {ProfileId}，identityKey=efootballbot）。");
+        _log?.Invoke($"HIDMaestro 控制器已创建（设备档 {_profileId}，identityKey=efootballbot）。");
 
-        // HID 层在场证明：虚拟 DS4 节点（VID_054C&PID_05C4）连接后必须出现在 HID 设备树——
-        // 无节点=设备未上线（驱动/档位问题，SDK 却无报错）；有节点=OS 层报告链路存在，
-        // 游戏不消费则是游戏侧绑定问题。注意与真实 DS4 共用前缀（本机无真实 DS4，可接受的误报面）。
-        try
+        // HID 层在场证明：HIDMaestro 虚拟设备节点形态为 ROOT\HIDCLASS\HM_<hash> + HID\HIDCLASS\1&<hash>
+        // （探针 2026-10-20 实测定案；实例路径不含 VID/PID 也不含"HIDMAESTRO"字样——
+        // 旧版找 VID_054C 恒假阴性，照报"未上线"）。设备创建可能异步上线，轮询至多 3s；
+        // 查无=设备未上线（驱动/档位问题，SDK 却无报错），阻断启动——照报"已连接"更害人。
+        bool online = false;
+        for (int attempt = 0; attempt < 10 && !online; attempt++)
         {
-            var nodes = HidDeviceEnumerator.EnumerateAllInstances()
-                .Where(i => i.InstancePath.Contains("VID_054C&PID_05C4", StringComparison.OrdinalIgnoreCase))
-                .Select(i => i.InstancePath).ToList();
-            _log?.Invoke(nodes.Count > 0
-                ? $"HIDMaestro HID 节点在场 {nodes.Count} 个：{nodes[0]}…"
-                : "HIDMaestro HID 节点检查：VID_054C&PID_05C4 无任何节点——虚拟设备未上线！");
+            if (attempt > 0) Thread.Sleep(300);
+            try
+            {
+                online = HidDeviceEnumerator.EnumerateAllInstances()
+                    .Any(i => HidDeviceEnumerator.IsHidMaestroInstance(i.InstancePath));
+            }
+            catch { }
         }
-        catch (Exception ex) { _log?.Invoke($"HIDMaestro HID 节点检查失败：{ex.Message}"); }
+        if (!online)
+            throw new InvalidOperationException(
+                @"HIDMaestro 控制器已创建但虚拟设备节点未上线（ROOT\HIDCLASS\HM_* 查无）。请重启本程序重试；若持续出现，请在「关于」页生成诊断反馈。");
+        _log?.Invoke(@"HIDMaestro 虚拟设备节点已上线（ROOT\HIDCLASS\HM_* 在场）。");
     }
 
     // ---- 状态操作 ----

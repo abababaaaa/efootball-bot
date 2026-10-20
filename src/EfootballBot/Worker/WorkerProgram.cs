@@ -218,6 +218,9 @@ public static class WorkerProgram
                         await SendAsync(PipeProtocol.EvLog("Info", "已停止"));
                     }
                     StopPreviewLoop();
+                    // 确认事件：GUI 收到后立即回收进程。Worker 收 stop 本就不退出
+                    // （保活等重连），GUI 侧固定等 5s 进程退出只会白等后 Kill。
+                    await SendAsync(PipeProtocol.EvStopped());
                 }
                 else if (msg.Cmd == "pause")
                 {

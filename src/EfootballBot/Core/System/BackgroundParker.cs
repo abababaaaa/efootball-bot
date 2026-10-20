@@ -12,6 +12,10 @@ namespace EfootballBot.Core.System;
 /// 不注入、不挂钩、不读写游戏进程——反作弊检测面（进程/内存/输入/驱动）完全没碰到。
 /// 窗口不在屏幕上但未最小化：游戏照常渲染、WGC/GDI 照常捕获、XInput 手柄输入照常生效。
 /// 看门狗周期校验窗口位置（有的游戏在加载/切场景时会自己把窗口搬回屏幕中央），被挪回即重新移出。
+/// ★停靠移动本身会触发部分游戏自行缩窗（2026-10-20 实测：eFootball 新版被移出屏幕后立即把窗口
+/// 缩到 70×39、客户区清零——渲染死、WGC 冻帧、手柄交互死，bot 对冻结画面按键=「乱点」）。
+/// 实测定案：停靠后在屏外原地把尺寸恢复一次即可，游戏不会再次缩窗，输入/捕获全部正常。
+/// 因此 Park 成功后与看门狗都要做尺寸校验，被缩即原地恢复。
 /// 前提：游戏未提权（提权进程的窗口本程序移不动，UIPI 拒绝），失败原因按 win32 错误码区分提示。
 /// </summary>
 public sealed class BackgroundParker
@@ -38,6 +42,19 @@ public sealed class BackgroundParker
     /// <summary>停靠点 X 坐标：虚拟屏幕右边界外 64px（纯函数便于单测）。</summary>
     internal static int ComputeParkX(int virtualScreenX, int virtualScreenWidth) =>
         virtualScreenX + virtualScreenWidth + 64;
+
+    /// <summary>窗口是否被游戏自行缩小（纯函数便于单测）：原宽≥800 且当前宽不到原宽一半。
+    /// 2026-10-20 实测：eFootball 被停靠移出屏幕后会缩到 70×39、客户区清零，渲染与手柄交互全死。</summary>
+    internal static bool WindowShrunk(int originalWidth, int currentWidth) =>
+        originalWidth >= 800 && currentWidth * 2 < originalWidth;
+
+    /// <summary>在停靠点原地把窗口恢复为原始尺寸（不改变 Z 序、不抢激活）。</summary>
+    private void RestoreSizeAt(int parkX)
+    {
+        SetWindowPos(_hwnd, nint.Zero, parkX, _original.Top,
+            _original.Right - _original.Left, _original.Bottom - _original.Top,
+            SWP_NOZORDER | SWP_NOACTIVATE);
+    }
 
     /// <summary>开始停靠并启动看门狗。重复调用会先还原再重新停靠。</summary>
     public void Start(nint hwnd)
@@ -73,6 +90,15 @@ public sealed class BackgroundParker
         // 必须存移出前的原矩形（_original）——此刻窗口已在屏幕外，读当前坐标会把
         // 屏幕外坐标当原位置存下来，之后所有还原路径都等于没还原（游戏永远回不来）。
         SaveParkRecord(_hwnd, _original);
+        // 停靠移动可能触发游戏自行缩窗（渲染/输入全死）：稍候片刻做一次尺寸校验，
+        // 被缩就在屏外原地把尺寸恢复（实测恢复一次后游戏不再缩）
+        Thread.Sleep(600);
+        if (GetWindowRect(_hwnd, out var afterPark) &&
+            WindowShrunk(_original.Right - _original.Left, afterPark.Right - afterPark.Left))
+        {
+            RestoreSizeAt(parkX: ComputeParkX(GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN)));
+            _log("后台停靠：游戏窗口被自行缩小（缩窗会杀死渲染与输入），已在屏外恢复尺寸", LogLevel.Warn);
+        }
         _log("后台停靠已开启：游戏窗口已移出屏幕（主屏幕不可见，点击其他软件不会跳出；停止挂机后自动还原位置）", LogLevel.Success);
         _cts = new CancellationTokenSource();
         _ = Task.Run(() => WatchAsync(_hwnd, _cts.Token));
@@ -145,14 +171,25 @@ public sealed class BackgroundParker
                 int parkX = ComputeParkX(
                     GetSystemMetrics(SM_XVIRTUALSCREEN),
                     GetSystemMetrics(SM_CXVIRTUALSCREEN));
-                if (rc.Left == parkX && rc.Top == _original.Top) continue;
-
-                // 游戏把窗口搬回了屏幕（或用户拖动）：重新移出
-                if (SetWindowPos(hwnd, nint.Zero, parkX, _original.Top,
-                        0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE))
+                if (rc.Left != parkX || rc.Top != _original.Top)
                 {
+                    // 游戏把窗口搬回了屏幕（或用户拖动）：重新移出
+                    if (SetWindowPos(hwnd, nint.Zero, parkX, _original.Top,
+                            0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE))
+                    {
+                        Corrections++;
+                        _log($"看门狗：游戏窗口被挪回屏幕（{rc.Left},{rc.Top}），已重新移出（第 {Corrections} 次）", LogLevel.Info);
+                    }
+                    // 移回动作可能再次触发自行缩窗，交给下面的尺寸校验（本或下轮处理）
+                    if (!GetWindowRect(hwnd, out rc)) continue;
+                }
+                // 尺寸校验：停靠状态下游戏自行缩窗（渲染/输入全死）即原地恢复尺寸
+                if (WindowShrunk(_original.Right - _original.Left, rc.Right - rc.Left))
+                {
+                    RestoreSizeAt(parkX);
                     Corrections++;
-                    _log($"看门狗：游戏窗口被挪回屏幕（{rc.Left},{rc.Top}），已重新移出（第 {Corrections} 次）", LogLevel.Info);
+                    _log($"看门狗：游戏窗口被自行缩小至 {rc.Right - rc.Left}x{rc.Bottom - rc.Top}，" +
+                         $"已恢复尺寸（第 {Corrections} 次）", LogLevel.Info);
                 }
             }
         }

@@ -1,0 +1,1482 @@
+== 86 types ==
+
+### HIDMaestro.HMArcadeStickLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   HMDpad Joystick
+  prop   IReadOnlyList`1 FaceButtons
+  prop   IReadOnlyList`1 SystemButtons
+  method HMLayoutKind get_Kind()
+  method HMDpad get_Joystick()
+  method Void set_Joystick(HMDpad value)
+  method IReadOnlyList`1 get_FaceButtons()
+  method Void set_FaceButtons(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_SystemButtons()
+  method Void set_SystemButtons(IReadOnlyList`1 value)
+  method static Boolean op_Inequality(HMArcadeStickLayout left, HMArcadeStickLayout right)
+  method static Boolean op_Equality(HMArcadeStickLayout left, HMArcadeStickLayout right)
+  method HMArcadeStickLayout <Clone>$()
+
+### HIDMaestro.HMAudioControlChangedEventArgs (static=False, enum=False, iface=False)
+  prop   String Function
+  prop   Boolean IsMute
+  prop   Boolean MuteValue
+  prop   Double VolumeDb
+  prop   Int16 RawValue
+  method String get_Function()
+  method Void set_Function(String value)
+  method Boolean get_IsMute()
+  method Void set_IsMute(Boolean value)
+  method Boolean get_MuteValue()
+  method Void set_MuteValue(Boolean value)
+  method Double get_VolumeDb()
+  method Void set_VolumeDb(Double value)
+  method Int16 get_RawValue()
+  method Void set_RawValue(Int16 value)
+
+### HIDMaestro.HMAudioOutput (static=False, enum=False, iface=False)
+  prop   Int32 Channels
+  prop   Int32 SampleRateHz
+  prop   Int32 BitsPerSample
+  prop   IReadOnlyList`1 ChannelRoles
+  prop   Boolean IsStreaming
+  method Int32 get_Channels()
+  method Int32 get_SampleRateHz()
+  method Int32 get_BitsPerSample()
+  method IReadOnlyList`1 get_ChannelRoles()
+  method Boolean get_IsStreaming()
+  method Void add_FramesReceived(Action`2 value)
+  method Void remove_FramesReceived(Action`2 value)
+  method Void add_StreamingChanged(Action`2 value)
+  method Void remove_StreamingChanged(Action`2 value)
+
+### HIDMaestro.HMAxis (static=False, enum=True, iface=False)
+  = None (0)
+  = X (304)
+  = Y (305)
+  = Z (306)
+  = Rx (307)
+  = Ry (308)
+  = Rz (309)
+  = Slider (310)
+  = Dial (311)
+  = Wheel (312)
+  = Hat (313)
+  = Vx (320)
+  = Vy (321)
+  = Vz (322)
+  = Vbrx (323)
+  = Vbry (324)
+  = Vbrz (325)
+  = Vno (326)
+  = Aileron (688)
+  = AileronTrim (689)
+  = AntiTorque (690)
+  = CollectiveControl (693)
+  = DiveBrake (694)
+  = Elevator (696)
+  = ElevatorTrim (697)
+  = Rudder (698)
+  = Throttle (699)
+  = LandingGear (702)
+  = ToeBrake (703)
+  = WingFlaps (707)
+  = Accelerator (708)
+  = Brake (709)
+  = Clutch (710)
+  = Shifter (711)
+  = Steering (712)
+  = TurretDirection (713)
+  = BarrelElevation (714)
+  = DivePlane (715)
+  = Ballast (716)
+  = BicycleCrank (717)
+  = HandleBars (718)
+  = FrontBrake (719)
+  = RearBrake (720)
+
+### HIDMaestro.Internal.HMAxisJsonConverter (static=False, enum=False, iface=False)
+  method HMAxis Read(Utf8JsonReader&& reader, Type typeToConvert, JsonSerializerOptions options)
+  method Void Write(Utf8JsonWriter writer, HMAxis value, JsonSerializerOptions options)
+
+### HIDMaestro.HMAxisRole (static=False, enum=True, iface=False)
+  = Unknown (0)
+  = LeftStickX (1)
+  = LeftStickY (2)
+  = RightStickX (3)
+  = RightStickY (4)
+  = LeftTrigger (5)
+  = RightTrigger (6)
+  = Wheel (7)
+  = Throttle (8)
+  = Brake (9)
+  = Clutch (10)
+  = Accelerator (11)
+  = Rudder (12)
+  = Aileron (13)
+  = Elevator (14)
+  = TwistRudder (15)
+  = ThrottleSlider (16)
+  = Dial (17)
+  = ScrollWheel (18)
+  = ModeDial (19)
+  = Friction (20)
+  = MiniStickX (21)
+  = MiniStickY (22)
+  = HandbrakeAxis (23)
+
+### HIDMaestro.HMButton (static=False, enum=True, iface=False)
+  = None (0)
+  = Cross (1)
+  = Cross (1)
+  = Circle (2)
+  = Circle (2)
+  = Square (4)
+  = Square (4)
+  = Y (8)
+  = Y (8)
+  = LeftBumper (16)
+  = RightBumper (32)
+  = Back (64)
+  = Start (128)
+  = LeftStick (256)
+  = RightStick (512)
+  = Guide (1024)
+  = LeftTouchpad (2048)
+  = LeftTouchpad (2048)
+  = Share (4096)
+  = RightPaddle (8192)
+  = LeftPaddle (16384)
+  = Misc1 (32768)
+  = RightPaddle2 (65536)
+  = LeftPaddle2 (131072)
+  = RightTouchpad (262144)
+  = LeftStickTouch (524288)
+  = RightStickTouch (1048576)
+  = LeftGripTouch (2097152)
+  = RightGripTouch (4194304)
+
+### HIDMaestro.HMButtonBinding (static=False, enum=False, iface=False)
+  prop   HMButtonRole Role
+  prop   Int32 ButtonIndex
+  prop   String Label
+  method HMButtonRole get_Role()
+  method Void set_Role(HMButtonRole value)
+  method Int32 get_ButtonIndex()
+  method Void set_ButtonIndex(Int32 value)
+  method String get_Label()
+  method Void set_Label(String value)
+  method static Boolean op_Inequality(HMButtonBinding left, HMButtonBinding right)
+  method static Boolean op_Equality(HMButtonBinding left, HMButtonBinding right)
+  method HMButtonBinding <Clone>$()
+
+### HIDMaestro.HMButtonRole (static=False, enum=True, iface=False)
+  = Unknown (0)
+  = FaceA (1)
+  = FaceB (2)
+  = FaceX (3)
+  = FaceY (4)
+  = FaceCross (5)
+  = FaceCircle (6)
+  = FaceSquare (7)
+  = FaceTriangle (8)
+  = LeftBumper (9)
+  = RightBumper (10)
+  = LeftTriggerClick (11)
+  = RightTriggerClick (12)
+  = LeftStickClick (13)
+  = RightStickClick (14)
+  = Back (15)
+  = View (16)
+  = Share (17)
+  = Start (18)
+  = Options (19)
+  = Menu (20)
+  = Guide (21)
+  = Home (22)
+  = Capture (23)
+  = Ps (24)
+  = Xbox (25)
+  = Mute (26)
+  = ProfileSwitch (27)
+  = Misc1 (28)
+  = PaddleP1 (29)
+  = PaddleP2 (30)
+  = PaddleP3 (31)
+  = PaddleP4 (32)
+  = PaddleM1 (33)
+  = PaddleM2 (34)
+  = PaddleM3 (35)
+  = PaddleM4 (36)
+  = PaddleM5 (37)
+  = PaddleM6 (38)
+  = PaddleShifterUp (39)
+  = PaddleShifterDown (40)
+  = Trigger (41)
+  = Pinkie (42)
+  = Thumb (43)
+  = ModeSwitchLow (44)
+  = ModeSwitchMid (45)
+  = ModeSwitchHigh (46)
+  = Gear1 (47)
+  = Gear2 (48)
+  = Gear3 (49)
+  = Gear4 (50)
+  = Gear5 (51)
+  = Gear6 (52)
+  = Gear7 (53)
+  = GearReverse (54)
+  = ShifterUp (55)
+  = ShifterDown (56)
+  = StrumUp (57)
+  = StrumDown (58)
+  = FretGreen (59)
+  = FretRed (60)
+  = FretYellow (61)
+  = FretBlue (62)
+  = FretOrange (63)
+  = SoloGreen (64)
+  = SoloRed (65)
+  = SoloYellow (66)
+  = SoloBlue (67)
+  = SoloOrange (68)
+  = Whammy (69)
+  = Move (70)
+  = T (71)
+  = DpadUp (72)
+  = DpadDown (73)
+  = DpadLeft (74)
+  = DpadRight (75)
+
+### HIDMaestro.HMContext (static=False, enum=False, iface=False)
+  prop   Boolean IsDriverInstalled
+  prop   Boolean IsUsbipBackendAvailable
+  prop   IReadOnlyList`1 AllProfiles
+  prop   IReadOnlyCollection`1 ActiveControllers
+  method Boolean get_IsDriverInstalled()
+  method static Boolean get_IsUsbipBackendAvailable()
+  method static Void InstallUsbipBackend(Action`1 progress)
+  method Void InstallDriver()
+  method static Void RemoveAllVirtualControllers()
+  method static Void RemoveAllVirtualControllers(Boolean preserveInstall)
+  method Void DisposeControllersInParallel(IEnumerable`1 controllers, Action`2 perControllerCallback)
+  method IReadOnlyList`1 get_AllProfiles()
+  method HMProfile GetProfile(String id)
+  method Int32 LoadProfilesFromDirectory(String profilesDir)
+  method Int32 LoadDefaultProfiles()
+  method HMController CreateController(HMProfile profile)
+  method HMController CreateController(HMProfile profile, String identityKey)
+  method HMController CreateControllerAt(Int32 index, HMProfile profile)
+  method HMController CreateControllerAt(Int32 index, HMProfile profile, String identityKey)
+  method IReadOnlyCollection`1 get_ActiveControllers()
+  method Void FinalizeNames()
+  method Void Dispose()
+
+### HIDMaestro.HMController (static=False, enum=False, iface=False)
+  prop   String IdentityKey
+  prop   HMProfile Profile
+  prop   HMUsbAudio UsbAudio
+  prop   Action`1 OnSubmitLatencyMicros
+  prop   Boolean DeliversEveryReport
+  prop   Boolean ReleasesOnConsumerExit
+  prop   Nullable`1 KeyboardLeds
+  method String get_IdentityKey()
+  method HMProfile get_Profile()
+  method HMUsbAudio get_UsbAudio()
+  method Void add_OutputReceived(Action`2 value)
+  method Void remove_OutputReceived(Action`2 value)
+  method Void add_OutputDecoded(EventHandler`1 value)
+  method Void remove_OutputDecoded(EventHandler`1 value)
+  method Action`1 get_OnSubmitLatencyMicros()
+  method Void set_OnSubmitLatencyMicros(Action`1 value)
+  method Void PublishPidPool(UInt16 ramPoolSize, Byte simultaneousEffectsMax, Boolean deviceManagedPool, Boolean sharedParameterBlocks)
+  method HMPidBlockLoad GetCurrentPidBlockLoad()
+  method Void PublishPidBlockLoad(Byte effectBlockIndex, PidLoadStatus loadStatus, UInt16 ramPoolAvailable)
+  method Void PublishPidState(Byte effectBlockIndex, PidStateFlags flags)
+  method Void SubmitState(HMGamepadState&& state)
+  method Void SubmitRawReport(ReadOnlySpan`1 report)
+  method Void SubmitRawExtendedReport(ReadOnlySpan`1 report)
+  method Boolean get_DeliversEveryReport()
+  method Boolean get_ReleasesOnConsumerExit()
+  method Void add_KeyboardLedsChanged(Action`2 value)
+  method Void remove_KeyboardLedsChanged(Action`2 value)
+  method Nullable`1 get_KeyboardLeds()
+  method Void SubmitMouse(HMMouseState&& state)
+  method Void SubmitKeyboard(HMKeyModifiers modifiers, ReadOnlySpan`1 keys)
+  method Void SubmitConsumer(ReadOnlySpan`1 usages)
+  method Byte[] EncodeOutput(IReadOnlyDictionary`2 fields)
+  method Void Dispose()
+
+### HIDMaestro.HMControllerAdapterLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   Int32 Ports
+  prop   String PerPortLayout
+  method HMLayoutKind get_Kind()
+  method Int32 get_Ports()
+  method Void set_Ports(Int32 value)
+  method String get_PerPortLayout()
+  method Void set_PerPortLayout(String value)
+  method static Boolean op_Inequality(HMControllerAdapterLayout left, HMControllerAdapterLayout right)
+  method static Boolean op_Equality(HMControllerAdapterLayout left, HMControllerAdapterLayout right)
+  method HMControllerAdapterLayout <Clone>$()
+
+### HIDMaestro.HMDancePadLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   IReadOnlyDictionary`2 Pads
+  prop   IReadOnlyList`1 SystemButtons
+  method HMLayoutKind get_Kind()
+  method IReadOnlyDictionary`2 get_Pads()
+  method Void set_Pads(IReadOnlyDictionary`2 value)
+  method IReadOnlyList`1 get_SystemButtons()
+  method Void set_SystemButtons(IReadOnlyList`1 value)
+  method static Boolean op_Inequality(HMDancePadLayout left, HMDancePadLayout right)
+  method static Boolean op_Equality(HMDancePadLayout left, HMDancePadLayout right)
+  method HMDancePadLayout <Clone>$()
+
+### HIDMaestro.HMDeviceExtractor (static=True, enum=False, iface=False)
+  method static IReadOnlyList`1 ListDevices()
+  method static HMProfile Extract(HMHidDeviceInfo device)
+  method static HMProfile ExtractByVidPid(UInt16 vid, UInt16 pid)
+  method static String ToJson(HMProfile profile)
+
+### HIDMaestro.HMDpad (static=False, enum=False, iface=False)
+  prop   HMDpadEncoding Encoding
+  prop   Nullable`1 HatAxis
+  prop   Nullable`1 HatPositions
+  prop   Nullable`1 UpButton
+  prop   Nullable`1 DownButton
+  prop   Nullable`1 LeftButton
+  prop   Nullable`1 RightButton
+  method HMDpadEncoding get_Encoding()
+  method Void set_Encoding(HMDpadEncoding value)
+  method Nullable`1 get_HatAxis()
+  method Void set_HatAxis(Nullable`1 value)
+  method Nullable`1 get_HatPositions()
+  method Void set_HatPositions(Nullable`1 value)
+  method Nullable`1 get_UpButton()
+  method Void set_UpButton(Nullable`1 value)
+  method Nullable`1 get_DownButton()
+  method Void set_DownButton(Nullable`1 value)
+  method Nullable`1 get_LeftButton()
+  method Void set_LeftButton(Nullable`1 value)
+  method Nullable`1 get_RightButton()
+  method Void set_RightButton(Nullable`1 value)
+  method static Boolean op_Inequality(HMDpad left, HMDpad right)
+  method static Boolean op_Equality(HMDpad left, HMDpad right)
+  method HMDpad <Clone>$()
+
+### HIDMaestro.HMDpadEncoding (static=False, enum=True, iface=False)
+  = Hat (0)
+  = Buttons (1)
+
+### HIDMaestro.HMFlightStickLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   HMStick Stick
+  prop   HMRudder Rudder
+  prop   HMPedal Throttle
+  prop   IReadOnlyList`1 Hats
+  prop   HMTriggerButton Trigger
+  prop   IReadOnlyList`1 StickButtons
+  prop   IReadOnlyList`1 BaseButtons
+  method HMLayoutKind get_Kind()
+  method HMStick get_Stick()
+  method Void set_Stick(HMStick value)
+  method HMRudder get_Rudder()
+  method Void set_Rudder(HMRudder value)
+  method HMPedal get_Throttle()
+  method Void set_Throttle(HMPedal value)
+  method IReadOnlyList`1 get_Hats()
+  method Void set_Hats(IReadOnlyList`1 value)
+  method HMTriggerButton get_Trigger()
+  method Void set_Trigger(HMTriggerButton value)
+  method IReadOnlyList`1 get_StickButtons()
+  method Void set_StickButtons(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_BaseButtons()
+  method Void set_BaseButtons(IReadOnlyList`1 value)
+  method static Boolean op_Inequality(HMFlightStickLayout left, HMFlightStickLayout right)
+  method static Boolean op_Equality(HMFlightStickLayout left, HMFlightStickLayout right)
+  method HMFlightStickLayout <Clone>$()
+
+### HIDMaestro.HMGamepadLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   IReadOnlyList`1 Sticks
+  prop   IReadOnlyList`1 Triggers
+  prop   HMDpad Dpad
+  prop   IReadOnlyList`1 FaceButtons
+  prop   IReadOnlyList`1 ShoulderButtons
+  prop   IReadOnlyList`1 SystemButtons
+  prop   IReadOnlyList`1 ExtraButtons
+  prop   HMHaptics Haptics
+  prop   HMImu Imu
+  method HMLayoutKind get_Kind()
+  method IReadOnlyList`1 get_Sticks()
+  method Void set_Sticks(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_Triggers()
+  method Void set_Triggers(IReadOnlyList`1 value)
+  method HMDpad get_Dpad()
+  method Void set_Dpad(HMDpad value)
+  method IReadOnlyList`1 get_FaceButtons()
+  method Void set_FaceButtons(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_ShoulderButtons()
+  method Void set_ShoulderButtons(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_SystemButtons()
+  method Void set_SystemButtons(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_ExtraButtons()
+  method Void set_ExtraButtons(IReadOnlyList`1 value)
+  method HMHaptics get_Haptics()
+  method Void set_Haptics(HMHaptics value)
+  method HMImu get_Imu()
+  method Void set_Imu(HMImu value)
+  method static Boolean op_Inequality(HMGamepadLayout left, HMGamepadLayout right)
+  method static Boolean op_Equality(HMGamepadLayout left, HMGamepadLayout right)
+  method HMGamepadLayout <Clone>$()
+
+### HIDMaestro.HMGamepadState (static=False, enum=False, iface=False)
+  field  Dictionary`2 Axes (static=False)
+  field  HMButton Buttons (static=False)
+  field  HMHat Hat (static=False)
+  field  Nullable`1 HatDegrees (static=False)
+  field  Nullable`1 HatHundredths (static=False)
+  field  Nullable`1 HatRaw (static=False)
+  field  Boolean TouchpadFinger0Active (static=False)
+  field  UInt16 TouchpadFinger0X (static=False)
+  field  UInt16 TouchpadFinger0Y (static=False)
+  field  Byte TouchpadFinger0Id (static=False)
+  field  Boolean TouchpadFinger1Active (static=False)
+  field  UInt16 TouchpadFinger1X (static=False)
+  field  UInt16 TouchpadFinger1Y (static=False)
+  field  Byte TouchpadFinger1Id (static=False)
+  field  Byte TouchpadPacketCounter (static=False)
+  field  Int16 GyroPitch (static=False)
+  field  Int16 GyroYaw (static=False)
+  field  Int16 GyroRoll (static=False)
+  field  Int16 AccelX (static=False)
+  field  Int16 AccelY (static=False)
+  field  Int16 AccelZ (static=False)
+  field  UInt32 SensorTimestamp (static=False)
+  field  Single AccelGX (static=False)
+  field  Single AccelGY (static=False)
+  field  Single AccelGZ (static=False)
+  field  Single GyroDpsX (static=False)
+  field  Single GyroDpsY (static=False)
+  field  Single GyroDpsZ (static=False)
+  field  Byte PressureA (static=False)
+  field  Byte PressureB (static=False)
+  field  Byte PressureX (static=False)
+  field  Byte PressureY (static=False)
+  field  Byte PressureLeftBumper (static=False)
+  field  Byte PressureRightBumper (static=False)
+  field  Byte PressureDpadUp (static=False)
+  field  Byte PressureDpadRight (static=False)
+  field  Byte PressureDpadDown (static=False)
+  field  Byte PressureDpadLeft (static=False)
+  field  Byte BatteryLevel (static=False)
+  field  Boolean BatteryCharging (static=False)
+  field  Boolean BatteryFull (static=False)
+  field  Boolean MicMuted (static=False)
+  field  Boolean HeadphonesConnected (static=False)
+
+### HIDMaestro.HMGamepadStateHelpers (static=True, enum=False, iface=False)
+  method static Dictionary`2 StandardAxes(HMProfile profile, Single leftStickX, Single leftStickY, Single rightStickX, Single rightStickY, Single leftTrigger, Single rightTrigger)
+
+### HIDMaestro.HMGuitarLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   IReadOnlyList`1 Frets
+  prop   IReadOnlyList`1 SoloFrets
+  prop   HMDpad Strum
+  prop   Nullable`1 WhammyAxis
+  prop   Nullable`1 TiltButton
+  prop   IReadOnlyList`1 SystemButtons
+  method HMLayoutKind get_Kind()
+  method IReadOnlyList`1 get_Frets()
+  method Void set_Frets(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_SoloFrets()
+  method Void set_SoloFrets(IReadOnlyList`1 value)
+  method HMDpad get_Strum()
+  method Void set_Strum(HMDpad value)
+  method Nullable`1 get_WhammyAxis()
+  method Void set_WhammyAxis(Nullable`1 value)
+  method Nullable`1 get_TiltButton()
+  method Void set_TiltButton(Nullable`1 value)
+  method IReadOnlyList`1 get_SystemButtons()
+  method Void set_SystemButtons(IReadOnlyList`1 value)
+  method static Boolean op_Inequality(HMGuitarLayout left, HMGuitarLayout right)
+  method static Boolean op_Equality(HMGuitarLayout left, HMGuitarLayout right)
+  method HMGuitarLayout <Clone>$()
+
+### HIDMaestro.HMHandbrakeLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   HMAxis Axis
+  method HMLayoutKind get_Kind()
+  method HMAxis get_Axis()
+  method Void set_Axis(HMAxis value)
+  method static Boolean op_Inequality(HMHandbrakeLayout left, HMHandbrakeLayout right)
+  method static Boolean op_Equality(HMHandbrakeLayout left, HMHandbrakeLayout right)
+  method HMHandbrakeLayout <Clone>$()
+
+### HIDMaestro.HMHaptics (static=False, enum=False, iface=False)
+  prop   HMRumbleKind Rumble
+  prop   Boolean TriggerHaptics
+  method HMRumbleKind get_Rumble()
+  method Void set_Rumble(HMRumbleKind value)
+  method Boolean get_TriggerHaptics()
+  method Void set_TriggerHaptics(Boolean value)
+  method static Boolean op_Inequality(HMHaptics left, HMHaptics right)
+  method static Boolean op_Equality(HMHaptics left, HMHaptics right)
+  method HMHaptics <Clone>$()
+
+### HIDMaestro.HMHat (static=False, enum=True, iface=False)
+  = None (0)
+  = North (1)
+  = NorthEast (2)
+  = East (3)
+  = SouthEast (4)
+  = South (5)
+  = SouthWest (6)
+  = West (7)
+  = NorthWest (8)
+
+### HIDMaestro.HMHatBinding (static=False, enum=False, iface=False)
+  prop   HMAxis Axis
+  prop   Int32 Positions
+  prop   HMHatLocation Location
+  prop   String Role
+  method HMAxis get_Axis()
+  method Void set_Axis(HMAxis value)
+  method Int32 get_Positions()
+  method Void set_Positions(Int32 value)
+  method HMHatLocation get_Location()
+  method Void set_Location(HMHatLocation value)
+  method String get_Role()
+  method Void set_Role(String value)
+  method static Boolean op_Inequality(HMHatBinding left, HMHatBinding right)
+  method static Boolean op_Equality(HMHatBinding left, HMHatBinding right)
+  method HMHatBinding <Clone>$()
+
+### HIDMaestro.HMHatLocation (static=False, enum=True, iface=False)
+  = Unknown (0)
+  = StickTop (1)
+  = StickThumb (2)
+  = Pinkie (3)
+  = Base (4)
+  = ThrottleModule (5)
+  = WheelHub (6)
+
+### HIDMaestro.HMHidDeviceInfo (static=False, enum=False, iface=False)
+  prop   UInt16 VendorId
+  prop   UInt16 ProductId
+  prop   UInt16 VersionNumber
+  prop   String ProductString
+  prop   String ManufacturerString
+  prop   String SerialNumberString
+  prop   UInt16 TopLevelUsagePage
+  prop   UInt16 TopLevelUsage
+  prop   UInt16 InputReportByteLength
+  prop   String DevicePath
+  method UInt16 get_VendorId()
+  method UInt16 get_ProductId()
+  method UInt16 get_VersionNumber()
+  method String get_ProductString()
+  method String get_ManufacturerString()
+  method String get_SerialNumberString()
+  method UInt16 get_TopLevelUsagePage()
+  method UInt16 get_TopLevelUsage()
+  method UInt16 get_InputReportByteLength()
+  method String get_DevicePath()
+
+### HIDMaestro.HMHotasLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   HMStick Stick
+  prop   HMRudder StickRudder
+  prop   IReadOnlyList`1 StickHats
+  prop   HMTriggerButton StickTrigger
+  prop   IReadOnlyList`1 StickButtons
+  prop   HMPedal ThrottlePrimary
+  prop   IReadOnlyList`1 ThrottleSecondary
+  prop   IReadOnlyList`1 ThrottleHats
+  prop   IReadOnlyList`1 ThrottleButtons
+  prop   HMPedal RudderModule
+  method HMLayoutKind get_Kind()
+  method HMStick get_Stick()
+  method Void set_Stick(HMStick value)
+  method HMRudder get_StickRudder()
+  method Void set_StickRudder(HMRudder value)
+  method IReadOnlyList`1 get_StickHats()
+  method Void set_StickHats(IReadOnlyList`1 value)
+  method HMTriggerButton get_StickTrigger()
+  method Void set_StickTrigger(HMTriggerButton value)
+  method IReadOnlyList`1 get_StickButtons()
+  method Void set_StickButtons(IReadOnlyList`1 value)
+  method HMPedal get_ThrottlePrimary()
+  method Void set_ThrottlePrimary(HMPedal value)
+  method IReadOnlyList`1 get_ThrottleSecondary()
+  method Void set_ThrottleSecondary(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_ThrottleHats()
+  method Void set_ThrottleHats(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_ThrottleButtons()
+  method Void set_ThrottleButtons(IReadOnlyList`1 value)
+  method HMPedal get_RudderModule()
+  method Void set_RudderModule(HMPedal value)
+  method static Boolean op_Inequality(HMHotasLayout left, HMHotasLayout right)
+  method static Boolean op_Equality(HMHotasLayout left, HMHotasLayout right)
+  method HMHotasLayout <Clone>$()
+
+### HIDMaestro.HMImu (static=False, enum=False, iface=False)
+  prop   Boolean Accelerometer
+  prop   Boolean Gyroscope
+  prop   Boolean Magnetometer
+  method Boolean get_Accelerometer()
+  method Void set_Accelerometer(Boolean value)
+  method Boolean get_Gyroscope()
+  method Void set_Gyroscope(Boolean value)
+  method Boolean get_Magnetometer()
+  method Void set_Magnetometer(Boolean value)
+  method static Boolean op_Inequality(HMImu left, HMImu right)
+  method static Boolean op_Equality(HMImu left, HMImu right)
+  method HMImu <Clone>$()
+
+### HIDMaestro.HMJoystickLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   HMStick Stick
+  prop   HMRudder Rudder
+  prop   HMPedal Throttle
+  prop   IReadOnlyList`1 Hats
+  prop   HMTriggerButton Trigger
+  prop   IReadOnlyList`1 StickButtons
+  prop   IReadOnlyList`1 BaseButtons
+  prop   Boolean ForceFeedback
+  method HMLayoutKind get_Kind()
+  method HMStick get_Stick()
+  method Void set_Stick(HMStick value)
+  method HMRudder get_Rudder()
+  method Void set_Rudder(HMRudder value)
+  method HMPedal get_Throttle()
+  method Void set_Throttle(HMPedal value)
+  method IReadOnlyList`1 get_Hats()
+  method Void set_Hats(IReadOnlyList`1 value)
+  method HMTriggerButton get_Trigger()
+  method Void set_Trigger(HMTriggerButton value)
+  method IReadOnlyList`1 get_StickButtons()
+  method Void set_StickButtons(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_BaseButtons()
+  method Void set_BaseButtons(IReadOnlyList`1 value)
+  method Boolean get_ForceFeedback()
+  method Void set_ForceFeedback(Boolean value)
+  method static Boolean op_Inequality(HMJoystickLayout left, HMJoystickLayout right)
+  method static Boolean op_Equality(HMJoystickLayout left, HMJoystickLayout right)
+  method HMJoystickLayout <Clone>$()
+
+### HIDMaestro.HMKey (static=False, enum=True, iface=False)
+  = None (0)
+  = ErrorRollOver (1)
+  = A (4)
+  = B (5)
+  = C (6)
+  = D (7)
+  = E (8)
+  = F (9)
+  = G (10)
+  = H (11)
+  = I (12)
+  = J (13)
+  = K (14)
+  = L (15)
+  = M (16)
+  = N (17)
+  = O (18)
+  = P (19)
+  = Q (20)
+  = R (21)
+  = S (22)
+  = T (23)
+  = U (24)
+  = V (25)
+  = W (26)
+  = X (27)
+  = Y (28)
+  = Z (29)
+  = D1 (30)
+  = D2 (31)
+  = D3 (32)
+  = D4 (33)
+  = D5 (34)
+  = D6 (35)
+  = D7 (36)
+  = D8 (37)
+  = D9 (38)
+  = D0 (39)
+  = Enter (40)
+  = Escape (41)
+  = Backspace (42)
+  = Tab (43)
+  = Space (44)
+  = Minus (45)
+  = Equals (46)
+  = LeftBracket (47)
+  = RightBracket (48)
+  = Backslash (49)
+  = NonUsHash (50)
+  = Semicolon (51)
+  = Apostrophe (52)
+  = Grave (53)
+  = Comma (54)
+  = Period (55)
+  = Slash (56)
+  = CapsLock (57)
+  = F1 (58)
+  = F2 (59)
+  = F3 (60)
+  = F4 (61)
+  = F5 (62)
+  = F6 (63)
+  = F7 (64)
+  = F8 (65)
+  = F9 (66)
+  = F10 (67)
+  = F11 (68)
+  = F12 (69)
+  = PrintScreen (70)
+  = ScrollLock (71)
+  = Pause (72)
+  = Insert (73)
+  = Home (74)
+  = PageUp (75)
+  = Delete (76)
+  = End (77)
+  = PageDown (78)
+  = Right (79)
+  = Left (80)
+  = Down (81)
+  = Up (82)
+  = NumLock (83)
+  = KeypadDivide (84)
+  = KeypadMultiply (85)
+  = KeypadMinus (86)
+  = KeypadPlus (87)
+  = KeypadEnter (88)
+  = Keypad1 (89)
+  = Keypad2 (90)
+  = Keypad3 (91)
+  = Keypad4 (92)
+  = Keypad5 (93)
+  = Keypad6 (94)
+  = Keypad7 (95)
+  = Keypad8 (96)
+  = Keypad9 (97)
+  = Keypad0 (98)
+  = KeypadPeriod (99)
+  = NonUsBackslash (100)
+  = Application (101)
+  = Power (102)
+  = KeypadEquals (103)
+  = F13 (104)
+  = F14 (105)
+  = F15 (106)
+  = F16 (107)
+  = F17 (108)
+  = F18 (109)
+  = F19 (110)
+  = F20 (111)
+  = F21 (112)
+  = F22 (113)
+  = F23 (114)
+  = F24 (115)
+  = Execute (116)
+  = Help (117)
+  = Menu (118)
+  = Select (119)
+  = Stop (120)
+  = Again (121)
+  = Undo (122)
+  = Cut (123)
+  = Copy (124)
+  = Paste (125)
+  = Find (126)
+  = Mute (127)
+  = VolumeUp (128)
+  = VolumeDown (129)
+  = KeypadComma (133)
+  = International1 (135)
+  = International2 (136)
+  = International3 (137)
+  = International4 (138)
+  = International5 (139)
+  = Lang1 (144)
+  = Lang2 (145)
+  = LeftControl (224)
+  = LeftShift (225)
+  = LeftAlt (226)
+  = LeftGui (227)
+  = RightControl (228)
+  = RightShift (229)
+  = RightAlt (230)
+  = RightGui (231)
+
+### HIDMaestro.HMKeyboardLeds (static=False, enum=True, iface=False)
+  = None (0)
+  = NumLock (1)
+  = CapsLock (2)
+  = ScrollLock (4)
+  = Compose (8)
+  = Kana (16)
+
+### HIDMaestro.HMKeyModifiers (static=False, enum=True, iface=False)
+  = None (0)
+  = LeftControl (1)
+  = LeftShift (2)
+  = LeftAlt (4)
+  = LeftGui (8)
+  = RightControl (16)
+  = RightShift (32)
+  = RightAlt (64)
+  = RightGui (128)
+
+### HIDMaestro.HMLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   String Source
+  method HMLayoutKind get_Kind()
+  method String get_Source()
+  method Void set_Source(String value)
+  method static Boolean op_Inequality(HMLayout left, HMLayout right)
+  method static Boolean op_Equality(HMLayout left, HMLayout right)
+  method HMLayout <Clone>$()
+
+### HIDMaestro.Internal.HMLayoutJsonConverter (static=False, enum=False, iface=False)
+  method HMLayout Read(Utf8JsonReader&& reader, Type typeToConvert, JsonSerializerOptions options)
+  method Void Write(Utf8JsonWriter writer, HMLayout value, JsonSerializerOptions options)
+
+### HIDMaestro.Internal.HMLayoutJsonOptions (static=True, enum=False, iface=False)
+  field  JsonSerializerOptions Default (static=True)
+
+### HIDMaestro.HMLayoutKind (static=False, enum=True, iface=False)
+  = Unspecified (0)
+  = Gamepad (1)
+  = Joystick (2)
+  = FlightStick (3)
+  = Hotas (4)
+  = Wheel (5)
+  = Pedals (6)
+  = Shifter (7)
+  = Handbrake (8)
+  = SingleAxisAccessory (9)
+  = ArcadeStick (10)
+  = DancePad (11)
+  = Guitar (12)
+  = MotionWand (13)
+  = Remote (14)
+  = ControllerAdapter (15)
+
+### HIDMaestro.Internal.HMLayoutValidationException (static=False, enum=False, iface=False)
+
+### HIDMaestro.Internal.HMLayoutValidator (static=True, enum=False, iface=False)
+  method static Void Validate(HMLayout layout, HidReportBuilder layoutDescriptor)
+
+### HIDMaestro.HMMicrophoneInput (static=False, enum=False, iface=False)
+  prop   Int32 Channels
+  prop   Int32 SampleRateHz
+  prop   Int32 BitsPerSample
+  prop   Boolean IsStreaming
+  prop   Int32 BufferedBytes
+  method Int32 get_Channels()
+  method Int32 get_SampleRateHz()
+  method Int32 get_BitsPerSample()
+  method Boolean get_IsStreaming()
+  method Void add_StreamingChanged(Action`2 value)
+  method Void remove_StreamingChanged(Action`2 value)
+  method Int32 Submit(ReadOnlySpan`1 interleavedPcm)
+  method Int32 get_BufferedBytes()
+
+### HIDMaestro.HMMotionWandLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   HMTriggerButton Trigger
+  prop   Nullable`1 TriggerAxis
+  prop   IReadOnlyList`1 Buttons
+  prop   HMImu Imu
+  prop   Boolean RgbLightbar
+  method HMLayoutKind get_Kind()
+  method HMTriggerButton get_Trigger()
+  method Void set_Trigger(HMTriggerButton value)
+  method Nullable`1 get_TriggerAxis()
+  method Void set_TriggerAxis(Nullable`1 value)
+  method IReadOnlyList`1 get_Buttons()
+  method Void set_Buttons(IReadOnlyList`1 value)
+  method HMImu get_Imu()
+  method Void set_Imu(HMImu value)
+  method Boolean get_RgbLightbar()
+  method Void set_RgbLightbar(Boolean value)
+  method static Boolean op_Inequality(HMMotionWandLayout left, HMMotionWandLayout right)
+  method static Boolean op_Equality(HMMotionWandLayout left, HMMotionWandLayout right)
+  method HMMotionWandLayout <Clone>$()
+
+### HIDMaestro.HMMouseButtons (static=False, enum=True, iface=False)
+  = None (0)
+  = Left (1)
+  = Right (2)
+  = Middle (4)
+  = Back (8)
+  = Forward (16)
+  = Button6 (32)
+  = Button7 (64)
+  = Button8 (128)
+  = Button9 (256)
+  = Button10 (512)
+  = Button11 (1024)
+  = Button12 (2048)
+  = Button13 (4096)
+  = Button14 (8192)
+  = Button15 (16384)
+  = Button16 (32768)
+
+### HIDMaestro.HMMouseState (static=False, enum=False, iface=False)
+  field  HMMouseButtons Buttons (static=False)
+  field  Int32 X (static=False)
+  field  Int32 Y (static=False)
+  field  Int32 Wheel (static=False)
+  field  Int32 Pan (static=False)
+
+### HIDMaestro.HMOemNameOverride (static=True, enum=False, iface=False)
+  method static Void Set(UInt16 vid, UInt16 pid, String label)
+  method static Void Clear(UInt16 vid, UInt16 pid)
+  method static Int32 RecoverOrphans()
+  method static IReadOnlyList`1 ListActive()
+
+### HIDMaestro.HMOemNameOverrideEntry (static=False, enum=False, iface=False)
+  prop   String VidPid
+  prop   String OriginalOemName
+  prop   Boolean OriginalKeyExisted
+  method String get_VidPid()
+  method String get_OriginalOemName()
+  method Boolean get_OriginalKeyExisted()
+
+### HIDMaestro.HMOutputDecodedEventArgs (static=False, enum=False, iface=False)
+  prop   Byte ReportId
+  prop   IReadOnlyDictionary`2 Fields
+  prop   ReadOnlyMemory`1 RawBytes
+  prop   Boolean CrcValid
+  method Byte get_ReportId()
+  method Void set_ReportId(Byte value)
+  method IReadOnlyDictionary`2 get_Fields()
+  method Void set_Fields(IReadOnlyDictionary`2 value)
+  method ReadOnlyMemory`1 get_RawBytes()
+  method Void set_RawBytes(ReadOnlyMemory`1 value)
+  method Boolean get_CrcValid()
+  method Void set_CrcValid(Boolean value)
+
+### HIDMaestro.HMOutputEncoder (static=True, enum=False, iface=False)
+  method static Byte[] Encode(HMProfile profile, IReadOnlyDictionary`2 fields)
+
+### HIDMaestro.HMOutputPacket (static=False, enum=False, iface=False)
+  field  HMOutputSource Source (static=False)
+  field  Byte ReportId (static=False)
+  field  ReadOnlyMemory`1 Data (static=False)
+  field  UInt32 SeqNo (static=False)
+
+### HIDMaestro.HMOutputSource (static=False, enum=True, iface=False)
+  = HidOutput (0)
+  = HidFeature (1)
+  = XInput (2)
+  = HidFeatureRead (3)
+
+### HIDMaestro.HMPedal (static=False, enum=False, iface=False)
+  prop   HMAxis Axis
+  prop   HMAxisRole Role
+  prop   HMPedalType Type
+  method HMAxis get_Axis()
+  method Void set_Axis(HMAxis value)
+  method HMAxisRole get_Role()
+  method Void set_Role(HMAxisRole value)
+  method HMPedalType get_Type()
+  method Void set_Type(HMPedalType value)
+  method static Boolean op_Inequality(HMPedal left, HMPedal right)
+  method static Boolean op_Equality(HMPedal left, HMPedal right)
+  method HMPedal <Clone>$()
+
+### HIDMaestro.HMPedalsLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   IReadOnlyList`1 Pedals
+  method HMLayoutKind get_Kind()
+  method IReadOnlyList`1 get_Pedals()
+  method Void set_Pedals(IReadOnlyList`1 value)
+  method static Boolean op_Inequality(HMPedalsLayout left, HMPedalsLayout right)
+  method static Boolean op_Equality(HMPedalsLayout left, HMPedalsLayout right)
+  method HMPedalsLayout <Clone>$()
+
+### HIDMaestro.HMPedalType (static=False, enum=True, iface=False)
+  = Unknown (0)
+  = Potentiometer (1)
+  = HallEffect (2)
+  = LoadCell (3)
+  = Magnetic (4)
+
+### HIDMaestro.HMPidBlockLoad (static=False, enum=False, iface=False)
+  prop   Byte EffectBlockIndex
+  prop   PidLoadStatus LoadStatus
+  prop   UInt16 RAMPoolAvailable
+  method Byte get_EffectBlockIndex()
+  method PidLoadStatus get_LoadStatus()
+  method UInt16 get_RAMPoolAvailable()
+
+### HIDMaestro.HMProfile (static=False, enum=False, iface=False)
+  prop   String Id
+  prop   String Name
+  prop   String Vendor
+  prop   UInt16 VendorId
+  prop   UInt16 ProductId
+  prop   String ProductString
+  prop   String ManufacturerString
+  prop   String DisplayName
+  prop   String Type
+  prop   String Connection
+  prop   String DriverMode
+  prop   String TriggerMode
+  prop   String Backend
+  prop   Boolean RequiresUsbipBackend
+  prop   Boolean IsDeployable
+  prop   Int32 InputReportSize
+  prop   String DescriptorHex
+  prop   Int32 ButtonCount
+  prop   Int32 AxisCount
+  prop   IReadOnlyList`1 AvailableAxes
+  prop   Boolean HasHat
+  prop   Nullable`1 HatLogicalMin
+  prop   Nullable`1 HatLogicalMax
+  prop   Int32 StickBits
+  prop   Int32 TriggerBits
+  prop   String Notes
+  prop   Int32[] ButtonMap
+  prop   Dictionary`2 AxisMap
+  prop   String SdlMapping
+  prop   ExtendedReportSpec ExtendedReport
+  prop   ExtendedReportSpec ExtendedOutputReport
+  prop   Boolean HasExtendedInput
+  prop   Boolean HasExtendedOutput
+  prop   HMLayout Layout
+  prop   IReadOnlyList`1 Sticks
+  prop   IReadOnlyList`1 Triggers
+  prop   Int32 StickCount
+  prop   Int32 TriggerCount
+  method String get_Id()
+  method String get_Name()
+  method String get_Vendor()
+  method UInt16 get_VendorId()
+  method UInt16 get_ProductId()
+  method String get_ProductString()
+  method String get_ManufacturerString()
+  method String get_DisplayName()
+  method String get_Type()
+  method String get_Connection()
+  method String get_DriverMode()
+  method String get_TriggerMode()
+  method String get_Backend()
+  method Boolean get_RequiresUsbipBackend()
+  method Boolean get_IsDeployable()
+  method Int32 get_InputReportSize()
+  method Byte[] GetDescriptorBytes()
+  method String get_DescriptorHex()
+  method Int32 get_ButtonCount()
+  method Int32 get_AxisCount()
+  method IReadOnlyList`1 get_AvailableAxes()
+  method Boolean get_HasHat()
+  method Nullable`1 get_HatLogicalMin()
+  method Nullable`1 get_HatLogicalMax()
+  method Int32 get_StickBits()
+  method Int32 get_TriggerBits()
+  method String get_Notes()
+  method Int32[] get_ButtonMap()
+  method Dictionary`2 get_AxisMap()
+  method String get_SdlMapping()
+  method ExtendedReportSpec get_ExtendedReport()
+  method ExtendedReportSpec get_ExtendedOutputReport()
+  method Boolean get_HasExtendedInput()
+  method Boolean get_HasExtendedOutput()
+  method HMLayout get_Layout()
+  method HMGamepadLayout AsGamepad()
+  method HMJoystickLayout AsJoystick()
+  method HMFlightStickLayout AsFlightStick()
+  method HMHotasLayout AsHotas()
+  method HMWheelLayout AsWheel()
+  method HMPedalsLayout AsPedals()
+  method HMShifterLayout AsShifter()
+  method HMHandbrakeLayout AsHandbrake()
+  method HMSingleAxisAccessoryLayout AsSingleAxisAccessory()
+  method HMArcadeStickLayout AsArcadeStick()
+  method HMDancePadLayout AsDancePad()
+  method HMGuitarLayout AsGuitar()
+  method HMMotionWandLayout AsMotionWand()
+  method HMRemoteLayout AsRemote()
+  method HMControllerAdapterLayout AsControllerAdapter()
+  method IReadOnlyList`1 get_Sticks()
+  method IReadOnlyList`1 get_Triggers()
+  method Int32 get_StickCount()
+  method Int32 get_TriggerCount()
+
+### HIDMaestro.HMProfileBuilder (static=False, enum=False, iface=False)
+  method HMProfileBuilder Id(String id)
+  method HMProfileBuilder Name(String name)
+  method HMProfileBuilder Vendor(String vendor)
+  method HMProfileBuilder Vid(UInt16 vid)
+  method HMProfileBuilder Pid(UInt16 pid)
+  method HMProfileBuilder ProductString(String s)
+  method HMProfileBuilder ManufacturerString(String s)
+  method HMProfileBuilder Type(String type)
+  method HMProfileBuilder Connection(String conn)
+  method HMProfileBuilder DriverMode(String mode)
+  method HMProfileBuilder TriggerMode(String mode)
+  method HMProfileBuilder DeviceDescription(String desc)
+  method HMProfileBuilder Descriptor(Byte[] bytes)
+  method HMProfileBuilder DescriptorHex(String hex)
+  method HMProfileBuilder InputReportSize(Int32 size)
+  method HMProfileBuilder FromDescriptorBuilder(HidDescriptorBuilder builder)
+  method HMProfileBuilder Notes(String notes)
+  method HMProfileBuilder ButtonMap(Int32[] map)
+  method HMProfileBuilder TriggerButtons(Int32[] map)
+  method HMProfileBuilder AxisMap(Dictionary`2 map)
+  method HMProfileBuilder FromProfile(HMProfile source)
+  method HMProfile Build()
+
+### HIDMaestro.HMRemoteLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   IReadOnlyList`1 Buttons
+  method HMLayoutKind get_Kind()
+  method IReadOnlyList`1 get_Buttons()
+  method Void set_Buttons(IReadOnlyList`1 value)
+  method static Boolean op_Inequality(HMRemoteLayout left, HMRemoteLayout right)
+  method static Boolean op_Equality(HMRemoteLayout left, HMRemoteLayout right)
+  method HMRemoteLayout <Clone>$()
+
+### HIDMaestro.HMRevIndicator (static=False, enum=False, iface=False)
+  prop   Int32 LedCount
+  method Int32 get_LedCount()
+  method Void set_LedCount(Int32 value)
+  method static Boolean op_Inequality(HMRevIndicator left, HMRevIndicator right)
+  method static Boolean op_Equality(HMRevIndicator left, HMRevIndicator right)
+  method HMRevIndicator <Clone>$()
+
+### HIDMaestro.HMRotaryEncoder (static=False, enum=False, iface=False)
+  prop   HMAxis Axis
+  prop   HMAxisRole Role
+  prop   Nullable`1 Positions
+  method HMAxis get_Axis()
+  method Void set_Axis(HMAxis value)
+  method HMAxisRole get_Role()
+  method Void set_Role(HMAxisRole value)
+  method Nullable`1 get_Positions()
+  method Void set_Positions(Nullable`1 value)
+  method static Boolean op_Inequality(HMRotaryEncoder left, HMRotaryEncoder right)
+  method static Boolean op_Equality(HMRotaryEncoder left, HMRotaryEncoder right)
+  method HMRotaryEncoder <Clone>$()
+
+### HIDMaestro.HMRudder (static=False, enum=False, iface=False)
+  prop   HMAxis Axis
+  prop   HMRudderKind Kind
+  method HMAxis get_Axis()
+  method Void set_Axis(HMAxis value)
+  method HMRudderKind get_Kind()
+  method Void set_Kind(HMRudderKind value)
+  method static Boolean op_Inequality(HMRudder left, HMRudder right)
+  method static Boolean op_Equality(HMRudder left, HMRudder right)
+  method HMRudder <Clone>$()
+
+### HIDMaestro.HMRudderKind (static=False, enum=True, iface=False)
+  = Twist (0)
+  = Rocker (1)
+  = Pedals (2)
+
+### HIDMaestro.HMRumbleKind (static=False, enum=True, iface=False)
+  = None (0)
+  = SingleErm (1)
+  = DualErm (2)
+  = VoiceCoilHaptic (3)
+  = ImpulseTriggers (4)
+
+### HIDMaestro.HMShifter (static=False, enum=False, iface=False)
+  prop   HMShifterKind Kind
+  prop   Nullable`1 ButtonIndex
+  prop   HMShifterActuation Actuation
+  method HMShifterKind get_Kind()
+  method Void set_Kind(HMShifterKind value)
+  method Nullable`1 get_ButtonIndex()
+  method Void set_ButtonIndex(Nullable`1 value)
+  method HMShifterActuation get_Actuation()
+  method Void set_Actuation(HMShifterActuation value)
+  method static Boolean op_Inequality(HMShifter left, HMShifter right)
+  method static Boolean op_Equality(HMShifter left, HMShifter right)
+  method HMShifter <Clone>$()
+
+### HIDMaestro.HMShifterActuation (static=False, enum=True, iface=False)
+  = Digital (0)
+  = AnalogSqueeze (1)
+
+### HIDMaestro.HMShifterKind (static=False, enum=True, iface=False)
+  = HPattern (0)
+  = Sequential (1)
+  = PaddleLeft (2)
+  = PaddleRight (3)
+
+### HIDMaestro.HMShifterLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   IReadOnlyList`1 Modes
+  prop   IReadOnlyDictionary`2 HPatternGears
+  prop   Nullable`1 SequentialUpButton
+  prop   Nullable`1 SequentialDownButton
+  method HMLayoutKind get_Kind()
+  method IReadOnlyList`1 get_Modes()
+  method Void set_Modes(IReadOnlyList`1 value)
+  method IReadOnlyDictionary`2 get_HPatternGears()
+  method Void set_HPatternGears(IReadOnlyDictionary`2 value)
+  method Nullable`1 get_SequentialUpButton()
+  method Void set_SequentialUpButton(Nullable`1 value)
+  method Nullable`1 get_SequentialDownButton()
+  method Void set_SequentialDownButton(Nullable`1 value)
+  method static Boolean op_Inequality(HMShifterLayout left, HMShifterLayout right)
+  method static Boolean op_Equality(HMShifterLayout left, HMShifterLayout right)
+  method HMShifterLayout <Clone>$()
+
+### HIDMaestro.HMSimpleStick (static=False, enum=False, iface=False)
+  prop   HMAxis XAxis
+  prop   HMAxis YAxis
+  prop   HMAxisRole RoleX
+  prop   HMAxisRole RoleY
+  prop   String Label
+  method HMAxis get_XAxis()
+  method Void set_XAxis(HMAxis value)
+  method HMAxis get_YAxis()
+  method Void set_YAxis(HMAxis value)
+  method HMAxisRole get_RoleX()
+  method Void set_RoleX(HMAxisRole value)
+  method HMAxisRole get_RoleY()
+  method Void set_RoleY(HMAxisRole value)
+  method String get_Label()
+  method Void set_Label(String value)
+  method static Boolean op_Inequality(HMSimpleStick left, HMSimpleStick right)
+  method static Boolean op_Equality(HMSimpleStick left, HMSimpleStick right)
+  method HMSimpleStick <Clone>$()
+
+### HIDMaestro.HMSimpleTrigger (static=False, enum=False, iface=False)
+  prop   HMAxis Axis
+  prop   HMAxisRole Role
+  prop   String Label
+  method HMAxis get_Axis()
+  method Void set_Axis(HMAxis value)
+  method HMAxisRole get_Role()
+  method Void set_Role(HMAxisRole value)
+  method String get_Label()
+  method Void set_Label(String value)
+  method static Boolean op_Inequality(HMSimpleTrigger left, HMSimpleTrigger right)
+  method static Boolean op_Equality(HMSimpleTrigger left, HMSimpleTrigger right)
+  method HMSimpleTrigger <Clone>$()
+
+### HIDMaestro.HMSingleAxisAccessoryLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   HMAxis Axis
+  prop   HMAxisRole Role
+  method HMLayoutKind get_Kind()
+  method HMAxis get_Axis()
+  method Void set_Axis(HMAxis value)
+  method HMAxisRole get_Role()
+  method Void set_Role(HMAxisRole value)
+  method static Boolean op_Inequality(HMSingleAxisAccessoryLayout left, HMSingleAxisAccessoryLayout right)
+  method static Boolean op_Equality(HMSingleAxisAccessoryLayout left, HMSingleAxisAccessoryLayout right)
+  method HMSingleAxisAccessoryLayout <Clone>$()
+
+### HIDMaestro.HMStick (static=False, enum=False, iface=False)
+  prop   HMStickSide Side
+  prop   HMAxis XAxis
+  prop   HMAxis YAxis
+  prop   Nullable`1 ClickButton
+  method HMStickSide get_Side()
+  method Void set_Side(HMStickSide value)
+  method HMAxis get_XAxis()
+  method Void set_XAxis(HMAxis value)
+  method HMAxis get_YAxis()
+  method Void set_YAxis(HMAxis value)
+  method Nullable`1 get_ClickButton()
+  method Void set_ClickButton(Nullable`1 value)
+  method static Boolean op_Inequality(HMStick left, HMStick right)
+  method static Boolean op_Equality(HMStick left, HMStick right)
+  method HMStick <Clone>$()
+
+### HIDMaestro.HMStickSide (static=False, enum=True, iface=False)
+  = Left (0)
+  = Right (1)
+
+### HIDMaestro.HMTrigger (static=False, enum=False, iface=False)
+  prop   HMAxis Axis
+  prop   HMTriggerSide Side
+  prop   HMTriggerKind Kind
+  prop   Nullable`1 Stages
+  method HMAxis get_Axis()
+  method Void set_Axis(HMAxis value)
+  method HMTriggerSide get_Side()
+  method Void set_Side(HMTriggerSide value)
+  method HMTriggerKind get_Kind()
+  method Void set_Kind(HMTriggerKind value)
+  method Nullable`1 get_Stages()
+  method Void set_Stages(Nullable`1 value)
+  method static Boolean op_Inequality(HMTrigger left, HMTrigger right)
+  method static Boolean op_Equality(HMTrigger left, HMTrigger right)
+  method HMTrigger <Clone>$()
+
+### HIDMaestro.HMTriggerButton (static=False, enum=False, iface=False)
+  prop   Int32 ButtonIndex
+  prop   Int32 Stages
+  method Int32 get_ButtonIndex()
+  method Void set_ButtonIndex(Int32 value)
+  method Int32 get_Stages()
+  method Void set_Stages(Int32 value)
+  method static Boolean op_Inequality(HMTriggerButton left, HMTriggerButton right)
+  method static Boolean op_Equality(HMTriggerButton left, HMTriggerButton right)
+  method HMTriggerButton <Clone>$()
+
+### HIDMaestro.HMTriggerKind (static=False, enum=True, iface=False)
+  = Analog (0)
+  = Digital (1)
+
+### HIDMaestro.HMTriggerSide (static=False, enum=True, iface=False)
+  = Left (0)
+  = Right (1)
+
+### HIDMaestro.HMUnspecifiedLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   String Note
+  method HMLayoutKind get_Kind()
+  method String get_Note()
+  method Void set_Note(String value)
+  method static Boolean op_Inequality(HMUnspecifiedLayout left, HMUnspecifiedLayout right)
+  method static Boolean op_Equality(HMUnspecifiedLayout left, HMUnspecifiedLayout right)
+  method HMUnspecifiedLayout <Clone>$()
+
+### HIDMaestro.HMUsbAudio (static=False, enum=False, iface=False)
+  prop   HMAudioOutput Output
+  prop   HMMicrophoneInput Microphone
+  method HMAudioOutput get_Output()
+  method HMMicrophoneInput get_Microphone()
+  method Void add_ControlChanged(EventHandler`1 value)
+  method Void remove_ControlChanged(EventHandler`1 value)
+
+### HIDMaestro.HMVR (static=True, enum=False, iface=False)
+  prop   Boolean IsSteamVRInstalled
+  prop   Boolean IsSteamVRRunning
+  prop   String SteamVRPath
+  prop   String DriverName
+  method static Boolean get_IsSteamVRInstalled()
+  method static Boolean get_IsSteamVRRunning()
+  method static String get_SteamVRPath()
+  method static Void SetSteamVRPathHint(String steamVrDir)
+  method static Boolean EnsureDriverRegistered()
+  method static Void UnregisterDriver()
+  method static String get_DriverName()
+  method static IReadOnlyList`1 FindDriverNameConflicts()
+
+### HIDMaestro.HMVRButton (static=False, enum=True, iface=False)
+  = None (0)
+  = System (1)
+  = A (2)
+  = ATouch (4)
+  = B (8)
+  = BTouch (16)
+  = TriggerClick (32)
+  = GripClick (64)
+  = StickClick (128)
+
+### HIDMaestro.HMVRController (static=False, enum=False, iface=False)
+  prop   Boolean DriverConnected
+  prop   Boolean ControllersLive
+  method Void add_HapticReceived(EventHandler`1 value)
+  method Void remove_HapticReceived(EventHandler`1 value)
+  method Boolean get_DriverConnected()
+  method Boolean get_ControllersLive()
+  method HMVRHmdPose GetHmdPose()
+  method Void SubmitState(HMVRState&& state)
+  method Void Dispose()
+
+### HIDMaestro.HMVRHand (static=False, enum=True, iface=False)
+  = Left (0)
+  = Right (1)
+
+### HIDMaestro.HMVRHandState (static=False, enum=False, iface=False)
+  field  HMVRButton Buttons (static=False)
+  field  Single Trigger (static=False)
+  field  Single Grip (static=False)
+  field  Single StickX (static=False)
+  field  Single StickY (static=False)
+  field  Boolean PoseValid (static=False)
+  field  Single PositionX (static=False)
+  field  Single PositionY (static=False)
+  field  Single PositionZ (static=False)
+  field  Single OrientationW (static=False)
+  field  Single OrientationX (static=False)
+  field  Single OrientationY (static=False)
+  field  Single OrientationZ (static=False)
+
+### HIDMaestro.HMVRHapticEventArgs (static=False, enum=False, iface=False)
+  prop   HMVRHand Hand
+  prop   Single DurationSeconds
+  prop   Single Frequency
+  prop   Single Amplitude
+  prop   Int64 TimestampQpc
+  method HMVRHand get_Hand()
+  method Void set_Hand(HMVRHand value)
+  method Single get_DurationSeconds()
+  method Void set_DurationSeconds(Single value)
+  method Single get_Frequency()
+  method Void set_Frequency(Single value)
+  method Single get_Amplitude()
+  method Void set_Amplitude(Single value)
+  method Int64 get_TimestampQpc()
+  method Void set_TimestampQpc(Int64 value)
+
+### HIDMaestro.HMVRHmdPose (static=False, enum=False, iface=False)
+  field  Boolean Valid (static=False)
+  field  Single PositionX (static=False)
+  field  Single PositionY (static=False)
+  field  Single PositionZ (static=False)
+  field  Single OrientationW (static=False)
+  field  Single OrientationX (static=False)
+  field  Single OrientationY (static=False)
+  field  Single OrientationZ (static=False)
+
+### HIDMaestro.HMVRState (static=False, enum=False, iface=False)
+  field  HMVRHandState Left (static=False)
+  field  HMVRHandState Right (static=False)
+
+### HIDMaestro.HMWheelLayout (static=False, enum=False, iface=False)
+  prop   HMLayoutKind Kind
+  prop   HMWheelSpec Wheel
+  prop   IReadOnlyList`1 Pedals
+  prop   IReadOnlyList`1 Shifters
+  prop   IReadOnlyList`1 WheelButtons
+  prop   IReadOnlyList`1 RotaryEncoders
+  prop   HMDpad Dpad
+  prop   HMRevIndicator RevIndicator
+  method HMLayoutKind get_Kind()
+  method HMWheelSpec get_Wheel()
+  method Void set_Wheel(HMWheelSpec value)
+  method IReadOnlyList`1 get_Pedals()
+  method Void set_Pedals(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_Shifters()
+  method Void set_Shifters(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_WheelButtons()
+  method Void set_WheelButtons(IReadOnlyList`1 value)
+  method IReadOnlyList`1 get_RotaryEncoders()
+  method Void set_RotaryEncoders(IReadOnlyList`1 value)
+  method HMDpad get_Dpad()
+  method Void set_Dpad(HMDpad value)
+  method HMRevIndicator get_RevIndicator()
+  method Void set_RevIndicator(HMRevIndicator value)
+  method static Boolean op_Inequality(HMWheelLayout left, HMWheelLayout right)
+  method static Boolean op_Equality(HMWheelLayout left, HMWheelLayout right)
+  method HMWheelLayout <Clone>$()
+
+### HIDMaestro.HMWheelSpec (static=False, enum=False, iface=False)
+  prop   HMAxis Axis
+  prop   Nullable`1 RotationDegrees
+  prop   Boolean ForceFeedback
+  method HMAxis get_Axis()
+  method Void set_Axis(HMAxis value)
+  method Nullable`1 get_RotationDegrees()
+  method Void set_RotationDegrees(Nullable`1 value)
+  method Boolean get_ForceFeedback()
+  method Void set_ForceFeedback(Boolean value)
+  method static Boolean op_Inequality(HMWheelSpec left, HMWheelSpec right)
+  method static Boolean op_Equality(HMWheelSpec left, HMWheelSpec right)
+  method HMWheelSpec <Clone>$()

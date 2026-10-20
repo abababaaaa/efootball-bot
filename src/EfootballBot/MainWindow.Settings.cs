@@ -88,6 +88,15 @@ public partial class MainWindow
         // OCR 引擎（枚举顺序 RapidV6=0 / Windows=1，与下拉项一致）
         CmbOcrEngine.SelectedIndex = _cfg.OcrEngine == OcrEngineKind.Windows ? 1 : 0;
 
+        // 虚拟手柄设备形态（下拉序 0~3 与档位一一对应）
+        CmbPadProfile.SelectedIndex = _cfg.PadProfileId switch
+        {
+            "xbox-360-wired" => 1,
+            "xbox-series-xs" => 2,
+            "xbox-elite-v2-bt-v2" => 3,
+            _ => 0,
+        };
+
         // OCR 频率
         int[] ocrMsValues = { 500, 900, 1500, 2500, 5000 };
         for (int i = 0; i < ocrMsValues.Length; i++)
@@ -220,6 +229,15 @@ public partial class MainWindow
             _cfg.FrameDump.IntervalMs = dumpMs[CmbFrameDumpInterval.SelectedIndex];
         }
         _cfg.OcrEngine = CmbOcrEngine.SelectedIndex == 1 ? OcrEngineKind.Windows : OcrEngineKind.RapidV6;
+
+        // 虚拟手柄设备形态（下次开始挂机生效；非法值回退默认 DS4）
+        _cfg.PadProfileId = CmbPadProfile.SelectedIndex switch
+        {
+            1 => "xbox-360-wired",
+            2 => "xbox-series-xs",
+            3 => "xbox-elite-v2-bt-v2",
+            _ => EfootballBot.Core.Input.HidMaestroPad.DefaultProfileId,
+        };
 
         if (CmbOcrInterval.SelectedIndex >= 0)
         {

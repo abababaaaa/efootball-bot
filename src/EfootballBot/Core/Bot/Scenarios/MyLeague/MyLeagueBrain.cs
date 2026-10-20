@@ -724,6 +724,58 @@ public static class MyLeagueBrain
     }
 
     /// <summary>
+    /// 检测难度页当前勾选（✓）难度——国际服难度页专用。<see cref="DetectSelectedDifficulty"/>
+    /// 的宽窗（词左右 ±0.06）会把光标行的蓝框描边一起扫进来：蓝框横边线落在词 y±0.03 带内，
+    /// 是否入带随捕获宽度漂移（实机 2026-10-20 两帧：1280 宽帧光标行 0 票判定正确，
+    /// 1227 宽帧光标行 68 票压过勾行 22 票——同一会话判定在勾行/光标行间抖动的根源）。
+    /// 校准窗（两张实机帧 difficulty_new_ui / difficulty_live_20261020 锁定回归）：
+    /// x=词左缘 [-0.034,-0.004]（只含勾图标；卡左边线在 -0.05 开外）、y=词中心 ±0.016
+    /// （勾与词同高；框横边线在 ±0.029）。实测勾行 22~24 票、其余行全 0，阈值取 12。
+    /// </summary>
+    public static string? DetectCheckedDifficulty(FrameData frame, OcrResult ocr)
+    {
+        var (w, h, bgra) = (frame.Width, frame.Height, frame.Bgra);
+        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return null;
+
+        string? best = null;
+        int bestBlue = 0;
+        foreach (var diff in Difficulties)
+        {
+            var word = ocr.Words.FirstOrDefault(x => x.Text.Replace(" ", "").Contains(diff));
+            if (word is null) continue;
+            int blue = 0;
+            double x0 = word.CenterX - word.W / 2 - 0.034, x1 = word.CenterX - word.W / 2 - 0.004;
+            for (int y = (int)((word.CenterY - 0.016) * h); y < (int)((word.CenterY + 0.016) * h); y += 2)
+            {
+                for (int x = Math.Max(0, (int)(x0 * w)); x < Math.Min(w, (int)(x1 * w)); x += 2)
+                {
+                    if (y < 0 || y >= h) continue;
+                    int i = (y * w + x) * 4;
+                    if (bgra[i] > 120 && bgra[i] > bgra[i + 1] + 40 && bgra[i] > bgra[i + 2] + 40) blue++;
+                }
+            }
+            if (blue > bestBlue) { bestBlue = blue; best = diff; }
+        }
+        return bestBlue >= 12 ? best : null;
+    }
+
+    /// <summary>
+    /// 难度页确认腿计划（用户 2026-10-20 实机配方，round 自 1 起）：
+    /// 页面 = 难度列表（≤7 行）+ 底行「取消 | 确认」，进页光标在列表第 1 行，确认唯一路径
+    /// = 下×(行数+3) 饱和落底行 → 右×1（取消→确认）→ A（新手行 ↓×7 →×1；光标已在底行
+    /// 就是 ↓→）。到底行后多按无效，行数+3 的余量吸收吞键。返回 null = 本轮不按确认腿
+    /// （第 4/7 轮 B 逃生：关对话框回联赛主页，由正常流程重新前往比赛重进，光标复位第 1 行）。
+    /// 首轮不先上归位（实机进页光标恒在第 1 行，纯用户配方）；重试腿先 上×9 饱和回顶行
+    /// 再下（上饱和已被联赛主页/CN 难度页验证），偶数轮 右×2 防吞键。
+    /// </summary>
+    public static (bool UpFirst, int Downs, int Rights)? DifficultyLegPlan(int round)
+    {
+        if (round is 4 or 7) return null; // B 逃生轮
+        if (round > 9) return null;       // 调用方在此停止挂机（弹窗遮挡类，按腿无解）
+        return (UpFirst: round > 1, Downs: 10, Rights: round % 2 == 0 ? 2 : 1);
+    }
+
+    /// <summary>
     /// 在物品列表 OCR 行中找目标道具行。物品区为页面主体（y 0.22~0.90），
     /// 按类别关键词 + 档位词匹配（x2/x3/x4 匹配数字位；状态档位匹配中文词）。
     /// 返回 null 表示本页没有该道具。同一行文本不可变（固定 UI 词），比分/球队名不参与。

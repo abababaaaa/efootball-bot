@@ -18,19 +18,33 @@ public static class HidDeviceEnumerator
     /// <summary>旧 ViGEm 虚拟 DualShock4 手柄的硬件 ID 前缀（与真实 DS4 同形，靠父设备判真假）。</summary>
     public const string ViGEmDs4InstancePrefix = @"HID\VID_054C&PID_05C4";
 
+    /// <summary>HIDMaestro 虚拟总线节点前缀（探针 2026-10-20 实测定案）：ROOT\HIDCLASS\HM_<hash>，
+    /// hash 由 identityKey 决定性生成；实例路径不含 VID/PID，也不含"HIDMAESTRO"字样。</summary>
+    public const string HidMaestroBusPrefix = @"ROOT\HIDCLASS\HM_";
+
+    /// <summary>HIDMaestro 的 HID 集合节点前缀：HID\HIDCLASS\1&amp;<hash>&amp;0&amp;0000（其父即虚拟总线节点）。
+    /// "HIDCLASS" 硬件 ID 仅 HIDMaestro 使用，真实设备不会撞此形态。</summary>
+    public const string HidMaestroHidPrefix = @"HID\HIDCLASS\";
+
+    /// <summary>HIDMaestro 虚拟设备实例判定（在线检查与黑名单共用；路径纯字符串，不打开设备）。</summary>
+    public static bool IsHidMaestroInstance(string instancePath)
+        => instancePath.StartsWith(HidMaestroBusPrefix, StringComparison.OrdinalIgnoreCase)
+           || instancePath.StartsWith(HidMaestroHidPrefix, StringComparison.OrdinalIgnoreCase);
+
     public static bool IsViGEmInstance(string instancePath)
         => instancePath.StartsWith(ViGEmInstancePrefix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// 黑名单/名单用的「虚拟手柄实例路径」判定（纯字符串，不打开设备）：
-    /// ViGEm Xbox360 前缀 ∥ ViGEm DS4 前缀 ∥ HIDMaestro 驱动特征（设备路径含驱动名，
-    /// 具体形态待实机校准，先宽匹配）。真实 DS4 与虚拟 DS4 路径同形——凡需分辨真假
-    /// （如禁用物理手柄）必须再过父设备判定，此处仅用于「我们加入黑名单的虚拟设备」。
+    /// ViGEm Xbox360 前缀 ∥ ViGEm DS4 前缀 ∥ HIDMaestro 节点前缀（ROOT\HIDCLASS\HM_ ∥ HID\HIDCLASS\，
+    /// 2026-10-20 探针实测定案；旧的 Contains("HIDMAESTRO") 永远匹配不上真实路径，导致隔离空转）。
+    /// 真实 DS4 与虚拟 DS4 路径同形——凡需分辨真假（如禁用物理手柄）必须再过父设备判定，
+    /// 此处仅用于「我们加入黑名单的虚拟设备」。
     /// </summary>
     public static bool IsVirtualPadInstancePath(string instancePath)
         => IsViGEmInstance(instancePath)
            || instancePath.StartsWith(ViGEmDs4InstancePrefix, StringComparison.OrdinalIgnoreCase)
-           || instancePath.Contains("HIDMAESTRO", StringComparison.OrdinalIgnoreCase);
+           || IsHidMaestroInstance(instancePath);
 
     /// <summary>
     /// 设备节点的祖先链（最多 4 级）里是否出现虚拟总线特征——真假手柄唯一可靠判据。
@@ -53,6 +67,7 @@ public static class HidDeviceEnumerator
                 var id = sb.ToString();
                 if (id.StartsWith("ViGEmBus", StringComparison.OrdinalIgnoreCase)
                     || id.StartsWith(@"ROOT\SYSTEM\", StringComparison.OrdinalIgnoreCase)
+                    || id.StartsWith(@"ROOT\HIDCLASS\", StringComparison.OrdinalIgnoreCase)
                     || id.Contains("HIDMAESTRO", StringComparison.OrdinalIgnoreCase))
                     return true;
                 if (CM_Get_Parent(out cur, cur, 0) != 0)

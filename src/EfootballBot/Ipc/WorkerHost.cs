@@ -19,6 +19,7 @@ public sealed class WorkerHost : IDisposable
     private Process? _process;
     private NamedPipeClientStream? _pipe;
     private CancellationTokenSource? _readCts;
+    private TaskCompletionSource<bool>? _stopAck;     // stop 命令的 Worker 确认（stopped 事件）
     private BotStats _lastStats = new();
     private bool _disposed;
 
@@ -47,7 +48,7 @@ public sealed class WorkerHost : IDisposable
         {
             // 任何失败（连接超时/握手失败/NRE）都必须回收残留子进程与句柄，
             // 否则孤儿 Worker 会让下一次点击走进"进程还在但管道没连上"的死分支
-            await TeardownAsync(killIfAlive: true);
+            await TeardownAsync();
             throw;
         }
         finally
@@ -66,7 +67,7 @@ public sealed class WorkerHost : IDisposable
             return;
         }
         if (_process is not null)
-            await TeardownAsync(killIfAlive: true);
+            await TeardownAsync();
 
         string exePath = Process.GetCurrentProcess().MainModule?.FileName
             ?? throw new InvalidOperationException("无法获取当前 exe 路径");
@@ -182,6 +183,9 @@ public sealed class WorkerHost : IDisposable
                     case "exited":
                         Exited?.Invoke(msg.Text ?? "");
                         break;
+                    case "stopped":
+                        _stopAck?.TrySetResult(true);
+                        break;
                 }
             }
             catch { /* 事件回调异常不中断读循环，也不冒出调用方 */ }
@@ -204,14 +208,15 @@ public sealed class WorkerHost : IDisposable
         await SendAsync(PipeProtocol.CmdStart(mode));
     }
 
-    /// <summary>发送 stop 命令，等待 5s 后若仍在跑则 Kill。</summary>
+    /// <summary>发送 stop 命令，收到 Worker 确认（典型 <1s）即 Kill 回收；确认超时 2s 也直接 Kill。
+    /// Worker 收 stop 本就不退出进程（保活等重连），旧实现固定等 5s 进程退出纯属白等。</summary>
     public async Task StopAsync()
     {
         try { await _lifecycle.WaitAsync(); }
         catch (ObjectDisposedException) { return; } // 关闭中：Dispose 已硬回收，无需再停
         try
         {
-            await TeardownAsync(killIfAlive: true);
+            await TeardownAsync();
         }
         finally
         {
@@ -220,27 +225,31 @@ public sealed class WorkerHost : IDisposable
         }
     }
 
-    /// <summary>回收当前会话：发 stop → 等退出（5s）→ Kill 兜底 → 取消读循环 → 释放句柄。幂等。</summary>
-    private async Task TeardownAsync(bool killIfAlive)
+    /// <summary>回收当前会话：发 stop → 等 stopped 确认（≤2s）→ Kill 兜底 → 取消读循环 → 释放句柄。幂等。</summary>
+    private async Task TeardownAsync()
     {
         if (_pipe is { IsConnected: true })
         {
-            try { await SendAsync(PipeProtocol.CmdStop()); }
+            try
+            {
+                var ack = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+                _stopAck = ack;
+                await SendAsync(PipeProtocol.CmdStop());
+                await ack.Task.WaitAsync(TimeSpan.FromSeconds(2));
+            }
             catch { }
         }
 
         var process = _process;
         if (process is not null && !process.HasExited)
         {
-            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-            try { await process.WaitForExitAsync(cts.Token); }
-            catch (OperationCanceledException)
-            {
-                if (killIfAlive)
-                    try { process.Kill(); } catch { }
-            }
+            try { process.Kill(); } catch { }
+            // Kill 后短暂等退出，避免僵尸进程残留句柄（引擎已在 stop 时清理，无需宽限）
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+            try { await process.WaitForExitAsync(cts.Token); } catch { }
         }
 
+        _stopAck = null;
         try { _readCts?.Cancel(); } catch { }
         try { _pipe?.Dispose(); } catch { }
         _pipe = null;

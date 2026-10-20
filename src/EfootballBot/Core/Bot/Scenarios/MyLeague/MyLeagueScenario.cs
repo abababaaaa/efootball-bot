@@ -56,9 +56,9 @@ public class MyLeagueScenario : IScenario
     /// <summary>下一场为关键比赛（预告弹窗/主页预告已见；比赛结束即消费复位）。
     /// 国服子类难度页接管复用（RespectGameDifficulty 同款守则）。</summary>
     protected bool _nextMatchIsKey;
-    /// <summary>难度页连续轮数与舞步/确认腿轮数（离开难度页清零，见 HandleDifficultyAsync）。</summary>
+    /// <summary>难度页连续轮数与确认腿轮数（离开难度页清零，见 HandleDifficultyAsync）。</summary>
     private int _difficultyPageRounds;
-    private int _difficultyDanceCount;
+    private int _difficultyConfirmRound;
     /// <summary>主页连续按 A 前往比赛但画面未离开主页的次数（无响应自愈计数）。</summary>
     private int _goMatchAttempts;
     /// <summary>上次按 A 前往比赛的时间（用于只 dump 一次前往后的弹窗画面 OCR）。</summary>
@@ -279,7 +279,7 @@ public class MyLeagueScenario : IScenario
             return await HandleDifficultyAsync(obs.Frame, obs.Ocr);
         }
         _difficultyPageRounds = 0;
-        _difficultyDanceCount = 0;
+        _difficultyConfirmRound = 0;
 
         switch (action.Kind)
         {
@@ -691,70 +691,46 @@ public class MyLeagueScenario : IScenario
     // ---------------- 难度选择页 ----------------
 
     /// <summary>
-    /// 难度页处理（实机 difficulty_2~4 + 关键比赛受限页 P1）：
-    /// 关键比赛（预告弹窗/主页预告/受限横幅任一命中）→ 一律按游戏默认直接 A 确认，不改选；
-    /// 其余：列表前 N 行 = 实际检出的难度选项（普通 7 项），底行(第 N+1) = 返回/取消/确认，
-    /// 默认光标在确认，蓝勾 = 当前所选难度。一致（或所选难度不在选项中→按游戏默认）→
-    /// 直接 A 确认；不一致 → 上×(N+1-k) 到第 k 行 A 勾选 → 下×(N+1-k) 回底行 → 右×1 到确认 → A 开赛。
+    /// 难度页处理（用户 2026-10-20 实机配方重写，替换旧的「上×(N+1-k) A 勾选」舞步）：
+    /// 实机帧结构 = 难度列表 ≤7 行 + 底行「取消 | 确认」两个按钮；进页光标在列表第 1 行；
+    /// 蓝勾 = 联赛难度，进页后不变（列表行上按 A 是空操作——实机连按两次 ✓ 纹丝不动），
+    /// 改选无手段也不需要（难度在建库时已定档）。确认开赛唯一路径 = 下×10 饱和落底行
+    /// → 右×1（取消→确认）→ A（用户配方：新手行 ↓×7 →×1；光标已在底行就是 ↓→）。
+    /// 蓝勾检测（DetectCheckedDifficulty）只用于日志与配置不符告警，不参与导航。
+    /// 轮次计划见 DifficultyLegPlan：第 4/7 轮 B 逃生重进，第 9 轮后停止挂机。
     /// </summary>
     private async Task<int> HandleDifficultyAsync(Capture.FrameData frame, OcrResult ocr)
     {
         string wanted = LeagueConfig.Difficulty;
         var options = MyLeagueBrain.DetectDifficultyOptions(ocr);
-        var selected = MyLeagueBrain.DetectSelectedDifficulty(frame, ocr);
+        var checkedDiff = MyLeagueBrain.DetectCheckedDifficulty(frame, ocr);
 
-        // 关键比赛：难度由游戏指定（受限横幅在 OCR 里），按默认直接确认开赛，绝不改选
-        // ——用户 2026-10-12 实机反馈（bot-20261012-015835 02:00）：受限页被当普通页
-        // 导航（上×2 改了难度），要求关键比赛不按↑。
-        if (MyLeagueBrain.RespectGameDifficulty(_nextMatchIsKey, ocr))
-        {
-            _log("[我的联赛] 关键比赛：难度由游戏指定，按游戏默认直接确认开赛（不改选）", LogLevel.Info);
-            await _engine.Pad.Confirm();
-            return 3000;
-        }
+        if (checkedDiff is not null && checkedDiff != wanted)
+            _log($"[我的联赛] 注意：蓝勾在「{checkedDiff}」而配置要「{wanted}」——难度页列表按 A 不改选，按当前勾选确认", LogLevel.Warn);
+        else if (options.Count > 0 && !options.Contains(wanted))
+            _log($"[我的联赛] 配置难度「{wanted}」不在当前 {options.Count} 项中（关键比赛受限页？），按当前蓝勾确认", LogLevel.Info);
 
-        // 所选难度不在当前选项中（OCR 漏读难度词等）→ 尊重游戏默认（蓝勾），直接确认
-        if (!options.Contains(wanted))
+        _difficultyConfirmRound++;
+        int round = _difficultyConfirmRound;
+        if (round > 9)
         {
-            _log($"[我的联赛] 难度「{wanted}」不在可选列表（未检出），按游戏默认确认开赛", LogLevel.Warn);
-            await _engine.Pad.Confirm();
-            return 3000;
+            _log("[我的联赛] 难度页连续 9 轮确认无效（疑似有识别不到的弹窗遮挡），停止挂机", LogLevel.Error);
+            _engine.StopWithError("难度确认页反复确认无效，请手动查看游戏画面是否有弹窗");
+            return 3500;
         }
-        if (selected == wanted)
+        var plan = MyLeagueBrain.DifficultyLegPlan(round);
+        if (plan is null) // 第 4/7 轮：B 关对话框回联赛主页，正常流程会重新前往比赛重进
         {
-            _log($"[我的联赛] 难度已为「{wanted}」，直接确认开赛", LogLevel.Success);
-            await _engine.Pad.Confirm();
-            return 3000;
-        }
-        if (selected is null)
-        {
-            _log("[我的联赛] 蓝勾未检出，按当前难度直接确认开赛", LogLevel.Warn);
-            await _engine.Pad.Confirm();
-            return 3000;
-        }
-
-        int n = options.Count;
-        int k = options.IndexOf(wanted) + 1; // 1 起
-        int steps = n + 1 - k;
-        if (_difficultyDanceCount == 0)
-        {
-            _difficultyDanceCount++;
-            _log($"[我的联赛] 难度 {selected} → {wanted}（{n} 选项中第 {k} 行）：上×{steps} A 勾选 → 下×{steps} 回底行 → 右×1 A 确认", LogLevel.Info);
-            await _engine.Pad.DpadRepeat(PadDir.Up, steps);
-            await _engine.Pad.Confirm();                 // 勾选所选难度
-            await _engine.Pad.DpadRepeat(PadDir.Down, steps);
-            await _engine.Pad.Dpad(PadDir.Right);        // 底行：取消 → 确认
-            await _engine.Pad.Confirm();                 // 确认开赛
+            _log($"[我的联赛] 难度页第 {round} 轮仍未确认：B 退出对话框重进（光标复位第 1 行）", LogLevel.Warn);
+            await _engine.Pad.Back();
             return 3500;
         }
 
-        // 勾选腿已做过一轮（A 勾选必然成功，页面还开着=确认腿没中）。蓝勾检测不可信，
-        // 绝不重复舞步——交替三种确认腿布局假设直到页面关闭
-        _difficultyDanceCount++;
-        int leg = (_difficultyDanceCount - 2) % 3;
-        _log($"[我的联赛] 难度页第 {_difficultyDanceCount} 轮确认（跳过舞步防打转）：{leg switch { 0 => "直接 A", 1 => "下×1 右×1 A", _ => "下×1 A" }}", LogLevel.Info);
-        if (leg > 0) await _engine.Pad.Dpad(PadDir.Down);
-        if (leg == 1) await _engine.Pad.Dpad(PadDir.Right);
+        _log($"[我的联赛] 难度页第 {round} 轮确认（蓝勾={checkedDiff ?? "未检出"}）：{(plan.Value.UpFirst ? "上×9 " : "")}下×{plan.Value.Downs} 右×{plan.Value.Rights} A", LogLevel.Info);
+        if (plan.Value.UpFirst)
+            await _engine.Pad.DpadRepeat(PadDir.Up, 9);
+        await _engine.Pad.DpadRepeat(PadDir.Down, plan.Value.Downs);
+        await _engine.Pad.DpadRepeat(PadDir.Right, plan.Value.Rights);
         await _engine.Pad.Confirm();
         return 3500;
     }

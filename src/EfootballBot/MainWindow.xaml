@@ -1336,6 +1336,23 @@
                                     </TextBlock>
                                 </StackPanel>
                             </CheckBox>
+
+                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                <TextBlock Text="虚拟手柄设备形态" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="CmbPadProfile" Width="330" Margin="10,0,0,0" SelectedIndex="0">
+                                    <ComboBoxItem Content="DualShock4（推荐：其他应用看不到机器人按键）"/>
+                                    <ComboBoxItem Content="Xbox 360（有线形态）"/>
+                                    <ComboBoxItem Content="Xbox Series X|S"/>
+                                    <ComboBoxItem Content="Xbox 精英2 蓝牙（与真实精英2同型）"/>
+                                </ComboBox>
+                            </StackPanel>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="640" Margin="0,6,0,0">
+                                <Run Text="三档均已实测被游戏正常消费。DS4 形态为纯 HID，挂机时"/>
+                                <Run Text="其他应用和前台游戏收不到机器人按键" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="；Xbox 形态会占用 XInput 玩家 1 且"/>
+                                <Run Text="按键会同时进入前台游戏" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="。更改在下次开始挂机时生效。"/>
+                            </TextBlock>
                         </StackPanel>
                     </Border>
                     </StackPanel>

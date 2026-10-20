@@ -27,4 +27,19 @@ public class BackgroundParkerTests
         Assert.Contains("无边框", msg);
         Assert.DoesNotContain("以管理员身份运行", msg);
     }
+
+    /// <summary>2026-10-20 实测定案：eFootball 被停靠移出屏幕后自行缩窗到 70×39（客户区清零，
+    /// 渲染/输入全死，bot 对冻结画面按键=「乱点」）。缩窗判定必须拦下这种形态并触发屏外恢复尺寸。</summary>
+    [Theory]
+    [InlineData(1280, 70, true)]    // 实机缩窗形态：1280→70
+    [InlineData(1920, 39, true)]
+    [InlineData(1280, 639, true)]   // 恰好缩过半
+    [InlineData(1280, 640, false)]  // 半宽边界：未过半不算缩窗
+    [InlineData(1280, 1280, false)] // 尺寸正常
+    [InlineData(640, 10, false)]    // 原始就小的窗口不参与判定（避免误伤小工具窗）
+    [InlineData(0, 0, false)]
+    public void WindowShrunk_检测游戏自行缩窗(int originalWidth, int currentWidth, bool expected)
+    {
+        Assert.Equal(expected, BackgroundParker.WindowShrunk(originalWidth, currentWidth));
+    }
 }

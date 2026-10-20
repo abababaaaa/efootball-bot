@@ -51,6 +51,20 @@ public partial class MainWindow
         }
         _paused = next;
         RefreshRunButtons();
+        // 接管/归还（2026-10-20 需求：暂停期间真实手柄前台玩其他游戏）：
+        // 暂停=立即恢复被禁用的真实手柄（提权计划任务，无 UAC）；恢复=写凭证再次禁用、虚拟手柄独占。
+        // 注意 XInput 无进程过滤：暂停期间真实手柄的输入也会打进后台 eFootball 菜单，
+        // 恢复挂机时引擎的智能接管会自动归位，无需人工处理。
+        if (next)
+        {
+            HidHideManager.RunTaskSilently(HidHideManager.PadRestoreTaskName, waitForExit: false);
+            AppendLog("已暂停：真实手柄已恢复，可拿去前台玩其他游戏；按恢复键（或点继续）后重新独占并继续挂机。", LogLevel.Success);
+        }
+        else
+        {
+            HidHideManager.RequestPadHide();
+            AppendLog("已恢复挂机：正在重新禁用真实手柄（虚拟手柄独占输入）。", LogLevel.Info);
+        }
     }
 
     /// <summary>统一停止（GUI 按钮与热键共用）。</summary>

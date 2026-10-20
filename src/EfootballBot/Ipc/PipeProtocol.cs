@@ -8,7 +8,7 @@ namespace EfootballBot.Ipc;
 /// <summary>
 /// GUI 壳 ↔ Worker 子进程 的命名管道协议（JSON Lines，一行一条 UTF-8 JSON）。
 /// 命令方向 GUI→Worker：start/stop/pause/resume/preview/reloadConfig/ping
-/// 事件方向 Worker→GUI：log/stats/screen/preview/pong/exited
+/// 事件方向 Worker→GUI：log/stats/screen/preview/pong/exited/stopped
 /// </summary>
 public static class PipeProtocol
 {
@@ -57,6 +57,8 @@ public static class PipeProtocol
     public static Msg EvPreview(string pngBase64) => new() { Ev = "preview", Png = pngBase64 };
     public static Msg EvPong() => new() { Ev = "pong" };
     public static Msg EvExited(string reason) => new() { Ev = "exited", Text = reason };
+    /// <summary>stop 命令的确认事件：引擎已完全停止。GUI 收到即回收 Worker，不再固定等 5s。</summary>
+    public static Msg EvStopped() => new() { Ev = "stopped" };
     public static Msg EvStats(int matches, int keyMatches, int playersMaxed, DateTime? startedAt, string? lastError)
         => new()
         {
