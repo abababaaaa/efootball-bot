@@ -198,6 +198,11 @@ public class PadBackendTests
         Assert.True(HidDeviceEnumerator.IsHidMaestroInstance(@"SWD\HIDMAESTRO_VID_045E_PID_02FF&IG_00\HM_627243559F81D525"));
         Assert.True(HidDeviceEnumerator.IsHidMaestroInstance(@"HID\HIDMAESTRO_VID_045E_PID_02FF&IG_00\1&62724355&0&0000"));
         Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"HID\HIDMAESTRO_VID_054C_PID_05C4&IG_00\1&62724355&0&0000"));
+        // xbox-360-wired 档节点（探针 2026-10-21 01:0x 实测：总线节点带 HM_ 尾段）
+        Assert.True(HidDeviceEnumerator.IsHidMaestroInstance(@"ROOT\VID_045E&PID_028E&IG_00\HM_AAA7C4F519869C77"));
+        Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"ROOT\VID_045E&PID_028E&IG_00\HM_AAA7C4F519869C77"));
+        // 真实 360 手柄集合（HID\VID_045E&PID_028E\6&...）不是 HIDMaestro 节点——由 ViGEm 前缀兜住黑名单、物理条目由 RemoveAll 保护
+        Assert.False(HidDeviceEnumerator.IsHidMaestroInstance(@"HID\VID_045E&PID_028E&IG_00\6&2DF92C3&0&0000"));
 
         // 真实设备不得误伤：ViGEm 时代的 DS4 幻影节点与真实 DS4/XInput 手柄路径
         Assert.False(HidDeviceEnumerator.IsHidMaestroInstance(@"HID\VID_054C&PID_05C4&REV_0100\2&526D6D&0&0000"));

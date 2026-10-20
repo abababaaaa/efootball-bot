@@ -8,8 +8,9 @@ namespace EfootballBot.Core.Input;
 ///    死区阈值天然免疫摇杆漂移；覆盖 Xbox 系手柄（XInput 路径）。
 /// ② 副传感：RawInput WM_INPUT 全局下沉（RIDEV_INPUTSINK + 专用消息线程），覆盖 DS4/DualSense/
 ///    蓝牙等不暴露 XInput 的手柄（事件边沿语义）。按设备实例路径过滤本程序自己的虚拟手柄：
-///    虚拟 DS4 的 HID 集合形态为 HID\HIDCLASS\*（不含 VID），IsHidMaestroInstance 精确识别——
-///    绝不能把自己的按键当作用户活动，否则挂机自触发永久让步。真实 DS4 路径带 VID_054C，不匹配。
+///    PS 档集合形态为 HID\HIDCLASS\*；xbox 档集合为 HID\VID_045E&PID_028E&IG_00\*（撞 ViGEm 前缀，
+///    同步过滤；真实 360 手柄同形误滤无死角——它必是 XInput 设备，主传感通道覆盖）。
+///    另有 bot 按键门闩（BotInputGate）兜底：绝不能把自己的按键当作用户活动，否则挂机自触发永久让步。
 /// 对外仅暴露 <see cref="LastActivityUtc"/>；Start/Stop 幂等；任一通道失败静默降级（另一通道仍工作）。
 /// </summary>
 public sealed class RealPadActivityMonitor : IDisposable
@@ -40,7 +41,13 @@ public sealed class RealPadActivityMonitor : IDisposable
         StartRawInputSink();
     }
 
-    private void Touch() => Interlocked.Exchange(ref _lastActivityTicks, DateTime.UtcNow.Ticks);
+    private void Touch()
+    {
+        // bot 按键门闩：虚拟 xbox 档自身是 XInput 设备，bot 的每次提交都会出现在 XInput 差分与
+        // RawInput 流里——算作用户活动会让挂机自触发永久让步死锁
+        if (BotInputGate.IsGated(DateTime.UtcNow)) return;
+        Interlocked.Exchange(ref _lastActivityTicks, DateTime.UtcNow.Ticks);
+    }
 
     // ---------------- ① XInput 槽位轮询 ----------------
 
@@ -171,8 +178,11 @@ public sealed class RealPadActivityMonitor : IDisposable
             if (len < 0) len = (int)Math.Min(nameSize, nameBuf.Length);
             string instance = ToInstancePath(new string(nameBuf, 0, len));
 
-            // 虚拟手柄过滤：HIDCLASS/HM_/HIDMAESTRO 形态只会是我们的虚拟设备（真实手柄路径必带厂商 VID）
-            if (HidDeviceEnumerator.IsHidMaestroInstance(instance)) return;
+            // 虚拟手柄过滤：①HIDCLASS/HM_/HIDMAESTRO 形态（HIDMaestro PS 档与 xbox 档总线节点）
+            // ②ViGEm 前缀（xbox 档的 HID 集合 HID\VID_045E&PID_028E&IG_00\* 与虚拟 Xbox360 同形）。
+            // 真实 360 手柄集合会撞 ViGEm 前缀而被误滤——但它的活动由 XInput 通道覆盖，无死角。
+            if (HidDeviceEnumerator.IsHidMaestroInstance(instance)
+                || HidDeviceEnumerator.IsViGEmInstance(instance)) return;
 
             Touch();
         }

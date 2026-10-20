@@ -1321,11 +1321,11 @@
                                       Checked="ChkCoexistence_Changed" Unchecked="ChkCoexistence_Changed"/>
                             <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}"
                                        TextWrapping="Wrap" MaxWidth="520" Margin="28,4,0,0">
-                                <Run Text="真实手柄全程可用（不禁用、无需拔下）：挂机中检测到你按真实手柄就"/>
-                                <Run Text="自动让步暂停" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
-                                <Run Text="，停手静默一段时间后"/>
-                                <Run Text="自动恢复继续挂机" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
-                                <Run Text="。让步期间后台游戏可能收到你的按键，属正常现象。"/>
+                                <Run Text="真实手柄全程可用（无需拔下）：挂机中检测到你按真实手柄就"/>
+                                <Run Text="自动让步并断开虚拟手柄" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="（玩家 1 立刻归还给你的手柄），停手静默一段时间后"/>
+                                <Run Text="自动重连并恢复挂机" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="。"/>
                             </TextBlock>
                             <StackPanel Orientation="Horizontal" Margin="28,8,0,0">
                                 <TextBlock Text="让步恢复静默" Style="{StaticResource FieldLabel}"/>
@@ -1338,9 +1338,9 @@
                             </StackPanel>
 
                             <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="640" Margin="0,14,0,0">
-                                <Run Text="虚拟手柄为 DualShock4 纯 HID 形态：XInput 游戏天生看不到，DInput/RawInput 泄漏由上面的隔离封死——"/>
-                                <Run Text="任何其他应用都收不到机器人按键" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
-                                <Run Text="。"/>
+                                <Run Text="虚拟手柄为 Xbox 形态（占用玩家 1，eFootball 全通道消费实测）。"/>
+                                <Run Text="挂机运行中请勿同时玩其他手柄游戏" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="——bot 按键与你的手柄共用玩家 1 通道；拿手柄玩游戏时挂机会自动让路（见上）。"/>
                             </TextBlock>
                         </StackPanel>
                     </Border>

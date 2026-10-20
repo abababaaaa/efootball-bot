@@ -55,9 +55,9 @@ public partial class MainWindow
         // 手柄全程可用、不禁用（XInput 无进程隔离，暂停期间用户手柄按键会进后台游戏菜单，
         // 恢复挂机时引擎的让步恢复与场景逃生机制自动归位）。
         if (next)
-            AppendLog("已暂停：虚拟手柄已复位；真实手柄不受影响，可拿去前台玩其他游戏。", LogLevel.Success);
+            AppendLog("已暂停：虚拟手柄已断开，真实手柄完全归你（可拿去玩其他游戏）；恢复后自动重连继续挂机。", LogLevel.Success);
         else
-            AppendLog("已恢复挂机。", LogLevel.Info);
+            AppendLog("已恢复挂机：虚拟手柄已重连。", LogLevel.Info);
     }
 
     /// <summary>统一停止（GUI 按钮与热键共用）。</summary>

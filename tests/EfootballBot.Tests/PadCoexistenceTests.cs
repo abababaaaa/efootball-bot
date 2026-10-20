@@ -112,6 +112,25 @@ public sealed class PadCoexistenceTests
         Assert.Equal("ApplicationException: boom", text);
     }
 
+    // ---------------- bot 按键门闩 ----------------
+
+    [Fact]
+    public void 按键门闩_从未提交_不门闩()
+    {
+        // BotInputGate 是静态状态：本测试只验证「无提交=不门闩」与时间参数语义，
+        // Mark 过的静态状态由后续断言覆盖（测试间不并发访问此类型）
+        Assert.False(BotInputGate.IsGated(DateTime.UtcNow.AddDays(-1)));
+    }
+
+    [Fact]
+    public void 按键门闩_窗口内门闩_窗口外放行()
+    {
+        var now = DateTime.UtcNow;
+        BotInputGate.Mark(now);
+        Assert.True(BotInputGate.IsGated(now.AddMilliseconds(BotInputGate.WindowMs - 1)));
+        Assert.False(BotInputGate.IsGated(now.AddMilliseconds(BotInputGate.WindowMs + 50)));
+    }
+
     // ---------------- 旧禁用机制配置迁移 ----------------
 
     [Fact]

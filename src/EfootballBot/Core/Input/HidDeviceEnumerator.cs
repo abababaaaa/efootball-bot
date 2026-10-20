@@ -26,18 +26,21 @@ public static class HidDeviceEnumerator
     /// "HIDCLASS" 硬件 ID 仅 HIDMaestro 使用，真实设备不会撞此形态。</summary>
     public const string HidMaestroHidPrefix = @"HID\HIDCLASS\";
 
-    /// <summary>HIDMaestro XInput 形态档的另一种节点形态（padprobe 2026-10-21 实测）：
-    /// SWD\HIDMAESTRO_VID_045E_PID_02FF&amp;IG_00\HM_&lt;hash&gt; 与 HID\HIDMAESTRO_VID_...&amp;IG_00\1&amp;&lt;hash&gt;。
-    /// "HIDMAESTRO" 字样只出现在虚拟设备的硬件 ID 里，真实设备不会撞。</summary>
+    /// <summary>HIDMaestro XInput 形态档的节点形态（padprobe 2026-10-21 实测）：
+    /// 总线节点 ROOT\VID_045E&PID_028E&amp;IG_00\HM_&lt;hash&gt;（含 HM_ 尾段，真实手柄无此形态）+
+    /// HID 集合 HID\VID_045E&amp;PID_028E&amp;IG_00\1&amp;&lt;hash&gt;（与真实 360 手柄集合同形，
+    /// 由 ViGEm 前缀兜住、物理条目由 ApplyIsolation 的 RemoveAll 保护）。另有 SWD/HID\HIDMAESTRO_ 形态。</summary>
     public const string HidMaestroSwdPrefix = @"SWD\HIDMAESTRO_";
     public const string HidMaestroHidVidPrefix = @"HID\HIDMAESTRO_";
+    public const string HidMaestroXboxBusPrefix = @"ROOT\VID_045E&PID_028E&IG_";
 
     /// <summary>HIDMaestro 虚拟设备实例判定（在线检查与黑名单共用；路径纯字符串，不打开设备）。</summary>
     public static bool IsHidMaestroInstance(string instancePath)
         => instancePath.StartsWith(HidMaestroBusPrefix, StringComparison.OrdinalIgnoreCase)
            || instancePath.StartsWith(HidMaestroHidPrefix, StringComparison.OrdinalIgnoreCase)
            || instancePath.StartsWith(HidMaestroSwdPrefix, StringComparison.OrdinalIgnoreCase)
-           || instancePath.StartsWith(HidMaestroHidVidPrefix, StringComparison.OrdinalIgnoreCase);
+           || instancePath.StartsWith(HidMaestroHidVidPrefix, StringComparison.OrdinalIgnoreCase)
+           || instancePath.StartsWith(HidMaestroXboxBusPrefix, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsViGEmInstance(string instancePath)
         => instancePath.StartsWith(ViGEmInstancePrefix, StringComparison.OrdinalIgnoreCase);
@@ -76,6 +79,7 @@ public static class HidDeviceEnumerator
                 if (id.StartsWith("ViGEmBus", StringComparison.OrdinalIgnoreCase)
                     || id.StartsWith(@"ROOT\SYSTEM\", StringComparison.OrdinalIgnoreCase)
                     || id.StartsWith(@"ROOT\HIDCLASS\", StringComparison.OrdinalIgnoreCase)
+                    || id.StartsWith(@"ROOT\VID_", StringComparison.OrdinalIgnoreCase) // HIDMaestro xbox 档总线节点（真实设备祖先链是 USB 集线器，永不撞 ROOT\VID_）
                     || id.Contains("HIDMAESTRO", StringComparison.OrdinalIgnoreCase))
                     return true;
                 if (CM_Get_Parent(out cur, cur, 0) != 0)

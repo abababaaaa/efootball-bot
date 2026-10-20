@@ -12,10 +12,12 @@ namespace EfootballBot.Core.Input;
 /// 首次启用时按需下载官方 Release zip，锁定 DLL SHA256 后解压到 data\hidmaestro\，
 /// 经独立 AssemblyLoadContext 反射加载（隔离其 net10.0-windows10.0.26100 TFM 的 SDK 投影依赖）。
 /// 加载/安装任一步失败抛清晰异常，由引擎告警并终止本次启动。
-/// ★设备形态档锁定 dualshock-4-v1（VID_054C&PID_05C4——与原 ViGEm DS4 逐字节同形）：
-/// 纯 HID、XInput 天生失明，挂机期间其他应用/前台游戏看不到这只手柄（XInput 游戏零泄漏；
-/// DInput/RawInput 泄漏由 HidHide 白名单封死）。xbox 形档 2026-10-21 探针实测虽同样被
-/// eFootball 消费，但占 XInput 槽 0 且按键会漏进前台游戏——与「不影响其他应用」冲突，已整体移除。
+/// ★设备形态档锁定 xbox-360-wired（VID_045E&PID_028E，XInput+DInput 双路径）——2026-10-21 实机探针
+/// 定案：HIDMaestro 全系 PS 档（dualshock-4-v1/v2/dualsense…）的 Hat/摇杆不被 eFootball 消费
+/// （按键有效但无法导航，十字键 10 连按画面零变化；ViGEm 时代 DS4 可用，系 HIDMaestro 描述符缺陷），
+/// xbox 形档全通道可用（diff 47113 + 焦点实测移动）。代价 = 占 XInput 玩家 1（eFootball 只认 slot0，
+/// 双控制器实锤 slot1 无效）——真实手柄在场时虚拟掉 slot1 被无视，故共存让步升级为「真让路」：
+/// 检测到用户占用即断开虚拟手柄（slot0 立刻归还），停手静默后自动重连恢复。
 /// 映射：PadButton.A/B/X/Y → HMButton Cross/Circle/Square/Y（DS4 按方位），十字键 → HMHat，
 /// 摇杆 ±1/扳机 0~1 交 HMGamepadStateHelpers.StandardAxes 按档位映射。
 /// 共存模式：真实手柄不做任何禁用，游戏同时可见两只手柄（eFootball 菜单响应任一手柄）；
@@ -25,9 +27,9 @@ public sealed class HidMaestroPad : IVirtualPad
 {
     public const string SdkVersion = "v1.12.0";
     public const string SdkZipUrl = "https://github.com/hifihedgehog/HIDMaestro/releases/download/" + SdkVersion + "/HIDMaestro-v1.12.0.zip";
-    /// <summary>虚拟设备形态档（锁定值）：DualShock4 v1（VID_054C&PID_05C4，与原 ViGEm DS4 同形）。
-    /// 纯 HID——XInput 天生失明不泄输入；eFootball 经 DInput 路径正常消费（探针实测）。</summary>
-    public const string ProfileId = "dualshock-4-v1";
+    /// <summary>虚拟设备形态档（锁定值）：Xbox 360 有线（VID_045E&PID_028E）。全通道被 eFootball
+    /// 消费（探针 2026-10-21 实测）；PS 系档 Hat/摇杆不被消费已排除，见类注释。</summary>
+    public const string ProfileId = "xbox-360-wired";
     /// <summary>官方 Release zip 的 SHA256（升级 SDK 版本时必须同步更新；zip 锁住即锁住全部解包产物）。</summary>
     public const string SdkZipSha256 = "CF03347A0BC88BFB198A606C0FF8375BC4A9420FA80C07EF336186986D79B244";
     /// <summary>官方 Release 内 HIDMaestro.Core.dll 的 SHA256（升级 SDK 版本时必须同步更新）。</summary>
@@ -369,6 +371,10 @@ public sealed class HidMaestroPad : IVirtualPad
             catch (Exception ex)
             {
                 throw new PadSubmitException($"HIDMaestro 状态提交失败：{FormatSubmitError(ex)}", ex);
+            }
+            finally
+            {
+                BotInputGate.Mark(); // 打点供活动监视器门闩：bot 自己的提交不算用户活动
             }
         }
     }
