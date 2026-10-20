@@ -514,8 +514,12 @@ public class MyLeagueScenario : IScenario
                 }
                 if (++_navAttempts > 3)
                 {
-                    // 带上当前主页 OCR 供远程排障：可看出面板实际停在哪个页签/词是否可读
-                    _log($"[我的联赛] 面板切换失败，当前主页 OCR：{OcrDigest(ocr)}", LogLevel.Debug);
+                    // 三次右拨无效：先记下面板实际停在哪（挑战=右拨根本没生效；物品=判定词漏读的
+                    // 假阴性），再防御性左拨收回——面板若停在物品档，D-pad 全部无效，后续归位/开赛全废
+                    string verdict = MyLeagueBrain.ShowsItemsPanel(ocr) ? "物品面板（判定词已见，疑似假阴性）"
+                        : MyLeagueBrain.ShowsChallengePanel(ocr) ? "仍在挑战面板（右拨未生效）" : "面板词均未读出";
+                    _log($"[我的联赛] 面板切换失败（{verdict}），当前主页 OCR：{OcrDigest(ocr)}", LogLevel.Debug);
+                    await _engine.Pad.RsFlick(PadDir.Left);
                     ResetPhase("面板切换失败");
                     return null;
                 }

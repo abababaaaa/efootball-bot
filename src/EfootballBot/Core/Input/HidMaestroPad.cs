@@ -147,6 +147,20 @@ public sealed class HidMaestroPad : IVirtualPad
         _connected = true;
         ResetAll();
         _log?.Invoke($"HIDMaestro 控制器已创建（设备档 {ProfileId}，identityKey=efootballbot）。");
+
+        // HID 层在场证明：虚拟 DS4 节点（VID_054C&PID_05C4）连接后必须出现在 HID 设备树——
+        // 无节点=设备未上线（驱动/档位问题，SDK 却无报错）；有节点=OS 层报告链路存在，
+        // 游戏不消费则是游戏侧绑定问题。注意与真实 DS4 共用前缀（本机无真实 DS4，可接受的误报面）。
+        try
+        {
+            var nodes = HidDeviceEnumerator.EnumerateAllInstances()
+                .Where(i => i.InstancePath.Contains("VID_054C&PID_05C4", StringComparison.OrdinalIgnoreCase))
+                .Select(i => i.InstancePath).ToList();
+            _log?.Invoke(nodes.Count > 0
+                ? $"HIDMaestro HID 节点在场 {nodes.Count} 个：{nodes[0]}…"
+                : "HIDMaestro HID 节点检查：VID_054C&PID_05C4 无任何节点——虚拟设备未上线！");
+        }
+        catch (Exception ex) { _log?.Invoke($"HIDMaestro HID 节点检查失败：{ex.Message}"); }
     }
 
     // ---- 状态操作 ----
