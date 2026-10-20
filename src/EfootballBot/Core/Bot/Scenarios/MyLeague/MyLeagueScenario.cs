@@ -1,6 +1,7 @@
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
+using System.IO; // Core.System 命名空间遮蔽：裸 Path/File/Directory 必须靠本 using（global:: 前缀在此工程报 CS0103）
 
 namespace EfootballBot.Core.Bot.Scenarios.MyLeague;
 
@@ -55,6 +56,9 @@ public class MyLeagueScenario : IScenario
     /// <summary>下一场为关键比赛（预告弹窗/主页预告已见；比赛结束即消费复位）。
     /// 国服子类难度页接管复用（RespectGameDifficulty 同款守则）。</summary>
     protected bool _nextMatchIsKey;
+    /// <summary>难度页连续轮数与舞步/确认腿轮数（离开难度页清零，见 HandleDifficultyAsync）。</summary>
+    private int _difficultyPageRounds;
+    private int _difficultyDanceCount;
     /// <summary>主页连续按 A 前往比赛但画面未离开主页的次数（无响应自愈计数）。</summary>
     private int _goMatchAttempts;
     /// <summary>上次按 A 前往比赛的时间（用于只 dump 一次前往后的弹窗画面 OCR）。</summary>
@@ -267,7 +271,15 @@ public class MyLeagueScenario : IScenario
 
         // ---- 难度选择页（点前往比赛后出现，非关键比赛）----
         if (screen == MlScreen.DifficultyPage)
+        {
+            // 连续 3 轮仍在难度页：把实机帧落 data\dump\ 供远程校准（后台停靠的捕获帧与
+            // 手动实截存在几何差异疑点——同一张手截图上蓝勾检测全对，实机却每轮读错，2026-10-20）
+            if (++_difficultyPageRounds == 3)
+                DumpLiveFrame(obs.Frame, "difficulty_live");
             return await HandleDifficultyAsync(obs.Frame, obs.Ocr);
+        }
+        _difficultyPageRounds = 0;
+        _difficultyDanceCount = 0;
 
         switch (action.Kind)
         {
@@ -724,12 +736,26 @@ public class MyLeagueScenario : IScenario
         int n = options.Count;
         int k = options.IndexOf(wanted) + 1; // 1 起
         int steps = n + 1 - k;
-        _log($"[我的联赛] 难度 {selected} → {wanted}（{n} 选项中第 {k} 行）：上×{steps} 勾选 → 下×{steps} 右×1 确认", LogLevel.Info);
-        await _engine.Pad.DpadRepeat(PadDir.Up, steps);
-        await _engine.Pad.Confirm();                 // 勾选所选难度
-        await _engine.Pad.DpadRepeat(PadDir.Down, steps);
-        await _engine.Pad.Dpad(PadDir.Right);        // 底行：取消 → 确认
-        await _engine.Pad.Confirm();                 // 确认开赛
+        if (_difficultyDanceCount == 0)
+        {
+            _difficultyDanceCount++;
+            _log($"[我的联赛] 难度 {selected} → {wanted}（{n} 选项中第 {k} 行）：上×{steps} A 勾选 → 下×{steps} 回底行 → 右×1 A 确认", LogLevel.Info);
+            await _engine.Pad.DpadRepeat(PadDir.Up, steps);
+            await _engine.Pad.Confirm();                 // 勾选所选难度
+            await _engine.Pad.DpadRepeat(PadDir.Down, steps);
+            await _engine.Pad.Dpad(PadDir.Right);        // 底行：取消 → 确认
+            await _engine.Pad.Confirm();                 // 确认开赛
+            return 3500;
+        }
+
+        // 勾选腿已做过一轮（A 勾选必然成功，页面还开着=确认腿没中）。蓝勾检测不可信，
+        // 绝不重复舞步——交替三种确认腿布局假设直到页面关闭
+        _difficultyDanceCount++;
+        int leg = (_difficultyDanceCount - 2) % 3;
+        _log($"[我的联赛] 难度页第 {_difficultyDanceCount} 轮确认（跳过舞步防打转）：{leg switch { 0 => "直接 A", 1 => "下×1 右×1 A", _ => "下×1 A" }}", LogLevel.Info);
+        if (leg > 0) await _engine.Pad.Dpad(PadDir.Down);
+        if (leg == 1) await _engine.Pad.Dpad(PadDir.Right);
+        await _engine.Pad.Confirm();
         return 3500;
     }
 
@@ -806,6 +832,41 @@ public class MyLeagueScenario : IScenario
     {
         var text = string.Join(" | ", ocr.Lines.Select(l => l.Text.Replace(" ", "")));
         return text.Length <= 320 ? text : text[..320];
+    }
+
+    /// <summary>
+    /// 实机帧转存（远程排障用，失败静默）：把当前观察帧落 data\dump\{tag}_时间戳.png。
+    /// 场景：判定在手动实截上全对、实机帧上却读错——后台停靠（窗口移出屏幕）下的捕获帧
+    /// 与实截的几何差异只有靠真帧才能校准（2026-10-20 难度页蓝勾误读）。
+    /// </summary>
+    private void DumpLiveFrame(Capture.FrameData f, string tag)
+    {
+        var pixels = (byte[])f.Bgra.Clone(); // 帧池复用数组：观察线程先拷贝，后台只做编码
+        string dir = Path.Combine(EfootballBot.Core.System.AppPaths.DataDir, "dump");
+        string file = Path.Combine(dir, $"{tag}_{DateTime.Now:yyyyMMdd_HHmmss}.png");
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                Directory.CreateDirectory(dir);
+                var info = new SkiaSharp.SKImageInfo(f.Width, f.Height,
+                    SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul);
+                unsafe
+                {
+                    fixed (byte* p = pixels)
+                    {
+                        using var bmp = new SkiaSharp.SKBitmap();
+                        if (!bmp.InstallPixels(info, (nint)p, info.RowBytes)) return;
+                        using var img = SkiaSharp.SKImage.FromBitmap(bmp);
+                        using var data = img.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+                        using var fs = File.OpenWrite(file);
+                        data.SaveTo(fs);
+                    }
+                }
+                _log($"[我的联赛] 已存实机帧：{file}", LogLevel.Info);
+            }
+            catch { }
+        });
     }
 
     private static string DescribeItem(MyLeagueBrain.MlItemTarget t) => t.Kind switch
