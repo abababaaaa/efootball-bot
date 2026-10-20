@@ -12,25 +12,22 @@ namespace EfootballBot.Core.Input;
 /// 首次启用时按需下载官方 Release zip，锁定 DLL SHA256 后解压到 data\hidmaestro\，
 /// 经独立 AssemblyLoadContext 反射加载（隔离其 net10.0-windows10.0.26100 TFM 的 SDK 投影依赖）。
 /// 加载/安装任一步失败抛清晰异常，由引擎告警并终止本次启动。
-/// ★设备形态档可配（PadProfileId）：默认 dualshock-4-v1（VID_054C&PID_05C4——与原 ViGEm DS4 逐字节同形），
-/// 纯 HID、XInput 失明不泄输入；xbox 形档同样被 eFootball 消费（2026-10-21 探针三档实测，
-/// 早前"零消费"结论系停靠缩窗冤案）但 XInput 可见会泄给前台应用。
+/// ★设备形态档锁定 dualshock-4-v1（VID_054C&PID_05C4——与原 ViGEm DS4 逐字节同形）：
+/// 纯 HID、XInput 天生失明，挂机期间其他应用/前台游戏看不到这只手柄（XInput 游戏零泄漏；
+/// DInput/RawInput 泄漏由 HidHide 白名单封死）。xbox 形档 2026-10-21 探针实测虽同样被
+/// eFootball 消费，但占 XInput 槽 0 且按键会漏进前台游戏——与「不影响其他应用」冲突，已整体移除。
 /// 映射：PadButton.A/B/X/Y → HMButton Cross/Circle/Square/Y（DS4 按方位），十字键 → HMHat，
 /// 摇杆 ±1/扳机 0~1 交 HMGamepadStateHelpers.StandardAxes 按档位映射。
-/// 槽位=创建顺序的经验保证（非文档保证），玩家 1 强保证仍依赖 HidHide 隐藏真实手柄。
+/// 共存模式：真实手柄不做任何禁用，游戏同时可见两只手柄（eFootball 菜单响应任一手柄）；
+/// 用户占用真实手柄期间由引擎让步暂停（PadCoexistencePolicy），停手后自动恢复。
 /// </summary>
 public sealed class HidMaestroPad : IVirtualPad
 {
     public const string SdkVersion = "v1.12.0";
     public const string SdkZipUrl = "https://github.com/hifihedgehog/HIDMaestro/releases/download/" + SdkVersion + "/HIDMaestro-v1.12.0.zip";
-    /// <summary>默认虚拟设备形态档：DualShock4 v1（VID_054C&PID_05C4，与原 ViGEm DS4 同形）。
-    /// 纯 HID——XInput 天生失明，不泄输入给前台应用；eFootball 经 DInput 路径正常消费（探针实测）。
-    /// Xbox 形档（xbox-360-wired / xbox-series-xs / xbox-elite-v2-bt-v2）2026-10-21 探针实测同样被
-    /// eFootball 消费并占 XInput slot 0（早前"零消费"结论系停靠缩窗冤案），但会泄漏给前台应用，作可选档。
-    /// 生效档由配置 PadProfileId 决定（<see cref="DefaultProfileId"/> 为默认）。</summary>
-    public const string DefaultProfileId = "dualshock-4-v1";
-    /// <summary>生效的设备形态档（构造时由配置注入，默认 <see cref="DefaultProfileId"/>）。</summary>
-    private readonly string _profileId;
+    /// <summary>虚拟设备形态档（锁定值）：DualShock4 v1（VID_054C&PID_05C4，与原 ViGEm DS4 同形）。
+    /// 纯 HID——XInput 天生失明不泄输入；eFootball 经 DInput 路径正常消费（探针实测）。</summary>
+    public const string ProfileId = "dualshock-4-v1";
     /// <summary>官方 Release zip 的 SHA256（升级 SDK 版本时必须同步更新；zip 锁住即锁住全部解包产物）。</summary>
     public const string SdkZipSha256 = "CF03347A0BC88BFB198A606C0FF8375BC4A9420FA80C07EF336186986D79B244";
     /// <summary>官方 Release 内 HIDMaestro.Core.dll 的 SHA256（升级 SDK 版本时必须同步更新）。</summary>
@@ -43,8 +40,12 @@ public sealed class HidMaestroPad : IVirtualPad
 
     private readonly Action<string>? _log;
     private object? _controller;          // HMController
-    private object? _profile;             // HMProfile（xbox-360-wired）
+    private object? _profile;             // HMProfile
     private volatile bool _connected;
+
+    /// <summary>提交串行锁：Submit 与 Disconnect 互斥。停止路径会把 _controller 置空并反射 Dispose，
+    /// 与观察循环的 Submit 并发时曾撞出 TargetException/对象已释放（2026-10-20 停止瞬间实锤）。</summary>
+    private readonly object _ioLock = new();
 
     // 状态镜像：每次 Set* 更新镜像后整体 SubmitState（与 ViGEm 手动提交语义一致）
     private uint _buttons;
@@ -57,10 +58,9 @@ public sealed class HidMaestroPad : IVirtualPad
 
     public PadBackendKind Kind => PadBackendKind.HidMaestro;
 
-    public HidMaestroPad(Action<string>? log = null, string? profileId = null)
+    public HidMaestroPad(Action<string>? log = null)
     {
         _log = log;
-        _profileId = string.IsNullOrWhiteSpace(profileId) ? DefaultProfileId : profileId!;
     }
 
     /// <summary>驱动是否已安装（离线判据：DriverStore 同时存在两份 inf 目录；GUI 环境检测用，不加载 DLL）。</summary>
@@ -128,8 +128,8 @@ public sealed class HidMaestroPad : IVirtualPad
                     }
 
                     _profile = tCtx.GetMethod("GetProfile", [typeof(string)])!
-                        .Invoke(_ctx, [_profileId])
-                        ?? throw new InvalidOperationException($"未找到 {_profileId} 设备档（SDK 内置档缺失？）");
+                        .Invoke(_ctx, [ProfileId])
+                        ?? throw new InvalidOperationException($"未找到 {ProfileId} 设备档（SDK 内置档缺失？）");
                 }
 
                 // CreateController 的接收者是 HMContext（HMController 只是返回值类型——在它上面 GetMethod
@@ -154,7 +154,7 @@ public sealed class HidMaestroPad : IVirtualPad
 
         _connected = true;
         ResetAll();
-        _log?.Invoke($"HIDMaestro 控制器已创建（设备档 {_profileId}，identityKey=efootballbot）。");
+        _log?.Invoke($"HIDMaestro 控制器已创建（设备档 {ProfileId}，identityKey=efootballbot）。");
 
         // HID 层在场证明：HIDMaestro 虚拟设备节点形态为 ROOT\HIDCLASS\HM_<hash> + HID\HIDCLASS\1&<hash>
         // （探针 2026-10-20 实测定案；实例路径不含 VID/PID 也不含"HIDMAESTRO"字样——
@@ -215,8 +215,12 @@ public sealed class HidMaestroPad : IVirtualPad
     {
         if (!_connected) return;
         _connected = false;
-        try { if (_controller is not null) RequireType("HMController").GetMethod("Dispose", Type.EmptyTypes)!.Invoke(_controller, null); } catch { }
-        _controller = null;
+        // 与 Submit 互斥：Dispose 反射调用期间绝不能有并发 Submit 撞上释放中的控制器
+        lock (_ioLock)
+        {
+            try { if (_controller is not null) RequireType("HMController").GetMethod("Dispose", Type.EmptyTypes)!.Invoke(_controller, null); } catch { }
+            _controller = null;
+        }
         UserIndex = -1;
     }
 
@@ -344,27 +348,45 @@ public sealed class HidMaestroPad : IVirtualPad
 
     private void Submit()
     {
-        // 本地快照：停止路径 Disconnect 会把 _controller 置空，与观察循环并发时
-        // Invoke(null) 会抛 "Non-static method requires a target"（实机 2026-10-20 停止瞬间实锤）
-        var controller = _controller;
-        if (controller is null || _tState is null || _tButton is null || _tHat is null || _ctx is null || _profile is null) return;
-        try
+        if (_tState is null || _tButton is null || _tHat is null || _ctx is null || _profile is null) return;
+        lock (_ioLock)
         {
-            var state = Activator.CreateInstance(_tState)!;
-            _tState.GetField("Buttons")!.SetValue(state, Enum.ToObject(_tButton, _buttons));
-            _tState.GetField("Hat")!.SetValue(state, Enum.ToObject(_tHat, _hat));
-            var axes = RequireType("HMGamepadStateHelpers")
-                .GetMethod("StandardAxes", BindingFlags.Public | BindingFlags.Static)!
-                .Invoke(null, [_profile, _lx, _ly, _rx, _ry, _lt, _rt]);
-            _tState.GetField("Axes")!.SetValue(state, axes);
-            RequireType("HMController")
-                .GetMethod("SubmitState", [_tState.MakeByRefType()])!
-                .Invoke(controller, [state]);
+            var controller = _controller;
+            if (controller is null) return;
+            try
+            {
+                var state = Activator.CreateInstance(_tState)!;
+                _tState.GetField("Buttons")!.SetValue(state, Enum.ToObject(_tButton, _buttons));
+                _tState.GetField("Hat")!.SetValue(state, Enum.ToObject(_tHat, _hat));
+                var axes = RequireType("HMGamepadStateHelpers")
+                    .GetMethod("StandardAxes", BindingFlags.Public | BindingFlags.Static)!
+                    .Invoke(null, [_profile, _lx, _ly, _rx, _ry, _lt, _rt]);
+                _tState.GetField("Axes")!.SetValue(state, axes);
+                RequireType("HMController")
+                    .GetMethod("SubmitState", [_tState.MakeByRefType()])!
+                    .Invoke(controller, [state]);
+            }
+            catch (Exception ex)
+            {
+                throw new PadSubmitException($"HIDMaestro 状态提交失败：{FormatSubmitError(ex)}", ex);
+            }
         }
-        catch (Exception ex)
+    }
+
+    /// <summary>拆反射包装取真实原因。TargetInvocationException 的 Message 恒为
+    /// "Exception has been thrown by the target of an invocation."——排障零信息（实机日志曾只见这句，
+    /// 真实内层是 SubmitState 进驱动的通信失败），必须逐层拆内层拼出完整异常链。</summary>
+    internal static string FormatSubmitError(Exception ex)
+    {
+        var parts = new List<string>();
+        for (var cur = ex; cur is not null && parts.Count < 6; cur = cur.InnerException)
         {
-            throw new InvalidOperationException($"HIDMaestro 状态提交失败：{ex.Message}", ex);
+            parts.Add(cur is TargetInvocationException
+                ? cur.GetType().Name
+                : $"{cur.GetType().Name}: {cur.Message}");
+            if (ReferenceEquals(cur, cur.InnerException)) break; // 防自引用链死循环
         }
+        return string.Join(" → ", parts);
     }
 
     /// <summary>按文件名（不含目录）在 zip 内挑条目，取目录最浅者（根目录优先，子目录兜底）。
@@ -381,4 +403,11 @@ public sealed class HidMaestroPad : IVirtualPad
         using var fs = File.OpenRead(path);
         return Convert.ToHexString(SHA256.HashData(fs));
     }
+}
+
+/// <summary>虚拟手柄状态提交失败（SDK↔UMDF2 驱动通信失效/设备掉线等）。专用类型供引擎识别，
+/// 触发手柄级重建自愈（ReconnectPad）而非按普通瞬时异常无限退避。</summary>
+public sealed class PadSubmitException : InvalidOperationException
+{
+    public PadSubmitException(string message, Exception innerException) : base(message, innerException) { }
 }

@@ -385,8 +385,7 @@
                                            TextWrapping="Wrap" MaxWidth="520" Margin="0,7,0,0">
                                     <Run Text="需连接"/>
                                     <Run Text="虚拟手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
-                                    <Run Text="，开始前请"/>
-                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，且真实手柄可保持连接（占用时挂机自动让步，停手后自动恢复）" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
                                     <Run Text="。"/>
                                 </TextBlock>
                         </StackPanel>
@@ -529,8 +528,7 @@
                                            TextWrapping="Wrap" MaxWidth="520" Margin="0,7,0,0">
                                     <Run Text="需连接"/>
                                     <Run Text="虚拟手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
-                                    <Run Text="，开始前请"/>
-                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，且真实手柄可保持连接（占用时挂机自动让步，停手后自动恢复）" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
                                     <Run Text="。"/>
                                 </TextBlock>
                             </StackPanel>
@@ -614,8 +612,7 @@
                                            TextWrapping="Wrap" MaxWidth="520" Margin="0,7,0,0">
                                     <Run Text="需连接"/>
                                     <Run Text="虚拟手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
-                                    <Run Text="，开始前请"/>
-                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，且真实手柄可保持连接（占用时挂机自动让步，停手后自动恢复）" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
                                     <Run Text="。"/>
                                 </TextBlock>
                             </StackPanel>
@@ -777,8 +774,7 @@
                                     <Run Text="以管理员运行" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
                                     <Run Text="；需"/>
                                     <Run Text="虚拟手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
-                                    <Run Text="，开始前请"/>
-                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，且真实手柄可保持连接（占用时挂机自动让步，停手后自动恢复）" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
                                     <Run Text="。"/>
                                 </TextBlock>
                                 <Border Background="{DynamicResource Surface2}" CornerRadius="7"
@@ -810,11 +806,11 @@
                                 </TextBlock>
                                 <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
                                            TextWrapping="Wrap" LineHeight="19" Margin="0,0,0,3">
-                                    <Run Text="2. 开始前"/>
-                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
-                                    <Run Text="，否则虚拟手柄只能当"/>
-                                    <Run Text="玩家 2" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
-                                    <Run Text="，菜单不响应。"/>
+                                    <Run Text="2. 真实手柄可保持连接（无需拔下）：占用时挂机"/>
+                                    <Run Text="自动让步" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="，停手后"/>
+                                    <Run Text="自动恢复" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                    <Run Text="；让步期间后台游戏可能收到你的按键，属正常现象。"/>
                                 </TextBlock>
                                 <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
                                            TextWrapping="Wrap" LineHeight="19" Margin="0,0,0,3">
@@ -867,8 +863,7 @@
                                            TextWrapping="Wrap" MaxWidth="520" Margin="0,7,0,0">
                                     <Run Text="需连接"/>
                                     <Run Text="虚拟手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
-                                    <Run Text="，开始前请"/>
-                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，且真实手柄可保持连接（占用时挂机自动让步，停手后自动恢复）" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
                                     <Run Text="。"/>
                                 </TextBlock>
                             </StackPanel>
@@ -951,8 +946,7 @@
                                     <Run Text="以管理员运行" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
                                     <Run Text="；需连接"/>
                                     <Run Text="虚拟手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
-                                    <Run Text="，开始前请"/>
-                                    <Run Text="断开真实手柄" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                    <Run Text="，且真实手柄可保持连接（占用时挂机自动让步，停手后自动恢复）" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
                                     <Run Text="。"/>
                                 </TextBlock>
                             </StackPanel>
@@ -1322,36 +1316,31 @@
                                        Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap"
                                        Text="正在检查状态…"/>
 
-                            <CheckBox x:Name="ChkHidePhysical" FontWeight="SemiBold" Margin="0,10,0,0"
-                                      Checked="ChkHidePhysical_Changed" Unchecked="ChkHidePhysical_Changed">
-                                <StackPanel>
-                                    <TextBlock Text="挂机时自动禁用真实手柄（释放玩家 1）" FontSize="12.5"/>
-                                    <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}"
-                                               TextWrapping="Wrap" MaxWidth="520" Margin="0,3,0,0">
-                                        <Run Text="真实手柄会占用玩家 1，虚拟手柄输入将被游戏忽略。开启后"/>
-                                        <Run Text="启动挂机自动禁用真实手柄、停止挂机即自动恢复" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
-                                        <Run Text="；首次需管理员授权注册系统任务，之后"/>
-                                        <Run Text="全自动" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
-                                        <Run Text="。"/>
-                                    </TextBlock>
-                                </StackPanel>
-                            </CheckBox>
-
-                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
-                                <TextBlock Text="虚拟手柄设备形态" Style="{StaticResource FieldLabel}"/>
-                                <ComboBox x:Name="CmbPadProfile" Width="330" Margin="10,0,0,0" SelectedIndex="0">
-                                    <ComboBoxItem Content="DualShock4（推荐：其他应用看不到机器人按键）"/>
-                                    <ComboBoxItem Content="Xbox 360（有线形态）"/>
-                                    <ComboBoxItem Content="Xbox Series X|S"/>
-                                    <ComboBoxItem Content="Xbox 精英2 蓝牙（与真实精英2同型）"/>
+                            <CheckBox x:Name="ChkCoexistence" Content="真实手柄共存（推荐）"
+                                      Margin="0,12,0,0" FontWeight="SemiBold"
+                                      Checked="ChkCoexistence_Changed" Unchecked="ChkCoexistence_Changed"/>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}"
+                                       TextWrapping="Wrap" MaxWidth="520" Margin="28,4,0,0">
+                                <Run Text="真实手柄全程可用（不禁用、无需拔下）：挂机中检测到你按真实手柄就"/>
+                                <Run Text="自动让步暂停" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="，停手静默一段时间后"/>
+                                <Run Text="自动恢复继续挂机" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="。让步期间后台游戏可能收到你的按键，属正常现象。"/>
+                            </TextBlock>
+                            <StackPanel Orientation="Horizontal" Margin="28,8,0,0">
+                                <TextBlock Text="让步恢复静默" Style="{StaticResource FieldLabel}"/>
+                                <ComboBox x:Name="CmbCoexistQuiet" Width="150" Margin="10,0,0,0" SelectedIndex="1">
+                                    <ComboBoxItem Content="10 秒"/>
+                                    <ComboBoxItem Content="30 秒（推荐）"/>
+                                    <ComboBoxItem Content="60 秒"/>
+                                    <ComboBoxItem Content="120 秒"/>
                                 </ComboBox>
                             </StackPanel>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="640" Margin="0,6,0,0">
-                                <Run Text="三档均已实测被游戏正常消费。DS4 形态为纯 HID，挂机时"/>
-                                <Run Text="其他应用和前台游戏收不到机器人按键" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
-                                <Run Text="；Xbox 形态会占用 XInput 玩家 1 且"/>
-                                <Run Text="按键会同时进入前台游戏" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
-                                <Run Text="。更改在下次开始挂机时生效。"/>
+
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="640" Margin="0,14,0,0">
+                                <Run Text="虚拟手柄为 DualShock4 纯 HID 形态：XInput 游戏天生看不到，DInput/RawInput 泄漏由上面的隔离封死——"/>
+                                <Run Text="任何其他应用都收不到机器人按键" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="。"/>
                             </TextBlock>
                         </StackPanel>
                     </Border>

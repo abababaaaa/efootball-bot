@@ -26,10 +26,18 @@ public static class HidDeviceEnumerator
     /// "HIDCLASS" 硬件 ID 仅 HIDMaestro 使用，真实设备不会撞此形态。</summary>
     public const string HidMaestroHidPrefix = @"HID\HIDCLASS\";
 
+    /// <summary>HIDMaestro XInput 形态档的另一种节点形态（padprobe 2026-10-21 实测）：
+    /// SWD\HIDMAESTRO_VID_045E_PID_02FF&amp;IG_00\HM_&lt;hash&gt; 与 HID\HIDMAESTRO_VID_...&amp;IG_00\1&amp;&lt;hash&gt;。
+    /// "HIDMAESTRO" 字样只出现在虚拟设备的硬件 ID 里，真实设备不会撞。</summary>
+    public const string HidMaestroSwdPrefix = @"SWD\HIDMAESTRO_";
+    public const string HidMaestroHidVidPrefix = @"HID\HIDMAESTRO_";
+
     /// <summary>HIDMaestro 虚拟设备实例判定（在线检查与黑名单共用；路径纯字符串，不打开设备）。</summary>
     public static bool IsHidMaestroInstance(string instancePath)
         => instancePath.StartsWith(HidMaestroBusPrefix, StringComparison.OrdinalIgnoreCase)
-           || instancePath.StartsWith(HidMaestroHidPrefix, StringComparison.OrdinalIgnoreCase);
+           || instancePath.StartsWith(HidMaestroHidPrefix, StringComparison.OrdinalIgnoreCase)
+           || instancePath.StartsWith(HidMaestroSwdPrefix, StringComparison.OrdinalIgnoreCase)
+           || instancePath.StartsWith(HidMaestroHidVidPrefix, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsViGEmInstance(string instancePath)
         => instancePath.StartsWith(ViGEmInstancePrefix, StringComparison.OrdinalIgnoreCase);

@@ -145,8 +145,8 @@ public partial class MainWindow : Window
             _hotkey.Unregister();
             // Worker 非正常退出（更新重启/崩溃/强杀）可能没机会还原停靠的窗口：兜底还原
             EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
-            // 崩溃残留的禁用真实手柄同样兜底恢复（下次启动挂机会重新禁用）
-            RestorePhysicalPadIfDisabled();
+            // 旧版本遗留的禁用手柄一次性迁移恢复
+            RestoreLegacyDisabledPads();
         });
         return _workerHost;
     }
@@ -380,12 +380,13 @@ public partial class MainWindow : Window
         }
 
         // 开始前必须手动确认的两点：
-        // ① 真实手柄占用 XInput 玩家1 时会由挂机自动禁用释放（退出程序自动恢复）；
+        // ① 共存模式：真实手柄保持连接可用，挂机检测到占用会自动让步、停手后自动恢复；
         // ② 全屏（尤其超宽）下定位与捕获均不稳定，720p 窗口模式是实测可靠配置。
         var confirm = System.Windows.MessageBox.Show(
             this,
             "开始前请确认两件事：\n\n" +
-            "① 真实手柄可以保持连接\n若它占用玩家 1，挂机会自动禁用它释放玩家 1（首次需一次管理员授权），关闭本程序后手柄自动恢复。\n\n" +
+            "① 真实手柄可以保持连接（无需拔下）\n挂机中检测到你在用真实手柄会自动让步暂停；停手后自动恢复继续挂机。" +
+            "让步期间后台游戏可能收到你的按键，属正常现象。\n\n" +
             "② 游戏最好以 720p 窗口模式运行\n无边框窗口 1280×720 最稳定；独占全屏下挂机无法窗口化且定位易失效。",
             "开始挂机前确认",
             MessageBoxButton.OKCancel,
@@ -397,10 +398,6 @@ public partial class MainWindow : Window
         {
             SaveUiToConfig();
             SetStartButtonsEnabled(false);
-
-            // 真实手柄占着玩家 1 而释放任务未就绪（未注册/指向旧路径）→ 现场补注册（一次 UAC）。
-            // 放在点击开始时做：用户此刻最期待授权弹窗，也避免每次启动都打扰。
-            await EnsurePadReleaseTasksAsync();
 
             // 立即反馈：Worker 冷启动握手最长 30s，期间按钮必须显示"启动中…"而非无响应
             btn.Content = "启动中…";
@@ -457,39 +454,20 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 「释放玩家 1」提权任务未就绪时的现场补注册：仅当真实手柄确实占着 slot 0 才弹 UAC
-    /// （RunHidHideJobAsync 会启动 runas 子进程）。注册后由 Worker 在挂机启动时静默触发。
+    /// 一次性遗留恢复：3.1 及更早版本的「挂机禁用真实手柄」机制可能给用户留下卡在禁用态的手柄
+    /// （旧版崩溃/强杀没走恢复流程）。检测到遗留禁用 → 进程内启用（需管理员；未提权则下次启动重试）。
+    /// 3.2.0 共存模式不再产生新禁用，本恢复是纯迁移。
     /// </summary>
-    private async Task EnsurePadReleaseTasksAsync()
+    private void RestoreLegacyDisabledPads()
     {
         try
         {
-            bool padHoldingSlot0 = PadBackendProbe.IsSlot0Occupied()
-                && HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0;
-            if (!padHoldingSlot0 || await Task.Run(HidHideManager.TasksReady))
-                return;
-
-            AppendLog("首次使用需注册「释放玩家 1」系统任务，请在授权窗口点「是」…", LogLevel.Info);
-            var res = await RunHidHideJobAsync(new HidHideConfigJob.HidHideJobDto { Mode = "tasks" });
-            AppendLog(res.Success
-                ? "释放玩家 1 任务已就绪。"
-                : $"释放玩家 1 任务注册失败：{res.Error}", res.Success ? LogLevel.Info : LogLevel.Warn);
+            if (!LegacyPadRestore.HasLegacyDisabled()) return;
+            AppendLog("检测到旧版本遗留的禁用手柄，正在自动恢复…", LogLevel.Info);
+            var (_, msg) = LegacyPadRestore.RestoreAll();
+            AppendLog($"遗留手柄恢复：{msg}", LogLevel.Info);
         }
-        catch (Exception ex)
-        {
-            AppendLog($"释放任务就绪检查失败：{ex.Message}", LogLevel.Warn);
-        }
-    }
-
-    /// <summary>触发恢复被挂机禁用的真实手柄（静默提权任务；无记录且无被禁节点时不做任何事）。</summary>
-    private void RestorePhysicalPadIfDisabled()
-    {
-        try
-        {
-            if (PhysicalPadControl.HasPendingRestore() || PhysicalPadControl.HasDisabledGamepad())
-                HidHideManager.RunTaskSilently(HidHideManager.PadRestoreTaskName);
-        }
-        catch { /* 恢复失败不影响退出流程，下次启动兜底 */ }
+        catch { /* 恢复失败不影响启动流程，下次启动重试 */ }
     }
 
     private void SetStartButtonsEnabled(bool enabled)
@@ -575,14 +553,13 @@ public partial class MainWindow : Window
         _previewTimer.Stop();
         _statsTimer.Stop();
         _hotkey.Dispose();
-        // 先杀 Worker（虚拟手柄释放玩家 1 槽位），再恢复真实手柄——
-        // 顺序反了会把真实手柄顶到玩家 2。恢复由提权任务在进程退出后自行完成。
+        // 先杀 Worker（虚拟手柄随引擎停止断开），再走停靠还原——
         // ★必须先于停靠还原：Worker 里的停靠看门狗存活期间会把刚还原的窗口再移出屏幕，
         //   而还原记录已被删除，游戏就永远留在屏幕外（挂机中直接关主窗口的实测路径）
         _workerHost?.Dispose();
         // 停靠中的游戏窗口还原兜底：Worker 已死，看门狗不会再对抗还原
         EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
-        RestorePhysicalPadIfDisabled();
+        RestoreLegacyDisabledPads();
         FileLogger.Instance.Dispose();
         base.OnClosing(e);
     }

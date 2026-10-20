@@ -23,14 +23,29 @@ public sealed class WorkerHost : IDisposable
     private BotStats _lastStats = new();
     private bool _disposed;
 
+    // ---- 意外退出自动重启（3.2.0）----
+    /// <summary>用户期望场景运行中（手动开始置位、手动停止/Dispose 复位）；仅此状态下才自动重启。</summary>
+    private volatile bool _expectedRunning;
+    private volatile bool _autoRestarting;            // 重启进行中：IsRunning 保持 true，GUI 不复位界面
+    private string? _lastMode;
+    private DateTime _lastAutoRestartAt = DateTime.MinValue;
+    private int _autoRestartCount;
+    private DateTime _lastRunStartAt = DateTime.MinValue;
+
+    private static readonly TimeSpan MinRestartSpacing = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan StableRunReset = TimeSpan.FromMinutes(5);
+    private const int MaxConsecutiveRestarts = 3;
+    private const int AutoRestartDelaySeconds = 3;
+
     public event Action<string, string>? Log;           // level, msg
     public event Action<BotStats>? StatsChanged;
     public event Action<string, double, string?>? ScreenObserved; // 感知摘要文本, 评分, 证据
     public event Action<string>? PreviewReceived;       // pngBase64
     public event Action<string>? Exited;                // reason
-    public event Action? Disconnected;                  // 管道断开 / 进程退出
+    public event Action? Disconnected;                  // 管道断开 / 进程退出（自动重启已放弃时才触发）
 
-    public bool IsRunning => _process is { HasExited: false };
+    /// <summary>自动重启进行中也视为运行中：GUI 的统计轮询依赖此标志判断"场景仍在跑"，避免重启间隙误报"场景已结束"。</summary>
+    public bool IsRunning => !_disposed && (_autoRestarting || _process is { HasExited: false });
     public BotStats LastStats => _lastStats;
 
     /// <summary>启动 Worker 子进程并建立管道连接（与 StopAsync 互斥，重入时排队等待）。</summary>
@@ -42,6 +57,10 @@ public sealed class WorkerHost : IDisposable
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
+            _lastMode = mode;
+            _expectedRunning = true;
+            // 用户手动开始 = 全新的信任预算：清空自动重启计数
+            _autoRestartCount = 0;
             await StartInternalAsync(mode);
         }
         catch
@@ -192,7 +211,9 @@ public sealed class WorkerHost : IDisposable
             return Task.CompletedTask;
         }, readCts.Token);
 
-        // 看门狗：局部捕获 process，Stop/Cleanup 置空字段也不会 NRE
+        // 看门狗：局部捕获 process，Stop/Cleanup 置空字段也不会 NRE。
+        // 进程退出后交给 HandleProcessExitAsync：用户手动停止→原样断开；
+        // 意外退出→按预算自动重启恢复挂机（3.2.0，杀掉挂机的 SDK 原生崩溃不再需要人守）
         _ = Task.Run(async () =>
         {
             try
@@ -201,17 +222,96 @@ public sealed class WorkerHost : IDisposable
             }
             catch { }
             try { readCts.Cancel(); } catch { }
-            try { Disconnected?.Invoke(); } catch { }
+            await HandleProcessExitAsync(process);
         });
 
         // 发送 start 命令
         await SendAsync(PipeProtocol.CmdStart(mode));
+        _lastRunStartAt = DateTime.Now;
+    }
+
+    /// <summary>
+    /// 进程退出处理：手动停止（_expectedRunning=false）或已销毁→照常触发 Disconnected；
+    /// 意外退出→按预算自动重启：距上次自动重启 ≥5 分钟、连续 ≤3 次（稳定运行 5 分钟后计数归零）。
+    /// 重启期间 <see cref="IsRunning"/> 保持 true，GUI 不会把重启间隙误判成"场景已结束"；
+    /// 预算耗尽或重启失败才触发 Disconnected（GUI 复位界面）。
+    /// </summary>
+    private async Task HandleProcessExitAsync(Process process)
+    {
+        if (_disposed || !_expectedRunning)
+        {
+            FireDisconnected();
+            return;
+        }
+        try { await _lifecycle.WaitAsync(); }
+        catch (ObjectDisposedException) { FireDisconnected(); return; }
+        try
+        {
+            if (_disposed || !_expectedRunning)
+            {
+                FireDisconnected();
+                return;
+            }
+
+            var now = DateTime.Now;
+            if (now - _lastRunStartAt >= StableRunReset)
+                _autoRestartCount = 0; // 上一段稳定运行足够久：重置连续计数
+            if (now - _lastAutoRestartAt < MinRestartSpacing)
+            {
+                EmitLog("Error", "Worker 意外退出，且距上次自动重启不足 5 分钟——不再重启，请查看日志排查后手动开始。");
+                await TeardownAsync();
+                FireDisconnected();
+                return;
+            }
+            if (_autoRestartCount >= MaxConsecutiveRestarts)
+            {
+                EmitLog("Error", "Worker 意外退出，自动重启已连续 3 次——不再重启，请查看日志排查后手动开始。");
+                await TeardownAsync();
+                FireDisconnected();
+                return;
+            }
+
+            _autoRestartCount++;
+            _lastAutoRestartAt = now;
+            EmitLog("Warn", $"Worker 意外退出，{AutoRestartDelaySeconds} 秒后自动重启并恢复挂机（第 {_autoRestartCount}/{MaxConsecutiveRestarts} 次）…");
+            _autoRestarting = true;
+            try
+            {
+                await TeardownAsync(); // 回收残留句柄（进程已退出，只清管道与 Process 对象）
+                await Task.Delay(TimeSpan.FromSeconds(AutoRestartDelaySeconds));
+                if (_disposed || !_expectedRunning) return; // 用户恰好在延迟内点了停止
+                await StartInternalAsync(_lastMode!);
+                _lastRunStartAt = DateTime.Now;
+                EmitLog("Success", "Worker 已自动重启，挂机继续。");
+            }
+            catch (Exception ex)
+            {
+                EmitLog("Error", $"Worker 自动重启失败：{ex.Message}");
+            }
+            finally
+            {
+                _autoRestarting = false;
+            }
+            if (_process is null or { HasExited: true })
+                FireDisconnected(); // 重启失败：交回 GUI 复位
+        }
+        finally
+        {
+            try { _lifecycle.Release(); }
+            catch (ObjectDisposedException) { /* 关闭中 */ }
+        }
+    }
+
+    private void FireDisconnected()
+    {
+        try { Disconnected?.Invoke(); } catch { /* 订阅方异常不影响回收 */ }
     }
 
     /// <summary>发送 stop 命令，收到 Worker 确认（典型 <1s）即 Kill 回收；确认超时 2s 也直接 Kill。
     /// Worker 收 stop 本就不退出进程（保活等重连），旧实现固定等 5s 进程退出纯属白等。</summary>
     public async Task StopAsync()
     {
+        _expectedRunning = false; // 用户主动停止：看门狗不再自动重启
         try { await _lifecycle.WaitAsync(); }
         catch (ObjectDisposedException) { return; } // 关闭中：Dispose 已硬回收，无需再停
         try
@@ -308,6 +408,7 @@ public sealed class WorkerHost : IDisposable
     {
         if (_disposed) return;
         _disposed = true;
+        _expectedRunning = false; // 关闭程序：自动重启链终止
         try
         {
             // Dispose 可能在信号量被占用时调用，不等锁，直接硬回收

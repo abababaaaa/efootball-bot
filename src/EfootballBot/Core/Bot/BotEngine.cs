@@ -67,6 +67,10 @@ public sealed class BotEngine : IDisposable
     private PerceptionPipeline? _perception;
     private readonly SessionScheduler _scheduler;
     private BackgroundParker? _parker;
+    /// <summary>共存让步传感器（场景模式 + 共存开启时创建）：监测真实手柄活动。</summary>
+    private RealPadActivityMonitor? _padMonitor;
+    /// <summary>共存让步状态机当前状态。</summary>
+    private PadCoexistencePolicy.State _yieldState;
     /// <summary>GDI+停靠黑帧自动还原是否已执行（每次运行一次，避免反复横跳）。</summary>
     private bool _blackGdiUnparked;
     /// <summary>捕获熔断后是否已降级 GDI（每次运行一次，降级失败才真正停机）。</summary>
@@ -214,6 +218,14 @@ public sealed class BotEngine : IDisposable
             _parker.Start(parkWin.Handle);
         }
 
+        // 共存让步传感器：仅场景模式需要（观察模式不按键，无让步概念）
+        if (scenarioMode && _cfg.Pad.CoexistenceEnabled)
+        {
+            _padMonitor ??= new RealPadActivityMonitor();
+            _padMonitor.Start();
+            _yieldState = default;
+        }
+
         _gdiFallbackTried = false;
         _loop = Task.Run(async () =>
         {
@@ -251,6 +263,40 @@ public sealed class BotEngine : IDisposable
                         {
                             idleThrottled = false;
                             Observation.ApplyCaptureThrottle(300);
+                        }
+
+                        // —— 共存让步：用户占用真实手柄时暂停挂机操作，停手静默后自动恢复 ——
+                        // （XInput 无进程级隔离：用户的按键会同时进后台游戏，让步避免 bot 与用户抢输入。
+                        //   暂停/作息分支已先行 continue，此处只在正常运行态评估）
+                        if (_padMonitor is not null)
+                        {
+                            var nowUtc = DateTime.UtcNow;
+                            var decision = PadCoexistencePolicy.Evaluate(
+                                _yieldState, _padMonitor.LastActivityUtc, nowUtc, _cfg.Pad.CoexistQuietSeconds);
+                            if (decision == PadCoexistencePolicy.Decision.Yield)
+                            {
+                                _yieldState = new PadCoexistencePolicy.State(true, nowUtc, false);
+                                try { Pad360.ResetAll(); } catch { }
+                                LogInternal($"检测到真实手柄使用，挂机让步中（后台游戏可能收到你的按键）；停手 {_cfg.Pad.CoexistQuietSeconds} 秒后自动恢复", LogLevel.Warn);
+                            }
+                            else if (decision == PadCoexistencePolicy.Decision.Resume)
+                            {
+                                _yieldState = default;
+                                LogInternal("真实手柄已静默，挂机自动恢复", LogLevel.Success);
+                                // 补一发 B 归位：让步期间用户的按键可能已把后台菜单按到未知层级
+                                try { await Pad.Back(); } catch { /* 归位键失败交由场景逃生兜底 */ }
+                            }
+                            else if (PadCoexistencePolicy.ShouldShowDriftHint(_yieldState, nowUtc))
+                            {
+                                _yieldState = new PadCoexistencePolicy.State(_yieldState.Yielded, _yieldState.YieldedSinceUtc, true);
+                                LogInternal("让步持续超过 45 分钟：若你并未在使用手柄，可能是摇杆漂移被误判为活动，请检查或拔下手柄", LogLevel.Warn);
+                            }
+                            if (_yieldState.Yielded)
+                            {
+                                if (!idleThrottled) { idleThrottled = true; Observation.ApplyCaptureThrottle(2000); }
+                                await Task.Delay(500, token);
+                                continue;
+                            }
                         }
 
                         await ObserveAsync(token);
@@ -329,6 +375,22 @@ public sealed class BotEngine : IDisposable
                         SaveFailureDump("捕获熔断终停");
                         EmitStats();
                         return;
+                    }
+                    catch (PadSubmitException ex)
+                    {
+                        // 虚拟手柄提交失败：先按指数退避重试；连续 3 次仍失败 → 重建控制器自愈
+                        // （SDK↔UMDF2 通信失效/设备节点掉线。identityKey 决定性，重建得到同设备路径）
+                        failStreak = Math.Min(failStreak + 1, 10);
+                        Stats.LastError = ex.Message;
+                        LogInternal($"虚拟手柄提交失败（连续第 {failStreak} 次）：{ex.Message}", LogLevel.Warn);
+                        if (failStreak >= 3)
+                        {
+                            await ReconnectPadAsync();
+                            failStreak = 0;
+                            Stats.LastError = "";
+                        }
+                        else
+                            await Task.Delay(1000, token);
                     }
                     catch (Exception ex)
                     {
@@ -421,30 +483,14 @@ public sealed class BotEngine : IDisposable
 
         if (connectPad)
         {
-            // 存在「已启用」的物理手柄节点时：按设置自动禁用（设备管理器级）——XInput 手柄释放
-            // 玩家 1，PS 系手柄堵住 DirectInput 并发通道，蓝牙 Xbox 手柄掐断 GATT 输入节点，
-            // 虚拟手柄成为游戏唯一可见的手柄。不走 HidHide 黑名单——XInput 不吃那套（实测）。
-            // ★触发条件只看节点，不看 XInput 玩家 1 占用：AMD Controller Emulation 等常驻
-            // 虚拟设备会永久占着玩家 1，没接手柄也会误报并空等 20 秒（实机 2026-10-19）。
-            // 纯 HID 后端不占 XInput 槽位，无需玩家 1 空闲；「已禁用」的节点不算在用，
-            // 禁用生效后本条件立即转 false，不再空等。
-            if (!Pad360.IsConnected && _cfg.HidHide.HidePhysicalGamepad
-                && Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0)
-            {
-                LogInternal("检测到真实手柄：自动禁用以让虚拟手柄独占游戏输入（停止挂机时自动恢复）…", LogLevel.Warn);
-                Input.HidHideManager.RequestPadHide();
-                var deadline = DateTime.Now.AddSeconds(20);
-                while (Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0
-                       && DateTime.Now < deadline)
-                    await Task.Delay(500);
-                if (Input.HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0)
-                    LogInternal("自动禁用未完全生效——真实手柄可能仍在向游戏输入（若蓝牙手柄仍响应请手动关闭其电源，详见 data\\hidhide-sync.log）", LogLevel.Warn);
-                else
-                    LogInternal("真实手柄已暂时禁用（虚拟手柄独占输入）", LogLevel.Success);
-            }
+            // 共存模式（3.2.0 起，唯一模式）：真实手柄全程不禁用、HidHide 不再碰物理手柄。
+            // 游戏同时可见两只手柄（eFootball 菜单响应任一手柄输入）；用户占用真实手柄期间
+            // 由主循环的让步状态机暂停操作，停手静默后自动恢复（PadCoexistencePolicy）。
+            if (HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0)
+                LogInternal("检测到真实手柄：共存模式保持其可用；占用期间挂机自动让步，停手后自动恢复", LogLevel.Info);
             await ConnectPadWithFallbackAsync();
             _ = Task.Run(EnsureHidHideIsolation); // 静默检查虚拟手柄黑名单覆盖（不阻塞启动）
-            LogInternal("虚拟手柄已连接（纯 HID 独占：其他应用/游戏完全看不到这只手柄）",
+            LogInternal("虚拟手柄已连接（纯 HID + HidHide 白名单：其他应用/游戏看不到这只手柄）",
                 LogLevel.Success);
         }
         else
@@ -454,14 +500,12 @@ public sealed class BotEngine : IDisposable
 
         Stats.StartedAt = DateTime.Now;
         _cts = new CancellationTokenSource();
-        // 会话标记：sync 提权任务凭它跳过 pad-restore（挂机中绝不能复活被禁用的真实手柄）
-        Input.PhysicalPadControl.WriteSessionMarker();
         return _cts.Token;
     }
 
-    /// <summary>按后端种类创建虚拟手柄实例（仅构造不连接）。ViGEm 两档移除后仅剩 HIDMaestro；形态档由配置注入。</summary>
+    /// <summary>按后端种类创建虚拟手柄实例（仅构造不连接）。唯一后端 HIDMaestro，形态档锁定 DS4（纯 HID 无泄漏）。</summary>
     private IVirtualPad CreatePad(PadBackendKind kind) =>
-        new HidMaestroPad(m => LogInternal(m, LogLevel.Info), _cfg.PadProfileId);
+        new HidMaestroPad(m => LogInternal(m, LogLevel.Info));
 
     /// <summary>
     /// 连接虚拟手柄。单后端后无回退可言（保留换实例重连的骨架：连接失败时重建一次实例再试，
@@ -492,6 +536,28 @@ public sealed class BotEngine : IDisposable
             }
         }
         throw new InvalidOperationException("虚拟手柄连接失败，请查看上方日志后重试。");
+    }
+
+    /// <summary>
+    /// 运行期手柄级自愈：断开→重建控制器→（Connect 内部）验证虚拟设备节点上线。
+    /// 提交失败多为 SDK↔UMDF2 驱动通信失效（设备节点掉线/驱动重启），identityKey 决定性
+    /// 保证重建得到相同设备路径，游戏不感知手柄换人。失败不抛——交回主循环退避，
+    /// 下一轮提交失败会再次触发重建。
+    /// </summary>
+    private async Task ReconnectPadAsync()
+    {
+        LogInternal("虚拟手柄提交连续失败，正在重建控制器自愈…", LogLevel.Warn);
+        try { Pad360.Disconnect(); } catch { }
+        await Task.Delay(500);
+        try
+        {
+            Pad360.Connect();
+            LogInternal("虚拟手柄已重建，挂机继续。", LogLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            LogInternal($"虚拟手柄重建失败：{ex.Message}（继续退避，下次提交失败再触发重建）", LogLevel.Error);
+        }
     }
 
     /// <summary>
@@ -785,12 +851,10 @@ public sealed class BotEngine : IDisposable
         // 停止即拔掉虚拟手柄：其他应用立即看不到任何手柄（旧实现保持在线到引擎销毁，
         // 用户停了挂机别的游戏里还挂着一只“幽灵手柄”）。下次开始重新连接。
         try { Pad360.Disconnect(); } catch { }
-        // 会话结束：sync 任务恢复对真实手柄的恢复权限
-        try { Input.PhysicalPadControl.RemoveSessionMarker(); } catch { }
-        // 本次挂机禁用过真实手柄：停止即恢复（不再等退出程序），把手柄还给用户。
-        // 火后不管：同步等待会把 Worker 的 stop 处理拖长数秒，放大 GUI 关闭竞态（曾致崩溃）
-        if (_cfg.HidHide.HidePhysicalGamepad && Input.PhysicalPadControl.HasPendingRestore())
-            Input.HidHideManager.RunTaskSilently(Input.HidHideManager.PadRestoreTaskName, waitForExit: false);
+        // 共存让步传感器随会话结束
+        try { _padMonitor?.Dispose(); } catch { }
+        _padMonitor = null;
+        _yieldState = default;
         // 先还原后台停靠的窗口位置，再断捕获（还原依赖窗口仍在捕获会话里无影响，但先还原能让用户立刻看到游戏）
         try { _parker?.Stop(); } catch { }
         // 显式停止捕获会话：挂机停止后不再后台抓帧。
@@ -799,10 +863,10 @@ public sealed class BotEngine : IDisposable
         try { _dxgi?.Stop(); } catch { }
         try { _gdi?.Stop(); } catch { }
         _lastObs = null;
-        // 注意：此处不断开虚拟手柄。手柄一旦被游戏看到「断开→重连」，
-        // eFootball 会把光标停靠到顶部头部的「手柄归属」图标上，重连设备的
-        // Left/A 全部失效（焦点不在磁贴行）。设备在 Stop→Start 间保持存活，
-        // XInput 槽位在应用退出（Dispose）时释放；如需立刻让位给真实手柄请关闭本程序。
+        // 注意：上面 Disconnect 只在停止时发生。挂机运行期间绝不反复断开/重连虚拟手柄——
+        // 手柄一旦被游戏看到「断开→重连」，eFootball 会把光标停靠到顶部头部的「手柄归属」图标上，
+        // 重连设备的 Left/A 全部失效（焦点不在磁贴行）。运行期自愈走 ReconnectPadAsync，
+        // 仅在提交连续失败（手柄实质已失效）时才重建。
     }
 
     /// <summary>异常停止（场景报错终止）：自动留档当前画面后正常停止。

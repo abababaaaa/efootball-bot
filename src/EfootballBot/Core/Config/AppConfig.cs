@@ -233,7 +233,7 @@ public sealed class ModuleFallbackConfig
     public bool DisableFailureDumps { get; set; } = false;
 }
 
-/// <summary>虚拟手柄后端配置。</summary>
+/// <summary>虚拟手柄后端配置（唯一后端 HidMaestro）+ 共存模式。</summary>
 public sealed class PadConfig
 {
     /// <summary>
@@ -241,6 +241,16 @@ public sealed class PadConfig
     /// 旧配置里的 ViGEm 档位（0=DualShock4 / 2=Xbox 360）加载时归一化。
     /// </summary>
     public PadBackendKind Backend { get; set; } = PadBackendKind.HidMaestro;
+
+    /// <summary>
+    /// 共存模式（3.2.0 起唯一隔离模型）：真实手柄全程不禁用；挂机检测到真实手柄活动即自动
+    /// 让步暂停，停手静默 <see cref="CoexistQuietSeconds"/> 秒后自动恢复。
+    /// 关闭后挂机不再感知真实手柄（不推荐：用户按键会与 bot 抢后台游戏输入）。
+    /// </summary>
+    public bool CoexistenceEnabled { get; set; } = true;
+
+    /// <summary>让步恢复静默秒数：真实手柄持续无活动的时长达到该值即自动恢复挂机。</summary>
+    public int CoexistQuietSeconds { get; set; } = 30;
 
     /// <summary>
     /// 旧版布尔开关迁移：EnableHidMaestro=true → 清零旧开关（后端本就只有 HidMaestro 一档）。
@@ -251,22 +261,27 @@ public sealed class PadConfig
         if (Backend != PadBackendKind.HidMaestro)
             Backend = PadBackendKind.HidMaestro;
         legacy.EnableHidMaestro = false;
+        CoexistQuietSeconds = Math.Clamp(CoexistQuietSeconds, 5, 600);
     }
 }
 
-/// <summary>手柄隔离（HidHide）配置。驱动侧持久化到注册表，此处仅存 UI 快照与回滚清单。</summary>
+/// <summary>手柄隔离（HidHide）配置：3.2.0 起只负责「虚拟手柄仅游戏可见」，
+/// 物理手柄的禁用机制已整体移除（共存模式）。驱动侧持久化到注册表，此处仅存 UI 快照与回滚清单。</summary>
 public sealed class HidHideConfig
 {
     /// <summary>已应用隔离（虚拟手柄已加入黑名单）。默认开启：首次由提权子进程自动完成配置。</summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>
-    /// 挂机启动时自动禁用真实手柄以释放 XInput 玩家 1（设备管理器级禁用，
-    /// 关闭本程序后自动恢复）。注意 HidHide 黑名单路线对 XInput 无效（见 PhysicalPadControl）。
+    /// ★已废弃（3.2.0 共存模式移除「挂机禁用真实手柄」机制）。保留字段仅为旧 config.json
+    /// 反序列化兼容，加载时置 false，任何代码不再消费。
     /// </summary>
-    public bool HidePhysicalGamepad { get; set; } = true;
+    public bool HidePhysicalGamepad { get; set; }
 
-    /// <summary>被禁用的真实手柄设备节点实例路径（pad-hide 提权任务先记录后禁用；恢复依据）。</summary>
+    /// <summary>
+    /// 旧版「被禁用的真实手柄节点」恢复清单。3.2.0 不再产生新记录；启动时的一次性遗留恢复
+    /// （LegacyPadRestore）消费并清空它，防老版本升级用户的手柄卡在禁用态。
+    /// </summary>
     public List<string> DisabledPadDevs { get; set; } = new();
 
     /// <summary>白名单游戏的完整镜像路径快照（应用隔离时快照，游戏未运行时无法更新）。</summary>
@@ -277,16 +292,16 @@ public sealed class HidHideConfig
 
     /// <summary>
     /// 老默认迁移：从未成功应用过隔离（AppliedBlacklist 为空，即旧出厂 Enabled=false 配置）
-    /// → 翻成新默认（隔离开 + 真实手柄隐藏开）。成功应用/解除过一次后不再干预，尊重用户选择。
+    /// → 翻成新默认（隔离开）。成功应用/解除过一次后不再干预，尊重用户选择。
+    /// 3.2.0 起 HidePhysicalGamepad 一律压回 false（禁用机制已移除）；
+    /// DisabledPadDevs 保留原值，由启动时的一次性遗留恢复消费后清空。
     /// 只改内存，首次 Save 时落盘（同 TimingConfig 迁移模式）。
     /// </summary>
     public void MigrateDefaults()
     {
         if (AppliedBlacklist.Count == 0)
-        {
             Enabled = true;
-            HidePhysicalGamepad = true;
-        }
+        HidePhysicalGamepad = false;
     }
 }
 
@@ -427,10 +442,6 @@ public sealed class AppConfig
     public bool AutoLaunchGame { get; set; }
     /// <summary>画面捕获后端：WGC 窗口捕获（默认，支持后台挂机/窗口被遮挡；已绑定真实 GPU 适配器）或 DXGI 桌面复制（高性能但窗口须可见）。</summary>
     public CaptureMode CaptureMode { get; set; } = CaptureMode.Wgc;
-    /// <summary>虚拟手柄设备形态档（HIDMaestro ProfileId）。默认 dualshock-4-v1（纯 HID：XInput 天生失明，
-    /// 挂机期间其他应用/前台游戏不可见）；xbox-360-wired / xbox-series-xs / xbox-elite-v2-bt-v2 为 XInput 形
-    /// （实机 2026-10-21 探针三档均被 eFootball 消费并占 slot 0，但会泄漏给前台应用）。重启挂机生效。</summary>
-    public string PadProfileId { get; set; } = HidMaestroPad.DefaultProfileId;
     public TimingConfig Timing { get; set; } = new();
 
     // —— 推理（ONNX Runtime EP 降级 + YOLO 目标检测）——

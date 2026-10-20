@@ -8,10 +8,24 @@ namespace EfootballBot.Tests;
 public class PadBackendTests
 {
     [Fact]
-    public void PadConfig_默认值_HIDMaestro后端()
+    public void PadConfig_默认值_HIDMaestro后端_共存开启()
     {
         var cfg = new PadConfig();
         Assert.Equal(PadBackendKind.HidMaestro, cfg.Backend);
+        Assert.True(cfg.CoexistenceEnabled);
+        Assert.Equal(30, cfg.CoexistQuietSeconds);
+    }
+
+    [Fact]
+    public void PadConfig_MigrateFrom_静默秒数越界钳制()
+    {
+        var pad = new PadConfig { CoexistQuietSeconds = 0 };
+        pad.MigrateFrom(new ModuleFallbackConfig());
+        Assert.Equal(5, pad.CoexistQuietSeconds); // 下限 5s
+
+        var pad2 = new PadConfig { CoexistQuietSeconds = 9999 };
+        pad2.MigrateFrom(new ModuleFallbackConfig());
+        Assert.Equal(600, pad2.CoexistQuietSeconds); // 上限 600s
     }
 
     [Fact]
@@ -123,13 +137,6 @@ public class PadBackendTests
     }
 
     [Fact]
-    public void PadBackendProbe_槽位占用提示_布尔语义()
-    {
-        Assert.Null(PadBackendProbe.SlotZeroOccupiedMessage(false));
-        Assert.NotNull(PadBackendProbe.SlotZeroOccupiedMessage(true));
-    }
-
-    [Fact]
     public void 后端策略_下拉顺序映射_单后端()
     {
         Assert.Equal(0, PadBackendInfo.UiIndexOf(PadBackendKind.HidMaestro));
@@ -138,6 +145,33 @@ public class PadBackendTests
         Assert.Equal(PadBackendKind.HidMaestro, PadBackendInfo.FromUiIndex(0));
         Assert.Equal(PadBackendKind.HidMaestro, PadBackendInfo.FromUiIndex(-1)); // 越界兜底默认
         Assert.Equal(PadBackendKind.HidMaestro, PadBackendInfo.FromUiIndex(99));
+    }
+
+    /// <summary>RawInput 设备名 → 实例路径形态（RealPadActivityMonitor 的虚拟设备过滤依赖此转换）。
+    /// 所有 '#'（含 interface GUID 前那个）都替换为 '\'。</summary>
+    [Theory]
+    [InlineData(@"\\?\HID#VID_054C&PID_05C4&MI_03#8&2b34f02&0&0000#{884b96c3-2ef6-4bd9-907a-42e167b8e99d}",
+                @"HID\VID_054C&PID_05C4&MI_03\8&2b34f02&0&0000\{884b96c3-2ef6-4bd9-907a-42e167b8e99d}")]
+    [InlineData(@"\\?\HID#HIDCLASS#1&8508b062&0&0000#{00001124-0000-1000-8000-00805f9b34fb}",
+                @"HID\HIDCLASS\1&8508b062&0&0000\{00001124-0000-1000-8000-00805f9b34fb}")]
+    [InlineData(@"HID\VID_045E&PID_02E0&IG_00\6&2DF92C3&0&0000",
+                @"HID\VID_045E&PID_02E0&IG_00\6&2DF92C3&0&0000")] // 非 \\?\ 前缀原样返回
+    public void RealPadMonitor_设备名转实例路径(string raw, string expected)
+        => Assert.Equal(expected, RealPadActivityMonitor.ToInstancePath(raw));
+
+    /// <summary>共存传感器的虚拟手柄过滤：自己的虚拟 DS4（HIDCLASS 形态）必须被识别并跳过——
+    /// 绝不能把 bot 自己的按键当用户活动（否则永久让步）；真实 DS4（VID_054C 形态）不得误过滤。</summary>
+    [Fact]
+    public void RealPadMonitor_虚拟手柄路径被过滤_真实手柄不误伤()
+    {
+        // 虚拟 DS4 的 RawInput 设备名转换后 = HID\HIDCLASS\* → IsHidMaestroInstance 命中
+        Assert.True(HidDeviceEnumerator.IsHidMaestroInstance(
+            RealPadActivityMonitor.ToInstancePath(
+                @"\\?\HID#HIDCLASS#1&8508b062&0&0000#{00001124-0000-1000-8000-00805f9b34fb}")));
+        // 真实 DS4 转换后 = HID\VID_054C... → 不命中（用户活动必须上报）
+        Assert.False(HidDeviceEnumerator.IsHidMaestroInstance(
+            RealPadActivityMonitor.ToInstancePath(
+                @"\\?\HID#VID_054C&PID_05C4&MI_03#8&2b34f02&0&0000#{884b96c3-2ef6-4bd9-907a-42e167b8e99d}")));
     }
 
     [Fact]
@@ -152,17 +186,23 @@ public class PadBackendTests
     /// <summary>HIDMaestro 真实节点形态（2026-10-20 提权探针实测定案）：
     /// 虚拟总线 ROOT\HIDCLASS\HM_&lt;hash&gt; + HID 集合 HID\HIDCLASS\1&amp;&lt;hash&gt;&amp;0&amp;0000。
     /// 路径不含 VID/PID 也不含"HIDMAESTRO"字样——旧 Contains("HIDMAESTRO") 宽匹配恒空，
-    /// 导致 ApplyIsolation 报"未枚举到虚拟手柄"整体空转（隔离承诺落空）。</summary>
+    /// 导致 ApplyIsolation 报"未枚举到虚拟手柄"整体空转（隔离承诺落空）。
+    /// XInput 形态档另有 SWD\HIDMAESTRO_VID_* / HID\HIDMAESTRO_VID_* 两形态（2026-10-21 探针）。</summary>
     [Fact]
     public void HIDMaestro真实节点形态_必须被虚拟手柄判定命中()
     {
         Assert.True(HidDeviceEnumerator.IsHidMaestroInstance(@"ROOT\HIDCLASS\HM_8508B0621FDA339A"));
         Assert.True(HidDeviceEnumerator.IsHidMaestroInstance(@"HID\HIDCLASS\1&8508B062&0&0000"));
         Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"ROOT\HIDCLASS\HM_627243559F81D525"));
+        // XInput 形态档节点（padprobe 2026-10-21 实测形态）
+        Assert.True(HidDeviceEnumerator.IsHidMaestroInstance(@"SWD\HIDMAESTRO_VID_045E_PID_02FF&IG_00\HM_627243559F81D525"));
+        Assert.True(HidDeviceEnumerator.IsHidMaestroInstance(@"HID\HIDMAESTRO_VID_045E_PID_02FF&IG_00\1&62724355&0&0000"));
+        Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"HID\HIDMAESTRO_VID_054C_PID_05C4&IG_00\1&62724355&0&0000"));
 
         // 真实设备不得误伤：ViGEm 时代的 DS4 幻影节点与真实 DS4/XInput 手柄路径
         Assert.False(HidDeviceEnumerator.IsHidMaestroInstance(@"HID\VID_054C&PID_05C4&REV_0100\2&526D6D&0&0000"));
         Assert.False(HidDeviceEnumerator.IsHidMaestroInstance(@"HID\VID_045E&PID_02E0&IG_00\6&2DF92C3&0&0000"));
+        Assert.False(HidDeviceEnumerator.IsHidMaestroInstance(@"HID\HIDMAESTRO01\FAKE")); // 形态必须带下划线段，防过宽
         Assert.False(HidDeviceEnumerator.IsHidMaestroInstance(
             @"BTHLEDEVICE\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&02045E_PID&0B22_REV&0522_ABC\C&1&0009"));
     }

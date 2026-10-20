@@ -88,13 +88,14 @@ public partial class MainWindow
         // OCR 引擎（枚举顺序 RapidV6=0 / Windows=1，与下拉项一致）
         CmbOcrEngine.SelectedIndex = _cfg.OcrEngine == OcrEngineKind.Windows ? 1 : 0;
 
-        // 虚拟手柄设备形态（下拉序 0~3 与档位一一对应）
-        CmbPadProfile.SelectedIndex = _cfg.PadProfileId switch
+        // 共存模式（真实手柄让步）：静默秒数下拉 0=10s / 1=30s / 2=60s / 3=120s
+        ChkCoexistence.IsChecked = _cfg.Pad.CoexistenceEnabled;
+        CmbCoexistQuiet.SelectedIndex = _cfg.Pad.CoexistQuietSeconds switch
         {
-            "xbox-360-wired" => 1,
-            "xbox-series-xs" => 2,
-            "xbox-elite-v2-bt-v2" => 3,
-            _ => 0,
+            <= 19 => 0,
+            <= 45 => 1,
+            <= 90 => 2,
+            _ => 3,
         };
 
         // OCR 频率
@@ -213,7 +214,7 @@ public partial class MainWindow
         // 手柄隔离（赋值会触发 Changed：加载期间必须屏蔽，否则每次启动误弹一次提权配置）
         _loadingConfig = true;
         ChkHidHideEnabled.IsChecked = _cfg.HidHide.Enabled;
-        ChkHidePhysical.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
+        ChkCoexistence.IsChecked = _cfg.Pad.CoexistenceEnabled;
         _loadingConfig = false;
         _ = RefreshHidHidePanelAsync();
     }
@@ -230,14 +231,10 @@ public partial class MainWindow
         }
         _cfg.OcrEngine = CmbOcrEngine.SelectedIndex == 1 ? OcrEngineKind.Windows : OcrEngineKind.RapidV6;
 
-        // 虚拟手柄设备形态（下次开始挂机生效；非法值回退默认 DS4）
-        _cfg.PadProfileId = CmbPadProfile.SelectedIndex switch
-        {
-            1 => "xbox-360-wired",
-            2 => "xbox-series-xs",
-            3 => "xbox-elite-v2-bt-v2",
-            _ => EfootballBot.Core.Input.HidMaestroPad.DefaultProfileId,
-        };
+        // 共存模式（下次开始挂机生效；静默秒数 0=10s / 1=30s / 2=60s / 3=120s）
+        _cfg.Pad.CoexistenceEnabled = ChkCoexistence.IsChecked == true;
+        if (CmbCoexistQuiet.SelectedIndex >= 0)
+            _cfg.Pad.CoexistQuietSeconds = new[] { 10, 30, 60, 120 }[CmbCoexistQuiet.SelectedIndex];
 
         if (CmbOcrInterval.SelectedIndex >= 0)
         {
@@ -344,10 +341,9 @@ public partial class MainWindow
         _cfg.ModuleFallback.DisableMouseTrajectory = ChkFbNoMouseTrajectory.IsChecked == true;
         _cfg.ModuleFallback.DisableFailureDumps = ChkFbNoFailureDumps.IsChecked == true;
 
-        // 手柄隔离（Enabled/GameImagePath/AppliedBlacklist 由开关提权动作维护，此处只同步复选框）
-        _cfg.HidHide.HidePhysicalGamepad = ChkHidePhysical.IsChecked == true;
-        // DisabledPadDevs 由提权任务独占维护：保存前从磁盘回读，
-        // 避免 GUI 陈旧快照清掉记录导致退出时手柄无法恢复
+        // 手柄隔离（Enabled/GameImagePath/AppliedBlacklist 由开关提权动作维护，此处只同步复选框）；
+        // DisabledPadDevs 是旧版遗留恢复清单：保存前从磁盘回读，避免 GUI 陈旧快照把
+        // 尚未消费的遗留记录清掉（LegacyPadRestore 靠它恢复旧版本卡禁用的手柄）
         try { _cfg.HidHide.DisabledPadDevs = AppConfig.Load().HidHide.DisabledPadDevs; } catch { }
 
         _cfg.Save();
@@ -748,16 +744,13 @@ public partial class MainWindow
 
     private bool _hidHideBusy;
 
-    private void ChkHidePhysical_Changed(object sender, RoutedEventArgs e)
+    private void ChkCoexistence_Changed(object sender, RoutedEventArgs e)
     {
         if (_loadingConfig) return;
-        _cfg.HidHide.HidePhysicalGamepad = ChkHidePhysical.IsChecked == true;
+        _cfg.Pad.CoexistenceEnabled = ChkCoexistence.IsChecked == true;
         _cfg.Save();
-        // 不立即弹 UAC：启动挂机时由提权任务静默禁用/恢复
-        if (TxtHidHideStatus is not null)
-            TxtHidHideStatus.Text = ChkHidePhysical.IsChecked == true
-                ? "真实手柄将在下次启动挂机时自动禁用（释放玩家 1，退出程序自动恢复）"
-                : "真实手柄不再自动禁用：占用玩家 1 时挂机将无法启动";
+        if (TxtHidHideStatus is not null && TxtHidHideStatus.Text.StartsWith("已开启", StringComparison.Ordinal))
+            TxtHidHideStatus.Text = "已开启：虚拟手柄仅游戏内可见；真实手柄占用时挂机自动让步、停手后自动恢复";
     }
 
     /// <summary>查询 HidHide 状态并刷新开关下方状态行；默认开启且未就绪时自动触发一次提权配置。</summary>

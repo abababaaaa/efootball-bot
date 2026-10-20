@@ -4,18 +4,18 @@ using Xunit;
 namespace EfootballBot.Tests;
 
 /// <summary>
-/// 「释放玩家 1」机制的纯函数测试：shim vbs 内容生成（路径含空格/引号转义）、
-/// shim 路径命名、禁用记录的配置序列化。
+/// HidHide shim 与遗留字段测试：shim vbs 内容生成（路径含空格/引号转义）、
+/// shim 路径命名（3.2.0 起仅剩 sync 任务）、旧版禁用记录的配置序列化（LegacyPadRestore 消费）。
 /// </summary>
 public sealed class PhysicalPadControlTests
 {
     [Fact]
     public void BuildShimScript_QuotesExePath_AndRunsHidden()
     {
-        var script = HidHideManager.BuildShimScript(@"B:\Efootball 挂机\publish\EfootballBot.exe", "pad-hide");
+        var script = HidHideManager.BuildShimScript(@"B:\Efootball 挂机\publish\EfootballBot.exe", "sync");
 
         // vbs 字符串内双引号加倍：路径必须完整出现在 ""…"" 中，参数跟在后面
-        Assert.Contains("\"\"B:\\Efootball 挂机\\publish\\EfootballBot.exe\"\" --hidhide-config pad-hide", script);
+        Assert.Contains("\"\"B:\\Efootball 挂机\\publish\\EfootballBot.exe\"\" --hidhide-config sync", script);
         // 0 = 隐藏窗口（登录触发不闪控制台），False = 不等待（任务即发即回）
         Assert.Contains("\", 0, False", script);
     }

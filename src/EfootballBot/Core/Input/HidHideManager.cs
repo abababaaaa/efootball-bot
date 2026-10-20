@@ -19,23 +19,19 @@ public sealed record HidHideStatus(
 /// 任务动作指向 %LOCALAPPDATA%\EfootballBot 下的稳定 shim vbs（每次 GUI 启动重写、
 /// 指向当前 exe）——exe 移动/更新后任务不再失效（2026-10-12 实机教训：任务注册的
 /// 绝对 exe 路径随项目搬迁变成 0x80070002 文件不存在，静默同步全部失效）。
-/// 真实手柄的玩家 1 释放不走 HidHide（黑名单对 XInput 无效），见 <see cref="PhysicalPadControl"/>。
+/// 3.2.0 共存模式起 HidHide 只管一件事：把虚拟手柄从除游戏/本程序外的所有进程眼前藏掉；
+/// 物理手柄不进黑名单也不禁用（真实手柄全程保持可用）。旧「玩家 1 释放」禁用机制已移除。
 /// </summary>
 public static class HidHideManager
 {
     /// <summary>同步任务：登录/启动时拉服务、刷新虚拟手柄黑名单、恢复被禁用的真实手柄。</summary>
     public const string SyncTaskName = "EfootballBotHidHideSync";
-    /// <summary>禁用真实手柄任务（挂机启动前由 Worker 触发；请求凭证防登录误触发）。</summary>
-    public const string PadHideTaskName = "EfootballBotPadHide";
-    /// <summary>恢复真实手柄任务（程序退出/启动/登录时触发）。</summary>
-    public const string PadRestoreTaskName = "EfootballBotPadRestore";
 
-    /// <summary>（任务名, --hidhide-config 参数）清单；shim 文件名与参数同名。</summary>
+    /// <summary>（任务名, --hidhide-config 参数）清单；shim 文件名与参数同名。
+    /// 3.2.0 起 pad-hide/pad-restore 任务随禁用机制移除，仅剩 sync。</summary>
     public static readonly (string Name, string Arg)[] AllTasks =
     {
         (SyncTaskName, "sync"),
-        (PadHideTaskName, "pad-hide"),
-        (PadRestoreTaskName, "pad-restore"),
     };
 
     /// <summary>
@@ -177,8 +173,7 @@ public static class HidHideManager
     public static void RunSyncTaskSilently() => RunTaskSilently(SyncTaskName);
 
     /// <summary>静默触发指定提权任务（无 UAC；任务不存在时 schtasks 静默失败）。
-    /// waitForExit=false 为火后不管——停止挂机的 pad-restore 不应拖慢停止流程
-    /// （等待会把 Worker 的 stop 处理拉长到数秒，放大 GUI 关闭竞态）。</summary>
+    /// waitForExit=false 为火后不管——调用方不应被提权子进程拖慢（等待会放大 GUI 关闭竞态）。</summary>
     public static void RunTaskSilently(string taskName, bool waitForExit = true)
     {
         try
@@ -191,15 +186,8 @@ public static class HidHideManager
         catch { /* 同步失败不阻塞挂机 */ }
     }
 
-    /// <summary>挂机启动前请求禁用真实手柄：写一次性请求凭证 + 静默运行提权任务（无 UAC）。</summary>
-    public static void RequestPadHide()
-    {
-        try { PhysicalPadControl.WriteHideRequest(); } catch { }
-        RunTaskSilently(PadHideTaskName);
-    }
-
     /// <summary>
-    /// 三个提权任务是否都已注册且指向当前 shim（PowerShell 查询，区域设置无关）。
+    /// 提权任务是否都已注册且指向当前 shim（PowerShell 查询，区域设置无关）。
     /// PowerShell 不可用时退化为 schtasks 存在性检查（无法识别旧 exe 路径的遗留任务）。
     /// </summary>
     public static bool TasksReady()
@@ -371,7 +359,8 @@ public static class HidHideManager
             if (!string.IsNullOrWhiteSpace(botPath))
                 newWl = MergeInto(newWl, new[] { botPath! });
             var newBl = MergeInto(bl, managed);
-            // 迁移清理：物理手柄可见性改由设备节点禁用机制管理，黑名单里的旧条目全部摘除
+            // 物理手柄条目从黑名单全部移除：共存模式下物理手柄对一切应用保持可见，
+            // 旧版本遗留的条目会让 HID 层应用看不到用户手柄
             newBl = RemoveAll(newBl, SafePhysicalGamepadInstances());
 
             HidHideIoctl.SetMultiString(HidHideIoctl.IoctlSetWhitelist, newWl);
