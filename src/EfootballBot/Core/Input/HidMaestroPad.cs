@@ -12,14 +12,23 @@ namespace EfootballBot.Core.Input;
 /// 首次启用时按需下载官方 Release zip，锁定 DLL SHA256 后解压到 data\hidmaestro\，
 /// 经独立 AssemblyLoadContext 反射加载（隔离其 net10.0-windows10.0.26100 TFM 的 SDK 投影依赖）。
 /// 加载/安装任一步失败抛清晰异常，由引擎告警并终止本次启动。
-/// 映射：PadButton.A/B/X/Y → HMButton Cross/Circle/Square/Y（xbox-360-wired 按方位），
-/// 十字键 → HMHat，摇杆 ±1/扳机 0~1 交 HMGamepadStateHelpers.StandardAxes 按档位映射。
+/// ★设备形态用 DualShock4 v1 档（dualshock-4-v1，VID_054C&PID_05C4——与原 ViGEm DS4 逐字节同形）：
+/// 实机 2026-10-20 对照实验：xbox-360-wired(XInput 形) eFootball 完全不消费（4 轮导航画面不动），
+/// DS4 形（ViGEm 时代与 HIDMaestro 同测试）秒认。DS4 是纯 HID，XInput 天然失明，不泄输入；
+/// 且 PID_05C4 命中 HidHide 虚拟设备识别前缀，自动黑名单同步照常工作。
+/// 映射：PadButton.A/B/X/Y → HMButton Cross/Circle/Square/Y（DS4 按方位），十字键 → HMHat，
+/// 摇杆 ±1/扳机 0~1 交 HMGamepadStateHelpers.StandardAxes 按档位映射。
 /// 槽位=创建顺序的经验保证（非文档保证），玩家 1 强保证仍依赖 HidHide 隐藏真实手柄。
 /// </summary>
 public sealed class HidMaestroPad : IVirtualPad
 {
     public const string SdkVersion = "v1.12.0";
     public const string SdkZipUrl = "https://github.com/hifihedgehog/HIDMaestro/releases/download/" + SdkVersion + "/HIDMaestro-v1.12.0.zip";
+    /// <summary>虚拟设备形态档：DualShock4 v1（VID_054C&PID_05C4，与原 ViGEm DS4 同形）。
+    /// 实机对照：eFootball 不消费 xbox-360-wired 形态，DS4 形态秒认（2026-10-20 反馈包实锤）。</summary>
+    public const string ProfileId = "dualshock-4-v1";
+    /// <summary>官方 Release zip 的 SHA256（升级 SDK 版本时必须同步更新；zip 锁住即锁住全部解包产物）。</summary>
+    public const string SdkZipSha256 = "CF03347A0BC88BFB198A606C0FF8375BC4A9420FA80C07EF336186986D79B244";
     /// <summary>官方 Release 内 HIDMaestro.Core.dll 的 SHA256（升级 SDK 版本时必须同步更新）。</summary>
     public const string SdkDllSha256 = "F0B048E1B566804226EFDF854F6201EB9D2895C1E83F3C1A8813562AAB2D186C";
 
@@ -111,13 +120,15 @@ public sealed class HidMaestroPad : IVirtualPad
                     }
 
                     _profile = tCtx.GetMethod("GetProfile", [typeof(string)])!
-                        .Invoke(_ctx, ["xbox-360-wired"])
-                        ?? throw new InvalidOperationException("未找到 xbox-360-wired 设备档（SDK 内置档缺失？）");
+                        .Invoke(_ctx, [ProfileId])
+                        ?? throw new InvalidOperationException($"未找到 {ProfileId} 设备档（SDK 内置档缺失？）");
                 }
 
-                var tCtrl = RequireType("HMController");
+                // CreateController 的接收者是 HMContext（HMController 只是返回值类型——在它上面 GetMethod
+                // 恒为 null，null!.Invoke 即空引用异常）。参数用元数据类型 HMProfile 精确匹配。
                 // identityKey 固定 → 同 key 重建得到相同设备路径（v1.8+），升级/重连不残留僵尸设备
-                _controller ??= tCtrl.GetMethod("CreateController", [_profile!.GetType(), typeof(string)])!
+                var tCtxType = RequireType("HMContext");
+                _controller ??= tCtxType.GetMethod("CreateController", [RequireType("HMProfile"), typeof(string)])!
                     .Invoke(_ctx, [_profile, "efootballbot"])
                     ?? throw new InvalidOperationException("HIDMaestro 虚拟手柄创建失败。");
             }
@@ -125,15 +136,17 @@ public sealed class HidMaestroPad : IVirtualPad
         catch (InvalidOperationException) { throw; }
         catch (TargetInvocationException ex) when (ex.InnerException is not null)
         {
-            throw new InvalidOperationException($"连接 HIDMaestro 失败：{ex.InnerException.Message}", ex.InnerException);
+            var inner = ex.InnerException;
+            throw new InvalidOperationException($"连接 HIDMaestro 失败：[{inner.GetType().Name}] {inner.Message}", inner);
         }
         catch (Exception ex)
         {
-            throw new InvalidOperationException($"连接 HIDMaestro 失败：{ex.Message}", ex);
+            throw new InvalidOperationException($"连接 HIDMaestro 失败：[{ex.GetType().Name}] {ex.Message}", ex);
         }
 
         _connected = true;
         ResetAll();
+        _log?.Invoke($"HIDMaestro 控制器已创建（设备档 {ProfileId}，identityKey=efootballbot）。");
     }
 
     // ---- 状态操作 ----
@@ -192,7 +205,7 @@ public sealed class HidMaestroPad : IVirtualPad
 
     // ---- 映射纯函数（可单测；返回 SDK 枚举原始值，不落编译期类型）----
 
-    /// <summary>PadButton → HMButton 位标志（xbox-360-wired 按方位：Cross=A 底、Circle=B 右、Square=X 左、Y=Y 顶）。Dpad 走 Hat，返回 0。</summary>
+    /// <summary>PadButton → HMButton 位标志（DS4 按方位：Cross=A 底、Circle=B 右、Square=X 左、Y=Y 顶）。Dpad 走 Hat，返回 0。</summary>
     internal static int MapButton(PadButton b) => b switch
     {
         PadButton.A => 0x01,             // Cross
@@ -218,35 +231,52 @@ public sealed class HidMaestroPad : IVirtualPad
 
     private static string SdkDir => Path.Combine(EfootballBot.Core.System.AppPaths.DataDir, "hidmaestro");
     private static string SdkDllPath => Path.Combine(SdkDir, "HIDMaestro.Core.dll");
+    private static string SdkZipPath => Path.Combine(SdkDir, "sdk.zip");
+    private static readonly string[] DepDllNames = ["HIDMaestro.Core.dll", "WinRT.Runtime.dll", "Microsoft.Windows.SDK.NET.dll"];
 
-    /// <summary>确保 SDK DLL 就位（存在且哈希匹配则跳过），返回 DLL 路径。</summary>
+    /// <summary>SDK 三件套是否齐且 Core.dll 哈希匹配。投影依赖缺失时必须重解压：
+    /// v1.12.0 zip 把 WinRT.Runtime/Microsoft.Windows.SDK.NET 放在子目录里，早期版本只解出 Core.dll 就中断，
+    /// 快速通道若只看 Core.dll 会带着残缺依赖直通 Connect，SDK 内部投影代理为 null → CreateController 抛 NRE。</summary>
+    internal bool SdkReady()
+        => File.Exists(SdkDllPath) && Sha256OfFile(SdkDllPath).Equals(SdkDllSha256, StringComparison.OrdinalIgnoreCase)
+           && DepDllNames.Skip(1).All(n => { var p = Path.Combine(SdkDir, n); try { return new FileInfo(p).Length > 0; } catch { return false; } });
+
+    /// <summary>确保 SDK DLL 就位（三件齐且哈希匹配则跳过），返回 DLL 路径。</summary>
     internal string EnsureSdk()
     {
-        if (File.Exists(SdkDllPath) && Sha256OfFile(SdkDllPath).Equals(SdkDllSha256, StringComparison.OrdinalIgnoreCase))
-            return SdkDllPath;
+        if (SdkReady()) return SdkDllPath;
 
         _log?.Invoke($"首次启用 HIDMaestro：下载官方 SDK（{SdkVersion}，约 160MB，一次性）…");
         Directory.CreateDirectory(SdkDir);
-        var zipPath = Path.Combine(SdkDir, "sdk.zip");
-        using (var client = new HttpClient { Timeout = TimeSpan.FromMinutes(15) })
-        using (var resp = client.GetAsync(SdkZipUrl, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
+        if (!File.Exists(SdkZipPath) || !Sha256OfFile(SdkZipPath).Equals(SdkZipSha256, StringComparison.OrdinalIgnoreCase))
         {
-            resp.EnsureSuccessStatusCode();
-            using var src = resp.Content.ReadAsStream();
-            using var dst = File.Create(zipPath);
-            src.CopyTo(dst);
+            using (var client = new HttpClient { Timeout = TimeSpan.FromMinutes(15) })
+            using (var resp = client.GetAsync(SdkZipUrl, HttpCompletionOption.ResponseHeadersRead).GetAwaiter().GetResult())
+            {
+                resp.EnsureSuccessStatusCode();
+                using var src = resp.Content.ReadAsStream();
+                using var dst = File.Create(SdkZipPath);
+                src.CopyTo(dst);
+            }
+        }
+        else
+        {
+            _log?.Invoke("检测到已校验的 SDK 离线包，跳过下载。");
         }
 
-        using var zip = global::System.IO.Compression.ZipFile.OpenRead(zipPath);
-        foreach (var entryName in new[] { "HIDMaestro.Core.dll", "WinRT.Runtime.dll", "Microsoft.Windows.SDK.NET.dll" })
+        using (var zip = global::System.IO.Compression.ZipFile.OpenRead(SdkZipPath))
         {
-            var entry = zip.GetEntry(entryName) ?? throw new InvalidOperationException($"SDK 包内缺少 {entryName}。");
-            var target = Path.Combine(SdkDir, entryName);
-            using var es = entry.Open();
-            using var ds = File.Create(target);
-            es.CopyTo(ds);
+            foreach (var name in DepDllNames)
+            {
+                var entry = PickEntry(zip, name)
+                    ?? throw new InvalidOperationException($"SDK 包内缺少 {name}（SHA256 已匹配，包结构异常？）。");
+                var target = Path.Combine(SdkDir, name);
+                using var es = entry.Open();
+                using var ds = File.Create(target);
+                es.CopyTo(ds);
+            }
         }
-        File.Delete(zipPath);
+        File.Delete(SdkZipPath);
 
         var actual = Sha256OfFile(SdkDllPath);
         if (!actual.Equals(SdkDllSha256, StringComparison.OrdinalIgnoreCase))
@@ -254,6 +284,8 @@ public sealed class HidMaestroPad : IVirtualPad
             try { File.Delete(SdkDllPath); } catch { }
             throw new InvalidOperationException($"HIDMaestro SDK 校验失败（SHA256 不符，实际 {actual}），已拒绝加载。请更新程序或检查下载通道。");
         }
+        if (!SdkReady())
+            throw new InvalidOperationException("HIDMaestro SDK 解压不完整（投影依赖缺失），已拒绝加载。");
         _log?.Invoke("HIDMaestro SDK 就绪。");
         return SdkDllPath;
     }
@@ -284,7 +316,10 @@ public sealed class HidMaestroPad : IVirtualPad
 
     private void Submit()
     {
-        if (_controller is null || _tState is null || _tButton is null || _tHat is null || _ctx is null || _profile is null) return;
+        // 本地快照：停止路径 Disconnect 会把 _controller 置空，与观察循环并发时
+        // Invoke(null) 会抛 "Non-static method requires a target"（实机 2026-10-20 停止瞬间实锤）
+        var controller = _controller;
+        if (controller is null || _tState is null || _tButton is null || _tHat is null || _ctx is null || _profile is null) return;
         try
         {
             var state = Activator.CreateInstance(_tState)!;
@@ -296,13 +331,22 @@ public sealed class HidMaestroPad : IVirtualPad
             _tState.GetField("Axes")!.SetValue(state, axes);
             RequireType("HMController")
                 .GetMethod("SubmitState", [_tState.MakeByRefType()])!
-                .Invoke(_controller, [state]);
+                .Invoke(controller, [state]);
         }
         catch (Exception ex)
         {
             throw new InvalidOperationException($"HIDMaestro 状态提交失败：{ex.Message}", ex);
         }
     }
+
+    /// <summary>按文件名（不含目录）在 zip 内挑条目，取目录最浅者（根目录优先，子目录兜底）。
+    /// v1.12.0 的 WinRT.Runtime/Microsoft.Windows.SDK.NET 不在根目录而在 HIDMaestroProfileExtractor\ 下，
+    /// 旧实现用 GetEntry(根路径) 找不到 → 只解出 Core.dll → ALC 缺投影依赖 → SDK 内部 NRE。</summary>
+    internal static global::System.IO.Compression.ZipArchiveEntry? PickEntry(global::System.IO.Compression.ZipArchive zip, string fileName)
+        => zip.Entries
+            .Where(e => e.Name.Equals(fileName, StringComparison.OrdinalIgnoreCase) && e.Length > 0)
+            .OrderBy(e => e.FullName.Count(c => c is '/' or '\\'))
+            .FirstOrDefault();
 
     private static string Sha256OfFile(string path)
     {
