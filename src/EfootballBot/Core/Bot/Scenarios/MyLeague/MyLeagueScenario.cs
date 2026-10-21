@@ -362,7 +362,8 @@ public class MyLeagueScenario : IScenario
                 break;
 
             case MlActionKind.PadLoginNav:
-                // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
+                // 登录序列：下→右→A（A 落在「登录」上，用户实机序列）——eFootball 2027
+                // 标题页与未登录页共用（两页默认焦点都在页签行，按钮列在右侧）
                 _log($"[我的联赛] {action.Target}", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Down);
                 await _engine.Pad.Dpad(PadDir.Right);

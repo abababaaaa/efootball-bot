@@ -51,8 +51,12 @@ public enum MlScreen
     PaymentConfirmDialog,
     /// <summary>未登录页（掉线后仅会话失效，游戏停在主菜单壳上）：大字「未登录」+
     /// 「请检查你的网络环境并登录游戏」+右侧 登录/退出游戏 两键。掉线重登链的第二种入口
-    /// （不经标题页）：直接 A 点默认焦点「登录」重连；登录后弹窗链由 LoginRecovery 窗口承接。</summary>
+    /// （不经标题页）：默认焦点在顶部页签而非按钮上，需 下→右→A 才能点到「登录」；
+    /// 登录后弹窗链由 LoginRecovery 窗口承接。</summary>
     NotLoggedIn,
+    /// <summary>登录后公告白页（实机 2026-10-21：整幅白底 +「eFootball™积分官方网站问题」+
+    /// 右上角「B 关闭」）。底下就是主菜单，无 A 推进键——必须 B 关闭，否则主菜单导航盲走。</summary>
+    AnnouncementPage,
     /// <summary>New Playing Style 活动奖励网格页（登录后弹窗链可出现，实机 2026-10-19/21）：
     /// 大字标题「New Playing Style Campaign」+ 奖励磁贴网格（全部已领时也同型）+ 底部
     /// 「继续」默认焦点。按 A 直接推进；判定用标题词、不依赖重登窗口（见 Classify）。</summary>
@@ -75,8 +79,9 @@ public enum MlActionKind
     /// <summary>暂停键（Start）：国服比赛中右上角出现「跳过比赛✅」横幅时打开暂停菜单
     /// （能否跳过由菜单里的「对局获胜」小字二次把关）。</summary>
     PadStartPress,
-    /// <summary>eFootball 2027 标题页登录序列（下→右→A）：A 落在「登录」上。
-    /// 掉线防卡死恢复动作，见 BootSplash。</summary>
+    /// <summary>登录序列（下→右→A）：eFootball 2027 标题页与未登录页共用——默认焦点在
+    /// 页签行，下进卡片行、右进右侧按钮列、A 落在「登录」上。掉线防卡死恢复动作，
+    /// 见 BootSplash / NotLoggedIn。</summary>
     PadLoginNav,
     Wait,
 }
@@ -208,6 +213,14 @@ public static class MyLeagueBrain
             (ocr.ContainsJoined("查看全部") && ocr.ContainsJoined("名球员")))
             return MlScreen.GachaPage;
 
+        // 登录后公告白页（实机 2026-10-21 用户截图：「eFootball™积分官方网站问题」+ 正文
+        // 「我们对此问题造成的不便深表歉意」+ 右上角「B 关闭」提示）。底下就是主菜单，
+        // YOLO main_menu 会命中 → 不先判会被主菜单导航（下×2 盲走）；也不能落 HasConfirm
+        // （B 关闭不是 A 推进键，上移+A 会按到页面其它位置）。判定与 loginRecovery 无关：
+        // 该类公告随时可能弹，标题词 OCR 碎裂时用正文固定句「深表歉意」兜底。
+        if (ocr.ContainsJoined("官方网站问题") || ocr.ContainsJoined("深表歉意"))
+            return MlScreen.AnnouncementPage;
+
         // 未登录页（掉线重登链第二入口，实机 2026-10-19：大字「未登录」+「请检查你的网络
         // 环境并登录游戏」+ 登录/退出游戏 两键）。必须先于一切菜单判定——该页带主菜单页签/
         // 磁贴词，会被 YOLO main_menu 判成 MainMenu 盲走 下×2 导航（落点不可控，最坏按在
@@ -242,10 +255,14 @@ public static class MyLeagueBrain
         // 拼接词 + 页脚版权/版本词双证据；兜底 loginRecovery 期内只剩 ASCII 标志词的加载帧
         // ——否则旧 TitleScreen 规则（纯 ASCII≤5 词含 footbal）抢判按 X，X 在此页无效会
         // 永久卡死（防掉线恢复绝不能停在这里）
+        // ★兜底必须限定「稀疏帧 + 无主菜单特征」：主菜单/比赛页的 eFootball™ 磁贴同样含
+        // footbal，登录成功后 100s 重登窗口内的主菜单会被判成标题页，无限执行下右A
+        // （实机 2026-10-21 用户反馈「标题页判断和未登录走混了」）。
         if (ocr.ContainsJoined("法律及隐私政策") ||
             (ocr.ContainsJoined("确认按钮") &&
              (ocr.ContainsJoined("footbal") || ocr.ContainsJoined("konami") || ocr.ContainsJoined("版本"))) ||
-            (loginRecovery && ocr.ContainsJoined("footbal")))
+            (loginRecovery && Count("main_menu") == 0 && ocr.Words.Count <= 8 &&
+             ocr.ContainsJoined("footbal")))
             return MlScreen.BootSplash;
 
         // 游戏启动设定窗（画面模式/分辨率，实机 2026-10-11：启动/更新后弹「设定」需确认一次）
@@ -597,12 +614,29 @@ public static class MyLeagueBrain
 
             case MlScreen.NotLoggedIn:
             {
-                // 未登录页：右侧 登录/退出游戏 两键，默认焦点在首项「登录」（页面的主 CTA，
-                // 游戏不会把破坏性的退出游戏设为默认）——直接 A 登录重连。
-                // ★绝不按 B/逃生（此页 B 无效，会空转卡死）；登录成功后的奖励弹窗链由
-                // LoginRecovery 窗口承接（本页记入记忆，见 ScenarioShared.LoginRecovery）
-                return new MlAction(MlActionKind.PadConfirm,
-                    screenStreak >= StuckStreak ? 5000 : 2600, "未登录→A 登录");
+                // 未登录页（实机 2026-10-21 用户视频逐帧）：默认焦点在顶部页签「游戏主菜单」，
+                // 不是右侧按钮——直接 A 无效；先按右会切到「学院」页签（错误页面）。
+                // 正确序列：下（落到「友谊赛」卡）→右（落到「登录」键）→A。
+                // ★绝不按 B/逃生（此页 B 无效，会空转卡死）。
+                // ★焦点探针（见 DetectNotLoggedInFocus）保证重试幂等：登录失败后焦点仍在
+                // 「登录」时只按 A；若焦点落到「退出游戏」（聚焦键变白）则上移一格再 A。
+                // 绝不盲目重跑下→右→A——第二次的「下」会落到退出游戏键上，A 即退出游戏。
+                var focus = DetectNotLoggedInFocus(frame);
+                if (focus == LoginButtonFocus.ExitGame)
+                    return new MlAction(MlActionKind.PadUpConfirm, 2600, "未登录→焦点在退出游戏，上移登录");
+                if (focus == LoginButtonFocus.Login)
+                    return new MlAction(MlActionKind.PadConfirm,
+                        screenStreak >= StuckStreak ? 5000 : 2600, "未登录→A 登录（焦点已在登录键）");
+                return new MlAction(MlActionKind.PadLoginNav,
+                    screenStreak >= StuckStreak ? 5000 : 3500, "未登录→下右A 登录");
+            }
+
+            case MlScreen.AnnouncementPage:
+            {
+                // 登录后公告白页（eFootball™积分官方网站问题，实机 2026-10-21）：页面右上角
+                // 明示「B 关闭」，无 A 推进键。退避只放慢不停手（B 偶发被吞）
+                return new MlAction(MlActionKind.GamepadBack,
+                    screenStreak >= StuckStreak ? 5000 : 2400, "公告页→B 关闭");
             }
 
             default:
@@ -640,6 +674,63 @@ public static class MyLeagueBrain
     /// <summary>区域内绿色像素计数（共享实现见 <see cref="RegionProbe.CountGreen"/>）。</summary>
     private static int CountGreen(FrameData f, double x0, double x1, double y0, double y1)
         => RegionProbe.CountGreenRef(f, x0, x1, y0, y1);
+
+    /// <summary>未登录页右侧按钮列的焦点位置（见 <see cref="DetectNotLoggedInFocus"/>）。</summary>
+    public enum LoginButtonFocus
+    {
+        /// <summary>两键都未聚焦（默认焦点在顶部页签「游戏主菜单」）。</summary>
+        None,
+        Login,
+        ExitGame,
+    }
+
+    /// <summary>
+    /// 未登录页焦点探针（实机 2026-10-21 用户视频逐帧）：右侧「登录/退出游戏」两键，
+    /// 被聚焦的键整块变白（未聚焦为 #333 深灰），而页面默认焦点在顶部页签行——
+    /// 这正是「直接按 A 无效、先按右会切到学院页签」的原因。
+    /// 按行统计右半区（x 0.52~0.77 / y 0.47~0.70 覆盖两键）平均亮度，取最长亮行带：
+    /// 亮带中心在按钮对上半 = 登录、下半 = 退出游戏、无亮带 = 默认。
+    /// 用途：让 NotLoggedIn 的导航幂等——登录失败重试时按焦点状态选择 A / 上移+A /
+    /// 下→右→A，避免盲目重跑序列时「下」落到退出游戏上被 A 触发。
+    /// frame 为 null（部分单测）时按默认处理。
+    /// </summary>
+    public static LoginButtonFocus DetectNotLoggedInFocus(FrameData? frame)
+    {
+        if (frame is null) return LoginButtonFocus.None;
+        var bgra = frame.Bgra;
+        int w = frame.Width, h = frame.Height;
+        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return LoginButtonFocus.None;
+
+        int x0 = (int)(w * 0.52), x1 = (int)(w * 0.77);
+        int y0 = (int)(h * 0.47), y1 = (int)(h * 0.70);
+        int span = Math.Max(1, x1 - x0);
+        int bestStart = -1, bestLen = 0, runStart = -1;
+        for (int y = y0; y < y1; y++)
+        {
+            long sum = 0;
+            for (int x = x0; x < x1; x++)
+            {
+                int i = (y * w + x) * 4;
+                sum += (bgra[i] * 114 + bgra[i + 1] * 587 + bgra[i + 2] * 299) / 1000;
+            }
+            bool bright = sum / span >= 140;
+            if (bright)
+            {
+                if (runStart < 0) runStart = y;
+                int len = y - runStart + 1;
+                if (len > bestLen) { bestLen = len; bestStart = runStart; }
+            }
+            else
+            {
+                runStart = -1;
+            }
+        }
+
+        // 聚焦按钮高约 5% 帧高；亮行太短多半是杂光/其他白色元素，按默认处理
+        if (bestLen < (y1 - y0) / 10) return LoginButtonFocus.None;
+        double centerY = (bestStart + bestLen / 2.0) / h;
+        return centerY < 0.58 ? LoginButtonFocus.Login : LoginButtonFocus.ExitGame;
+    }
 
     /// <summary>在 OCR 排版行里找包含任一关键词的行，返回命中词。</summary>
     private static string? FindLine(OcrResult ocr, params string[] keywords)

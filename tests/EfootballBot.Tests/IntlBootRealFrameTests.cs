@@ -59,7 +59,7 @@ public class IntlBootRealFrameTests
             "boot_splash.png", "boot_splash_loading.png", "campaign_grid.png",
             "playing_style_campaign.png",
             "gacha_page.png", "inbox_popup.png", "login_bonus_popup.png", "payment_confirm.png",
-            "not_logged_in.png",
+            "not_logged_in.png", "points_website_popup.png",
         })
         {
             if (File.Exists(Path.Combine(Dir, f))) Load(f, loginRecovery: true);
@@ -211,7 +211,7 @@ public class IntlBootRealFrameTests
     }
 
     [Fact]
-    public void NotLoggedIn_DirectConfirmOnLogin()
+    public void NotLoggedIn_NavigatesDownRightToLogin()
     {
         // 未登录页（掉线重登链第二入口，实机 2026-10-19：游戏未重启、仅会话失效，停在
         // 主菜单壳上）。带主菜单页签/磁贴词，必须先于 MainMenu/YOLO 判定——否则盲走
@@ -219,8 +219,10 @@ public class IntlBootRealFrameTests
         // （会话可在挂机任意时刻掉，附近没有标题页）
         var (screen, _) = Load("not_logged_in.png", loginRecovery: false);
         Assert.Equal(MlScreen.NotLoggedIn, screen);
+        // 实机 2026-10-21 用户视频：默认焦点在顶部页签「游戏主菜单」，直接 A 无效、
+        // 先按右会切到学院页签；必须 下（友谊赛）→右（登录）→A
         var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, screenStreak: 0);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        Assert.Equal(MlActionKind.PadLoginNav, action.Kind);
 
         // 判定词守卫（纯构造）：主判「未登录」；兜底「网络环境」（请检查你的网络环境并登录游戏）
         Assert.Equal(MlScreen.NotLoggedIn, MyLeagueBrain.Classify(
@@ -234,6 +236,67 @@ public class IntlBootRealFrameTests
     }
 
     [Fact]
+    public void NotLoggedIn_FocusProbe_MakesNavigationIdempotent()
+    {
+        // 未登录页右侧按钮列：聚焦键整块变白，未聚焦 #333（实机 2026-10-21 视频逐帧）。
+        // ★登录失败重试时焦点可能已停在「登录」甚至「退出游戏」，盲目重跑下→右→A 会把
+        // 「下」落到退出游戏上、A 直接退出游戏——探针按焦点状态选择动作，序列幂等
+        var none = Frame();
+        Assert.Equal(MyLeagueBrain.LoginButtonFocus.None, MyLeagueBrain.DetectNotLoggedInFocus(none));
+        Assert.Equal(MlActionKind.PadLoginNav, MyLeagueBrain.Decide(
+            MlScreen.NotLoggedIn, OcrResult.Empty, 0, frame: none).Kind);
+
+        var login = Frame(band: (0.505, 0.560));
+        Assert.Equal(MyLeagueBrain.LoginButtonFocus.Login, MyLeagueBrain.DetectNotLoggedInFocus(login));
+        Assert.Equal(MlActionKind.PadConfirm, MyLeagueBrain.Decide(
+            MlScreen.NotLoggedIn, OcrResult.Empty, 0, frame: login).Kind);
+
+        var exit = Frame(band: (0.600, 0.655));
+        Assert.Equal(MyLeagueBrain.LoginButtonFocus.ExitGame, MyLeagueBrain.DetectNotLoggedInFocus(exit));
+        Assert.Equal(MlActionKind.PadUpConfirm, MyLeagueBrain.Decide(
+            MlScreen.NotLoggedIn, OcrResult.Empty, 0, frame: exit).Kind);
+    }
+
+    [Fact]
+    public void BootSplash_FallbackDoesNotSwallowMainMenu()
+    {
+        // 登录成功后 100s 重登窗口内：主菜单带 eFootball™ 磁贴词（footbal）+ YOLO main_menu。
+        // 兜底规则若只看「窗口内 footbal」就会把主菜单判成标题页 → 无限下右A
+        // （实机 2026-10-21 用户反馈「标题页判断和未登录走混了」）
+        var mainMenuOcr = Ocr(("游戏主菜单", 0.30, 0.06), ("学院", 0.52, 0.06), ("额外选项", 0.72, 0.06),
+            ("友谊赛", 0.12, 0.78), ("eFootball联赛", 0.50, 0.80), ("我的联赛", 0.70, 0.80));
+        var mainMenuDet = new[] { new YoloDetection("main_menu", 0, 0.90f, 0.10, 0.05, 0.80, 0.90) };
+        Assert.Equal(MlScreen.MainMenu, MyLeagueBrain.Classify(
+            mainMenuDet, mainMenuOcr, loginRecovery: true));
+
+        // 稀疏加载帧（只剩 eFootball 标志词、无主菜单特征）仍由兜底判标题页——
+        // 掉线恢复不能因为收紧规则而漏判
+        Assert.Equal(MlScreen.BootSplash, MyLeagueBrain.Classify(
+            Array.Empty<YoloDetection>(), Ocr(("eFootball", 0.50, 0.50), ("2027", 0.50, 0.60)),
+            loginRecovery: true));
+    }
+
+    [Fact]
+    public void PointsWebsiteAnnouncement_BacksOutWithB()
+    {
+        // 登录后公告白页（实机 2026-10-21 用户截图）：「eFootball™积分官方网站问题」+
+        // 右上角「B 关闭」。白底整幅文档 + YOLO main_menu（底下是主菜单）→ 必须专用判定，
+        // 处置 B 关闭；绝不走主菜单导航（下×2 盲走）或 HasConfirm（上移+A）
+        var (screen, _) = Load("points_website_popup.png", loginRecovery: true);
+        Assert.Equal(MlScreen.AnnouncementPage, screen);
+        var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, screenStreak: 0);
+        Assert.Equal(MlActionKind.GamepadBack, action.Kind);
+        Assert.Equal(MlActionKind.GamepadBack, MyLeagueBrain.Decide(
+            screen, OcrResult.Empty, screenStreak: MyLeagueBrain.StuckStreak).Kind);
+
+        // 判定词守卫（纯构造）：标题碎裂时正文固定句「深表歉意」兜底
+        Assert.Equal(MlScreen.AnnouncementPage, MyLeagueBrain.Classify(
+            Array.Empty<YoloDetection>(),
+            Ocr(("eFootball积分官方网站问题", 0.50, 0.30), ("我们对此问题造成的不便深表歉意", 0.50, 0.55)),
+            loginRecovery: false));
+    }
+
+    [Fact]
     public void LoginRecoveryWindow_CoversNotLoggedInEntry()
     {
         // 未登录页与标题页同样武装重登窗口：点「登录」后的奖励弹窗链只认推进词，
@@ -243,6 +306,27 @@ public class IntlBootRealFrameTests
         m.Record(MlScreen.NotLoggedIn, t0);
         Assert.True(EfootballBot.Core.Bot.Scenarios.ScenarioShared.LoginRecovery(m, t0.AddSeconds(50)));
         Assert.False(EfootballBot.Core.Bot.Scenarios.ScenarioShared.LoginRecovery(m, t0.AddSeconds(101)));
+    }
+
+    /// <summary>构造测试帧：默认全黑；band 给出时在未登录页按钮列区域（x 0.52~0.77）
+    /// 按归一化 y 区间画白带（模拟被聚焦的按钮）。</summary>
+    private static FrameData Frame(int w = 200, int h = 200, (double Y0, double Y1)? band = null)
+    {
+        var bgra = new byte[w * h * 4];
+        if (band is { } b)
+        {
+            for (int y = (int)(h * b.Y0); y < (int)(h * b.Y1); y++)
+            {
+                for (int x = (int)(w * 0.52); x < (int)(w * 0.77); x++)
+                {
+                    int i = (y * w + x) * 4;
+                    bgra[i] = 255;
+                    bgra[i + 1] = 255;
+                    bgra[i + 2] = 255;
+                }
+            }
+        }
+        return new FrameData(bgra, w, h, 0);
     }
 
     private static OcrResult Ocr(params (string text, double x, double y)[] words)
