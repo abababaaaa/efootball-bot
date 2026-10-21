@@ -5,11 +5,11 @@ using Xunit.Abstractions;
 
 namespace EfootballBot.Tests;
 
-// OCR 识别模型/引擎 A/B 对比（真机帧，TestData 固化集）。
-// 背景：2026-10-21 反馈包实机——用户机 WGC 无帧降级 GDI 且选了 Windows 内置 OCR，
-// 界面词大量碎词/误识导致全模块卡环；为「设置页选模型」提供量化依据：
-// 高精度 medium / 轻量 small / SimdPaddle 纯托管 / Windows 内置，同帧对比关键词命中与耗时。
-// 结论归档：survey/ocr_model_comparison_20261021.md（由本测试输出整理）。
+// OCR 引擎 A/B 对比（真机帧，TestData 固化集）。两引擎共用同一套 PP-OCRv6-small 模型文件，
+// 只换推理内核：RapidV6=ONNX Runtime CPU / SimdPaddle=纯托管 SIMD（默认引擎）。
+// 历史数据（2026-10-21，medium 模型还在时的四后端对比）见 survey/ocr_model_comparison_20261021.md：
+// 命中 10/12 三 PP-OCR 持平，SimdPaddle-medium 1085ms < RapidV6-small 1764ms < RapidV6-medium 3703ms，
+// Windows 内置 9/12 @52ms（已删除引擎，质量不达挂机判定线）。
 public class OcrModelComparisonSurvey
 {
     private readonly ITestOutputHelper _out;
@@ -45,18 +45,9 @@ public class OcrModelComparisonSurvey
     [Fact]
     public void Compare_Backends_OnRealFrames()
     {
-        // 每后端：预热 1 遍 + 计时 2 遍取最小（CPU 基准取 min 最稳）
-        RunBackend("RapidV6-small", () => new OcrRecognizer(OcrEngineKind.RapidV6, recModel: OcrRecModelKind.Small));
-        RunBackend("RapidV6-medium", () => new OcrRecognizer(OcrEngineKind.RapidV6, recModel: OcrRecModelKind.Medium));
-        RunBackend("SimdPaddle-medium", () => new OcrRecognizer(OcrEngineKind.SimdPaddle, recModel: OcrRecModelKind.Medium));
-        try
-        {
-            RunBackend("Windows", () => new OcrRecognizer(OcrEngineKind.Windows));
-        }
-        catch (Exception ex)
-        {
-            _out.WriteLine($"Windows 引擎不可用：{ex.Message}");
-        }
+        // 每后端：预热 1 遍 + 计时 2 遍取最小（CPU 基准取 min 最稳）；两引擎统一 fp32 口径
+        RunBackend("SimdPaddle-small", () => new OcrRecognizer(OcrEngineKind.SimdPaddle, preferInt8: false));
+        RunBackend("RapidV6-small", () => new OcrRecognizer(OcrEngineKind.RapidV6, preferInt8: false));
 
         // 汇总表
         _out.WriteLine("");
@@ -67,8 +58,8 @@ public class OcrModelComparisonSurvey
             _out.WriteLine($"| {r.Name} | {r.Hits}/{Frames.Length} | {r.AvgMs:F0} ms | {string.Join("；", r.Missed)} |");
         }
 
-        // 契约（宽松）：medium 与 small 在固化集上都必须过半，防「默认档换模型后大幅退化」 unnoticed
-        foreach (var r in _results.Where(r => r.Name.StartsWith("RapidV6")))
+        // 契约（宽松）：默认引擎与备用引擎在固化集上都必须过半，防引擎/模型退化未被发现
+        foreach (var r in _results)
             Assert.True(r.Hits >= Frames.Length / 2, $"{r.Name} 关键词命中过少：{r.Hits}/{Frames.Length}");
     }
 

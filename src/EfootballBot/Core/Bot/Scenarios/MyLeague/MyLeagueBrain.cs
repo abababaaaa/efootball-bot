@@ -997,14 +997,16 @@ public static class MyLeagueBrain
         }
         var best = candidates.OrderByDescending(s => s.Avg).First();
 
-        // i 图标亮度：前往比赛词右侧锚定（右缘 +0.07~+0.16、y±0.04 —— 图标实际范围，
+        // i 图标亮度：前往比赛词右侧锚定（右缘 +0.07~+0.16、y -0.035~+0.045 —— 图标实际范围，
         // 实机网格扫描亮区 x0.25~0.31/y0.215~0.285；用户标定帧：i 聚焦时该区亮 208，
-        // 前往比赛聚焦时磁贴自身亮块在 +0.03~0.08 不污染本锚定区）
+        // 前往比赛聚焦时磁贴自身亮块在 +0.03~0.08 不污染本锚定区。
+        // y 窗向下偏：图标带比文字行高约一倍且向行下方延伸，居中窗会把图标上方暗行采进来
+        // 拉低读数（Simd 引擎词框略矮时 130 差 1 分脱靶，2026-10-21 实测），故 -0.035/+0.045）
         double iAvg = 0;
         if (goWord is not null)
         {
             double x0 = goWord.CenterX + goWord.W / 2 + 0.07;
-            iAvg = RegionAvg(x0, x0 + 0.09, goWord.CenterY - 0.04, goWord.CenterY + 0.04);
+            iAvg = RegionAvg(x0, x0 + 0.09, goWord.CenterY - 0.035, goWord.CenterY + 0.045);
         }
 
         string? verdict;
@@ -1012,9 +1014,14 @@ public static class MyLeagueBrain
         {
             verdict = best.Name;
         }
-        else if (goWord is not null && (iAvg >= 140 || (iAvg >= 125 && iAvg >= best.Avg + 25)))
+        else if (goWord is not null && (iAvg >= 140 ||
+                 (iAvg >= 125 && best.Avg <= 125 && iAvg > best.Avg)))
         {
-            verdict = "i"; // 「i」图标：文字磁贴全暗才算（原判据，用户标定帧验证有效）
+            // 「i」图标：文字磁贴全暗才算（判据本意）。旧相对线 iAvg≥best+25 对词框敏感——
+            // 引擎换 Simd 后多读出 赛事信息(106) 把 best 抬高，130 差 1 分脱靶（2026-10-21 实测）；
+            // 改绝对暗线 best≤125（未聚焦磁贴实测 78~108，聚焦 183+ 有大间隙）+ iAvg>best。
+            // iAvg≥140 绝对亮线保留（高亮捕获下磁贴整体偏亮时兜底）。
+            verdict = "i";
         }
         else
         {

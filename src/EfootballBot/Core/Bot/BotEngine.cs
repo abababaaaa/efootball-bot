@@ -136,10 +136,9 @@ public sealed class BotEngine : IDisposable
 
         // EP 降级工厂：OCR 与 YOLO 共享同一 SessionOptions（进程内仅一份 onnxruntime.dll）
         _factory = new OnnxSessionFactory(cfg.Inference.PreferredProvider, LogInternal);
-        Ocr = new OcrRecognizer(cfg.OcrEngine, cfg.OcrLanguage,
+        Ocr = new OcrRecognizer(cfg.OcrEngine,
             downscaleLongSide: cfg.ModuleFallback.DisableOcrDownscale ? 0 : OcrRecognizer.DefaultDownscaleLongSide,
-            preferInt8: !cfg.ModuleFallback.UseFp32Ocr,
-            recModel: cfg.OcrRecModel);
+            preferInt8: !cfg.ModuleFallback.UseFp32Ocr);
         if (Ocr.FallbackNote is { } fallbackNote)
             LogInternal($"OCR 引擎回退：{fallbackNote}（现用 {Ocr.LanguageTag}）", LogLevel.Warn);
         else

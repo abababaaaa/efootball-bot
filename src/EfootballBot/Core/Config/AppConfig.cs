@@ -424,12 +424,9 @@ public sealed class ScheduleConfig
 public sealed class AppConfig
 {
     public string Theme { get; set; } = "Dark"; // Dark / Light / DeepBlue
-    public string? OcrLanguage { get; set; }
-    /// <summary>OCR 识别引擎：RapidV6（PP-OCRv6 深度学习，默认）/ SimdPaddle（纯托管备选）/ Windows（内置 OCR 回退）。下次启动挂机生效。</summary>
-    public OcrEngineKind OcrEngine { get; set; } = OcrEngineKind.RapidV6;
-    /// <summary>PP-OCRv6 识别模型档位：Medium（默认，美术字/小字更准，包体+73MB）或 Small（更快，支持 int8）。
-    /// 仅 RapidV6/SimdPaddle 引擎消费，Windows 引擎忽略。下次启动挂机生效。</summary>
-    public OcrRecModelKind OcrRecModel { get; set; } = OcrRecModelKind.Medium;
+    /// <summary>OCR 识别引擎：SimdPaddle（纯托管 PP-OCR，默认）/ RapidV6（ONNX Runtime CPU）。
+    /// 旧值 Windows(1)=已删除的 Windows 内置 OCR，读取后按 SimdPaddle 处理。下次启动挂机生效。</summary>
+    public OcrEngineKind OcrEngine { get; set; } = OcrEngineKind.SimdPaddle;
     public bool AutoLaunchGame { get; set; }
     /// <summary>画面捕获后端：WGC 窗口捕获（默认，支持后台挂机/窗口被遮挡；已绑定真实 GPU 适配器）或 DXGI 桌面复制（高性能但窗口须可见）。</summary>
     public CaptureMode CaptureMode { get; set; } = CaptureMode.Wgc;

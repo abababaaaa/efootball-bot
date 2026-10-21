@@ -1257,22 +1257,19 @@
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                                 <TextBlock Text="OCR 识别引擎" Style="{StaticResource FieldLabel}"/>
                                 <ComboBox x:Name="CmbOcrEngine" Width="300" Margin="10,0,0,0" SelectedIndex="0">
-                                    <ComboBoxItem Content="高精度 Medium 模型（推荐，默认）"/>
-                                    <ComboBoxItem Content="轻量 Small 模型（更快）"/>
-                                    <ComboBoxItem Content="SimdPaddle 引擎（试验）"/>
-                                    <ComboBoxItem Content="Windows 内置 OCR（回退用）"/>
+                                    <ComboBoxItem Content="SimdPaddle（推荐，默认）"/>
+                                    <ComboBoxItem Content="RapidOCR Small（备用）"/>
                                 </ComboBox>
                             </StackPanel>
                             <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" Margin="0,6,0,9">
-                                <Run Text="PP-OCRv6 为随程序自带的"/>
-                                <Run Text="离线模型" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
-                                <Run Text="（不联网、不装第三方软件），对游戏美术字、小号说明文字的识别显著更好："/>
-                                <Run Text="Medium" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
-                                <Run Text=" 更准、识别稍慢，"/>
-                                <Run Text="Small" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
-                                <Run Text=" 更快。识别异常（界面读不出、原地打转）时优先确认这里选的是"/>
-                                <Run Text="高精度 Medium" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
-                                <Run Text="。更改在下次开始挂机时生效。"/>
+                                <Run Text="两个引擎都跑随程序自带的"/>
+                                <Run Text="离线 PP-OCRv6 Small 模型" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text="（不联网、不装第三方软件），对游戏美术字、小号说明文字的识别显著更好。"/>
+                                <Run Text="SimdPaddle" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
+                                <Run Text=" 识别更快更稳（真机对比 1085ms/帧 vs 1764ms），SimdPaddle 异常时自动落到 RapidOCR。"/>
+                                <Run Text="识别异常（界面读不出、原地打转）时确认这里没有选过"/>
+                                <Run Text="Windows 内置 OCR" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/>
+                                <Run Text="（旧版选项，已删除，会按 SimdPaddle 运行）。更改在下次开始挂机时生效。"/>
                             </TextBlock>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,0">
                                 <TextBlock Text="OCR 识别频率" Style="{StaticResource FieldLabel}"/>

@@ -2,11 +2,6 @@ using EfootballBot.Core.Capture;
 using System.IO;
 using RapidOcrNet;
 using SkiaSharp;
-using Windows.Globalization;
-using Windows.Graphics.Imaging;
-using Windows.Media.Ocr;
-using Windows.Security.Cryptography;
-using Windows.Storage.Streams;
 
 namespace EfootballBot.Core.Vision;
 
@@ -198,23 +193,14 @@ public static class OcrText
 /// <summary>OCR 识别后端。</summary>
 public enum OcrEngineKind
 {
-    /// <summary>RapidOCR PP-OCRv6：本地离线深度学习模型，单模型通吃简繁英日，游戏美术字体识别准（默认）。
-    /// 识别模型大小由 <see cref="OcrRecModelKind"/> 决定。</summary>
+    /// <summary>RapidOCR PP-OCRv6-small（ONNX Runtime CPU）：本地离线深度学习，单模型通吃简繁英日。</summary>
     RapidV6,
-    /// <summary>Windows 内置 OCR：速度快、零体积，但中文与小字误识多，作为回退方案。</summary>
-    Windows,
-    /// <summary>SimdPaddleOCR（纯托管推理，Apache-2.0）：与 RapidV6 共用 models/v6 模型文件，
-    /// 零原生依赖备选引擎。加载失败自动回退 RapidV6。</summary>
-    SimdPaddle,
-}
-
-/// <summary>PP-OCRv6 识别（rec）模型大小。det/cls 两档共用，只换识别模型。</summary>
-public enum OcrRecModelKind
-{
-    /// <summary>medium 识别模型（约 73MB）：美术字/小字更准，推理更慢（默认）。</summary>
-    Medium,
-    /// <summary>small 识别模型（约 21MB）：更快，支持 int8 量化加速。</summary>
-    Small,
+    /// <summary>【已删除引擎，仅为旧配置编号兼容保留】3.3.0.1 起 Windows 内置 OCR 已移除，
+    /// 读取到该值一律按 <see cref="SimdPaddle"/> 处理（其碎词/误识质量不达挂机判定线）。</summary>
+    Windows = 1,
+    /// <summary>SimdPaddleOCR（纯托管推理，Apache-2.0，默认引擎）：与 RapidV6 共用 models/v6 模型文件，
+    /// 零原生依赖。加载失败自动回退 RapidV6。</summary>
+    SimdPaddle = 2,
 }
 
 /// <summary>OCR 后端统一契约：输入一帧 BGRA，输出归一化坐标词块。</summary>
@@ -237,53 +223,42 @@ public sealed class OcrRecognizer : IDisposable
     /// <summary>当前引擎类型。</summary>
     public OcrEngineKind EngineKind { get; }
 
-    /// <summary>识别模型档位（RapidV6/SimdPaddle 有效）。</summary>
-    public OcrRecModelKind RecModel { get; }
-
     /// <summary>引擎/语言标签（日志展示用）。</summary>
     public string LanguageTag => _backend.Label;
 
     /// <summary>非空 = 选定引擎加载失败已自动回退（内容为原因），日志须播报。</summary>
     public string? FallbackNote { get; }
 
-    public static IReadOnlyList<string> AvailableLanguages()
-        => OcrEngine.AvailableRecognizerLanguages.Select(l => l.LanguageTag).ToList();
-
-    /// <summary>旧签名兼容：默认使用 PP-OCRv6（离线命令行自检 --check-frame/--dump 走此入口）。</summary>
-    public OcrRecognizer(string? preferredTag = null) : this(OcrEngineKind.RapidV6, preferredTag) { }
+    /// <summary>旧签名兼容：默认使用当前默认引擎（离线命令行自检 --check-frame/--dump 走此入口）。
+    /// preferredTag 曾用于选择 Windows OCR 语言包，该引擎已删除，参数保留仅防调用方破坏。</summary>
+    public OcrRecognizer(string? preferredTag = null) : this(OcrEngineKind.SimdPaddle) { }
 
     /// <param name="downscaleLongSide">OCR 输入降采样上限（帧长边超过该值先等比缩小再识别）。
     /// 0 = 关闭。4K 级画面降采样到 1080p 后 det 像素量约为原来 1/4，UI 文字在 720p 实测帧即可读全；
     /// 词块坐标按归一化输出，降采样不影响 0~1 坐标契约。</param>
-    /// <param name="preferInt8">true = PP-OCRv6 优先加载 int8 量化模型（缺失自动回退 fp32）。</param>
-    /// <param name="recModel">PP-OCRv6 识别模型档位（medium=默认精准 / small=快速）。</param>
+    /// <param name="preferInt8">true = small 识别模型优先加载 int8 量化版（缺失自动回退 fp32）。</param>
     public OcrRecognizer(OcrEngineKind engine, string? preferredTag = null,
-        int downscaleLongSide = DefaultDownscaleLongSide, bool preferInt8 = true,
-        OcrRecModelKind recModel = OcrRecModelKind.Medium)
+        int downscaleLongSide = DefaultDownscaleLongSide, bool preferInt8 = true)
     {
         EngineKind = engine;
-        RecModel = recModel;
         _downscaleLongSide = downscaleLongSide;
         switch (engine)
         {
-            case OcrEngineKind.Windows:
-                _backend = new WindowsOcrBackend(preferredTag);
-                break;
             case OcrEngineKind.SimdPaddle:
+            case OcrEngineKind.Windows: // 旧配置迁移：Windows 引擎已删除，一律落 SimdPaddle
                 try
                 {
-                    _backend = new SimdPaddleOcrBackend(recModel);
+                    _backend = new SimdPaddleOcrBackend();
                 }
                 catch (Exception ex)
                 {
                     // 纯托管引擎也可能因模型图形态不兼容失败：绝不因试验引擎断了挂机
                     FallbackNote = $"SimdPaddle 加载失败已回退 RapidV6：{ex.Message}";
-                    _backend = new RapidV6OcrBackend(recModel, preferInt8);
+                    _backend = new RapidV6OcrBackend(preferInt8);
                 }
                 break;
             default:
-                // medium 缺文件/损坏时 RapidV6 后端内部自带回退 small 的降级阶梯
-                _backend = new RapidV6OcrBackend(recModel, preferInt8);
+                _backend = new RapidV6OcrBackend(preferInt8);
                 break;
         }
     }
@@ -302,79 +277,22 @@ public sealed class OcrRecognizer : IDisposable
     public void Dispose() => _backend.Dispose();
 }
 
-/// <summary>Windows 内置离线 OCR（优先简体中文，回退英文 / 系统首选）。</summary>
-internal sealed class WindowsOcrBackend : IOcrBackend
-{
-    private readonly OcrEngine _engine;
-
-    public string Label { get; }
-
-    public WindowsOcrBackend(string? preferredTag = null)
-    {
-        var avail = OcrEngine.AvailableRecognizerLanguages.ToList();
-        Language? lang = null;
-        if (preferredTag is not null)
-            lang = avail.FirstOrDefault(l => string.Equals(l.LanguageTag, preferredTag, StringComparison.OrdinalIgnoreCase));
-        lang ??= avail.FirstOrDefault(l => l.LanguageTag.StartsWith("zh-Hans", StringComparison.OrdinalIgnoreCase)
-                                       || l.LanguageTag.Equals("zh", StringComparison.OrdinalIgnoreCase)
-                                       || l.LanguageTag.StartsWith("zh-CN", StringComparison.OrdinalIgnoreCase));
-        lang ??= avail.FirstOrDefault(l => l.LanguageTag.StartsWith("zh", StringComparison.OrdinalIgnoreCase));
-        lang ??= avail.FirstOrDefault(l => l.LanguageTag.StartsWith("en", StringComparison.OrdinalIgnoreCase));
-        lang ??= avail.FirstOrDefault();
-        if (lang is null)
-            throw new InvalidOperationException("系统没有可用的 OCR 语言包。请在 Windows 设置 → 时间和语言 → 语言中添加简体中文。");
-        _engine = OcrEngine.TryCreateFromLanguage(lang) ?? OcrEngine.TryCreateFromUserProfileLanguages()
-            ?? throw new InvalidOperationException("无法创建 OCR 引擎。");
-        Label = lang.LanguageTag;
-    }
-
-    public async Task<OcrResult> RecognizeAsync(FrameData frame, CancellationToken ct = default)
-    {
-        IBuffer buffer = CryptographicBuffer.CreateFromByteArray(frame.Bgra);
-        using var bmp = SoftwareBitmap.CreateCopyFromBuffer(
-            buffer, BitmapPixelFormat.Bgra8, frame.Width, frame.Height, BitmapAlphaMode.Premultiplied);
-
-        var result = await _engine.RecognizeAsync(bmp).AsTask(ct);
-        var words = new List<OcrWord>(result.Lines.Sum(l => l.Words.Count));
-        foreach (var line in result.Lines)
-        {
-            foreach (var word in line.Words)
-            {
-                string text = word.Text;
-                if (string.IsNullOrWhiteSpace(text)) continue;
-                var r = word.BoundingRect;
-                words.Add(new OcrWord(
-                    text,
-                    Math.Clamp(r.X / frame.Width, 0, 1),
-                    Math.Clamp(r.Y / frame.Height, 0, 1),
-                    Math.Clamp(r.Width / frame.Width, 0, 1),
-                    Math.Clamp(r.Height / frame.Height, 0, 1)));
-            }
-        }
-        return new OcrResult(words, frame.Width, frame.Height);
-    }
-
-    public void Dispose() { }
-}
-
 /// <summary>
 /// RapidOCR PP-OCRv6-small 多语言后端（ONNX Runtime 本地推理，简繁英日一个模型）。
 /// 模型随程序输出到 models/v6，文本行方向分类器复用包自带 v5 cls；游戏文字均正立，关闭方向分类省一次推理。
 /// </summary>
 internal sealed class RapidV6OcrBackend : IOcrBackend
 {
-    public const string LabelText = "PP-OCRv6";
+    public const string LabelText = "PP-OCRv6-small";
 
     private readonly RapidOcrNet.RapidOcr _ocr;
     private readonly RapidOcrOptions _options;
 
     public string Label { get; }
 
-    /// <param name="preferInt8">true = small 档优先加载 models/v6/int8 下的 int8 量化模型（CPU 推理约 2-4x）；
-    /// int8 文件缺失或加载失败（损坏/ORT 不兼容）时自动回退 fp32，绝不因量化模型问题而启动失败。
-    /// medium 档无 int8（量化未过门禁不随包）。</param>
-    /// <param name="recModel">识别模型档位：medium 缺文件/加载失败自动回退 small（只损失精度不损失可用性）。</param>
-    public RapidV6OcrBackend(OcrRecModelKind recModel, bool preferInt8 = true)
+    /// <param name="preferInt8">true = 优先加载 models/v6/int8 下的 int8 量化模型（CPU 推理约 2-4x）；
+    /// int8 文件缺失或加载失败（损坏/ORT 不兼容）时自动回退 fp32，绝不因量化模型问题而启动失败。</param>
+    public RapidV6OcrBackend(bool preferInt8 = true)
     {
         // 单文件发布时模型在临时解压目录；普通发布在 exe 同级 models，FindBundledFile 两种都兼容
         var fp32Det = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "PP-OCRv6_det_small.onnx")
@@ -382,55 +300,9 @@ internal sealed class RapidV6OcrBackend : IOcrBackend
         var clsPath = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v5", "ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx")
             ?? throw ModelMissing("models/v5/ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx");
 
-        RapidOcrNet.RapidOcr ocr;
-        string sizeGrade;
-
-        // medium 档：缺文件/损坏/ORT 不兼容一律回退 small（用户选精度但保可用，绝不启动失败）
-        if (recModel == OcrRecModelKind.Medium && TryLoadMedium(fp32Det, clsPath, out ocr))
-        {
-            sizeGrade = "-medium";
-        }
-        else
-        {
-            ocr = LoadSmallWithInt8Ladder(fp32Det, clsPath, preferInt8, out var smallGrade);
-            sizeGrade = recModel == OcrRecModelKind.Medium ? "-small（medium 回退）" : "-small" + smallGrade;
-        }
-
-        _ocr = ocr;
-        Label = LabelText + sizeGrade;
-
-        // PPOCRv6 预处理（短边自适应 736、不加白边）；游戏界面文字不会倒置，跳过 180° 分类
-        _options = RapidOcrOptions.PPOCRv6 with { DoAngle = false };
-    }
-
-    private static bool TryLoadMedium(string detPath, string clsPath, out RapidOcrNet.RapidOcr ocr)
-    {
-        var rec = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "PP-OCRv6_rec_medium.onnx");
-        var keys = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "ppocrv6_medium_dict.txt");
-        if (rec is null || keys is null)
-        {
-            ocr = null!;
-            return false;
-        }
-        try
-        {
-            ocr = CreateOcr(detPath, clsPath, rec, keys);
-            return true;
-        }
-        catch (Exception ex)
-        {
-            global::System.Diagnostics.Debug.WriteLine($"[OCR] medium 模型加载失败，回退 small：{ex.Message}");
-            ocr = null!;
-            return false;
-        }
-    }
-
-    /// <summary>small 档 int8 降级阶梯：识别模型动态量化精度无损（实测文本逐字一致）优先启用；
-    /// 检测模型静态量化对 DBNet 概率图敏感（MinMax 校准实测大面积漏检），
-    /// det int8 只有在通过全量 RealFrame 回归后才随包发布。逐级尝试，全败落 fp32。</summary>
-    private static RapidOcrNet.RapidOcr LoadSmallWithInt8Ladder(
-        string fp32Det, string clsPath, bool preferInt8, out string grade)
-    {
+        // int8 降级阶梯：识别模型动态量化精度无损（实测文本逐字一致）优先启用；
+        // 检测模型静态量化对 DBNet 概率图敏感（MinMax 校准实测大面积漏检），
+        // det int8 只有在通过全量 RealFrame 回归后才随包发布。逐级尝试，全败落 fp32。
         var fp32Rec = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "PP-OCRv6_rec_small.onnx")
             ?? throw ModelMissing("models/v6/PP-OCRv6_rec_small.onnx");
         var keysPath = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "ppocrv6_small_dict.txt")
@@ -447,12 +319,15 @@ internal sealed class RapidV6OcrBackend : IOcrBackend
             (fp32Det, fp32Rec, ""),
         ];
 
+        RapidOcrNet.RapidOcr? loaded = null;
+        string int8Grade = "";
         foreach (var (det, rec, g) in ladder)
         {
             try
             {
-                grade = g;
-                return CreateOcr(det, clsPath, rec, keysPath);
+                loaded = CreateOcr(det, clsPath, rec, keysPath);
+                int8Grade = g;
+                break;
             }
             catch (Exception ex)
             {
@@ -460,8 +335,12 @@ internal sealed class RapidV6OcrBackend : IOcrBackend
                 global::System.Diagnostics.Debug.WriteLine($"[OCR] 模型加载失败（det={Path.GetFileName(det)} rec={Path.GetFileName(rec)}），降级重试：{ex.Message}");
             }
         }
-        grade = "";
-        return CreateOcr(fp32Det, clsPath, fp32Rec, keysPath);
+
+        _ocr = loaded ?? CreateOcr(fp32Det, clsPath, fp32Rec, keysPath);
+        Label = LabelText + int8Grade;
+
+        // PPOCRv6 预处理（短边自适应 736、不加白边）；游戏界面文字不会倒置，跳过 180° 分类
+        _options = RapidOcrOptions.PPOCRv6 with { DoAngle = false };
     }
 
     private static RapidOcrNet.RapidOcr CreateOcr(string detPath, string clsPath, string recPath, string keysPath)
@@ -474,8 +353,7 @@ internal sealed class RapidV6OcrBackend : IOcrBackend
     }
 
     private static InvalidOperationException ModelMissing(string rel) => new(
-        "PP-OCRv6 模型文件缺失：" + rel +
-        "。请重新下载完整版程序（models 目录需与 exe 同级），或在设置中把 OCR 引擎切回「Windows 内置 OCR」。");
+        "PP-OCRv6 模型文件缺失：" + rel + "。请重新下载完整版程序（models 目录需与 exe 同级）。");
 
     public Task<OcrResult> RecognizeAsync(FrameData frame, CancellationToken ct = default)
         => Task.Run(() =>
@@ -532,17 +410,14 @@ internal sealed class SimdPaddleOcrBackend : IOcrBackend
 
     public string Label { get; }
 
-    public SimdPaddleOcrBackend(OcrRecModelKind recModel)
+    public SimdPaddleOcrBackend()
     {
-        bool medium = recModel == OcrRecModelKind.Medium;
         string det = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "PP-OCRv6_det_small.onnx")
             ?? throw ModelFileMissing("models/v6/PP-OCRv6_det_small.onnx");
-        string rec = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6",
-                medium ? "PP-OCRv6_rec_medium.onnx" : "PP-OCRv6_rec_small.onnx")
-            ?? throw ModelFileMissing(medium ? "models/v6/PP-OCRv6_rec_medium.onnx" : "models/v6/PP-OCRv6_rec_small.onnx");
-        string keys = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6",
-                medium ? "ppocrv6_medium_dict.txt" : "ppocrv6_small_dict.txt")
-            ?? throw ModelFileMissing(medium ? "models/v6/ppocrv6_medium_dict.txt" : "models/v6/ppocrv6_small_dict.txt");
+        string rec = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "PP-OCRv6_rec_small.onnx")
+            ?? throw ModelFileMissing("models/v6/PP-OCRv6_rec_small.onnx");
+        string keys = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "ppocrv6_small_dict.txt")
+            ?? throw ModelFileMissing("models/v6/ppocrv6_small_dict.txt");
         string cls = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v5", "ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx")
             ?? throw ModelFileMissing("models/v5/ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx");
 
@@ -553,7 +428,7 @@ internal sealed class SimdPaddleOcrBackend : IOcrBackend
             Classifier = new() { Backend = Sdcb.SimdPaddleOCR.OcrBackend.Cpu },
             Recognizer = new() { Backend = Sdcb.SimdPaddleOCR.OcrBackend.Cpu },
         });
-        Label = $"PP-OCRv6-{(medium ? "medium" : "small")}（SimdPaddle）";
+        Label = "PP-OCRv6-small（SimdPaddle）";
     }
 
     private static InvalidOperationException ModelFileMissing(string rel) => new(

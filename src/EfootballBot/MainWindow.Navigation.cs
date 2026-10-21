@@ -112,25 +112,13 @@ public partial class MainWindow
         bool wgc = WindowCapture.IsSupported();
         DotWgc.Fill = wgc ? BrushOk : BrushBad;
 
-        // OCR 引擎：PP-OCRv6 模型随程序自带、不依赖系统语言包；Windows 引擎才检查中文语言包
+        // OCR 引擎：PP-OCRv6 模型随程序自带、不依赖系统语言包
         try
         {
-            if (_cfg.OcrEngine == OcrEngineKind.Windows)
-            {
-                var langs = OcrRecognizer.AvailableLanguages();
-                bool zh = langs.Any(l => l.StartsWith("zh", StringComparison.OrdinalIgnoreCase));
-                DotOcr.Fill = zh ? BrushOk : BrushBad;
-                TxtOcr.Text = zh ? $"OCR 引擎（Windows {string.Join(",", langs.Take(2))}）" : "OCR 缺中文语言包";
-            }
-            else
-            {
-                DotOcr.Fill = BrushOk;
-                TxtOcr.Text = _cfg.OcrEngine == OcrEngineKind.SimdPaddle
-                    ? "OCR 引擎（SimdPaddle）"
-                    : _cfg.OcrRecModel == OcrRecModelKind.Small
-                        ? "OCR 引擎（PP-OCRv6 Small）"
-                        : "OCR 引擎（PP-OCRv6 Medium）";
-            }
+            DotOcr.Fill = BrushOk;
+            TxtOcr.Text = _cfg.OcrEngine == OcrEngineKind.RapidV6
+                ? "OCR 引擎（RapidOCR Small）"
+                : "OCR 引擎（SimdPaddle）";
         }
         catch
         {
