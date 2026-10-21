@@ -57,6 +57,7 @@ public class IntlBootRealFrameTests
         foreach (var f in new[]
         {
             "boot_splash.png", "boot_splash_loading.png", "campaign_grid.png",
+            "playing_style_campaign.png",
             "gacha_page.png", "inbox_popup.png", "login_bonus_popup.png", "payment_confirm.png",
             "not_logged_in.png",
         })
@@ -125,9 +126,10 @@ public class IntlBootRealFrameTests
     public void LoginRecoveryPopupChain_ClassifiesHasConfirm_AndPressesA()
     {
         // 重登弹窗链（每周轮换不认具体词，只认推进按钮词）：登录奖励「继续」/
-        // Campaign 网格「继续」/物品已送到收件箱「OK」/上一场比赛被放弃「OK」。
+        // 物品已送到收件箱「OK」/上一场比赛被放弃「OK」。
+        // （campaign_grid 已升级为标题专用判定 CampaignGridPage，见下，不再走此门控块）
         // ★被放弃弹窗底下透出标题页的「法律及隐私政策」——弹窗链判定必须先于 BootSplash
-        foreach (var f in new[] { "login_bonus_popup.png", "campaign_grid.png", "inbox_popup.png", "boot_abandoned_popup.png" })
+        foreach (var f in new[] { "login_bonus_popup.png", "inbox_popup.png", "boot_abandoned_popup.png" })
         {
             var (screen, ocr) = Load(f, loginRecovery: true);
             Assert.Equal(MlScreen.HasConfirm, screen);
@@ -135,6 +137,54 @@ public class IntlBootRealFrameTests
             Assert.True(action.Kind is MlActionKind.PadConfirm or MlActionKind.PadUpConfirm,
                 $"{f}: 应为推进类动作，实际 {action.Kind}:{action.Target}");
         }
+    }
+
+    [Fact]
+    public void CampaignGridPage_TitleJudge_DirectContinue()
+    {
+        // New Playing Style 活动奖励网格页（实机 2026-10-19/21 两帧同页）：标题专用判定。
+        // ★不依赖 loginRecovery——登录加载慢时该页可能落在重登 100s 窗口之外，
+        // 旧门控路径（只认「继续」词）会漏判。处置=直接 A 点默认焦点「继续」领奖推进
+        foreach (var f in new[] { "campaign_grid.png", "playing_style_campaign.png" })
+        {
+            var (cold, ocr) = Load(f, loginRecovery: false);
+            Assert.Equal(MlScreen.CampaignGridPage, cold);
+            var (warm, _) = Load(f, loginRecovery: true);
+            Assert.Equal(MlScreen.CampaignGridPage, warm);
+            var action = MyLeagueBrain.Decide(cold, ocr, screenStreak: 0);
+            Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+            Assert.NotEqual(MlActionKind.PadUpConfirm, action.Kind);
+        }
+
+        // 判定词守卫（纯构造）：标题整行 / 逐词拆开（JoinedText 拼回）+ 推进词 双证据命中
+        Assert.Equal(MlScreen.CampaignGridPage, MyLeagueBrain.Classify(
+            Array.Empty<YoloDetection>(),
+            Ocr(("New Playing Style Campaign", 0.5, 0.19), ("继续", 0.5, 0.93)),
+            loginRecovery: false));
+        Assert.Equal(MlScreen.CampaignGridPage, MyLeagueBrain.Classify(
+            Array.Empty<YoloDetection>(),
+            Ocr(("New", 0.35, 0.19), ("Playing", 0.44, 0.19), ("Style", 0.53, 0.19),
+                ("Campaign", 0.63, 0.19), ("继续", 0.5, 0.93)),
+            loginRecovery: false));
+
+        // 负例守卫：标题在而推进词漏读 → 不命中（宁落后续规则也不盲按）；
+        // 「继续」词在而标题不在、又无重登窗口 → 不命中（正常流程同名词保护）
+        Assert.NotEqual(MlScreen.CampaignGridPage, MyLeagueBrain.Classify(
+            Array.Empty<YoloDetection>(),
+            Ocr(("New Playing Style Campaign", 0.5, 0.19), ("Y详情", 0.1, 0.93)),
+            loginRecovery: false));
+        Assert.NotEqual(MlScreen.CampaignGridPage, MyLeagueBrain.Classify(
+            Array.Empty<YoloDetection>(), Ocr(("继续", 0.5, 0.75)), loginRecovery: false));
+
+        // 实机负例（2026-10-21 回归）：主菜单横幅同样含整行标题词（收件箱弹窗背后
+        // @y0.68 被 OCR 整行读出）——标题必须落在页首（y&lt;0.35）才算网格页，
+        // 否则收件箱弹窗被抢判、OK 漏按（首版不限位置的判定在此帧翻车）
+        var bannerUnderPopup = Ocr(("NewPlayingStyleCampaign", 0.5, 0.68),
+            ("物品已送到收件箱", 0.5, 0.55), ("OK", 0.5, 0.78));
+        Assert.NotEqual(MlScreen.CampaignGridPage, MyLeagueBrain.Classify(
+            Array.Empty<YoloDetection>(), bannerUnderPopup, loginRecovery: true));
+        Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(
+            Array.Empty<YoloDetection>(), bannerUnderPopup, loginRecovery: true));
     }
 
     [Fact]

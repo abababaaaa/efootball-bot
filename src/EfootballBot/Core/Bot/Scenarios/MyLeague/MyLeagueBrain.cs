@@ -53,6 +53,10 @@ public enum MlScreen
     /// 「请检查你的网络环境并登录游戏」+右侧 登录/退出游戏 两键。掉线重登链的第二种入口
     /// （不经标题页）：直接 A 点默认焦点「登录」重连；登录后弹窗链由 LoginRecovery 窗口承接。</summary>
     NotLoggedIn,
+    /// <summary>New Playing Style 活动奖励网格页（登录后弹窗链可出现，实机 2026-10-19/21）：
+    /// 大字标题「New Playing Style Campaign」+ 奖励磁贴网格（全部已领时也同型）+ 底部
+    /// 「继续」默认焦点。按 A 直接推进；判定用标题词、不依赖重登窗口（见 Classify）。</summary>
+    CampaignGridPage,
 }
 
 public enum MlActionKind
@@ -161,8 +165,9 @@ public static class MyLeagueBrain
     /// 白色 = 「我的联赛」说明页（全流程唯一白底页面，深色主题下强特征）。
     /// <paramref name="loginRecovery"/> = 流程记忆里最近（~100s）见过 BootSplash 标题页或
     /// NotLoggedIn 未登录页（场景层传入，见 ScenarioShared.LoginRecovery）：门控掉线重登后的
-    /// 弹窗链识别（登录奖励/Campaign 网格/物品到收件箱等每周轮换页面，只认推进按钮词不认
-    /// 具体内容）与加载期 OCR 退化的标志帧兜底。
+    /// 弹窗链识别（登录奖励/物品到收件箱等每周轮换页面，只认推进按钮词不认
+    /// 具体内容）与加载期 OCR 退化的标志帧兜底。New Playing Style 网格页不在门控内
+    /// （标题词唯一，有专用判定）。
     /// </summary>
     public static MlScreen Classify(IReadOnlyList<YoloDetection> dets, OcrResult ocr,
         bool topRightHasContent = false, bool allowCornerInMatch = true, bool mostlyLightPage = false,
@@ -210,8 +215,22 @@ public static class MyLeagueBrain
         if (ocr.ContainsJoined("未登录") || ocr.ContainsJoined("网络环境"))
             return MlScreen.NotLoggedIn;
 
-        // 掉线重登后的弹窗链：登录奖励「继续」/ Campaign 网格「继续」/ 物品已送到收件箱「OK」/
+        // New Playing Style 活动奖励网格页（登录后弹窗链成员，实机 campaign_grid 帧）：
+        // 大字标题「New Playing Style Campaign」在页首 + 奖励磁贴网格 + 底部「继续」。
+        // ★不门控 loginRecovery：标题在网格页是页首大字，且该页可能落在链中靠后、
+        // 重登 100s 窗口已过期（登录加载慢时）。
+        // ★标题必须在高处（y&lt;0.35）——主菜单横幅同样含该标题词（实机 2026-10-21：
+        // 收件箱弹窗背后菜单横幅 @y0.68 被整行读出），不限位置会把弹窗链页抢判成网格页；
+        // 再与推进词任一（该页恒有「继续」）构成双证据
+        if (ocr.Lines.Any(l => l.CenterY < 0.35 &&
+                l.Text.Replace(" ", "").Contains("PlayingStyle", StringComparison.OrdinalIgnoreCase)) &&
+            (ocr.ContainsJoined("继续") || HasOkButton(ocr) ||
+             ocr.ContainsJoined("下一步") || ocr.ContainsJoined("确定")))
+            return MlScreen.CampaignGridPage;
+
+        // 掉线重登后的弹窗链：登录奖励「继续」/ 物品已送到收件箱「OK」/
         // 上一场比赛被放弃「OK」——页面每周轮换不认具体词，只认推进按钮词按 A。
+        // （New Playing Style 网格页已有上方标题专用判定，不再走此门控块）
         // ★必须 loginRecovery 门控（最近见过标题页），否则正常流程里的同名词（联赛页
         // 「继续」等）会被抢判。该块先于 BootSplash：弹窗盖在标题页上时按 A 先关弹窗
         if (loginRecovery &&
@@ -321,16 +340,27 @@ public static class MyLeagueBrain
     }
 
     /// <summary>
-    /// 比赛选择页判定：顶部标题行恰为「比赛」（短行、y&lt;0.25）+ 磁贴行特征词
-    /// （锦标赛/自定义锦标赛/活动/我的联赛，用户实机两帧验证：焦点不在时看不到我的联赛，
-    /// 焦点在时预览区显示我的联赛+描述，两态都有磁贴行词）。
+    /// 比赛选择页判定（新旧 UI 双形态）：
+    /// ① 强证据：磁贴词「锦标赛」+ eFootball™联赛卡描述「争取升级至更高组别」同屏——
+    ///   后者全游戏唯一出现在比赛页（AI 天梯/我的联赛共用此页），新 UI 2026-10-21 实拍帧验证。
+    /// ② 标题行：旧 UI 精确「比赛」（y&lt;0.25）；新 UI 美术字标题行会并读进卡片角标碎片
+    ///   （实拍整行读成「比赛小V1100000Rank」，精确等值恒假 → 卡死在比赛页循环 B 逃），
+    ///   放宽为「行含比赛且不含联赛主页同高行的 contaminator 词」——我的联赛主页 y&lt;0.25 有
+    ///   「排名比赛记录」「前往比赛…」两行（前往/排名/记录），必须排除否则主页被抢判成比赛页。
+    /// 磁贴行特征词（锦标赛/自定义锦标赛/活动/我的联赛）仍是前置门槛。
     /// </summary>
     private static bool IsMatchHub(OcrResult ocr)
     {
-        bool hasTitle = ocr.Lines.Any(l => l.Text == "比赛" && l.CenterY < 0.25);
-        if (!hasTitle) return false;
-        return ocr.ContainsJoined("锦标赛") || ocr.ContainsJoined("自定义")
+        bool hasTileWords = ocr.ContainsJoined("锦标赛") || ocr.ContainsJoined("自定义")
             || ocr.ContainsJoined("活动") || ocr.ContainsJoined("我的联赛");
+        if (!hasTileWords) return false;
+
+        if (ocr.ContainsJoined("锦标赛") && ocr.ContainsJoined("争取升级至更高组别"))
+            return true;
+
+        return ocr.Lines.Any(l => l.CenterY < 0.25 &&
+            l.Text.Replace(" ", "").Contains("比赛") &&
+            !l.Text.Contains("前往") && !l.Text.Contains("排名") && !l.Text.Contains("记录"));
     }
 
     /// <summary>OCR 里是否出现「纵向排列的 ≥2 个难度名」（难度列表页特征；
@@ -386,13 +416,15 @@ public static class MyLeagueBrain
             }
             case MlScreen.MatchHub:
             {
-                // 右移选中「我的联赛」磁贴：进入比赛页后默认焦点不在其上（实机需右移一次）。
-                // OCR 预览区（y<0.6，磁贴行标签在 y≈0.72）看到「我的联赛」= 焦点已到 → A 进入；
-                // 否则右移一格，下一轮观察确认——避免盲按 A 进错模式。
-                // 焦点词被 OCR 漏读时会无限右移，≥NavEscapeStreak 按 B 回主菜单重新导航。
+                // 右移选中「我的联赛」磁贴：进入比赛页后默认焦点在最左卡（新 UI 2026-10-21 实拍：
+                // 卡排 锦标赛/活动/eFootball™联赛/我的联赛）。
+                // 焦点确认认「我的联赛」词、y 不限——新 UI 没有旧版预览区（旧判据 y<0.6 恒假会
+                // 无限右移卡死）：未聚焦时该卡被屏幕右缘裁掉只读出碎片（我/自），聚焦后卡排
+                // 滚入、标签完整可读。误读提前按 A 的最坏情况是进错卡详情页，其分类不再是
+                // MatchHub，B 逃生自愈。焦点词整排漏读时 ≥NavEscapeStreak 按 B 回主菜单重导航。
                 if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
                     return new MlAction(MlActionKind.GamepadBack, 2400, "比赛页导航失效，B 回主菜单重导航");
-                bool focused = ocr.Lines.Any(l => l.Text.Contains("我的联赛") && l.CenterY < 0.6);
+                bool focused = ocr.Lines.Any(l => l.Text.Contains("我的联赛"));
                 return focused
                     ? new MlAction(MlActionKind.PadConfirm,
                         screenStreak >= StuckStreak ? 5000 : 2500, "比赛页→我的联赛")
@@ -550,6 +582,17 @@ public static class MyLeagueBrain
                 // 付款确认弹窗：光标默认在「取消」——直接按 A 即取消付款。
                 // ★绝不上移：上方是 eFootball 金币付款键（与购买弹窗方向相反）
                 return new MlAction(MlActionKind.PadConfirm, 2600, "付款确认→A 取消");
+            }
+
+            case MlScreen.CampaignGridPage:
+            {
+                // New Playing Style 活动奖励网格页（登录后弹窗链成员）：底部「继续」即默认
+                // 焦点（白底高亮）——直接 A 推进领奖，绝不上移（左下角 Y=详情，无关）。
+                // 退避只放慢不停手（弹窗链页通用）；久按无效周期 B 逃生（A 被吞时自愈）
+                if (screenStreak >= ConfirmEscapeStreak && (screenStreak - ConfirmEscapeStreak) % 5 == 0)
+                    return new MlAction(MlActionKind.GamepadBack, 2400, "活动奖励页久按无效，B 逃生");
+                return new MlAction(MlActionKind.PadConfirm,
+                    screenStreak >= StuckStreak ? 5000 : 2200, "活动奖励页→A 继续");
             }
 
             case MlScreen.NotLoggedIn:

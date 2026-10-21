@@ -44,7 +44,8 @@ internal static class ScenarioShared
 
     /// <summary>掉线重登窗口：最近 ~100s 见过 eFootball 2027 标题页（BootSplash）或未登录页
     /// （NotLoggedIn，掉线重登链第二入口，点登录后同样接奖励弹窗链）。
-    /// 门控重登后的弹窗链识别（登录奖励/Campaign 网格/收件箱等每周轮换页只认推进词）
+    /// 门控重登后的弹窗链识别（登录奖励/收件箱等每周轮换页只认推进词；
+    /// New Playing Style 网格页标题词唯一，有专用判定不占此门控）
     /// 与加载期 OCR 退化的标志帧兜底——不门控则正常流程里的同名词（联赛页「继续」等）被抢判。
     /// 各场景 Classify 的 loginRecovery 参数统一走这里。</summary>
     public static bool LoginRecovery(MlFlowMemory memory, DateTime now) =>
