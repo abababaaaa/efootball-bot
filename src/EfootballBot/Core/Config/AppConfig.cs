@@ -253,16 +253,13 @@ public sealed class PadConfig
     }
 }
 
-/// <summary>手柄隔离（HidHide）配置：虚拟手柄仅游戏可见（白名单）+ 真实手柄接管
-/// （设备节点禁用清单由 PhysicalPadControl 维护）。驱动侧持久化到注册表，
-/// 此处仅存 UI 快照与回滚清单。</summary>
-public sealed class HidHideConfig
+/// <summary>真实手柄接管配置（v3.3.2 起 HidHide 隔离整链剔除，仅剩挂机禁用真实手柄；
+/// JSON 键名保留 "HidHide" 以兼容旧配置——其中的 DisabledPadDevs 恢复清单不能丢，
+/// 丢失会把用户被禁用的真实手柄卡在禁用态）。设备节点禁用清单由 PhysicalPadControl 维护。</summary>
+public sealed class PadTakeoverConfig
 {
-    /// <summary>已应用隔离（虚拟手柄已加入黑名单）。默认开启：首次由提权子进程自动完成配置。</summary>
-    public bool Enabled { get; set; } = true;
-
     /// <summary>
-    /// 挂机期间自动禁用真实手柄以释放 XInput 玩家 1（全权接管模型，v3.3.0 恢复）。
+    /// 挂机期间自动禁用真实手柄以释放 XInput 玩家 1（全权接管模型）。
     /// 虚拟手柄为 Xbox 360 形态，必须拿到 slot0 才被 eFootball 消费；
     /// 停止挂机自动恢复真实手柄。
     /// </summary>
@@ -272,25 +269,12 @@ public sealed class HidHideConfig
     /// 由 pad-hide/pad-restore 提权任务与 GUI 启动兜底消费）。</summary>
     public List<string> DisabledPadDevs { get; set; } = new();
 
-    /// <summary>白名单游戏的完整镜像路径快照（应用隔离时快照，游戏未运行时无法更新）。</summary>
-    public string GameImagePath { get; set; } = "";
-
-    /// <summary>本次隔离实际加入的黑名单条目快照（解除隔离时精确回滚）。</summary>
-    public List<string> AppliedBlacklist { get; set; } = new();
-
     /// <summary>
-    /// 老默认迁移：从未成功应用过隔离（AppliedBlacklist 为空，即旧出厂 Enabled=false 配置）
-    /// → 翻成新默认（隔离开）。成功应用/解除过一次后不再干预，尊重用户选择。
-    /// 3.2.x 曾把 HidePhysicalGamepad 压回 false（共存模式）；v3.3.0 恢复全权接管模型，
-    /// 迁移一律翻回 true（挂机禁用真实手柄、停止恢复）。
+    /// 老默认迁移：3.2.x 曾把 HidePhysicalGamepad 压回 false（共存模式）；
+    /// v3.3.0 起全权接管模型，一律翻回 true（挂机禁用真实手柄、停止恢复）。
     /// 只改内存，首次 Save 时落盘（同 TimingConfig 迁移模式）。
     /// </summary>
-    public void MigrateDefaults()
-    {
-        if (AppliedBlacklist.Count == 0)
-            Enabled = true;
-        HidePhysicalGamepad = true;
-    }
+    public void MigrateDefaults() => HidePhysicalGamepad = true;
 }
 
 /// <summary>
@@ -468,8 +452,8 @@ public sealed class AppConfig
     // —— 模块回退（新版实现出问题时的手动退路，更新页可改）——
     public ModuleFallbackConfig ModuleFallback { get; set; } = new();
 
-    // —— 手柄隔离（HidHide）——
-    public HidHideConfig HidHide { get; set; } = new();
+    // —— 真实手柄接管（JSON 键名 "HidHide" 为旧配置兼容保留）——
+    public PadTakeoverConfig HidHide { get; set; } = new();
 
     // —— 虚拟手柄后端 ——
     public PadConfig Pad { get; set; } = new();

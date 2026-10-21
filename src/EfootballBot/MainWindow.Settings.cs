@@ -88,7 +88,7 @@ public partial class MainWindow
         // OCR 引擎（下拉项：0=SimdPaddle 默认 / 1=RapidV6；旧配置 Windows 值已删引擎，一并落 SimdPaddle）
         CmbOcrEngine.SelectedIndex = _cfg.OcrEngine == OcrEngineKind.RapidV6 ? 1 : 0;
 
-        // 全权接管（挂机禁用真实手柄）：开关见「手柄隔离」卡
+        // 全权接管（挂机禁用真实手柄）：开关见「手柄接管」卡
         ChkPadTakeover.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
 
         // OCR 频率
@@ -204,12 +204,10 @@ public partial class MainWindow
         ChkFbNoMouseTrajectory.IsChecked = _cfg.ModuleFallback.DisableMouseTrajectory;
         ChkFbNoFailureDumps.IsChecked = _cfg.ModuleFallback.DisableFailureDumps;
 
-        // 手柄隔离（赋值会触发 Changed：加载期间必须屏蔽，否则每次启动误弹一次提权配置）
+        // 手柄接管（赋值会触发 Changed：加载期间必须屏蔽）
         _loadingConfig = true;
-        ChkHidHideEnabled.IsChecked = _cfg.HidHide.Enabled;
         ChkPadTakeover.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
         _loadingConfig = false;
-        _ = RefreshHidHidePanelAsync();
     }
 
     private void SaveUiToConfig()
@@ -333,8 +331,7 @@ public partial class MainWindow
         _cfg.ModuleFallback.DisableMouseTrajectory = ChkFbNoMouseTrajectory.IsChecked == true;
         _cfg.ModuleFallback.DisableFailureDumps = ChkFbNoFailureDumps.IsChecked == true;
 
-        // 手柄隔离（Enabled/GameImagePath/AppliedBlacklist 由开关提权动作维护，此处只同步复选框）；
-        // DisabledPadDevs 是旧版遗留恢复清单：保存前从磁盘回读，避免 GUI 陈旧快照把
+        // 手柄接管：DisabledPadDevs 恢复清单保存前从磁盘回读，避免 GUI 陈旧快照把
         // 尚未消费的遗留记录清掉（LegacyPadRestore 靠它恢复旧版本卡禁用的手柄）
         try { _cfg.HidHide.DisabledPadDevs = AppConfig.Load().HidHide.DisabledPadDevs; } catch { }
 
@@ -732,220 +729,12 @@ public partial class MainWindow
         UpdateBanner.Visibility = Visibility.Collapsed;
     }
 
-    // ================= 手柄隔离（HidHide） =================
-
-    private bool _hidHideBusy;
+    // ================= 手柄接管 =================
 
     private void ChkPadTakeover_Changed(object sender, RoutedEventArgs e)
     {
         if (_loadingConfig) return;
         _cfg.HidHide.HidePhysicalGamepad = ChkPadTakeover.IsChecked == true;
         _cfg.Save();
-        if (TxtHidHideStatus is not null && TxtHidHideStatus.Text.StartsWith("已开启", StringComparison.Ordinal))
-            TxtHidHideStatus.Text = "已开启：虚拟手柄仅游戏内可见；挂机时自动禁用真实手柄（全权接管），停止挂机自动恢复";
-    }
-
-    /// <summary>查询 HidHide 状态并刷新开关下方状态行；默认开启且未就绪时自动触发一次提权配置。</summary>
-    private async Task RefreshHidHidePanelAsync(bool autoSetup = true)
-    {
-        var status = await Task.Run(HidHideManager.QueryStatus);
-        bool needSetup = false;
-        await Dispatcher.InvokeAsync(() =>
-        {
-            if (!status.DriverInstalled)
-            {
-                TxtHidHideStatus.Text = _cfg.HidHide.Enabled
-                    ? "待配置：驱动未安装，开启开关时自动下载安装"
-                    : "驱动未安装";
-                needSetup = _cfg.HidHide.Enabled;
-            }
-            else if (status.Error is not null)
-            {
-                TxtHidHideStatus.Text = $"服务未就绪：{status.Error}";
-                needSetup = _cfg.HidHide.Enabled; // 服务停止/未激活，setup 会拉起
-            }
-            else if (_cfg.HidHide.Enabled)
-            {
-                // 设备离线（未挂机）时不打扰：Active 且已有快照即视为已配置，变化由计划任务 sync 兜底
-                bool onlineUnhidden = status.VirtualInstanceCount > 0 && !status.VirtualHidden;
-                TxtHidHideStatus.Text = (!status.Active || onlineUnhidden)
-                    ? "待配置：尚未对当前虚拟手柄生效"
-                    : "已开启：虚拟手柄仅游戏内可见";
-                needSetup = !status.Active || onlineUnhidden;
-            }
-            else
-            {
-                TxtHidHideStatus.Text = "已关闭：虚拟手柄对所有应用可见";
-            }
-        });
-
-        if (autoSetup && needSetup && !_hidHideBusy)
-            _ = SetHidHideEnabledAsync(true, automatic: true);
-    }
-
-    /// <summary>
-    /// 提权执行 job：启动 runas 子进程 → 日志记录 PID → 并行等待「子进程退出」与「结果文件」。
-    /// 三类失败均返回带明确 Error 的结果：
-    /// ① UAC 被否(1223)/被策略拦截(5)；② 子进程退出但未写回结果（疑崩溃，指引查日志）；
-    /// ③ 300s 超时（疑卡在下载/安装）。
-    /// </summary>
-    private async Task<HidHideConfigJob.HidHideResultDto> RunHidHideJobAsync(HidHideConfigJob.HidHideJobDto job)
-    {
-        string jobPath = Path.Combine(AppPaths.TempDir, $"hidhide_{Guid.NewGuid():N}.json");
-        File.WriteAllText(jobPath, System.Text.Json.JsonSerializer.Serialize(job));
-
-        Process child;
-        try
-        {
-            child = Process.Start(new ProcessStartInfo
-            {
-                FileName = Environment.ProcessPath!,
-                Arguments = $"--hidhide-config \"{jobPath}\"",
-                Verb = "runas",
-                UseShellExecute = true,
-            }) ?? throw new InvalidOperationException("Process.Start 返回 null");
-        }
-        catch (Win32Exception ex) when (ex.NativeErrorCode is 1223 or 5)
-        {
-            AppendLog($"提权子进程未启动（Win32 {ex.NativeErrorCode}：" +
-                (ex.NativeErrorCode == 1223 ? "UAC 被拒绝" : "访问被策略或安全软件拦截") + "）。", LogLevel.Warn);
-            TryDelete(jobPath);
-            return new HidHideConfigJob.HidHideResultDto
-            {
-                Success = false,
-                Error = $"提权子进程未启动（Win32 {ex.NativeErrorCode}）。" +
-                    "若本程序本身是「以管理员身份运行」，则不会弹窗、属正常现象，请直接观察是否静默配置成功",
-            };
-        }
-
-        AppendLog($"提权配置子进程已启动（PID={child.Id}），等待其退出…", LogLevel.Info);
-
-        HidHideConfigJob.HidHideResultDto? result = null;
-        bool exited, resultWritten;
-        exited = resultWritten = false;
-        var sw = Stopwatch.StartNew();
-        while (sw.Elapsed.TotalSeconds < 300)
-        {
-            if (child.HasExited)
-            {
-                AppendLog($"提权配置子进程已退出（ExitCode={child.ExitCode}）。", LogLevel.Info);
-                await Task.Delay(150); // 等结果文件刷盘
-                exited = true;
-                break;
-            }
-            try
-            {
-                string text = await File.ReadAllTextAsync(jobPath);
-                if (text.Contains("\"Success\"")) { resultWritten = true; break; }
-            }
-            catch { /* 文件被占用：子进程正在写 */ }
-            await Task.Delay(500);
-        }
-
-        bool timeout = !exited && !resultWritten;
-        if (timeout && !child.HasExited)
-        {
-            AppendLog("提权配置子进程 300 秒未退出，本次配置超时。", LogLevel.Warn);
-            try { child.Kill(false); } catch { /* 提权进程可能无权结束 */ }
-        }
-
-        try
-        {
-            result = System.Text.Json.JsonSerializer.Deserialize<HidHideConfigJob.HidHideResultDto>(
-                await File.ReadAllTextAsync(jobPath));
-        }
-        catch (Exception ex)
-        {
-            string hint = AppPaths.ErrorLogPath("hidhide-config-error.log");
-            AppendLog(exited
-                ? $"子进程未写回有效结果，可能启动即崩溃，详见 {hint}（{ex.Message}）"
-                : $"结果文件读取失败：{ex.Message}", LogLevel.Warn);
-        }
-
-        TryDelete(jobPath);
-        child.Dispose();
-
-        result ??= timeout
-            ? new HidHideConfigJob.HidHideResultDto
-            {
-                Success = false,
-                Error = "提权配置子进程超时（300 秒未退出），可能卡在下载 HidHide 或静默安装环节",
-            }
-            : new HidHideConfigJob.HidHideResultDto
-            {
-                Success = false,
-                Error = "子进程已退出但未写回结果，可能启动即崩溃；" +
-                    "请查看 %AppData%\\EfootballBot\\hidhide-config-error.log",
-            };
-        return result;
-    }
-
-    private static void TryDelete(string path)
-    {
-        try { File.Delete(path); } catch { }
-    }
-
-    /// <summary>主开关切换：on=自动装驱动+配置（setup），off=解除（clear）。</summary>
-    private async Task SetHidHideEnabledAsync(bool on, bool automatic)
-    {
-        if (_hidHideBusy) return;
-        _hidHideBusy = true;
-        ChkHidHideEnabled.IsEnabled = false;
-        try
-        {
-            TxtHidHideStatus.Text = GitHostsOptimizer.IsAdministrator()
-                ? "已具备管理员权限，正在静默配置（不会弹出授权窗口）…"
-                : on
-                    ? (automatic ? "首次启用正在自动配置，请在授权窗口点「是」…" : "正在开启手柄隔离，请在授权窗口点「是」…")
-                    : "正在关闭手柄隔离，请在授权窗口点「是」…";
-
-            var job = new HidHideConfigJob.HidHideJobDto
-            {
-                Mode = on ? "setup" : "clear",
-                HideVigem = true,
-                GameImagePath = _cfg.HidHide.GameImagePath,
-            };
-
-            // 拒权(1223)/拦截(5)/崩溃/超时均由 RunHidHideJobAsync 转成带 Error 的结果
-            var result = await RunHidHideJobAsync(job);
-
-            if (!result.Success)
-            {
-                _loadingConfig = true;
-                ChkHidHideEnabled.IsChecked = !on;
-                _loadingConfig = false;
-                TxtHidHideStatus.Text = $"配置失败：{result.Error}";
-                return;
-            }
-
-            _cfg.HidHide.Enabled = on;
-            if (on)
-            {
-                if (!string.IsNullOrWhiteSpace(result.ResolvedGameImagePath))
-                    _cfg.HidHide.GameImagePath = result.ResolvedGameImagePath;
-                // job 只返回本次新增条目，快照须合并（幂等重跑新增为 0 时不能清空，否则 clear 无法回滚）
-                _cfg.HidHide.AppliedBlacklist =
-                    HidHideManager.MergeInto(_cfg.HidHide.AppliedBlacklist, result.AppliedBlacklist);
-            }
-            _cfg.Save();
-            AppendLog(on
-                ? (result.AppliedBlacklist.Count > 0
-                    ? $"手柄隔离已开启（黑名单托管 {result.AppliedBlacklist.Count} 项）。"
-                    : "手柄隔离已开启，配置已生效。")
-                : "手柄隔离已关闭，虚拟手柄恢复全局可见。", LogLevel.Info);
-            TxtHidHideStatus.Text = result.Message;
-        }
-        finally
-        {
-            ChkHidHideEnabled.IsEnabled = true;
-            _hidHideBusy = false;
-        }
-    }
-
-    private void ChkHidHideEnabled_Changed(object sender, RoutedEventArgs e)
-    {
-        if (_loadingConfig) return;
-        bool on = ChkHidHideEnabled.IsChecked == true;
-        _ = SetHidHideEnabledAsync(on, automatic: false);
     }
 }

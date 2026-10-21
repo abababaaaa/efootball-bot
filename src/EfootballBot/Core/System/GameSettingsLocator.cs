@@ -109,7 +109,7 @@ public static class GameSettingsLocator
     /// <summary>① 运行中的游戏进程：读映像路径后向上找设置工具。
     /// 用 QueryFullProcessImageName（PROCESS_QUERY_LIMITED_INFORMATION）跨提权可读——
     /// 旧 MainModule 方案对提权进程抛拒绝访问（实机 2026-10-13：国服客户端以管理员运行，
-    /// eFootballOnline.exe 在跑但 MainModule 读不到 → 国服定位恒失败），HidHide 白名单同款修法。</summary>
+    /// eFootballOnline.exe 在跑但 MainModule 读不到 → 国服定位恒失败），物理手柄禁用链同款修法。</summary>
     private static string? LocateFromRunningProcess(string gameProcessName)
     {
         try

@@ -1268,33 +1268,23 @@
 
                     <!-- ============ 二级页：手柄与输入 ============ -->
                     <StackPanel x:Name="SetTabInput" Visibility="Collapsed">
-                    <!-- ===== 手柄隔离 ===== -->
+                    <!-- ===== 手柄接管 ===== -->
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Text="手柄隔离" Style="{StaticResource H2}"/>
+                                <TextBlock Text="手柄接管" Style="{StaticResource H2}"/>
                             </StackPanel>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" LineHeight="19">
-                                <Run Text="·  开启后机器人虚拟手柄"/><Run Text="仅游戏内可见" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/><Run Text="，Steam 与其他游戏收不到按键。"/>
-                                <LineBreak/>
-                                <Run Text="·  基于 HidHide 过滤驱动，首次开启自动安装并需"/><Run Text="管理员授权一次" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/><Run Text="。"/>
-                            </TextBlock>
-
-                            <CheckBox x:Name="ChkHidHideEnabled" Content="虚拟手柄仅游戏内可见"
-                                      Margin="0,12,0,0" FontWeight="SemiBold"
-                                      Checked="ChkHidHideEnabled_Changed" Unchecked="ChkHidHideEnabled_Changed"/>
-                            <TextBlock x:Name="TxtHidHideStatus" FontSize="11.5" Margin="28,4,0,0"
-                                       Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap"
-                                       Text="正在检查状态…"/>
 
                             <CheckBox x:Name="ChkPadTakeover" Content="挂机时禁用真实手柄（全权接管，推荐）"
-                                      Margin="0,12,0,0" FontWeight="SemiBold"
+                                      Margin="0,4,0,0" FontWeight="SemiBold"
                                       Checked="ChkPadTakeover_Changed" Unchecked="ChkPadTakeover_Changed"/>
                             <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}"
                                        TextWrapping="Wrap" MaxWidth="520" Margin="28,4,0,0" LineHeight="19">
                                 <Run Text="·  虚拟手柄为 Xbox 360 形态，必须占用玩家 1：开始挂机时"/><Run Text="自动禁用真实手柄" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/>
                                 <Run Text="，"/><Run Text="停止挂机自动恢复" Foreground="{DynamicResource AccentGlow}" FontWeight="SemiBold"/><Run Text="；中途崩溃下次启动也会恢复。"/>
+                                <LineBreak/>
+                                <Run Text="·  首次启用需要"/><Run Text="管理员授权一次" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/><Run Text="。"/>
                             </TextBlock>
 
                             <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" TextWrapping="Wrap" MaxWidth="640" Margin="0,14,0,0" LineHeight="19">

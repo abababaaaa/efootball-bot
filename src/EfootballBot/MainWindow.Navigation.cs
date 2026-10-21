@@ -148,30 +148,31 @@ public partial class MainWindow
     /// <summary>
     /// 启动自愈（后台，不阻塞 UI）：
     /// ① 重写提权任务 shim 指向当前 exe（程序移动/更新后任务动作恒有效）；
-    /// ② 幂等注册全部提权任务（sync / pad-hide / pad-restore——3.2.x 升级用户的两个任务
-    ///    曾被共存模式迁移清理，这里恢复注册）；
+    /// ② 幂等注册提权任务（pad-hide / pad-restore）+ 一次性清理已剔除的 HidHide 遗留；
     /// ③ 挂机中崩溃残留的禁用真实手柄 → 触发 pad-restore 恢复（未提权时 schtasks 静默失败，下次重试）。
     /// </summary>
     private async Task EnsurePadEnvironmentAsync()
     {
         try
         {
-            HidHideManager.WriteShimScripts();
+            EfootballBot.Core.Input.PhysicalPadControl.WriteShimScripts();
 
             await Task.Run(() =>
             {
                 try
                 {
-                    HidHideManager.EnsureTasksRegistered();
+                    EfootballBot.Core.Input.PhysicalPadControl.LegacyHidHideCleanupOnce();
+                    EfootballBot.Core.Input.PhysicalPadControl.EnsureTasksRegistered();
 
                     if (EfootballBot.Core.Input.PhysicalPadControl.HasPendingRestore()
                         || EfootballBot.Core.Input.PhysicalPadControl.HasDisabledGamepad())
                     {
                         Dispatcher.BeginInvoke(() =>
                             AppendLog("检测到仍被禁用的真实手柄，触发自动恢复…", LogLevel.Info));
-                        HidHideManager.RunTaskSilently(HidHideManager.PadRestoreTaskName);
+                        EfootballBot.Core.Input.PhysicalPadControl.RunTaskSilently(
+                            EfootballBot.Core.Input.PhysicalPadControl.PadRestoreTaskName);
                         Dispatcher.BeginInvoke(() =>
-                            AppendLog("手柄恢复任务已触发（详见 data\\hidhide-sync.log）", LogLevel.Info));
+                            AppendLog("手柄恢复任务已触发（详见 data\\pad-control.log）", LogLevel.Info));
                     }
                 }
                 catch { /* 未提权等：下次启动重试 */ }

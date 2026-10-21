@@ -41,15 +41,14 @@ public class PadBackendTests
     }
 
     [Fact]
-    public void HidHideConfig_迁移_接管开关翻回开启()
+    public void PadTakeoverConfig_迁移_接管开关翻回开启()
     {
-        var cfg = new HidHideConfig { HidePhysicalGamepad = false }; // 3.2.x 共存模式遗留值
+        var cfg = new PadTakeoverConfig { HidePhysicalGamepad = false }; // 3.2.x 共存模式遗留值
         cfg.MigrateDefaults();
         Assert.True(cfg.HidePhysicalGamepad); // v3.3.0 恢复全权接管
 
-        var fresh = new HidHideConfig();
+        var fresh = new PadTakeoverConfig();
         Assert.True(fresh.HidePhysicalGamepad);
-        Assert.True(fresh.Enabled);
     }
 
     [Fact]
@@ -102,20 +101,6 @@ public class PadBackendTests
         Assert.Equal(PadBackendKind.Vigem, PadBackendInfo.FromUiIndex(0));
         Assert.Equal(PadBackendKind.Vigem, PadBackendInfo.FromUiIndex(-1)); // 越界兜底默认
         Assert.Equal(PadBackendKind.Vigem, PadBackendInfo.FromUiIndex(99));
-    }
-
-    [Fact]
-    public void 虚拟手柄实例路径判定_ViGEm两档形态()
-    {
-        // Xbox 360 档（唯一后端形态）：HID 层固定 VID_045E&PID_028E
-        Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"HID\VID_045E&PID_028E\6&2DF92C3&0&0000"));
-        Assert.True(HidDeviceEnumerator.IsViGEmInstance(@"HID\VID_045E&PID_028E&IG_00\6&2DF92C3&0&0000"));
-        // DS4 档（v2.0.x 旧档，黑名单清理仍需识别）
-        Assert.True(HidDeviceEnumerator.IsVirtualPadInstancePath(@"HID\VID_054C&PID_05C4&REV_0100\2&526D6D&0&0000"));
-        // 真实设备不误伤
-        Assert.False(HidDeviceEnumerator.IsVirtualPadInstancePath(@"HID\VID_1532&PID_0900\6&abcd")); // Razer 鼠标等
-        Assert.False(HidDeviceEnumerator.IsVirtualPadInstancePath(
-            @"BTHLEDEVICE\{00001812-0000-1000-8000-00805F9B34FB}_DEV_VID&02045E_PID&0B22_REV&0522_ABC\C&1&0009"));
     }
 
     /// <summary>虚拟总线后代判定：ViGEmBus 命名节点与 DS4 的 ROOT\SYSTEM 根枚举拓扑必须命中，

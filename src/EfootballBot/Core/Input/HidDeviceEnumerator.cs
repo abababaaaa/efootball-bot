@@ -6,32 +6,11 @@ using Microsoft.Win32.SafeHandles;
 namespace EfootballBot.Core.Input;
 
 /// <summary>
-/// HID 设备枚举：虚拟手柄实例（路径前缀/驱动特征判定）与物理手柄实例（HID Usage 判定）。
-/// 黑名单条目格式 = 设备实例路径（如 HID\VID_045E&PID_028E\6&2DF92C3&0&0000）。
-/// ViGEm 前缀常量同时服务在线判定与旧版本黑名单条目的识别清理。
+/// HID 设备枚举：物理手柄实例（HID Usage 判定）与虚拟总线子节点判定（真伪手柄唯一可靠判据）。
+/// （v3.3.2 起虚拟手柄黑名单随 HidHide 整链剔除，ViGEm 实例路径匹配函数已删。）
 /// </summary>
 public static class HidDeviceEnumerator
 {
-    /// <summary>ViGEm 虚拟 Xbox360 手柄在 HID 层的固定硬件 ID 前缀（唯一后端形态）。</summary>
-    public const string ViGEmInstancePrefix = @"HID\VID_045E&PID_028E";
-
-    /// <summary>ViGEm 虚拟 DualShock4 手柄的硬件 ID 前缀（v2.0.x 旧档残留，与真实 DS4 同形，
-    /// 靠父设备判真假；保留用于清理旧黑名单条目）。</summary>
-    public const string ViGEmDs4InstancePrefix = @"HID\VID_054C&PID_05C4";
-
-    public static bool IsViGEmInstance(string instancePath)
-        => instancePath.StartsWith(ViGEmInstancePrefix, StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>
-    /// 黑名单/名单用的「虚拟手柄实例路径」判定（纯字符串，不打开设备）：
-    /// ViGEm Xbox360 前缀 ∥ ViGEm DS4 前缀。
-    /// 真实 DS4 与虚拟 DS4 路径同形——凡需分辨真假（如禁用物理手柄）必须再过父设备判定，
-    /// 此处仅用于「我们加入黑名单的虚拟设备」。
-    /// </summary>
-    public static bool IsVirtualPadInstancePath(string instancePath)
-        => IsViGEmInstance(instancePath)
-           || instancePath.StartsWith(ViGEmDs4InstancePrefix, StringComparison.OrdinalIgnoreCase);
-
     /// <summary>
     /// 设备节点的祖先链（最多 4 级）里是否出现虚拟总线特征——真假手柄唯一可靠判据。
     /// 两种实机拓扑（2026-10-19 现场探测）：
@@ -60,19 +39,6 @@ public static class HidDeviceEnumerator
             return false; // 深度用尽未见虚拟特征：按物理
         }
         catch { return true; }
-    }
-
-    /// <summary>
-    /// 设备接口路径 → 设备实例路径：
-    /// \\?\hid#vid_045e&amp;pid_028e#7&amp;2df92c3#{guid} → hid\vid_045e&amp;pid_028e\7&amp;2df92c3
-    /// </summary>
-    public static string InterfacePathToInstancePath(string interfacePath)
-    {
-        if (interfacePath.StartsWith(@"\\?\", StringComparison.Ordinal))
-            interfacePath = interfacePath[4..];
-        int hash = interfacePath.IndexOf("#{", StringComparison.Ordinal);
-        if (hash >= 0) interfacePath = interfacePath[..hash];
-        return Uri.UnescapeDataString(interfacePath.Replace('#', '\\'));
     }
 
     /// <summary>HID 设备实例（实例路径 + 设备节点句柄，父节点判定用）。</summary>
@@ -113,23 +79,10 @@ public static class HidDeviceEnumerator
         catch { return null; }
     }
 
-    /// <summary>当前存在的虚拟手柄实例路径（ViGEm Xbox360；含旧黑名单里的 DS4 档条目形态）。</summary>
-    public static List<string> FindVirtualPadInstances()
-    {
-        var result = new List<string>();
-        foreach (var inst in EnumerateAllInstances())
-        {
-            if (!IsVirtualPadInstancePath(inst.InstancePath)) continue;
-            if (IsVirtualBusChild(inst.DevInst)) result.Add(inst.InstancePath);
-        }
-        return result;
-    }
-
     /// <summary>
     /// XInput 可见手柄的 HID 集合实例路径特征：XUSB/xinputhid 子设备必带 &amp;IG_00…IG_03 段
     /// （Xbox 360/One/兼容 pad 均如此）。仅凭路径判定、不需要打开设备——
-    /// HidHide Active 时对非白名单进程连 access=0 的查询打开都会拒绝，
-    /// 旧的「开接口读 Usage」判定在手柄已被列入黑名单的机器上恒空（2026-10-12）。
+    /// 旧的「开接口读 Usage」判定在驱动过滤层拦截查询时恒空（2026-10-12 实测）。
     /// </summary>
     public static bool IsXInputStyleInstance(string instancePath) =>
         global::System.Text.RegularExpressions.Regex.IsMatch(instancePath,

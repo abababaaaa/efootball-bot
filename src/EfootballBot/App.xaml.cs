@@ -84,16 +84,17 @@ public partial class App : Application
                 Shutdown();
             };
         }
-        else if (args.Length > 0 && args[0] == "--hidhide-config")
+        else if (args.Length > 0 && (args[0] == "--pad-config" || args[0] == "--hidhide-config"))
         {
-            // 提权配置模式：--hidhide-config <job文件路径> 或 --hidhide-config sync（计划任务）。
-            // 应用 HidHide 白/黑名单后立即退出，无窗口、无单实例 Mutex、无日志初始化。
+            // 提权配置模式：--pad-config <job文件路径|pad-hide|pad-restore|tasks>。
+            // --hidhide-config 为旧参数别名：升级过渡期旧计划任务/shim 仍指向它，按新入口解析不断链。
+            // 立即退出，无窗口、无单实例 Mutex、无日志初始化。
             Startup += (_, _) =>
             {
                 try
                 {
-                    string arg = args.Length > 1 ? args[1] : "sync";
-                    int exit = EfootballBot.Core.Input.HidHideConfigJob.Run(arg);
+                    string arg = args.Length > 1 ? args[1] : "tasks";
+                    int exit = EfootballBot.Core.Input.PadConfigJob.Run(arg);
                     Environment.ExitCode = exit;
                 }
                 catch (Exception ex)
@@ -102,7 +103,7 @@ public partial class App : Application
                     {
                         string dir = AppPaths.DataDir;
                         Directory.CreateDirectory(dir);
-                        File.WriteAllText(Path.Combine(dir, "hidhide-config-error.log"),
+                        File.WriteAllText(Path.Combine(dir, "pad-config-error.log"),
                             $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {ex}");
                     }
                     catch { }

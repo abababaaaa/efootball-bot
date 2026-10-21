@@ -128,14 +128,15 @@ foreach ($hive in 'HKCU:','HKLM:') {
 
         ct.ThrowIfCancellationRequested();
         progress?.Invoke("收集虚拟手柄驱动状态…");
-        Head("SECTION 9 - VIGEMBUS / HIDHIDE DRIVERS (virtual gamepad stack)");
+        Head("SECTION 9 - VIGEMBUS DRIVER + PAD TASKS (virtual gamepad stack)");
         report.AppendLine(await RunNativeAsync("sc", "query ViGEmBus", 20, ct));
         report.AppendLine(await RunNativeAsync("sc", "qc ViGEmBus", 20, ct));
-        report.AppendLine(await RunNativeAsync("sc", "query HidHide", 20, ct));
-        report.AppendLine(await RunNativeAsync("sc", "qc HidHide", 20, ct));
+        report.AppendLine("[pad takeover scheduled tasks]");
+        report.AppendLine(await RunNativeAsync("schtasks", "/Query /TN EfootballBotPadHide /V /FO LIST", 20, ct));
+        report.AppendLine(await RunNativeAsync("schtasks", "/Query /TN EfootballBotPadRestore /V /FO LIST", 20, ct));
         report.AppendLine("[driver sys file versions]");
-        report.AppendLine(await RunPsAsync(@"foreach ($n in @('ViGEmBus.sys','HidHide.sys','HidHideX.sys','xusb22.sys')) { $f = Join-Path $env:windir (Join-Path 'System32\drivers' $n); if (Test-Path -LiteralPath $f) { $i = Get-Item -LiteralPath $f; $v = $i.VersionInfo; '{0} | FileVersion={1} | Product={2} | Modified={3}' -f $f, $v.FileVersion, $v.ProductName, $i.LastWriteTime } else { '{0} | NOT FOUND' -f $n } }"));
-        report.AppendLine("[running drivers matching vigem/hidhide/xusb]");
+        report.AppendLine(await RunPsAsync(@"foreach ($n in @('ViGEmBus.sys','xusb22.sys')) { $f = Join-Path $env:windir (Join-Path 'System32\drivers' $n); if (Test-Path -LiteralPath $f) { $i = Get-Item -LiteralPath $f; $v = $i.VersionInfo; '{0} | FileVersion={1} | Product={2} | Modified={3}' -f $f, $v.FileVersion, $v.ProductName, $i.LastWriteTime } else { '{0} | NOT FOUND' -f $n } }"));
+        report.AppendLine("[running drivers matching vigem/xusb]");
         report.AppendLine(FilterLines(await RunNativeAsync("driverquery", "/v /fo csv", 60, ct),
             static l => l.Contains("vigem", StringComparison.OrdinalIgnoreCase)
                      || l.Contains("hidhide", StringComparison.OrdinalIgnoreCase)

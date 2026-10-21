@@ -6,8 +6,7 @@ namespace EfootballBot.Core.Input;
 public enum PadBackendKind
 {
     /// <summary>ViGEmBus 虚拟 Xbox 360 手柄：XInput 玩家 1 全通道被 eFootball 消费。
-    /// 占用 XInput 槽位——真实手柄由挂机自动禁用让位（全权接管），停止挂机自动恢复；
-    /// HidHide 白名单保证其他应用看不到虚拟手柄。</summary>
+    /// 占用 XInput 槽位——真实手柄由挂机自动禁用让位（全权接管），停止挂机自动恢复。</summary>
     Vigem = 0,
 }
 
@@ -37,7 +36,6 @@ public static class PadBackendInfo
     /// <summary>
     /// 该后端的手柄是否对 XInput 可见。Xbox 360 形态天然占 XInput 槽位（玩家 1），
     /// 真实手柄需由设备节点禁用让位——这是「全权接管」模型的一部分。
-    /// 其他应用侧的不可见性由 HidHide 白名单保证（XInput 不吃黑名单，见 HidHideManager）。
     /// </summary>
     public static bool IsXInputVisible(PadBackendKind kind) => true;
 
