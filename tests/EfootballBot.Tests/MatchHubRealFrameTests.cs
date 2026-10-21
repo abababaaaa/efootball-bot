@@ -65,7 +65,7 @@ public class MatchHubRealFrameTests
         var data = LoadPngBgra(Path.Combine(TestDir, "TestData", name), out int w, out int h);
         var frame = new FrameData(data, w, h, 0);
         var dets = det.Detect(frame);
-        var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var ocrRes = TestOcr.Run(ocr, frame);
         var screen = MyLeagueBrain.Classify(dets, ocrRes);
         var action = MyLeagueBrain.Decide(screen, ocrRes, 0);
         return (screen, action, dets, ocrRes);

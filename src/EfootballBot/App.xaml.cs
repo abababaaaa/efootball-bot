@@ -18,6 +18,14 @@ public partial class App : Application
     public App()
     {
         var args = Environment.GetCommandLineArgs().Skip(1).ToArray();
+        // 多开档案（--profile <名> / --profile=<名>）：必须最先解析——data\、logs\、
+        // 单实例锁、管道名全部按档案隔离，解析晚了静态路径就已经定型。
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--profile" && i + 1 < args.Length) AppPaths.SetProfile(args[i + 1]);
+            else if (args[i].StartsWith("--profile=", StringComparison.Ordinal))
+                AppPaths.SetProfile(args[i]["--profile=".Length..]);
+        }
         if (args.Length > 0 && args[0] is "--dump" or "--cn-dump")
         {
             Startup += async (_, _) =>
@@ -111,6 +119,29 @@ public partial class App : Application
                 Shutdown();
             };
         }
+        else if (args.Length > 0 && args[0] == "--make-patch")
+        {
+            // 发布链工具：--make-patch <旧exe> <新exe> <补丁输出>
+            // CI 在发版时对「上一个 tag 的 exe」生成一跳补丁，上传到同源 patches/ 目录；
+            // 客户端更新时优先尝试该补丁（见 UpdateApplier.TryDeltaAsync）。
+            Startup += (_, _) =>
+            {
+                try
+                {
+                    if (args.Length < 4) throw new ArgumentException("用法：--make-patch <旧exe> <新exe> <补丁输出>");
+                    Core.System.DeltaPatch.Create(args[1], args[2], args[3]);
+                    long patchBytes = new FileInfo(args[3]).Length;
+                    long newBytes = new FileInfo(args[2]).Length;
+                    Console.WriteLine($"PATCH OK: {args[3]} — {Core.System.DeltaPatch.Describe(patchBytes, newBytes)}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("PATCH FAIL: " + ex.Message);
+                    Environment.ExitCode = 1;
+                }
+                Shutdown();
+            };
+        }
         else
             Startup += (_, _) => StartGui(fromUpdate: args.Contains("--updated"));
 
@@ -138,8 +169,13 @@ public partial class App : Application
 
     // ================= 单实例（仅 GUI 模式；--dump 诊断命令不受限） =================
 
-    private const string SingleMutexName = @"Local\EfootballBot-SingleInstance-Mutex";
-    private const string SinglePipeName = "EfootballBot-SingleInstance-Pipe";
+    // 单实例锁与唤醒管道按档案命名：多个 --profile 实例可同时驻留（各自挂一个账号）
+    private static string SingleMutexName => AppPaths.Profile.Length == 0
+        ? @"Local\EfootballBot-SingleInstance-Mutex"
+        : $@"Local\EfootballBot-SingleInstance-Mutex-{AppPaths.Profile}";
+    private static string SinglePipeName => AppPaths.Profile.Length == 0
+        ? "EfootballBot-SingleInstance-Pipe"
+        : $"EfootballBot-SingleInstance-Pipe-{AppPaths.Profile}";
 
     private Mutex? _singleMutex;
     private CancellationTokenSource? _pipeCts;

@@ -64,7 +64,7 @@ public class WeeklyRealFrameTests
             var data = LoadPngBgra(path, out int w, out int h);
             var frame = new FrameData(data, w, h, 0);
             var dets = det.Detect(frame);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
             var screen = WeeklyBrain.Classify(dets, ocrRes,
                 MyLeagueScenario.CornerHasContent(frame),
                 matchContext: false,
@@ -105,7 +105,7 @@ public class WeeklyRealFrameTests
             var data = LoadPngBgra(path, out int w, out int h);
             var frame = new FrameData(data, w, h, 0);
             var dets = det.Detect(frame);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
             var screen = WeeklyBrain.Classify(dets, ocrRes,
                 MyLeagueScenario.CornerHasContent(frame),
                 matchContext: false,
@@ -134,7 +134,7 @@ public class WeeklyRealFrameTests
             var data = LoadPngBgra(p1, out int w, out int h);
             var frame = new FrameData(data, w, h, 0);
             var dets = det.Detect(frame);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
             var screen = WeeklyBrain.Classify(dets, ocrRes);
             _out.WriteLine($"weekly_reward_done: {screen}, mainRewardDone={WeeklyBrain.IsMainRewardDone(ocrRes, frame)}");
             Assert.Equal(WkScreen.EventHome, screen);
@@ -148,7 +148,7 @@ public class WeeklyRealFrameTests
             var data = LoadPngBgra(p1b, out int w, out int h);
             var frame = new FrameData(data, w, h, 0);
             var dets = det.Detect(frame);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
             var screen = WeeklyBrain.Classify(dets, ocrRes);
             _out.WriteLine($"weekly_home_titani_done: {screen}, mainRewardDone={WeeklyBrain.IsMainRewardDone(ocrRes, frame)}");
             Assert.Equal(WkScreen.EventHome, screen);
@@ -162,7 +162,7 @@ public class WeeklyRealFrameTests
             var data = LoadPngBgra(p2, out int w, out int h);
             var frame = new FrameData(data, w, h, 0);
             var dets = det.Detect(frame);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
             var screen = WeeklyBrain.Classify(dets, ocrRes);
             _out.WriteLine($"weekly_list_greencheck: {screen}, check0={WeeklyBrain.DetectGreenCheck(frame, 0)}, " +
                            $"check1={WeeklyBrain.DetectGreenCheck(frame, 1)}, check2={WeeklyBrain.DetectGreenCheck(frame, 2)}");
@@ -179,7 +179,7 @@ public class WeeklyRealFrameTests
             var data = LoadPngBgra(p3, out int w, out int h);
             var frame = new FrameData(data, w, h, 0);
             var dets = det.Detect(frame);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
             var screen = WeeklyBrain.Classify(dets, ocrRes);
             _out.WriteLine($"weekly_event_home: {screen}, mainRewardDone={WeeklyBrain.IsMainRewardDone(ocrRes, frame)}");
             Assert.Equal(WkScreen.EventHome, screen);
@@ -204,7 +204,7 @@ public class WeeklyRealFrameTests
             var data = LoadPngBgra(p0, out int w, out int h);
             var frame = new FrameData(data, w, h, 0);
             var dets = det.Detect(frame);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
             var screen = WeeklyBrain.Classify(dets, ocrRes);
             _out.WriteLine($"==== weekly_home_titani_done.png -> {screen} ====");
             foreach (var d in dets.Where(d => d.Score >= MyLeagueBrain.MinScore))
@@ -225,7 +225,7 @@ public class WeeklyRealFrameTests
         {
             var data = LoadPngBgra(p1, out int w, out int h);
             var frame = new FrameData(data, w, h, 0);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
             _out.WriteLine("==== weekly_reward_done.png ====");
             foreach (var l in ocrRes.Lines)
                 _out.WriteLine($"  L \"{l.Text}\" @({l.CenterX:F2},{l.CenterY:F2})");
@@ -239,7 +239,7 @@ public class WeeklyRealFrameTests
         {
             var data = LoadPngBgra(p2, out int w, out int h);
             var frame = new FrameData(data, w, h, 0);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
             _out.WriteLine("==== weekly_list_greencheck.png ====");
             foreach (var l in ocrRes.Lines)
                 _out.WriteLine($"  L \"{l.Text}\" @({l.CenterX:F2},{l.CenterY:F2})");

@@ -91,6 +91,8 @@ public partial class MainWindow : Window
             _hotkey.PauseStopTriggered += () => Dispatcher.BeginInvoke(Hotkey_PauseStop_Triggered);
             _hotkey.ResumeTriggered += () => Dispatcher.BeginInvoke(Hotkey_Resume_Triggered);
             RefreshHotkeyUi();
+
+            StartMonitorIfEnabled();
         };
 
         // 环境检测在 Loaded 事件里跑：构造到此结束即界面可用（v1.1.19 远程排障心跳，
@@ -406,6 +408,7 @@ public partial class MainWindow : Window
             if (host.IsRunning)
             {
                 _activeStartBtn = btn;
+                _activeMode = mode ?? "";
                 btn.Style = (Style)FindResource("DangerBtn");
                 btn.IsEnabled = true;
                 BtnPause.IsEnabled = true;
@@ -485,9 +488,92 @@ public partial class MainWindow : Window
     private bool _paused;
     /// <summary>当前运行中的模块启动按钮（决定哪个显示"停止"）。</summary>
     private Button? _activeStartBtn;
+    /// <summary>当前运行模式（监控页展示用）。</summary>
+    private string _activeMode = "";
+    /// <summary>局域网监控页（配置开启时才创建）。</summary>
+    private EfootballBot.Core.System.MonitorServer? _monitor;
+
+    /// <summary>按配置启动局域网监控页（失败只记日志，不影响挂机）。</summary>
+    private void StartMonitorIfEnabled()
+    {
+        if (!_cfg.Monitor.Enabled || _monitor is not null) return;
+        _monitor = new EfootballBot.Core.System.MonitorServer(
+            _cfg.Monitor,
+            () =>
+            {
+                var s = _workerHost?.LastStats;
+                return new EfootballBot.Core.System.MonitorStatus(
+                    _workerHost is { IsRunning: true },
+                    _paused,
+                    _activeMode,
+                    s?.MatchesDone ?? 0,
+                    s?.KeyMatches ?? 0,
+                    s?.PlayersMaxed ?? 0,
+                    s?.StartedAt is { } st ? (DateTime.Now - st).ToString(@"hh\:mm\:ss") : "",
+                    s?.LastScreen ?? "",
+                    s?.LastError ?? "",
+                    DateTime.Now);
+            },
+            HandleMonitorCommandAsync,
+            AppendLog);
+        _monitor.Start();
+    }
+
+    /// <summary>监控页操作（HTTP 线程回调）：统一封送到 UI 线程执行。</summary>
+    private Task HandleMonitorCommandAsync(string cmd)
+        => Dispatcher.InvokeAsync(() => HandleMonitorCommandCoreAsync(cmd)).Task.Unwrap();
+
+    private async Task HandleMonitorCommandCoreAsync(string cmd)
+    {
+        AppendLog($"[监控页] 收到操作：{cmd}", LogLevel.Info);
+        if (_workerHost is not { IsRunning: true })
+        {
+            AppendLog("[监控页] 当前没有运行中的挂机，操作已忽略", LogLevel.Info);
+            return;
+        }
+        switch (cmd)
+        {
+            case "pause":
+                if (!_paused) await TogglePauseAsync();
+                break;
+            case "resume":
+                if (_paused) await TogglePauseAsync();
+                break;
+            case "stop":
+                await StopScenarioAsync();
+                break;
+            case "step":
+                if (_paused) await _workerHost.SendStepAsync();
+                break;
+        }
+    }
 
     private async void BtnPause_Click(object sender, RoutedEventArgs e)
         => await TogglePauseAsync();
+
+    /// <summary>单步：暂停状态下让 Worker 走一拍（观察 + 决策），随后继续保持暂停。</summary>
+    private async void BtnStep_Click(object sender, RoutedEventArgs e)
+    {
+        if (_workerHost is not { IsRunning: true })
+        {
+            AppendLog("单步：当前没有运行中的挂机。", LogLevel.Info);
+            return;
+        }
+        if (!_paused)
+        {
+            AppendLog("单步：请先暂停（单步只用于暂停状态下看一拍）。", LogLevel.Info);
+            return;
+        }
+        try
+        {
+            await _workerHost.SendStepAsync();
+            AppendLog("单步：已请求执行一拍。", LogLevel.Info);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"单步命令发送失败：{ex.Message}", LogLevel.Error);
+        }
+    }
 
     private void ResetButtons()
     {
@@ -506,6 +592,7 @@ public partial class MainWindow : Window
         BtnPause.IsEnabled = false;
         _paused = false;
         _activeStartBtn = null;
+        _activeMode = "";
         RefreshRunButtons();
         RbCn.IsEnabled = RbIntl.IsEnabled = true;
         _statsTimer.Stop();
@@ -554,6 +641,8 @@ public partial class MainWindow : Window
         _previewTimer.Stop();
         _statsTimer.Stop();
         _hotkey.Dispose();
+        try { _monitor?.Dispose(); } catch { }
+        _monitor = null;
         // 先杀 Worker（虚拟手柄随引擎停止断开），再走停靠还原——
         // ★必须先于停靠还原：Worker 里的停靠看门狗存活期间会把刚还原的窗口再移出屏幕，
         //   而还原记录已被删除，游戏就永远留在屏幕外（挂机中直接关主窗口的实测路径）

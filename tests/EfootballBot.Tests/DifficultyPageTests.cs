@@ -23,7 +23,7 @@ public class DifficultyPageTests
         System.Runtime.InteropServices.Marshal.Copy(bgra.Data, data, 0, byteCount);
         var frame = new FrameData(data, mat.Width, mat.Height, 0);
         using var ocr = new OcrRecognizer();
-        var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var ocrRes = TestOcr.Run(ocr, frame);
         using var det = new YoloDetector(
             Path.Combine(AppContext.BaseDirectory, "models", "yolo", "yolo26n.onnx"),
             Path.Combine(AppContext.BaseDirectory, "models", "yolo", "classes.txt"),

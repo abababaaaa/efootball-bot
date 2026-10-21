@@ -26,7 +26,7 @@ public class KeyMatchPageTests
         var data = new byte[byteCount];
         System.Runtime.InteropServices.Marshal.Copy(bgra.Data, data, 0, byteCount);
         using var ocr = new OcrRecognizer();
-        return ocr.RecognizeAsync(new FrameData(data, mat.Width, mat.Height, 0)).GetAwaiter().GetResult();
+        return TestOcr.Run(ocr, new FrameData(data, mat.Width, mat.Height, 0));
     }
 
     [Fact]

@@ -13,14 +13,29 @@ public sealed class HumanPacer
     /// <summary>每次按键插入「犹豫」的概率（约每 50 次操作一次）。</summary>
     public const double DefaultHesitationProbability = 0.02;
 
+    /// <summary>
+    /// 相邻采样之间的「惯性」φ（AR(1) 自相关系数）。真实操作是成串的——
+    /// 手顺的时候连续几下都快、卡顿时连续几下都慢，而独立同分布的对数正态虽然
+    /// 单点分布正确，但在「序列」维度上一眼可辨（自相关恒为 0）。
+    /// z_t = φ·z_{t-1} + √(1-φ²)·ε 保持单位方差不变：只增加序列相关性，
+    /// 不改变单点分布（原有的中位数/长尾/滤波阈值全部不变）。
+    /// </summary>
+    public const double DefaultMomentum = 0.35;
+
     private readonly double _sigma;
     private readonly double _hesitationP;
+    private readonly double _momentum;
     private readonly Random _rnd;
 
-    public HumanPacer(double sigma = DefaultSigma, double hesitationProbability = DefaultHesitationProbability, Random? rnd = null)
+    private double _lastZ;
+    private bool _hasZ;
+
+    public HumanPacer(double sigma = DefaultSigma, double hesitationProbability = DefaultHesitationProbability,
+        Random? rnd = null, double momentum = DefaultMomentum)
     {
         _sigma = Math.Clamp(sigma, 0.05, 1.0);
         _hesitationP = Math.Clamp(hesitationProbability, 0.0, 1.0);
+        _momentum = Math.Clamp(momentum, 0.0, 0.95);
         _rnd = rnd ?? new Random();
     }
 
@@ -31,7 +46,7 @@ public sealed class HumanPacer
     public int Sample(int baseMs, int floorMs = 40, int capMs = 4000)
     {
         if (baseMs <= 0) return baseMs;
-        int ms = (int)Math.Round(baseMs * Math.Exp(Normal() * _sigma));
+        int ms = (int)Math.Round(baseMs * Math.Exp(NextZ() * _sigma));
         return Math.Clamp(ms, Math.Min(floorMs, baseMs), Math.Max(capMs, baseMs));
     }
 
@@ -41,7 +56,7 @@ public sealed class HumanPacer
         int lo = Math.Min(minMs, maxMs), hi = Math.Max(minMs, maxMs);
         if (hi <= lo) return lo;
         double mid = Math.Sqrt((double)lo * hi);
-        int ms = (int)Math.Round(mid * Math.Exp(Normal() * _sigma));
+        int ms = (int)Math.Round(mid * Math.Exp(NextZ() * _sigma));
         return Math.Clamp(ms, lo, hi);
     }
 
@@ -57,5 +72,18 @@ public sealed class HumanPacer
         double u1 = 1.0 - _rnd.NextDouble(); // 避开 log(0)
         double u2 = _rnd.NextDouble();
         return Math.Sqrt(-2.0 * Math.Log(u1)) * Math.Sin(2.0 * Math.PI * u2);
+    }
+
+    /// <summary>
+    /// 带惯性的标准正态采样：AR(1) 递推，方差保持为 1（φ=0 时退化为独立同分布）。
+    /// </summary>
+    private double NextZ()
+    {
+        double z = Normal();
+        if (_momentum > 0 && _hasZ)
+            z = _momentum * _lastZ + Math.Sqrt(1.0 - _momentum * _momentum) * z;
+        _lastZ = z;
+        _hasZ = true;
+        return z;
     }
 }

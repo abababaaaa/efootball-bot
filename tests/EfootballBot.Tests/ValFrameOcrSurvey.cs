@@ -42,7 +42,7 @@ public class ValFrameOcrSurvey
             System.Runtime.InteropServices.Marshal.Copy(bgra.Data, data, 0, byteCount);
             var frame = new FrameData(data, mat.Width, mat.Height, 0);
             var dets = det.Detect(frame);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
             var screen = MyLeagueBrain.Classify(dets, ocrRes);
             bool ml = ocrRes.ContainsJoined("我的联赛");
             bool match = ocrRes.ContainsJoined("比赛");

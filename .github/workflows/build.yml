@@ -93,6 +93,35 @@ jobs:
           draft: false
           prerelease: ${{ steps.meta.outputs.prerelease }}
 
+      # ---- 差量更新：对「上一个 Release 的 exe」生成一跳补丁，作为独立资产上传 ----
+      # 客户端（UpdateApplier.TryDeltaAsync）优先下 patch-<旧>-to-<新>.bin，产物 SHA256 必须与
+      # 整包一致才使用，任何失败自动回退整包下载。实测 119MB→119MB 的版本跳变补丁约 4MB（3.3%）。
+      - name: Build delta patch from previous release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $cur = '${{ github.ref_name }}'.TrimStart('v')
+          $prevTag = $null
+          try {
+            $rels = gh release list --limit 20 --json tagName | ConvertFrom-Json
+            $prevTag = ($rels | Where-Object { $_.tagName -ne '${{ github.ref_name }}' } | Select-Object -First 1).tagName
+          } catch { Write-Host "list releases failed: $_" }
+          if (-not $prevTag) { Write-Host '没有上一个 Release，跳过差量补丁'; exit 0 }
+          $prev = $prevTag.TrimStart('v')
+          Write-Host "prev=$prev cur=$cur"
+          New-Item -ItemType Directory -Force prev | Out-Null
+          gh release download $prevTag --pattern EfootballBot.exe --dir prev --clobber
+          if (-not (Test-Path 'prev/EfootballBot.exe')) {
+            Write-Host '上一版没有裸 exe 资产（旧包为 zip），跳过差量补丁'
+            exit 0
+          }
+          $name = "patch-$prev-to-$cur.bin"
+          dotnet run --project tools/PatchGen -c Release -- prev/EfootballBot.exe release-artifact/EfootballBot.exe "release-artifact/$name"
+          gh release upload '${{ github.ref_name }}' "release-artifact/$name" --clobber
+          Write-Host "patch asset uploaded: $name"
+
       # SHA256 写入 Release 正文：更新器下载完成后按它校验完整性——加速镜像被篡改/反代吐
       # 错误页/发错版本都因哈希不匹配被弃用并切换下一通道。正文经 api.github.com 直读，与
       # 镜像分属不同信任域，不被中间人污染。

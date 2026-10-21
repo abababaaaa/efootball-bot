@@ -17,7 +17,7 @@
     <!-- 测试版约定：4 段版本号（如 2.0.5.1）+ 同名 4 段 tag（v2.0.5.1）→ CI 按 pre-release 发布，
          更新器 Version.TryParse 原生支持、仅「包含测试版」开启的用户可见；迭代测试版递增第 4 段，
          正式版顺延三段号（2.0.6）。带横杠的 tag（v2.0.5-beta1）不可用——Version.TryParse 解析失败 -->
-    <Version>3.4.0.0</Version>
+    <Version>4.0.0.0</Version>
     <Product>eFootball 挂机助手</Product>
     <Company>EfootballBot</Company>
     <InvariantGlobalization>false</InvariantGlobalization>
@@ -66,11 +66,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- PP-OCRv6-small 多语言识别模型（简繁英日，约 30MB），随程序松散输出到 models/v6；
-         单文件发布时不嵌入 exe，避免启动时整包解压到临时目录 -->
+    <!-- PP-OCRv6-small 多语言识别模型（简繁英日，约 35MB）。
+         默认：单文件发布时随 IncludeAllContentForSelfExtract 内嵌进 exe（一个文件拷走就能用）。
+         瘦身发布：dotnet publish ... -p:ExternalModels=true → models 输出为 exe 同级的 models\
+         目录，exe 约小 30MB；运行时按需从 R2 下载（见 ModelPack）。 -->
     <Content Include="models\**\*.*">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
       <CopyToPublishDirectory>PreserveNewest</CopyToPublishDirectory>
+      <ExcludeFromSingleFile Condition="'$(ExternalModels)' == 'true'">true</ExcludeFromSingleFile>
     </Content>
   </ItemGroup>
 
@@ -86,12 +89,12 @@
     </EmbeddedResource>
   </ItemGroup>
 
-  <!-- RapidOcrNet 的 build target 在 Publish 后无条件把 models/v5 松散复制到发布目录；
-       v5 四个模型已收入项目 models/v5（单文件发布时随 models\** 内嵌进 exe）。
-       单文件发布时删除这份重复的松散副本，保证输出目录只有一个 exe；普通文件夹发布保留。 -->
+  <!-- RapidOcrNet 的 build target 在 Publish 后无条件把 models/v5 松散复制到发布目录。
+       默认（内嵌模型）：单文件发布删除这份松散副本，保证输出目录只有一个 exe。
+       瘦身发布（-p:ExternalModels=true）：保留 models\ 目录，与 88MB 的 exe 一起分发
+       （模型不随 exe 更新，日常升级只需下 exe）。 -->
   <Target Name="RemoveDuplicateV5ModelsFromSingleFile" AfterTargets="CopyModelsPublish"
-          Condition="'$(PublishSingleFile)' == 'true'">
-    <!-- v5 包副本删除；v6 由项目 Content 内嵌不松散输出，models 目录在单文件发布下不应存在，整体删除 -->
+          Condition="'$(PublishSingleFile)' == 'true' and '$(ExternalModels)' != 'true'">
     <RemoveDir Directories="$(PublishDir)models" Condition="Exists('$(PublishDir)models')" />
   </Target>
 

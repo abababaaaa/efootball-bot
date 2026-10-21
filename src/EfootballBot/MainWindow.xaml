@@ -398,6 +398,11 @@
                             <Button x:Name="BtnPause" Content="未开始" Style="{StaticResource DangerBtn}"
                                     Width="210" Height="34" FontSize="13" Margin="0,8,0,0"
                                     IsEnabled="False" Click="BtnPause_Click"/>
+                            <!-- 单步：暂停状态下走一拍（陌生界面排障），不改变暂停状态 -->
+                            <Button x:Name="BtnStep" Content="单步走一拍（暂停中）" Style="{StaticResource GhostBtn}"
+                                    Width="210" Height="30" FontSize="12.5" Margin="0,6,0,0"
+                                    IsEnabled="False" Click="BtnStep_Click"
+                                    ToolTip="暂停时执行一轮「观察 + 决策」后继续暂停：看 Bot 对当前画面打算做什么，且只做一步"/>
                         </StackPanel>
                     </Grid>
 
@@ -1293,9 +1298,32 @@
                             </TextBlock>
                         </StackPanel>
                     </Border>
-                    </StackPanel>
 
-                    <!-- ============ 二级页：挂机与日志 ============ -->
+                    <!-- ===== 手柄驱动自检 ===== -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Text="手柄驱动自检" Style="{StaticResource H2}"/>
+                            </StackPanel>
+                            <TextBlock Text="开始挂机提示「虚拟手柄连接失败」时先点这里：会探测驱动注册项、驱动文件、内核服务与权限，并直接给出下一步动作。"
+                                       TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" FontSize="11.5" MaxWidth="640" Margin="0,0,0,10"/>
+                            <StackPanel Orientation="Horizontal">
+                                <Button x:Name="BtnPadSelfCheck" Content="检测" Style="{StaticResource GhostBtn}"
+                                        Padding="16,6" Click="BtnPadSelfCheck_Click"/>
+                                <Button x:Name="BtnPadSelfFix" Content="一键修复" Style="{StaticResource PrimaryBtn}"
+                                        Padding="16,6" Margin="10,0,0,0" Click="BtnPadSelfFix_Click"/>
+                                <Button x:Name="BtnPadSelfCheckReport" Content="导出报告" Style="{StaticResource GhostBtn}"
+                                        Padding="16,6" Margin="10,0,0,0" Click="BtnPadSelfCheckReport_Click"/>
+                            </StackPanel>
+                            <Border Background="{DynamicResource InputBg}" CornerRadius="8" Padding="12" Margin="0,10,0,0">
+                                <TextBlock x:Name="TxtPadSelfCheckResult" Text="尚未检测。"
+                                           TextWrapping="Wrap" FontSize="12" LineHeight="20"
+                                           Foreground="{DynamicResource TextPrimary}"/>
+                            </Border>
+                        </StackPanel>
+                    </Border>
+                    </StackPanel>
                     <StackPanel x:Name="SetTabDaily" Visibility="Collapsed">
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                         <StackPanel>
@@ -1309,6 +1337,41 @@
                     </Border>
 
                     <!-- （挂机节奏已移至「★重要设定」页） -->
+
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Text="通知与远程监控" Style="{StaticResource H2}"/>
+                            </StackPanel>
+                            <TextBlock Text="挂机结束或异常时推一条消息到你自己的服务（Bark / 飞书 / 钉钉 / ntfy 等）。URL 里含 msg 占位符（花括号包住 msg）时改发 GET；否则 POST JSON。留空 = 不发送。"
+                                       TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" FontSize="11.5" Margin="0,0,0,10"/>
+                            <StackPanel Orientation="Horizontal">
+                                <TextBlock Text="Webhook" Style="{StaticResource FieldLabel}" VerticalAlignment="Center" Width="64"/>
+                                <TextBox x:Name="TxtWebhookUrl" Width="330" Margin="10,0,0,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="实例名" Style="{StaticResource FieldLabel}" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                                <TextBox x:Name="TxtNotifyName" Width="92" Margin="8,0,0,0" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <CheckBox x:Name="ChkNotifyStop" Content="正常停止时通知" IsChecked="True"/>
+                                <CheckBox x:Name="ChkNotifyError" Content="异常停止时通知" IsChecked="True" Margin="18,0,0,0"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                                <CheckBox x:Name="ChkMonitor" Content="开启局域网监控页" IsChecked="False"/>
+                                <TextBlock Text="端口" Style="{StaticResource FieldLabel}" Margin="16,0,0,0" VerticalAlignment="Center"/>
+                                <TextBox x:Name="TxtMonitorPort" Width="66" Margin="8,0,0,0" Text="18321"/>
+                                <TextBlock Text="token" Style="{StaticResource FieldLabel}" Margin="12,0,0,0" VerticalAlignment="Center"/>
+                                <TextBox x:Name="TxtMonitorToken" Width="128" Margin="8,0,0,0"/>
+                            </StackPanel>
+                            <TextBlock Text="监控页：手机连同一 WiFi，打开 http://本机IP:端口/?t=token 即可看状态、暂停/继续/单步。默认关闭；只监听本机网卡，不上传任何数据。"
+                                       TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,8,0,0"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <CheckBox x:Name="ChkDryRun" Content="影子模式（不实际按键，只记录「本来会按什么」）" IsChecked="False"/>
+                            </StackPanel>
+                            <TextBlock Text="影子模式：感知与判定照常运行，手柄输出被拦截并写进日志。用于游戏更新后零风险验证决策，下次开始挂机生效。"
+                                       TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" FontSize="11" Margin="0,6,0,0"/>
+                        </StackPanel>
+                    </Border>
 
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                         <StackPanel>

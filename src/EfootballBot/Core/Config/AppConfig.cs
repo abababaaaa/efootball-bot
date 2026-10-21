@@ -403,10 +403,62 @@ public sealed class ScheduleConfig
 
     /// <summary>启停时间每日随机漂移幅度（分钟）：真人不会每天同一秒上线。</summary>
     public int DriftMinutes { get; set; } = 20;
+
+    /// <summary>
+    /// 随机整日休息概率（0~100，0 = 关闭）。每天按「日期 + 启动盐」确定性抽样：
+    /// 抽中则当天完全不挂机。防的是「每天都挂满同样的时长」这一长期行为指纹——
+    /// 单一账号天天 6 小时比偶尔休息更不像真人。
+    /// </summary>
+    public int RestDayChancePercent { get; set; } = 0;
+}
+
+/// <summary>
+/// 完成/异常通知（Webhook）：POST 一段 JSON 到指定 URL。
+/// 兼容 Bark / 飞书 / 钉钉群机器人 / Telegram Bot / ntfy 等常见「一个 URL 搞定」的服务。
+/// 默认关闭且 URL 为空 —— 属于用户主动开启的外发行为，绝不自作主张联网。
+/// </summary>
+public sealed class NotifyConfig
+{
+    /// <summary>完整 Webhook URL（含 token/路径）。空 = 不发送。</summary>
+    public string WebhookUrl { get; set; } = "";
+
+    /// <summary>挂机正常停止（用户点停止 / 打完场次）时通知。</summary>
+    public bool OnStop { get; set; } = true;
+
+    /// <summary>异常终止（捕获熔断、窗口消失、崩溃兜底停止）时通知。建议保持开启。</summary>
+    public bool OnError { get; set; } = true;
+
+    /// <summary>通知内容里带的实例名（多开时区分是哪个号）。</summary>
+    public string InstanceName { get; set; } = "";
+}
+
+/// <summary>
+/// 局域网监控页（默认关闭）：手机/平板同 WiFi 打开即可查看运行状态并暂停/继续。
+/// 只监听本机网卡，页面需要 token 才能操作；不会上传任何数据。
+/// </summary>
+public sealed class MonitorConfig
+{
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>监听端口（http://本机IP:端口/）。</summary>
+    public int Port { get; set; } = 18321;
+
+    /// <summary>访问 token（URL 里 ?t=... 或页面输入）；空 = 只允许查看、禁止操作。</summary>
+    public string Token { get; set; } = "";
 }
 
 public sealed class AppConfig
 {
+    /// <summary>
+    /// 配置结构版本。用于「删功能后不再靠枚举兼容 hack 养老」：
+    /// 读取旧版本时由 <see cref="Migrate"/> 逐级升级（升到当前版本后立刻回写）。
+    /// 1 = 隐式老版本（在引入本字段之前写出的配置）。
+    /// </summary>
+    public const int CurrentSchemaVersion = 3;
+
+    [JsonPropertyName("SchemaVersion")]
+    public int SchemaVersion { get; set; } = CurrentSchemaVersion;
+
     public string Theme { get; set; } = "Dark"; // Dark / Light / DeepBlue
     /// <summary>OCR 识别引擎：SimdPaddle（纯托管 PP-OCR，默认）/ RapidV6（ONNX Runtime CPU）。
     /// 旧值 Windows(1)=已删除的 Windows 内置 OCR，读取后按 SimdPaddle 处理。下次启动挂机生效。</summary>
@@ -480,6 +532,15 @@ public sealed class AppConfig
     public BackgroundParkingConfig BackgroundParking { get; set; } = new();
     public ScheduleConfig Schedule { get; set; } = new();
 
+    // —— 影子模式：不实际按键，只把「本来会按什么」写进日志 ——
+    /// <summary>影子模式（dry-run）：感知/判定照常跑，手柄输出被吞掉并记日志。
+    /// 用于新 UI 版本上零风险验证决策、以及产出「Bot 想做什么」的排障证据。</summary>
+    public bool DryRun { get; set; } = false;
+
+    // —— 完成/异常通知 与 局域网监控 ——
+    public NotifyConfig Notify { get; set; } = new();
+    public MonitorConfig Monitor { get; set; } = new();
+
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         WriteIndented = true,
@@ -499,10 +560,22 @@ public sealed class AppConfig
         {
             if (File.Exists(ConfigPath))
             {
-                var cfg = JsonSerializer.Deserialize<AppConfig>(File.ReadAllText(ConfigPath), JsonOpts) ?? new AppConfig();
+                string text = File.ReadAllText(ConfigPath);
+                var cfg = JsonSerializer.Deserialize<AppConfig>(text, JsonOpts) ?? new AppConfig();
+                // 老配置没有 SchemaVersion 字段：反序列化会保留属性默认值（=当前版本），
+                // 单看属性无法区分「新配置」与「老配置」。以原始文本为准判定。
+                if (!text.Contains("\"SchemaVersion\"", StringComparison.Ordinal))
+                    cfg.SchemaVersion = 1;
+                bool upgraded = cfg.SchemaVersion < CurrentSchemaVersion;
+                cfg.Migrate();
                 cfg.Timing.MigrateIdleTapDefaults();
                 cfg.HidHide.MigrateDefaults();
                 cfg.Pad.MigrateFrom(cfg.ModuleFallback);
+                if (upgraded)
+                {
+                    // 升级结果立即回写：下次启动不再重复走迁移，也让用户能看到新增字段
+                    try { cfg.Save(); } catch { /* 回写失败不影响本次运行 */ }
+                }
                 return cfg;
             }
         }
@@ -519,6 +592,27 @@ public sealed class AppConfig
             catch { /* 留档失败不阻塞启动 */ }
         }
         return new AppConfig();
+    }
+
+    /// <summary>
+    /// 旧配置逐级升级到 <see cref="CurrentSchemaVersion"/>。
+    /// 原则：只做「结构性补全 + 已删除功能的等价替换」，绝不重置用户已有取值。
+    /// </summary>
+    public void Migrate()
+    {
+        if (SchemaVersion >= CurrentSchemaVersion) return;
+
+        if (SchemaVersion < 2)
+        {
+            // v1 → v2：无结构变更。Windows 内置 OCR 引擎已在 OcrEngine 读取处静默迁移为 SimdPaddle，
+            // HidHide 键名兼容等历史兼容逻辑各自保留在对应配置类里。
+        }
+        if (SchemaVersion < 3)
+        {
+            // v2 → v3：新增 DryRun / Notify / Monitor 段，默认值即正确行为（全关），无需搬运数据。
+        }
+
+        SchemaVersion = CurrentSchemaVersion;
     }
 
     public void Save()

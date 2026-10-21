@@ -31,7 +31,7 @@ public class MatchHubNewUiRealFrameTests
         // 无 YOLO 检测（空 dets）也要正判——比生产环境（有 btn_back 框）更严
         var frame = LoadFrame("matchhub_new_ui_20261021.jpg");
         using var ocr = new OcrRecognizer(OcrEngineKind.SimdPaddle, preferInt8: false);
-        var res = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var res = TestOcr.Run(ocr, frame);
 
         var ml = MyLeagueBrain.Classify(
             new System.Collections.Generic.List<EfootballBot.Core.Vision.Yolo.YoloDetection>(), res);
@@ -44,7 +44,7 @@ public class MatchHubNewUiRealFrameTests
         // 未聚焦时最右 我的联赛 卡被裁掉（只读出 我/自 碎片）→ 必须右移，不得直接按 A
         var frame = LoadFrame("matchhub_new_ui_20261021.jpg");
         using var ocr = new OcrRecognizer(OcrEngineKind.SimdPaddle, preferInt8: false);
-        var res = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var res = TestOcr.Run(ocr, frame);
 
         var act = MyLeagueBrain.Decide(MlScreen.MatchHub, res, screenStreak: 0);
         Assert.Equal(MlActionKind.PadMoveRight, act.Kind);
@@ -56,7 +56,7 @@ public class MatchHubNewUiRealFrameTests
         // 旧 UI 实机帧不回归：磁贴词 + 精确标题路径仍有效
         var frame = LoadFrame("matchhub_user_1.png");
         using var ocr = new OcrRecognizer(OcrEngineKind.SimdPaddle, preferInt8: false);
-        var res = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var res = TestOcr.Run(ocr, frame);
 
         var ml = MyLeagueBrain.Classify(
             new System.Collections.Generic.List<EfootballBot.Core.Vision.Yolo.YoloDetection>(), res);

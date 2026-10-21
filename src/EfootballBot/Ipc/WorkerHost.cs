@@ -93,8 +93,10 @@ public sealed class WorkerHost : IDisposable
 
         // 管道名用 GUID 并通过命令行传给 Worker，避免猜测子进程 PID
         string pipeName = $"EfootballBot-Worker-{Guid.NewGuid():N}";
+        // 多开：Worker 必须继承 GUI 的档案名，否则它会读写默认 data\ 下的配置
+        string ProfileArg = AppPaths.Profile.Length == 0 ? "" : $" --profile {AppPaths.Profile}";
 
-        var psi = new ProcessStartInfo(exePath, $"--worker {mode} --pipe {pipeName}")
+        var psi = new ProcessStartInfo(exePath, $"--worker {mode} --pipe {pipeName}{ProfileArg}")
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -368,6 +370,9 @@ public sealed class WorkerHost : IDisposable
 
     /// <summary>暂停/继续场景循环（暂停时 Worker 清空手柄输出并停止观察与操作）。</summary>
     public Task SendPauseAsync(bool on) => SendAsync(PipeProtocol.CmdPause(on));
+
+    /// <summary>单步执行一拍（仅暂停状态有效）：观察一次 + 场景决策一次后继续暂停。</summary>
+    public Task SendStepAsync() => SendAsync(PipeProtocol.CmdStep());
 
     /// <summary>枚举 \\.\pipe\ 判断 Worker 管道是否已存在（避免在服务器未监听时空连产生幽灵句柄）。</summary>
     private static bool PipeExists(string pipeName)

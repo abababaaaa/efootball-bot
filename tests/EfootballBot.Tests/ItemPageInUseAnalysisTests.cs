@@ -30,7 +30,7 @@ public class ItemPageInUseAnalysisTests
             int byteCount = (int)(bgra.Total() * bgra.ElemSize());
             var data = new byte[byteCount];
             System.Runtime.InteropServices.Marshal.Copy(bgra.Data, data, 0, byteCount);
-            var ocrRes = ocr.RecognizeAsync(new FrameData(data, mat.Width, mat.Height, 0)).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, new FrameData(data, mat.Width, mat.Height, 0));
 
             _out.WriteLine($"==== {name} ({mat.Width}x{mat.Height}) ====");
             foreach (var l in ocrRes.Lines)

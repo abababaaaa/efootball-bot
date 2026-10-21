@@ -125,7 +125,7 @@ public static class WeeklyBrain
         foreach (var w in ocr.Words)
         {
             if (w.H < 0.08 || w.CenterY < 0.15 || w.CenterY > 0.40 || w.CenterX >= 0.72) continue;
-            var t = OcrText.Norm(w.Text).ToUpper().Replace("O", "0");
+            var t = w.NormText.ToUpper().Replace("O", "0");
             if (t.Length != 2 || !t.All(char.IsDigit) || t[0] == '0' && t[1] == '0') continue;
             if (w.CenterX < 0.33) left = true; else right = true;
         }
@@ -149,7 +149,7 @@ public static class WeeklyBrain
         foreach (var w in ocr.Words)
         {
             if (w.H < 0.08 || w.CenterY < 0.15 || w.CenterY > 0.40 || w.CenterX >= 0.72) continue;
-            var t = OcrText.Norm(w.Text).ToUpper().Replace("O", "0");
+            var t = w.NormText.ToUpper().Replace("O", "0");
             if (t.Length != 2 || !t.All(char.IsDigit)) continue;
             int index = int.Parse(t);
             if (index < 1 || list.Any(c => c.Index == index)) continue;
@@ -183,24 +183,9 @@ public static class WeeklyBrain
         return CountGreen(frame, right - 0.080, right - 0.005, 0.160, 0.280) >= 40;
     }
 
-    /// <summary>区域内灰色像素计数（R≈G≈B、亮度 90~220；2px 步进采样）。</summary>
+    /// <summary>区域内灰色像素计数（共享实现见 <see cref="RegionProbe.CountGray"/>）。</summary>
     private static int CountGray(FrameData f, double x0, double x1, double y0, double y1)
-    {
-        var bgra = f.Bgra;
-        int w = f.Width, h = f.Height;
-        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return 0;
-        int count = 0;
-        for (int y = Math.Max(0, (int)(h * y0)); y < Math.Min(h, (int)(h * y1)); y += 2)
-            for (int x = Math.Max(0, (int)(w * x0)); x < Math.Min(w, (int)(w * x1)); x += 2)
-            {
-                int i = (y * w + x) * 4;
-                int b = bgra[i], g = bgra[i + 1], r = bgra[i + 2];
-                int lum = (r + g + b) / 3;
-                int mx = Math.Max(r, Math.Max(g, b)), mn = Math.Min(r, Math.Min(g, b));
-                if (mx - mn < 30 && lum >= 90 && lum <= 220) count++;
-            }
-        return count;
-    }
+        => RegionProbe.CountGrayRef(f, x0, x1, y0, y1);
 
     /// <summary>
     /// 挑战卡详情页（活动主页样式）通关判定：右栏「胜场」计分器读满——
@@ -209,7 +194,7 @@ public static class WeeklyBrain
     /// 正常周活动主页右栏是积分值（2030/330 等非等位数），永不命中。
     /// </summary>
     public static bool ChallengeProgressDone(OcrResult ocr)
-        => ocr.Words.Any(w => w.CenterX > 0.65 && w.CenterY < 0.35 && IsFullProgress(OcrText.Norm(w.Text)));
+        => ocr.Words.Any(w => w.CenterX > 0.65 && w.CenterY < 0.35 && IsFullProgress(w.NormText));
 
     private static bool IsFullProgress(string norm)
         => norm.Length is >= 2 and <= 4 && norm.All(char.IsDigit) &&
@@ -297,8 +282,8 @@ public static class WeeklyBrain
     private static double? LabelWordY(OcrResult ocr, string keyword, bool exact)
         => ocr.Words
             .FirstOrDefault(w => exact
-                ? OcrText.Norm(w.Text) == keyword
-                : OcrText.Norm(w.Text).Contains(keyword))
+                ? w.NormText == keyword
+                : w.NormText.Contains(keyword))
             ?.CenterY;
 
     // ---------------- 完成态探针（2026-10-13 用户实机截图校准） ----------------
@@ -307,21 +292,9 @@ public static class WeeklyBrain
     /// 第 4 卡大部分在屏幕外，勾区采样不到自然返回 false（进入后由主页完成态判定兜底）。</summary>
     private static readonly double[] CardRightEdges = { 0.352, 0.643, 0.946, 1.24 };
 
-    /// <summary>区域内绿色像素计数（绿底白勾：G&gt;100 且显著高于 R/B；2px 步进采样）。</summary>
+    /// <summary>区域内绿色像素计数（共享实现见 <see cref="RegionProbe.CountGreen"/>）。</summary>
     private static int CountGreen(FrameData f, double x0, double x1, double y0, double y1)
-    {
-        var bgra = f.Bgra;
-        int w = f.Width, h = f.Height;
-        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return 0;
-        int count = 0;
-        for (int y = Math.Max(0, (int)(h * y0)); y < Math.Min(h, (int)(h * y1)); y += 2)
-            for (int x = Math.Max(0, (int)(w * x0)); x < Math.Min(w, (int)(w * x1)); x += 2)
-            {
-                int i = (y * w + x) * 4;
-                if (bgra[i + 1] > 100 && bgra[i + 1] > bgra[i + 2] + 40 && bgra[i + 1] > bgra[i] + 40) count++;
-            }
-        return count;
-    }
+        => RegionProbe.CountGreenRef(f, x0, x1, y0, y1);
 
     /// <summary>
     /// 活动列表卡右上角绿色勾（该活动主要奖励已完成，不进入）：勾形徽章固定在卡右上角。

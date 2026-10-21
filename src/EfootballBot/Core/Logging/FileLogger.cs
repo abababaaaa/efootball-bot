@@ -25,6 +25,23 @@ public sealed class FileLogger : IDisposable
     private LogLevel _minLevel = LogLevel.Debug;
     private bool _enabled = true;
 
+    /// <summary>
+    /// 单段日志文件的大小上限。Debug 级 8 小时会话可写出数十万行、十几 MB，
+    /// 记事本/反馈包都难以处理；超限后滚动到下一段（同一次会话，文件名 -r1/-r2…），
+    /// 保证「最近的日志」永远在一个可打开的大小内。滚动段同样以 bot- 命名，
+    /// 受启动时的「保留天数 + 保留数量」清理策略管辖。
+    /// </summary>
+    private const long RotateAtBytes = 32L * 1024 * 1024;
+
+    private long _bytesWritten;   // 当前段已写字节数（UTF-8）
+    private int _rotateIndex;     // 本次会话的滚动段号（0 = 首段）
+    private string _sessionBase = ""; // bot-YYYYMMDD-HHmmss-PID（滚动段共用前缀）
+    private bool _rotating;       // 滚动中：写头部行时不触发二次滚动
+
+    /// <summary>定时刷盘间隔：AutoFlush=false 下的最大未落盘时长（崩溃最多丢这么多秒）。</summary>
+    private const int FlushIntervalMs = 2000;
+    private Timer? _flushTimer;
+
     private FileLogger() { }
 
     /// <summary>
@@ -58,14 +75,20 @@ public sealed class FileLogger : IDisposable
 
         // 文件名带 PID：GUI 与 Worker 子进程同秒启动时不会撞同名文件
         string filename = $"bot-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}.yml";
+        _sessionBase = Path.GetFileNameWithoutExtension(filename);
+        _rotateIndex = 0;
+        _bytesWritten = 0;
         CurrentLogPath = Path.Combine(LogDir, filename);
         try
         {
             // UTF-8 带 BOM：任何版本的记事本双击打开中文都不乱码
+            // AutoFlush=false + 2s 定时 flush：此前每行都落盘，Debug 级长会话是持续的
+            // 小写入风暴（挂机 8h 的 IO 与磁盘唤醒都白费）；改为定时刷盘后，
+            // Warn/Error 仍然立即 flush（崩溃前最后一条必在盘上）。
             _writer = new StreamWriter(CurrentLogPath, append: false,
                     encoding: new UTF8Encoding(encoderShouldEmitUTF8Identifier: true))
             {
-                AutoFlush = true
+                AutoFlush = false
             };
         }
         catch
@@ -96,6 +119,19 @@ public sealed class FileLogger : IDisposable
             }
             catch { }
         }
+
+        // 定时刷盘（AutoFlush=false 的配套）：2s 一次，代价可忽略，崩溃最多丢最后 2s
+        _flushTimer?.Dispose();
+        _flushTimer = new Timer(_ => FlushSafe(), null, FlushIntervalMs, FlushIntervalMs);
+    }
+
+    /// <summary>把缓冲区刷到磁盘（异常静默：磁盘满/句柄失效都不允许影响挂机）。</summary>
+    private void FlushSafe()
+    {
+        lock (_lock)
+        {
+            try { _writer?.Flush(); } catch { }
+        }
     }
 
     /// <summary>YAML 双引号标量转义（反斜杠/引号；路径与命令行必含反斜杠）。</summary>
@@ -124,6 +160,9 @@ public sealed class FileLogger : IDisposable
             try { WriteYamlLine(level, fullMsg); }
             catch { /* 磁盘满/句柄关闭等异常静默 */ }
         }
+
+        // Warn/Error 立即落盘：崩溃前最后几条关键信息绝不能停在缓冲区里
+        if (Severity(level) >= 2) FlushSafe();
     }
 
     private void WriteYamlLine(LogLevel level, string msg)
@@ -140,7 +179,53 @@ public sealed class FileLogger : IDisposable
         // flow mapping，一行一条；msg 做 YAML 双引号转义
         string escaped = msg.Replace("\\", "\\\\").Replace("\"", "\\\"")
                             .Replace("\r", " ").Replace("\n", " ");
-        _writer?.WriteLine($"- {{time: \"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\", level: \"{levelTag}\", msg: \"{escaped}\"}}");
+        string line = $"- {{time: \"{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}\", level: \"{levelTag}\", msg: \"{escaped}\"}}";
+        if (_writer is null) return;
+        _writer.WriteLine(line);
+
+        if (_rotating) return;
+        _bytesWritten += Encoding.UTF8.GetByteCount(line) + 2; // + 换行
+        if (_bytesWritten >= RotateAtBytes) Rotate();
+    }
+
+    /// <summary>
+    /// 日志滚动：关闭当前段，以 -rN 后缀开新段并写入续段头。
+    /// 只影响「写到哪个文件」，不改变写入内容与级别过滤；任何失败都静默降级为停止写文件
+    /// （日志问题绝不允许影响挂机）。
+    /// </summary>
+    private void Rotate()
+    {
+        _rotating = true;
+        try
+        {
+            try { _writer?.Flush(); _writer?.Close(); } catch { }
+            _writer = null;
+
+            _rotateIndex++;
+            string name = $"{_sessionBase}-r{_rotateIndex}.yml";
+            string path = Path.Combine(LogDir, name);
+            _writer = new StreamWriter(path, append: false,
+                    encoding: new UTF8Encoding(encoderShouldEmitUTF8Identifier: true))
+            {
+                AutoFlush = false
+            };
+            CurrentLogPath = path;
+            _bytesWritten = 0;
+            _writer.WriteLine("# eFootball 挂机助手运行日志（同会话续段，达到单段大小上限后滚动）");
+            _writer.WriteLine($"session: \"{name}\"");
+            _writer.WriteLine($"continued_from: \"{_sessionBase}\"");
+            _writer.WriteLine("logs:");
+            _writer.Flush();
+        }
+        catch
+        {
+            _writer = null;
+            CurrentLogPath = "";
+        }
+        finally
+        {
+            _rotating = false;
+        }
     }
 
     /// <summary>严重度等级：数字越大越严重（Debug=0 最详细最轻）。</summary>
@@ -204,6 +289,10 @@ public sealed class FileLogger : IDisposable
 
     public void Dispose()
     {
+        // 先停定时器（其回调会取 _lock，不能在持锁时 Dispose 它——Timer.Dispose 会等待回调结束）
+        try { _flushTimer?.Dispose(); } catch { }
+        _flushTimer = null;
+
         lock (_lock)
         {
             try

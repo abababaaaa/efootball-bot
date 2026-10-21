@@ -76,14 +76,8 @@ public static class PeakLadderBrain
         return PlScreen.None;
     }
 
-    /// <summary>顶部页签行（y&lt;0.15 的词拼接）是否同时含 推荐/签约/商店。</summary>
-    public static bool HasTopTabs(OcrResult ocr)
-    {
-        string top = string.Join("|", ocr.Words
-            .Where(w => w.CenterY < 0.15)
-            .Select(w => w.Text.Replace(" ", "")));
-        return top.Contains("推荐") && top.Contains("签约") && top.Contains("商店");
-    }
+    /// <summary>顶部页签行通用特征（共享实现见 <see cref="RegionProbe.HasTopTabs"/>）。</summary>
+    public static bool HasTopTabs(OcrResult ocr) => RegionProbe.HasTopTabs(ocr);
 
     // ---------------- 场次解析 ----------------
 
@@ -117,7 +111,7 @@ public static class PeakLadderBrain
         {
             if (w.CenterY < 0.45 || w.CenterY > 0.88) continue;
             if (w.CenterX <= 0.5) continue;
-            if (OcrText.Norm(w.Text).Contains("天梯巅峰赛")) return w;
+            if (w.NormText.Contains("天梯巅峰赛")) return w;
         }
         return null;
     }
@@ -132,7 +126,7 @@ public static class PeakLadderBrain
         foreach (var w in ocr.MergedWords)
         {
             if (w.CenterY >= 0.45) continue;
-            if (!OcrText.Norm(w.Text).Contains("前往比赛")) continue;
+            if (!w.NormText.Contains("前往比赛")) continue;
             if (best is null || w.CenterX < best.CenterX) best = w;
         }
         return best;

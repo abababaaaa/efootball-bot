@@ -78,7 +78,9 @@ public static class WorkerProgram
         {
             e.Log += (msg, lv) =>
             {
-                FileLogger.Instance.Write(msg, lv);
+                // 不落盘：同一批消息由 GUI 的 AppendLog 统一写日志文件（Worker 只拥有
+                // 自己的生命周期行）。此前两边各写一份逐字相同的文件，反馈包里同一次
+                // 会话有两份副本，磁盘与打包体积白白翻倍。
                 if (console) Console.WriteLine($"[{lv}] {msg}");
                 _ = SendAsync(PipeProtocol.EvLog(lv.ToString(), msg));
             };
@@ -191,6 +193,13 @@ public static class WorkerProgram
                     // 每次 start 重建引擎（干净状态）
                     engine?.Dispose();
                     var freshCfg = AppConfig.Load(); // 每次 start 读最新配置
+                    // 瘦身发布（ExternalModels）：模型可能不在包里 → 首次开始前按需下载一次。
+                    // 失败不阻断启动：OCR 会给出明确的缺失提示，用户也可手动放 models 目录。
+                    await ModelPack.EnsureAsync((m, lv) =>
+                    {
+                        if (console) Console.WriteLine($"[{lv}] {m}");
+                        _ = SendAsync(PipeProtocol.EvLog(lv.ToString(), m));
+                    });
                     engine = new BotEngine(freshCfg);
                     BridgeEvents(engine);
                     try
@@ -229,6 +238,10 @@ public static class WorkerProgram
                 else if (msg.Cmd == "resume")
                 {
                     engine?.SetPaused(false);
+                }
+                else if (msg.Cmd == "step")
+                {
+                    engine?.RequestStep();
                 }
                 else if (msg.Cmd == "preview")
                 {

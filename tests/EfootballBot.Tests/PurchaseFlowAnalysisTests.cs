@@ -40,7 +40,7 @@ public class PurchaseFlowAnalysisTests
             System.Runtime.InteropServices.Marshal.Copy(bgra.Data, data, 0, byteCount);
             var frame = new FrameData(data, mat.Width, mat.Height, 0);
             var dets = det.Detect(frame);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
 
             _out.WriteLine($"==== purchase_flow_{i} ({mat.Width}x{mat.Height}) ====");
             _out.WriteLine($"YOLO: {string.Join(" ", dets.Where(d => d.Score >= 0.4).Select(d => $"{d.ClassName} {d.Score:F2}"))}");

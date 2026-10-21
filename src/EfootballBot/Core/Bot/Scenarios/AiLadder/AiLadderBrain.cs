@@ -52,7 +52,7 @@ public static class AiLadderBrain
         // （y≈0.7）不会命中；组别主页顶部无中文「联赛」（logo 是英文 EFOOTBALL LEAGUE）。
         bool topTitle = ocr.Lines.Any(l => l.CenterY < 0.2 && l.Text.Contains("联赛"));
         bool topBrand = ocr.MergedWords.Any(w => w.CenterY < 0.2 &&
-            OcrText.Norm(w.Text).Contains("eFootball", StringComparison.OrdinalIgnoreCase));
+            w.NormText.Contains("eFootball", StringComparison.OrdinalIgnoreCase));
         if (topTitle && topBrand)
             return AlScreen.CategorySelect;
 
@@ -72,7 +72,7 @@ public static class AiLadderBrain
         foreach (var w in ocr.MergedWords)
         {
             if (w.CenterY >= 0.22 || w.CenterX >= 0.45) continue;
-            var m = DivisionWord.Match(OcrText.Norm(w.Text));
+            var m = DivisionWord.Match(w.NormText);
             if (m.Success && int.TryParse(m.Groups[1].Value, out int d) && d is >= 1 and <= 10)
                 return d;
         }

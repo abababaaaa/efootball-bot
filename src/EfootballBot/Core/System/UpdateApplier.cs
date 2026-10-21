@@ -74,21 +74,36 @@ public static class UpdateApplier
             Directory.CreateDirectory(tempDir);
             string downloadPath = Path.Combine(tempDir, "download.bin");
 
-            long downloaded = await DownloadAsync(info.DownloadUrls, downloadPath, info.TotalBytes, progress,
-                info.ExpectedSha256);
-            if (downloaded != info.TotalBytes)
-                throw new IOException($"下载不完整：收到 {downloaded} 字节，应为 {info.TotalBytes}");
-            Log($"下载完成：{downloaded} 字节");
+            // ①' 差量优先（最小可用版：只支持「上一版 → 新版」一跳）。
+            //     补丁补齐后必须与整包 SHA256 完全一致才算数；任何失败都静默回退整包下载。
+            string? deltaExe = null;
+            try { deltaExe = await TryDeltaAsync(exePath, info, tempDir, progress); }
+            catch (Exception ex) { Log($"差量更新不可用，改走整包：{ex.Message}"); }
 
-            // ② 取出新版 exe：裸 exe 直接用；zip（≤2.0.2 旧更新器兼容格式，根级单个 exe）
-            //    解压后找根级（或一层子目录内的）exe
-            string newExePath = downloadPath;
-            if (!info.SingleExecutable)
+            string newExePath;
+            if (deltaExe is not null)
             {
-                string extractDir = Path.Combine(tempDir, "extracted");
-                ZipFile.ExtractToDirectory(downloadPath, extractDir);
-                newExePath = FindExtractedExe(extractDir)
-                    ?? throw new InvalidOperationException("zip 中未找到 exe");
+                newExePath = deltaExe;
+                Log("已用差量补丁生成新版本（本次未下载整包）");
+            }
+            else
+            {
+                long downloaded = await DownloadAsync(info.DownloadUrls, downloadPath, info.TotalBytes, progress,
+                    info.ExpectedSha256);
+                if (downloaded != info.TotalBytes)
+                    throw new IOException($"下载不完整：收到 {downloaded} 字节，应为 {info.TotalBytes}");
+                Log($"下载完成：{downloaded} 字节");
+
+                // ② 取出新版 exe：裸 exe 直接用；zip（≤2.0.2 旧更新器兼容格式，根级单个 exe）
+                //    解压后找根级（或一层子目录内的）exe
+                newExePath = downloadPath;
+                if (!info.SingleExecutable)
+                {
+                    string extractDir = Path.Combine(tempDir, "extracted");
+                    ZipFile.ExtractToDirectory(downloadPath, extractDir);
+                    newExePath = FindExtractedExe(extractDir)
+                        ?? throw new InvalidOperationException("zip 中未找到 exe");
+                }
             }
 
             // ③ 原子交换（失败自动回滚，本进程不受影响）
@@ -109,6 +124,93 @@ public static class UpdateApplier
             Log($"更新失败：{ex.Message}");
             return UpdateResult.Error($"更新失败：{ex.Message}");
         }
+    }
+
+    /// <summary>
+    /// 差量更新（最小可用版）：从同一发布源取 <c>patches/patch-{旧版本}-to-{新版本}.bin</c>，
+    /// 对当前 exe 应用补丁，产出的文件必须与整包 SHA256 完全一致才返回。
+    ///
+    /// 返回 null 表示「没有差量可用」——没配 SHA256、没有补丁、补丁下载/应用/校验任一失败。
+    /// 调用方在这种情况直接走整包，用户无感。这正是设计意图：差量只加速，不承担正确性。
+    /// </summary>
+    private static async Task<string?> TryDeltaAsync(string exePath, UpdateInfo info, string tempDir,
+        IProgress<(long Bytes, long Total)>? progress)
+    {
+        // 没有期望哈希就无法证明补丁产物正确 → 不做差量（宁可多下 100MB，不能换上一个坏 exe）
+        if (string.IsNullOrWhiteSpace(info.ExpectedSha256)) return null;
+
+        string from = Updater.FormatVersion(Updater.CurrentVersion);
+        string to = (info.Version?.ToString() ?? "").TrimStart('v', 'V');
+        if (string.IsNullOrEmpty(from) || string.IsNullOrEmpty(to) || from == to) return null;
+
+        string patchName = $"patch-{from}-to-{to}.bin";
+        var urls = new List<string>();
+        foreach (var u in info.DownloadUrls)
+        {
+            if (!u.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) continue;
+            int slash = u.LastIndexOf('/');
+            if (slash <= 0) continue;
+            string dir = u[..(slash + 1)];
+            // 两种发布约定都试：
+            // ① GitHub Release 附件：与 exe 同目录的独立资产 <dir>/patch-xxx.bin
+            // ② R2 桶目录：<dir>/patches/patch-xxx.bin
+            urls.Add(dir + patchName);
+            urls.Add(dir + "patches/" + patchName);
+        }
+        if (urls.Count == 0) return null;
+
+        string patchPath = Path.Combine(tempDir, patchName);
+        try
+        {
+            // 补丁本体不做哈希校验：即使被篡改，产物 SHA256 也必然对不上，等价于「下载失败」
+            await DownloadAsync(urls, patchPath, 0, progress, expectedSha256: null);
+        }
+        catch (Exception ex)
+        {
+            Log($"未取到差量补丁（{patchName}）：{ex.Message}");
+            try { File.Delete(patchPath); } catch { }
+            return null;
+        }
+
+        long patchSize = new FileInfo(patchPath).Length;
+        string outExe = Path.Combine(tempDir, "delta_new.exe");
+        try
+        {
+            var sw = global::System.Diagnostics.Stopwatch.StartNew();
+            DeltaPatch.Apply(exePath, patchPath, outExe);
+            sw.Stop();
+
+            long newSize = new FileInfo(outExe).Length;
+            string actual = ComputeSha256(outExe);
+            if (!string.Equals(actual, info.ExpectedSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                Log($"差量产物校验不符（{actual[..12]}…），回退整包");
+                try { File.Delete(outExe); } catch { }
+                return null;
+            }
+            if (info.TotalBytes > 0 && newSize != info.TotalBytes)
+            {
+                Log($"差量产物大小不符（{newSize} != {info.TotalBytes}），回退整包");
+                try { File.Delete(outExe); } catch { }
+                return null;
+            }
+
+            Log($"差量补丁生效：{DeltaPatch.Describe(patchSize, newSize)}，应用耗时 {sw.ElapsedMilliseconds}ms");
+            try { File.Delete(patchPath); } catch { }
+            return outExe;
+        }
+        catch (Exception ex)
+        {
+            Log($"差量补丁应用失败，回退整包：{ex.Message}");
+            try { File.Delete(outExe); } catch { }
+            return null;
+        }
+    }
+
+    private static string ComputeSha256(string path)
+    {
+        using var fs = File.OpenRead(path);
+        return Convert.ToHexString(global::System.Security.Cryptography.SHA256.HashData(fs)).ToLowerInvariant();
     }
 
     /// <summary>

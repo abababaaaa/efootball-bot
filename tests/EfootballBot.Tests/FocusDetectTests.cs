@@ -28,7 +28,7 @@ public class FocusDetectTests
         System.Runtime.InteropServices.Marshal.Copy(bgra.Data, data, 0, byteCount);
         var frame = new FrameData(data, mat.Width, mat.Height, 0);
         using var ocr = new OcrRecognizer();
-        return (frame, ocr.RecognizeAsync(frame).GetAwaiter().GetResult());
+        return (frame, TestOcr.Run(ocr, frame));
     }
 
     [Theory]

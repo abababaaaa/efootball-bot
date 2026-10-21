@@ -24,7 +24,7 @@ public class MyLeagueBrainTests
     public void Classify_MainMenu()
     {
         var dets = new[] { Det("main_menu", 0.9f), Det("player_card", 0.8f) };
-        Assert.Equal(MyLeagueBrain.Classify(dets, OcrResult.Empty), MlScreen.MainMenu);
+        Assert.Equal(MlScreen.MainMenu, MyLeagueBrain.Classify(dets, OcrResult.Empty));
     }
 
     [Fact]

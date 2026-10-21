@@ -61,7 +61,7 @@ public class ChallengeRealFrameTests
             var data = LoadPngBgra(path, out int w, out int h);
             var frame = new FrameData(data, w, h, 0);
             var dets = det.Detect(frame);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
             var screen = WeeklyBrain.Classify(dets, ocrRes,
                 MyLeagueScenario.CornerHasContent(frame),
                 matchContext: false,
@@ -116,7 +116,7 @@ public class ChallengeRealFrameTests
         var data = LoadPngBgra(path, out int w, out int h);
         var frame = new FrameData(data, w, h, 0);
         var ocr = new OcrRecognizer();
-        var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var ocrRes = TestOcr.Run(ocr, frame);
         return (WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocrRes,
             MyLeagueScenario.CornerHasContent(frame),
             matchContext: false,

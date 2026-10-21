@@ -41,7 +41,7 @@ public class GpRewardPopupRealFrameTests
         var frame = new FrameData(data, mat.Width, mat.Height, 0);
 
         var dets = det.Detect(frame);
-        var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var ocrRes = TestOcr.Run(ocr, frame);
 
         bool corner = MyLeagueScenario.CornerHasContent(frame);
         bool light = MyLeagueScenario.IsMostlyLightPage(frame);

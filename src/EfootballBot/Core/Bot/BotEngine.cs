@@ -80,6 +80,9 @@ public sealed class BotEngine : IDisposable
     // 暂停标志：置位后主循环不再观察/操作，且立即清空手柄输出防残留半按状态
     private volatile bool _paused;
 
+    /// <summary>单步请求：暂停状态下执行一轮「观察 + 决策」后自动回到暂停（见 RequestStep）。</summary>
+    private volatile bool _stepOnce;
+
     /// <summary>暂停/继续场景循环（幂等）。暂停即刻清空手柄输出防残留半按状态
     /// （真实手柄本就处于禁用让位态，无需断开虚拟手柄）。</summary>
     public void SetPaused(bool on)
@@ -95,6 +98,21 @@ public sealed class BotEngine : IDisposable
         {
             LogInternal("已继续", LogLevel.Info);
         }
+    }
+
+    /// <summary>
+    /// 单步执行一拍（仅暂停状态有效）：观察一次当前画面、让场景决策一次，然后继续暂停。
+    /// 用于陌生界面排障——先看 Bot 对当前画面打算做什么，且只做一步（不会连按跑飞）。
+    /// </summary>
+    public void RequestStep()
+    {
+        if (!_paused)
+        {
+            LogInternal("单步：当前未暂停（挂机本就在连续执行），已忽略", LogLevel.Info);
+            return;
+        }
+        _stepOnce = true;
+        LogInternal("单步：执行一轮观察 + 决策…", LogLevel.Info);
     }
 
     public readonly BotStats Stats = new();
@@ -132,6 +150,8 @@ public sealed class BotEngine : IDisposable
         // 任一时刻只存在一只虚拟手柄。
         Pad360 = CreatePad(cfg.Pad.Backend);
         LogInternal($"虚拟手柄后端：{PadBackendInfo.DisplayName(cfg.Pad.Backend)}", LogLevel.Info);
+        if (cfg.DryRun)
+            LogInternal("影子模式：手柄输出全部拦截，只在日志记录「本来会按什么」——本次不会操作游戏", LogLevel.Warn);
         Pad = new Pad(Pad360, cfg.Timing);
 
         // EP 降级工厂：OCR 与 YOLO 共享同一 SessionOptions（进程内仅一份 onnxruntime.dll）
@@ -160,6 +180,8 @@ public sealed class BotEngine : IDisposable
     public async Task StartAsync(string mode)
     {
         if (IsRunning) return;
+        _summaryWritten = false; // 新会话：允许再写一次摘要
+        Stats.StartedAt ??= DateTime.Now;
         // 场景模式（cndaily=国服天梯巅峰赛 / cnweekly=国服周活动 / cnmyleague=国服我的联赛 /
         // intl=国际服我的联赛 / intlweekly=国际服周活动 / intlladder=国际服AI天梯联赛）
         // 需接管虚拟手柄（B 键逃生依赖）；observe 纯观察不操作游戏
@@ -236,6 +258,35 @@ public sealed class BotEngine : IDisposable
                         if (_paused)
                         {
                             if (!idleThrottled) { idleThrottled = true; Observation.ApplyCaptureThrottle(2000); }
+                            // 单步：临时恢复常规捕获节奏跑一轮「观察 + 场景决策」，然后回到暂停。
+                            // 排障用——陌生界面上先看 Bot 会做什么，且只做一步。
+                            if (_stepOnce)
+                            {
+                                _stepOnce = false;
+                                Observation.ApplyCaptureThrottle(300);
+                                try
+                                {
+                                    await ObserveAsync(token);
+                                    if (Scenario is not null)
+                                    {
+                                        int delay = await Scenario.RunOnceAsync(token);
+                                        LogInternal($"单步完成（场景建议下一轮 {delay}ms），继续暂停", LogLevel.Info);
+                                    }
+                                    else
+                                    {
+                                        LogInternal("单步完成（观察模式无场景，仅刷新感知），继续暂停", LogLevel.Info);
+                                    }
+                                }
+                                catch (OperationCanceledException) { throw; }
+                                catch (Exception ex)
+                                {
+                                    LogInternal($"单步执行失败：{ex.Message}", LogLevel.Warn);
+                                }
+                                finally
+                                {
+                                    Observation.ApplyCaptureThrottle(2000);
+                                }
+                            }
                             await Task.Delay(400, token);
                             continue;
                         }
@@ -470,7 +521,10 @@ public sealed class BotEngine : IDisposable
             // 触发条件只看节点不看 slot0 占用：
             // AMD Controller Emulation 等常驻虚拟设备会永久占着玩家 1，没接手柄也会误报空等。
             // 「已禁用」的节点不算在用，禁用生效后本条件立即转 false，不再空等。
-            if (!Pad360.IsConnected && _cfg.HidHide.HidePhysicalGamepad
+            // 影子模式不禁用真实手柄：它只是「看 Bot 想做什么」，用户随时可以自己上手玩
+            if (_cfg.DryRun && _cfg.HidHide.HidePhysicalGamepad)
+                LogInternal("影子模式：跳过真实手柄禁用（不会影响你正常使用手柄）", LogLevel.Info);
+            if (!Pad360.IsConnected && _cfg.HidHide.HidePhysicalGamepad && !_cfg.DryRun
                 && HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0)
             {
                 LogInternal("检测到真实手柄：自动禁用以让虚拟手柄独占游戏输入（停止挂机时自动恢复）…", LogLevel.Warn);
@@ -500,9 +554,13 @@ public sealed class BotEngine : IDisposable
         return _cts.Token;
     }
 
-    /// <summary>按后端种类创建虚拟手柄实例（仅构造不连接）。唯一后端 ViGEm Xbox 360。</summary>
-    private IVirtualPad CreatePad(PadBackendKind kind) =>
-        new VigemPad(m => LogInternal(m, LogLevel.Info));
+    /// <summary>按后端种类创建虚拟手柄实例（仅构造不连接）。唯一后端 ViGEm Xbox 360。
+    /// 影子模式（cfg.DryRun）下包一层 <see cref="DryRunPad"/>：连接/断开照常，输入全部拦下并记日志。</summary>
+    private IVirtualPad CreatePad(PadBackendKind kind)
+    {
+        IVirtualPad pad = new VigemPad(m => LogInternal(m, LogLevel.Info));
+        return _cfg.DryRun ? new DryRunPad(pad, LogInternal) : pad;
+    }
 
     /// <summary>
     /// 连接虚拟手柄。单后端后无回退可言（保留换实例重连的骨架：连接失败时重建一次实例再试，
@@ -735,8 +793,7 @@ public sealed class BotEngine : IDisposable
     public void Stop()
     {
         try { _cts?.Cancel(); } catch { }
-        try { Pad360.ResetAll(); } catch { }
-        // 停止即拔掉虚拟手柄：其他应用立即看不到任何手柄（旧实现保持在线到引擎销毁，
+        try { Pad360.ResetAll(); } catch { }        // 停止即拔掉虚拟手柄：其他应用立即看不到任何手柄（旧实现保持在线到引擎销毁，
         // 用户停了挂机别的游戏里还挂着一只“幽灵手柄”）。下次开始重新连接。
         try { Pad360.Disconnect(); } catch { }
         // 全权接管收尾：恢复被禁用的真实手柄（火后不管，不拖慢停止流程）
@@ -759,6 +816,8 @@ public sealed class BotEngine : IDisposable
         // 手柄一旦被游戏看到「断开→重连」，eFootball 会把光标停靠到顶部头部的「手柄归属」图标上，
         // 重连设备的 Left/A 全部失效（焦点不在磁贴行）。运行期自愈走 ReconnectPadAsync，
         // 仅在提交连续失败（手柄实质已失效）时才重建。
+
+        WriteSessionSummary("正常停止", isError: false);
     }
 
     /// <summary>异常停止（场景报错终止）：自动留档当前画面后正常停止。
@@ -767,6 +826,54 @@ public sealed class BotEngine : IDisposable
     {
         SaveFailureDump(reason);
         Stop();
+        WriteSessionSummary($"异常停止：{reason}", isError: true);
+    }
+
+    /// <summary>本次运行是否已写过会话摘要（Stop 可能被多处调用，摘要只写一次）。</summary>
+    private bool _summaryWritten;
+
+    /// <summary>
+    /// 会话摘要：一行日志 + 一条 JSONL（data\session-summary.jsonl）。
+    /// 用途是把「这次挂了多久、打了多少场、为什么停」变成可聚合数据——
+    /// 此前这些信息只散落在日志里，想比较两天的成绩得自己翻。
+    /// </summary>
+    private void WriteSessionSummary(string reason, bool isError)
+    {
+        if (_summaryWritten) return;
+        _summaryWritten = true;
+        try
+        {
+            var s = Stats;
+            TimeSpan dur = s.StartedAt is { } t ? DateTime.Now - t : TimeSpan.Zero;
+            int suppressed = Pad360 is DryRunPad dr ? dr.SuppressedActions : 0;
+            string line = $"本次会话摘要：场次 {s.MatchesDone}（关键 {s.KeyMatches}）· 用时 {dur:hh\\:mm} · " +
+                          (Scenario is not null ? $"场景 {Scenario.Name} · " : "") +
+                          (suppressed > 0 ? $"影子模式拦截 {suppressed} 次输入 · " : "") +
+                          $"结束原因：{reason}";
+            LogInternal(line, isError ? LogLevel.Warn : LogLevel.Success);
+
+            var record = new
+            {
+                at = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                mode = Scenario?.Name ?? "observe",
+                matches = s.MatchesDone,
+                keyMatches = s.KeyMatches,
+                playersMaxed = s.PlayersMaxed,
+                durationMinutes = Math.Round(dur.TotalMinutes, 1),
+                dryRun = _cfg.DryRun,
+                reason,
+                error = isError,
+            };
+            string path = Path.Combine(AppPaths.DataDir, "session-summary.jsonl");
+            Directory.CreateDirectory(AppPaths.DataDir);
+            File.AppendAllText(path, global::System.Text.Json.JsonSerializer.Serialize(record) + Environment.NewLine);
+
+            Notifier.Send(_cfg, $"挂机{(isError ? "异常停止" : "已停止")}", line, isError, LogInternal);
+        }
+        catch (Exception ex)
+        {
+            LogInternal($"会话摘要写入失败：{ex.Message}", LogLevel.Debug);
+        }
     }
 
     /// <summary>

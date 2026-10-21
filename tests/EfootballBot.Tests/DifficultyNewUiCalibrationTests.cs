@@ -32,7 +32,7 @@ public class DifficultyNewUiCalibrationTests
             var data = TestFrameLoader.LoadPngBgra(FramePath(name), out int w, out int h);
             var frame = new FrameData(data, w, h, 0);
             using var ocr = new OcrRecognizer();
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
 
             _out.WriteLine($"==== {name} {w}x{h}, 词数 {ocrRes.Words.Count} ====");
             foreach (var word in ocrRes.Words)

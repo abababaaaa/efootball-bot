@@ -97,6 +97,10 @@ public partial class MainWindow
             BtnPause.Content = string.IsNullOrEmpty(rs) ? "继续" : $"继续 ({rs})";
         else
             BtnPause.Content = string.IsNullOrEmpty(ps) ? "暂停" : $"暂停 ({ps})";
+
+        // 单步只在「运行中且已暂停」时可用：它就是在暂停态下放一拍
+        if (BtnStep is not null)
+            BtnStep.IsEnabled = running && _paused;
     }
 
     /// <summary>把当前热键配置同步到设置页标签与运行按钮。</summary>

@@ -39,7 +39,7 @@ public class ExpResultPageRealFrameTests
         var frame = new FrameData(data, mat.Width, mat.Height, 0);
 
         var dets = det.Detect(frame);
-        var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var ocrRes = TestOcr.Run(ocr, frame);
 
         var ml = MyLeagueBrain.Classify(dets, ocrRes,
             MyLeagueScenario.CornerHasContent(frame), false, MyLeagueScenario.IsMostlyLightPage(frame));

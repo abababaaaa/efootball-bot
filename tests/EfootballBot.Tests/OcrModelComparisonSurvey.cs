@@ -74,7 +74,7 @@ public class OcrModelComparisonSurvey
             {
                 var frame = LoadFrame(file);
                 var sw = System.Diagnostics.Stopwatch.StartNew();
-                var res = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+                var res = TestOcr.Run(ocr, frame);
                 sw.Stop();
                 times[file] = Math.Min(times.GetValueOrDefault(file, double.MaxValue), sw.Elapsed.TotalMilliseconds);
                 if (res.ContainsJoined(keyword)) hits.Add(file);

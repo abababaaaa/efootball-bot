@@ -176,6 +176,16 @@ public partial class MainWindow
 
         ChkShowRuntimeLog.IsChecked = _cfg.ShowRuntimeLog;
 
+        // 通知 / 监控 / 影子模式
+        TxtWebhookUrl.Text = _cfg.Notify.WebhookUrl;
+        TxtNotifyName.Text = _cfg.Notify.InstanceName;
+        ChkNotifyStop.IsChecked = _cfg.Notify.OnStop;
+        ChkNotifyError.IsChecked = _cfg.Notify.OnError;
+        ChkMonitor.IsChecked = _cfg.Monitor.Enabled;
+        TxtMonitorPort.Text = _cfg.Monitor.Port.ToString();
+        TxtMonitorToken.Text = _cfg.Monitor.Token;
+        ChkDryRun.IsChecked = _cfg.DryRun;
+
         // 运行日志显示过滤档（仅 UI 显示，文件日志不受影响）
         _runtimeLogFilter = _cfg.RuntimeLogFilter is "Key" or "Warn" ? _cfg.RuntimeLogFilter : "All";
         _loadingConfig = true;
@@ -214,6 +224,27 @@ public partial class MainWindow
     {
         // 设置面板
         _cfg.AutoCloseWhenDone = ChkAutoClose.IsChecked == true;
+
+        // 通知 / 监控 / 影子模式
+        _cfg.Notify.WebhookUrl = TxtWebhookUrl.Text.Trim();
+        _cfg.Notify.InstanceName = TxtNotifyName.Text.Trim();
+        _cfg.Notify.OnStop = ChkNotifyStop.IsChecked == true;
+        _cfg.Notify.OnError = ChkNotifyError.IsChecked == true;
+        bool monitorWasEnabled = _cfg.Monitor.Enabled;
+        _cfg.Monitor.Enabled = ChkMonitor.IsChecked == true;
+        if (int.TryParse(TxtMonitorPort.Text.Trim(), out int monPort) && monPort is > 0 and < 65536)
+            _cfg.Monitor.Port = monPort;
+        _cfg.Monitor.Token = TxtMonitorToken.Text.Trim();
+        _cfg.DryRun = ChkDryRun.IsChecked == true;
+        // 监控页开关变更：即时生效（重启监听）；其余字段重启程序后生效
+        if (_cfg.Monitor.Enabled != monitorWasEnabled)
+        {
+            try { _monitor?.Dispose(); } catch { }
+            _monitor = null;
+            if (_cfg.Monitor.Enabled) StartMonitorIfEnabled();
+            else AppendLog("局域网监控页已关闭。", LogLevel.Info);
+        }
+
         _cfg.FrameDump.Enabled = ChkFrameDump.IsChecked == true;
         if (CmbFrameDumpInterval.SelectedIndex >= 0)
         {
@@ -736,5 +767,58 @@ public partial class MainWindow
         if (_loadingConfig) return;
         _cfg.HidHide.HidePhysicalGamepad = ChkPadTakeover.IsChecked == true;
         _cfg.Save();
+    }
+
+    // ================= 手柄驱动自检 =================
+
+    private EfootballBot.Core.System.PadCheckResult? _lastPadCheck;
+
+    private void BtnPadSelfCheck_Click(object sender, RoutedEventArgs e) => RunPadSelfCheck();
+
+    private void RunPadSelfCheck()
+    {
+        var r = EfootballBot.Core.System.PadSelfCheck.Run();
+        ShowPadCheck(r);
+        AppendLog($"[手柄自检] {r.Title}：{r.Detail}",
+            r.Kind == EfootballBot.Core.System.PadCheckKind.Ready ? LogLevel.Success : LogLevel.Warn);
+    }
+
+    private async void BtnPadSelfFix_Click(object sender, RoutedEventArgs e)
+    {
+        BtnPadSelfFix.IsEnabled = false;
+        try
+        {
+            var r = await EfootballBot.Core.System.PadSelfCheck.TryFixAsync(
+                m => AppendLog($"[手柄自检] {m}", LogLevel.Info));
+            ShowPadCheck(r);
+            AppendLog(r.Kind == EfootballBot.Core.System.PadCheckKind.Ready
+                    ? $"[手柄自检] 修复完成：{r.Title}"
+                    : $"[手柄自检] 修复后仍未就绪：{r.Title}——{r.SuggestedFix}",
+                r.Kind == EfootballBot.Core.System.PadCheckKind.Ready ? LogLevel.Success : LogLevel.Warn);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[手柄自检] 修复过程出错：{ex.Message}", LogLevel.Error);
+        }
+        finally
+        {
+            BtnPadSelfFix.IsEnabled = true;
+        }
+    }
+
+    private void BtnPadSelfCheckReport_Click(object sender, RoutedEventArgs e)
+    {
+        var r = _lastPadCheck ?? EfootballBot.Core.System.PadSelfCheck.Run();
+        _lastPadCheck = r;
+        string path = EfootballBot.Core.System.PadSelfCheck.SaveReport(r);
+        TxtPadSelfCheckResult.Text = $"{r.Title}\n\n报告已保存：{path}\n（发反馈时直接带上这个文件即可）";
+        AppendLog($"[手柄自检] 报告已保存：{path}", LogLevel.Info);
+    }
+
+    /// <summary>把自检结论 + 建议动作显示在设置页（只陈述探测事实，不给猜测性结论）。</summary>
+    private void ShowPadCheck(EfootballBot.Core.System.PadCheckResult r)
+    {
+        _lastPadCheck = r;
+        TxtPadSelfCheckResult.Text = $"{r.Title}\n{r.Detail}\n\n下一步：{r.SuggestedFix}";
     }
 }

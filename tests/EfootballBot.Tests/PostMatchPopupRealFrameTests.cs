@@ -40,7 +40,7 @@ public class PostMatchPopupRealFrameTests
             var frame = new FrameData(data, mat.Width, mat.Height, 0);
 
             var dets = det.Detect(frame);
-            var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+            var ocrRes = TestOcr.Run(ocr, frame);
 
             _out.WriteLine($"==== {name} ({mat.Width}x{mat.Height}) ====");
             _out.WriteLine("-- YOLO --");

@@ -380,7 +380,7 @@ public static class MyLeagueBrain
     /// </summary>
     public static bool HasOkButton(OcrResult ocr) =>
         ocr.ContainsJoined("OK") ||
-        ocr.Words.Any(w => OcrText.Norm(w.Text).Replace("0", "O")
+        ocr.Words.Any(w => w.NormText.Replace("0", "O")
             .Equals("OK", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>难度选择页特征（标题行或 ≥2 难度名列表）：确认键是默认焦点，不上移改难度。</summary>
@@ -637,21 +637,9 @@ public static class MyLeagueBrain
         return CountGreen(frame, 0.930, 0.990, 0.015, 0.095) >= 30;
     }
 
-    /// <summary>区域内绿色像素计数（绿底白勾：G&gt;100 且显著高于 R/B；2px 步进采样）。</summary>
+    /// <summary>区域内绿色像素计数（共享实现见 <see cref="RegionProbe.CountGreen"/>）。</summary>
     private static int CountGreen(FrameData f, double x0, double x1, double y0, double y1)
-    {
-        var bgra = f.Bgra;
-        int w = f.Width, h = f.Height;
-        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return 0;
-        int count = 0;
-        for (int y = Math.Max(0, (int)(h * y0)); y < Math.Min(h, (int)(h * y1)); y += 2)
-            for (int x = Math.Max(0, (int)(w * x0)); x < Math.Min(w, (int)(w * x1)); x += 2)
-            {
-                int i = (y * w + x) * 4;
-                if (bgra[i + 1] > 100 && bgra[i + 1] > bgra[i + 2] + 40 && bgra[i + 1] > bgra[i] + 40) count++;
-            }
-        return count;
-    }
+        => RegionProbe.CountGreenRef(f, x0, x1, y0, y1);
 
     /// <summary>在 OCR 排版行里找包含任一关键词的行，返回命中词。</summary>
     private static string? FindLine(OcrResult ocr, params string[] keywords)
@@ -943,7 +931,7 @@ public static class MyLeagueBrain
         var words = ocr.Words
             .Where(w =>
             {
-                var t = OcrText.Norm(w.Text);
+                var t = w.NormText;
                 return t.Contains("等级") || t.Contains("加成");
             })
             .OrderBy(w => w.CenterX)

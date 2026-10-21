@@ -10,6 +10,16 @@ public sealed record OcrWord(string Text, double X, double Y, double W, double H
 {
     public double CenterX => X + W / 2;
     public double CenterY => Y + H / 2;
+
+    private string? _norm;
+
+    /// <summary>
+    /// 规范化文本缓存（<see cref="OcrText.Norm"/> 的惰性结果）。
+    /// Norm 要走 Unicode FormKC 归一 + 标点剔除 + 替换表，单次约 10µs；一帧 100+ 词、
+    /// 每轮判定要跑十几个探针，同一个词会被反复规范化几十次（每帧数千次纯重复计算）。
+    /// 对固定 Text 结果恒定，缓存不改变任何行为，仅省掉重复分配与字符串处理。
+    /// </summary>
+    public string NormText => _norm ??= OcrText.Norm(Text);
 }
 
 /// <summary>一条排版行：行内词按 X 排序后的规范化拼接文本 + 整行包围盒。</summary>
@@ -47,7 +57,7 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
             var ordered = line.OrderBy(w => w.X).ToList();
             double x0 = ordered.Min(w => w.X), y0 = ordered.Min(w => w.Y);
             double x1 = ordered.Max(w => w.X + w.W), y1 = ordered.Max(w => w.Y + w.H);
-            return new OcrLine(string.Concat(ordered.Select(w => OcrText.Norm(w.Text))),
+            return new OcrLine(string.Concat(ordered.Select(w => w.NormText)),
                 x0, y0, x1 - x0, y1 - y0);
         }).ToList();
     }
@@ -81,7 +91,7 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
         {
             if (line.Count < 2) continue;
             var ordered = line.OrderBy(w => w.X).ToList();
-            string text = string.Concat(ordered.Select(w => OcrText.Norm(w.Text)));
+            string text = string.Concat(ordered.Select(w => w.NormText));
             if (text.Length < 2) continue;
             double x0 = ordered.Min(w => w.X), y0 = ordered.Min(w => w.Y);
             double x1 = ordered.Max(w => w.X + w.W), y1 = ordered.Max(w => w.Y + w.H);
@@ -93,7 +103,7 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
     public IEnumerable<OcrWord> FindAll(string normalizedKeyword)
     {
         foreach (var w in MergedWords)
-            if (OcrText.Norm(w.Text).Contains(normalizedKeyword, StringComparison.OrdinalIgnoreCase))
+            if (w.NormText.Contains(normalizedKeyword, StringComparison.OrdinalIgnoreCase))
                 yield return w;
     }
 
@@ -118,7 +128,7 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
         }
         return string.Concat(lines
             .OrderBy(l => l.Average(w => w.CenterY))
-            .SelectMany(l => l.OrderBy(w => w.X).Select(w => OcrText.Norm(w.Text))));
+            .SelectMany(l => l.OrderBy(w => w.X).Select(w => w.NormText)));
     }
 
     /// <summary>在全文拼接里找子串（不要求关键词落在同一个 OCR 词内）。</summary>
@@ -140,7 +150,7 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
         bool exact = normalizedKeyword.Length > 0 && normalizedKeyword.All(char.IsAsciiLetter);
         foreach (var w in MergedWords)
         {
-            string t = OcrText.Norm(w.Text);
+            string t = w.NormText;
             bool hit = exact
                 ? t.Equals(normalizedKeyword, StringComparison.OrdinalIgnoreCase)
                 : t.Contains(normalizedKeyword, StringComparison.OrdinalIgnoreCase);

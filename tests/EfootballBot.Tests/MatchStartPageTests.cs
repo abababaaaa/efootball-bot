@@ -29,7 +29,7 @@ public class MatchStartPageTests
         System.Runtime.InteropServices.Marshal.Copy(bgra.Data, data, 0, byteCount);
         var frame = new FrameData(data, mat.Width, mat.Height, 0);
         using var ocr = new OcrRecognizer();
-        var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var ocrRes = TestOcr.Run(ocr, frame);
 
         Assert.Equal(MlScreen.MatchStartPage, MyLeagueBrain.Classify(
             Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocrRes, true));

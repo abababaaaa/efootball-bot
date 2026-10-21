@@ -36,7 +36,7 @@ public class IntlBootRealFrameTests
         var data = TestFrameLoader.LoadPngBgra(path, out int w, out int h);
         var frame = new FrameData(data, w, h, 0);
         var dets = Det.Value.Detect(frame);
-        var ocrRes = OcrRec.Value.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var ocrRes = TestOcr.Run(OcrRec.Value, frame);
         var screen = MyLeagueBrain.Classify(dets, ocrRes,
             MyLeagueScenario.CornerHasContent(frame),
             allowCornerInMatch: false,

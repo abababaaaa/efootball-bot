@@ -31,7 +31,7 @@ public class DifficultyPageLiveFrameTests
     {
         var frame = LoadFrame(file);
         using var ocr = new OcrRecognizer();
-        var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var ocrRes = TestOcr.Run(ocr, frame);
 
         // 两张帧蓝勾都在传奇、光标都在新手（用户备注：光标在新手上）——窄窗必须读出传奇
         Assert.Equal("传奇", MyLeagueBrain.DetectCheckedDifficulty(frame, ocrRes));
@@ -72,7 +72,7 @@ public class DifficultyPageLiveFrameTests
         // 供对照，不作断言——生产判定只见实机捕获帧，以上两帧锁回归。
         var frame = LoadFrame(file);
         using var ocr = new OcrRecognizer();
-        var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var ocrRes = TestOcr.Run(ocr, frame);
         _out.WriteLine($"{file}: DetectCheckedDifficulty={MyLeagueBrain.DetectCheckedDifficulty(frame, ocrRes) ?? "null"}, " +
                        $"DetectSelectedDifficulty={MyLeagueBrain.DetectSelectedDifficulty(frame, ocrRes) ?? "null"}");
     }

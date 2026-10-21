@@ -190,14 +190,8 @@ public static class CnWeeklyBrain
         return false;
     }
 
-    /// <summary>顶部页签行（y&lt;0.15 的词拼接）是否同时含 推荐/签约/商店。</summary>
-    public static bool HasTopTabs(OcrResult ocr)
-    {
-        string top = string.Join("|", ocr.Words
-            .Where(w => w.CenterY < 0.15)
-            .Select(w => w.Text.Replace(" ", "")));
-        return top.Contains("推荐") && top.Contains("签约") && top.Contains("商店");
-    }
+    /// <summary>顶部页签行通用特征（共享实现见 <see cref="RegionProbe.HasTopTabs"/>）。</summary>
+    public static bool HasTopTabs(OcrResult ocr) => RegionProbe.HasTopTabs(ocr);
 
     /// <summary>RS 菜单中「活动加成」选项行号（0 起，自上而下：无变更/重视能力值/重视能力值心有灵犀/活动加成）。
     /// 光标默认在第 1 项「无变更」（实机帧验证），按 Down×3 到「活动加成」。</summary>
@@ -222,7 +216,7 @@ public static class CnWeeklyBrain
             return false;
         foreach (var w in ocr.MergedWords)
         {
-            string t = OcrText.Norm(w.Text);
+            string t = w.NormText;
             if (t == "开") return true;
             if (t.Contains("教练模式") && !t.Contains("内控制") && t.Contains("开")) return true;
         }
@@ -240,7 +234,7 @@ public static class CnWeeklyBrain
     {
         index = 0;
         if (w.H < 0.075 || w.CenterY < 0.15 || w.CenterY > 0.40 || w.CenterX >= 0.95) return false;
-        var t = OcrText.Norm(w.Text).ToUpper().Replace("O", "0");
+        var t = w.NormText.ToUpper().Replace("O", "0");
         if (t.Length != 2 || !t.All(char.IsDigit)) return false;
         index = int.Parse(t);
         return index >= 1;
@@ -313,23 +307,9 @@ public static class CnWeeklyBrain
         return list.OrderBy(c => c.Index).ToList();
     }
 
-    /// <summary>区域内亮度中位数（3px 步进采样；聚焦白卡/深灰卡的判别用中位数抗文字干扰）。</summary>
+    /// <summary>区域内亮度中位数（共享实现见 <see cref="RegionProbe.MedianLuma"/>）。</summary>
     private static int RegionMedianLuma(FrameData f, double x0, double x1, double y0, double y1)
-    {
-        var bgra = f.Bgra;
-        int w = f.Width, h = f.Height;
-        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return 0;
-        var lumas = new List<int>();
-        for (int y = Math.Max(0, (int)(h * y0)); y < Math.Min(h, (int)(h * y1)); y += 3)
-            for (int x = Math.Max(0, (int)(w * x0)); x < Math.Min(w, (int)(w * x1)); x += 3)
-            {
-                int i = (y * w + x) * 4;
-                lumas.Add((bgra[i] + bgra[i + 1] + bgra[i + 2]) / 3);
-            }
-        if (lumas.Count == 0) return 0;
-        lumas.Sort();
-        return lumas[lumas.Count / 2];
-    }
+        => RegionProbe.MedianLuma(f, x0, x1, y0, y1);
 
     /// <summary>
     /// 挑战清单当前聚焦卡（游标所在卡）：聚焦卡白底高亮、其余卡深灰底（实机 2026-10-17 晚
@@ -355,40 +335,13 @@ public static class CnWeeklyBrain
         return best.Index;
     }
 
-    /// <summary>区域内灰色像素计数（R≈G≈B、亮度 90~220；2px 步进采样）。</summary>
+    /// <summary>区域内灰色像素计数（共享实现见 <see cref="RegionProbe.CountGray"/>）。</summary>
     private static int CountGray(FrameData f, double x0, double x1, double y0, double y1)
-    {
-        var bgra = f.Bgra;
-        int w = f.Width, h = f.Height;
-        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return 0;
-        int count = 0;
-        for (int y = Math.Max(0, (int)(h * y0)); y < Math.Min(h, (int)(h * y1)); y += 2)
-            for (int x = Math.Max(0, (int)(w * x0)); x < Math.Min(w, (int)(w * x1)); x += 2)
-            {
-                int i = (y * w + x) * 4;
-                int b = bgra[i], g = bgra[i + 1], r = bgra[i + 2];
-                int lum = (r + g + b) / 3;
-                int mx = Math.Max(r, Math.Max(g, b)), mn = Math.Min(r, Math.Min(g, b));
-                if (mx - mn < 30 && lum >= 90 && lum <= 220) count++;
-            }
-        return count;
-    }
+        => RegionProbe.CountGrayRef(f, x0, x1, y0, y1);
 
-    /// <summary>区域内绿色像素计数（绿底白勾：G&gt;100 且显著高于 R/B；2px 步进采样）。</summary>
+    /// <summary>区域内绿色像素计数（共享实现见 <see cref="RegionProbe.CountGreen"/>）。</summary>
     private static int CountGreen(FrameData f, double x0, double x1, double y0, double y1)
-    {
-        var bgra = f.Bgra;
-        int w = f.Width, h = f.Height;
-        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return 0;
-        int count = 0;
-        for (int y = Math.Max(0, (int)(h * y0)); y < Math.Min(h, (int)(h * y1)); y += 2)
-            for (int x = Math.Max(0, (int)(w * x0)); x < Math.Min(w, (int)(w * x1)); x += 2)
-            {
-                int i = (y * w + x) * 4;
-                if (bgra[i + 1] > 100 && bgra[i + 1] > bgra[i + 2] + 40 && bgra[i + 1] > bgra[i] + 40) count++;
-            }
-        return count;
-    }
+        => RegionProbe.CountGreenRef(f, x0, x1, y0, y1);
 
     // ---------------- 挑战型活动（国服专属词） ----------------
 

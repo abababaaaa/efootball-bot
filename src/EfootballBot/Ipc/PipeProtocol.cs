@@ -47,6 +47,8 @@ public static class PipeProtocol
     public static Msg CmdStart(string mode) => new() { Cmd = "start", Mode = mode };
     public static Msg CmdStop() => new() { Cmd = "stop" };
     public static Msg CmdPause(bool on) => new() { Cmd = on ? "pause" : "resume" };
+    /// <summary>单步：暂停状态下执行一轮观察+决策（陌生界面排障用）。</summary>
+    public static Msg CmdStep() => new() { Cmd = "step" };
     public static Msg CmdPreview(bool on) => new() { Cmd = "preview", On = on };
     public static Msg CmdReloadConfig() => new() { Cmd = "reloadConfig" };
     public static Msg CmdPing() => new() { Cmd = "ping" };

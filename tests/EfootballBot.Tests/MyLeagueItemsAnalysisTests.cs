@@ -30,7 +30,7 @@ public class MyLeagueItemsAnalysisTests
         var frame = new FrameData(data, mat.Width, mat.Height, 0);
 
         using var ocr = new OcrRecognizer();
-        var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var ocrRes = TestOcr.Run(ocr, frame);
 
         _out.WriteLine($"==== myleague_items_user_1.png ({mat.Width}x{mat.Height}) ====");
         _out.WriteLine("-- OCR words --");

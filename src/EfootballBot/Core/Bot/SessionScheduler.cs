@@ -28,6 +28,11 @@ public sealed class SessionScheduler
     private DateTime _nextBreakAt = DateTime.MaxValue;
     private DateTime _breakUntil = DateTime.MinValue;
 
+    /// <summary>今日是否为「随机整日休息」（见 <see cref="ScheduleConfig.RestDayChancePercent"/>）。</summary>
+    private bool _restDay;
+    /// <summary>每日抽样盐：每次启动不同 → 长期看哪一天休息不可预测（服务端无法反推规律）。</summary>
+    private readonly int _restSalt = Environment.TickCount ^ Guid.NewGuid().GetHashCode();
+
     /// <summary>本次调用是否刚从运行转入休息（引擎借此复位手柄残留按键）。</summary>
     public bool PauseJustBegan { get; private set; }
 
@@ -60,7 +65,7 @@ public sealed class SessionScheduler
             _acc += now - t;
         _lastTick = now;
 
-        bool should = InWindow(now.TimeOfDay) && !CapReached() && now >= _breakUntil;
+        bool should = !_restDay && InWindow(now.TimeOfDay) && !CapReached() && now >= _breakUntil;
 
         // 运行中偶尔短暂离开（真实感停顿，不打断挂机流程状态）
         if (should && now >= _nextBreakAt)
@@ -85,6 +90,8 @@ public sealed class SessionScheduler
             }
             else if (CapReached())
                 _log($"作息调度：今日挂机已达上限 {_cfg.DailyCapHours:0.#} 小时，休息至明天 {_start + _drift:hh\\:mm} 自动恢复", LogLevel.Warn);
+            else if (_restDay)
+                _log($"作息调度：今日随机整日休息，明天 {_start + _drift:hh\\:mm} 自动恢复", LogLevel.Warn);
             else if (now < _breakUntil)
                 _log($"作息调度：短暂离开至 {_breakUntil:HH:mm}", LogLevel.Info);
             else
@@ -111,6 +118,21 @@ public sealed class SessionScheduler
         _drift = TimeSpan.FromMinutes(Math.Round((_rnd.NextDouble() * 2 - 1) * drift));
         if (drift > 0)
             _log($"作息调度：今日活跃时段 {_start + _drift:hh\\:mm}–{_end + _drift:hh\\:mm}（含 ±{drift} 分钟随机漂移），上限 {_cfg.DailyCapHours:0.#} 小时", LogLevel.Info);
+
+        // 随机整日休息：每天固定上线时长本身就是行为指纹。按「日期 + 启动盐」做确定性
+        // 哈希——当天内多次判定结果一致（不会挂到一半突然变休息日），跨天重新抽。
+        _restDay = false;
+        int chance = Math.Clamp(_cfg.RestDayChancePercent, 0, 100);
+        if (chance > 0)
+        {
+            uint h = (uint)DateOnly.FromDateTime(now).DayNumber * 2654435761u ^ (uint)_restSalt;
+            h ^= h >> 13;
+            h *= 0x5bd1e995u;
+            h ^= h >> 15;
+            _restDay = (int)(h % 100u) < chance;
+            if (_restDay)
+                _log($"作息调度：今日随机整日休息（{chance}% 概率，模拟真人不上线的一天）", LogLevel.Warn);
+        }
     }
 
     private bool CapReached() => _cfg.DailyCapHours > 0 && _acc.TotalHours >= _cfg.DailyCapHours;

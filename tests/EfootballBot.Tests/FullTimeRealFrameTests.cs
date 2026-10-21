@@ -38,7 +38,7 @@ public class FullTimeRealFrameTests
         using var ocr = new OcrRecognizer();
 
         var dets = det.Detect(frame);
-        var ocrRes = ocr.RecognizeAsync(frame).GetAwaiter().GetResult();
+        var ocrRes = TestOcr.Run(ocr, frame);
 
         _out.WriteLine($"==== fulltime_user_1.png ({mat.Width}x{mat.Height}) ====");
         _out.WriteLine("-- YOLO --");

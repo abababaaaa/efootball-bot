@@ -1,0 +1,19 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <AssemblyName>PatchGen</AssemblyName>
+    <RootNamespace>EfootballBot.Tools.PatchGen</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <!-- 直接编译主工程的补丁实现（不引用 WPF 主程序集）：
+       生成端与客户端必须用同一份算法，链接同一文件是唯一可靠做法。 -->
+  <ItemGroup>
+    <Compile Include="..\..\src\EfootballBot\Core\System\DeltaPatch.cs" Link="DeltaPatch.cs" />
+  </ItemGroup>
+
+</Project>
