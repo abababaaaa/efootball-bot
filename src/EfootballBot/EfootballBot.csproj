@@ -50,6 +50,9 @@
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <!-- PP-OCRv6 本地离线 OCR（ONNX Runtime，包自带 v5 检测/方向分类模型） -->
     <PackageReference Include="RapidOcrNet" Version="4.2.0" />
+    <!-- SimdPaddleOCR（纯托管 PP-OCR 推理，Apache-2.0）：可选引擎，加载与 RapidV6 共用的
+         models/v6 松散模型文件（不引模型包——ChineseV6Medium 包内嵌 100MB 模型会整体进 exe） -->
+    <PackageReference Include="Sdcb.SimdPaddleOCR" Version="2.0.0" />
     <!-- 推理引擎：统一 1.31.0（RapidOcrNet 4.2.0 程序集级要求 ORT >= 1.29.0，1.31 满足；
          Microsoft.ML.OnnxRuntime.DirectML 原生包停更于 1.24.4 无法共存 → 实际走 CPU EP。
          OnnxSessionFactory 保留 CUDA→DirectML→CPU 降级链：无 DML 原生库时运行时探测失败自动落 CPU，

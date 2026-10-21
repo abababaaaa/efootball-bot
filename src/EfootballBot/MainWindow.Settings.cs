@@ -85,8 +85,13 @@ public partial class MainWindow
         int dumpIdx = Array.IndexOf(dumpMsValues, _cfg.FrameDump.IntervalMs);
         CmbFrameDumpInterval.SelectedIndex = dumpIdx >= 0 ? dumpIdx : 2; // 缺省 10 秒
 
-        // OCR 引擎（枚举顺序 RapidV6=0 / Windows=1，与下拉项一致）
-        CmbOcrEngine.SelectedIndex = _cfg.OcrEngine == OcrEngineKind.Windows ? 1 : 0;
+        // OCR 引擎+模型档位（下拉项：0=RapidV6+Medium 默认 / 1=RapidV6+Small / 2=SimdPaddle / 3=Windows）
+        CmbOcrEngine.SelectedIndex = _cfg.OcrEngine switch
+        {
+            OcrEngineKind.Windows => 3,
+            OcrEngineKind.SimdPaddle => 2,
+            _ => _cfg.OcrRecModel == OcrRecModelKind.Small ? 1 : 0,
+        };
 
         // 全权接管（挂机禁用真实手柄）：开关见「手柄隔离」卡
         ChkPadTakeover.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
@@ -222,7 +227,25 @@ public partial class MainWindow
             int[] dumpMs = { 2000, 5000, 10000, 30000, 60000 };
             _cfg.FrameDump.IntervalMs = dumpMs[CmbFrameDumpInterval.SelectedIndex];
         }
-        _cfg.OcrEngine = CmbOcrEngine.SelectedIndex == 1 ? OcrEngineKind.Windows : OcrEngineKind.RapidV6;
+        // 下拉项 → 引擎+模型档位（0=RapidV6+Medium / 1=RapidV6+Small / 2=SimdPaddle / 3=Windows）
+        switch (CmbOcrEngine.SelectedIndex)
+        {
+            case 3:
+                _cfg.OcrEngine = OcrEngineKind.Windows;
+                break;
+            case 2:
+                _cfg.OcrEngine = OcrEngineKind.SimdPaddle;
+                _cfg.OcrRecModel = OcrRecModelKind.Medium;
+                break;
+            case 1:
+                _cfg.OcrEngine = OcrEngineKind.RapidV6;
+                _cfg.OcrRecModel = OcrRecModelKind.Small;
+                break;
+            default:
+                _cfg.OcrEngine = OcrEngineKind.RapidV6;
+                _cfg.OcrRecModel = OcrRecModelKind.Medium;
+                break;
+        }
 
         // 全权接管（下次开始挂机生效；停止挂机自动恢复真实手柄）
         _cfg.HidHide.HidePhysicalGamepad = ChkPadTakeover.IsChecked == true;

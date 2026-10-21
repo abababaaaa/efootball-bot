@@ -125,7 +125,11 @@ public partial class MainWindow
             else
             {
                 DotOcr.Fill = BrushOk;
-                TxtOcr.Text = "OCR 引擎（RapidOCR PP-OCRv6）";
+                TxtOcr.Text = _cfg.OcrEngine == OcrEngineKind.SimdPaddle
+                    ? "OCR 引擎（SimdPaddle）"
+                    : _cfg.OcrRecModel == OcrRecModelKind.Small
+                        ? "OCR 引擎（PP-OCRv6 Small）"
+                        : "OCR 引擎（PP-OCRv6 Medium）";
             }
         }
         catch

@@ -138,8 +138,12 @@ public sealed class BotEngine : IDisposable
         _factory = new OnnxSessionFactory(cfg.Inference.PreferredProvider, LogInternal);
         Ocr = new OcrRecognizer(cfg.OcrEngine, cfg.OcrLanguage,
             downscaleLongSide: cfg.ModuleFallback.DisableOcrDownscale ? 0 : OcrRecognizer.DefaultDownscaleLongSide,
-            preferInt8: !cfg.ModuleFallback.UseFp32Ocr);
-        LogInternal($"OCR 引擎：{Ocr.LanguageTag}（{Ocr.EngineKind}）", LogLevel.Info);
+            preferInt8: !cfg.ModuleFallback.UseFp32Ocr,
+            recModel: cfg.OcrRecModel);
+        if (Ocr.FallbackNote is { } fallbackNote)
+            LogInternal($"OCR 引擎回退：{fallbackNote}（现用 {Ocr.LanguageTag}）", LogLevel.Warn);
+        else
+            LogInternal($"OCR 引擎：{Ocr.LanguageTag}（{Ocr.EngineKind}）", LogLevel.Info);
         LogInternal($"捕获家族：{(_captureUseSharpDx ? "SharpDX（回退）" : "Vortice（默认）")}", LogLevel.Info);
 
         Observation = new ObservationService(Capture, Ocr, cfg);
