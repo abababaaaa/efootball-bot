@@ -1006,7 +1006,9 @@ public sealed class BotEngine : IDisposable
         if (now - _lastOcrDumpTick > (dets.Count == 0 ? 5000 : 30000))
         {
             _lastOcrDumpTick = now;
-            var words = ocr.MergedWords.Take(25).Select(w => w.Text);
+            // 全量输出：Take(25) 在 90~125 词的页面上只见零头（2026-10-21 反馈包：
+            // 组别主页的 前往比赛/组别分布 是否在剩余 66 词里全靠猜，远程排障瞎子）
+            var words = ocr.MergedWords.Select(w => w.Text);
             LogInternal($"[OCR原文] {string.Join(" | ", words)}", LogLevel.Debug);
         }
 

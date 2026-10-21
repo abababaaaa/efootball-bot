@@ -67,6 +67,28 @@ public class AiLadderBrainTests
         Assert.Equal(AlScreen.DivisionHome, AiLadderBrain.Classify(ocr));
     }
 
+    [Fact]
+    public void Classify_DivisionHome_TraditionalChars()
+    {
+        // 2026-10-21 反馈包（GDI 兜底捕获 + 2027 新 UI 美术字）：前往比賽/階段/組別 繁体化，
+        // 单字映射（Norm 逐词生效）后仍须正判主页
+        var ocr = Ocr(W("組別9", 0.155, 0.055), W("階段3: 2026/10/03 10:00 - 2026/11/05 09:59", 0.31, 0.12),
+            W("前往比賽", 0.14, 0.24));
+        Assert.Equal(AlScreen.DivisionHome, AiLadderBrain.Classify(ocr));
+    }
+
+    [Fact]
+    public void Classify_None_WhenCaptureDegraded()
+    {
+        // 捕获退化机器的组别主页实测帧（bot-20261021-140128，OCR 只剩 24/90 词的可见碎片）：
+        // 前往比赛/组别分布/比赛场次全不可读、組別9 拆成 组|别|9 三词 → 分类恒 None。
+        // 该形态由场景层盲归位开赛兜底（AiLadderScenario Home 阶段），此测试锁定分类行为不变
+        var ocr = Ocr(W("eFootball™", 0.2, 0.05), W("9", 0.115, 0.055), W("组", 0.145, 0.055),
+            W("别", 0.165, 0.055), W("9", 0.185, 0.055), W("階", 0.24, 0.12),
+            W("3", 0.26, 0.12), W("2026/10/03", 0.35, 0.12));
+        Assert.Equal(AlScreen.None, AiLadderBrain.Classify(ocr));
+    }
+
     // ---------------- 互斥（同形词跨页出现） ----------------
 
     [Fact]
@@ -130,6 +152,28 @@ public class AiLadderBrainTests
         // OCR 偶发繁体「組别」
         var ocr = Ocr(W("組别3", 0.155, 0.055));
         Assert.Equal(3, AiLadderBrain.ParseDivision(ocr));
+    }
+
+    [Fact]
+    public void ParseDivision_TraditionalBothChars()
+    {
+        // 2026-10-21 反馈包：組+別 双繁体（单字映射后归一为 组别9）
+        var ocr = Ocr(W("組別9", 0.155, 0.055));
+        Assert.Equal(9, AiLadderBrain.ParseDivision(ocr));
+    }
+
+    [Fact]
+    public void GoMatchWord_FragmentedTraditionalLine_Matches()
+    {
+        // 美术字按钮「前往比赛」被 OCR 拆成 4 个碎词且末字繁体：行文本=逐词 Norm 拼接，
+        // 单字映射「賽→赛」须在行文本与 JoinedText 两处还原出 前往比赛
+        //（ContainsJoined/FindLine 共用该拼接，是主页判定与「前往比赛」按键的判定基础）
+        var ocr = new OcrResult(new[]
+        {
+            W("前", 0.10, 0.24), W("往", 0.16, 0.24), W("比", 0.22, 0.24), W("賽", 0.28, 0.24),
+        }, 1280, 720);
+        Assert.Contains("前往比赛", ocr.Lines[0].Text);
+        Assert.True(ocr.ContainsJoined("前往比赛"));
     }
 
     [Fact]

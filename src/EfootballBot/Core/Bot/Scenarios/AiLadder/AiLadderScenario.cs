@@ -41,6 +41,9 @@ public sealed class AiLadderScenario : IScenario
     private int _hubTry;
     /// <summary>比赛页整轮扫描（4 格）失败后 B 退主菜单重进的次数。</summary>
     private int _hubRound;
+    /// <summary>组别主页整轮盲试（5 次盲归位开赛+B 退出）失败后由类别页重进的次数：识别退化
+    /// 机器上主页永不被认出，靠它防 类别页↔主页 无限循环（>3 轮暂停回报）。</summary>
+    private int _homeRound;
 
     private string _lastScreenName = "";
     private int _streak;
@@ -95,7 +98,10 @@ public sealed class AiLadderScenario : IScenario
         bool wasActive = _matchSession.Active;
         bool matchEnded = _matchSession.Observe(ml, now, sawKeyMatchHint: false, isHome: false);
         if (!wasActive && _matchSession.Active)
+        {
             _log("[AI天梯联赛] 比赛开始：挂机等待比赛结束（按节奏随机点击）", LogLevel.Info);
+            _homeRound = 0; // 开赛成功=盲试配方有效，重置主页重试轮数
+        }
         if (matchEnded)
         {
             _engine.Stats.MatchesDone++;
@@ -252,6 +258,7 @@ public sealed class AiLadderScenario : IScenario
                     case AlScreen.DivisionHome:
                         _hubTry = 0;
                         _hubRound = 0;
+                        _homeRound = 0;
                         SetPhase(AlPhase.Home);
                         return 700; // 下一轮读组别/查停止条件
                 }
@@ -313,12 +320,20 @@ public sealed class AiLadderScenario : IScenario
 
             case AlPhase.Home:
             {
-                if (al != AlScreen.DivisionHome)
+                // 识别退化兜底（2026-10-21 反馈包实机：GDI 兜底捕获 + 2027 新 UI 美术字，
+                // 组别主页 OCR 只剩 組別9/階段3/日期 碎片，前往比赛/组别分布/比赛场次全不可读
+                // → Classify 恒 None、共享分类落 LeaguePage、旧流程 B 逃生成 类别页↔主页 死循环）：
+                // 页面只要没被正判离开本模块（比赛中/周活动页/弹窗页等），一律继续按主页流程
+                // 处理——盲归位配方本就 OCR 无关，识别成功只用于额外验证。
+                bool onHome = al == AlScreen.DivisionHome;
+                if (!onHome &&
+                    !(al == AlScreen.None && wk == WkScreen.None && ml == MlScreen.LeaguePage))
                 {
                     // 已按 A 离开主页（开赛链/比赛中/赛后弹窗链）：交共享流程，赛后屏幕驱动自动回
                     SetPhase(AlPhase.Flow);
                     return null;
                 }
+                if (onHome) _homeRound = 0;
 
                 // 盖层弹窗（赛后奖励/组别变动等，主页词透出仍可读）：先 A 清掉。
                 // 绝不在弹窗上盲归位——多按钮弹窗上按方向键会改选（如 是/否）。
@@ -361,7 +376,18 @@ public sealed class AiLadderScenario : IScenario
 
                 if (++_attempts > 5)
                 {
-                    _log("[AI天梯联赛] 前往比赛多次未生效，B 退出联赛由比赛页重进（重进后光标回默认位）", LogLevel.Warn);
+                    // 整轮盲试失败：识别退化机器上主页永远不被认出，B 退出后由类别页重进
+                    // 会再次走到这里——_homeRound 预算防 类别页↔主页 无限循环
+                    _homeRound++;
+                    if (_homeRound > 3)
+                    {
+                        _log("[AI天梯联赛] 组别主页多轮盲试开赛未生效（反复出现请回报日志），暂停 30s 后重试", LogLevel.Error);
+                        _homeRound = 0;
+                        _hubTry = 0;
+                        SetPhase(AlPhase.Flow);
+                        return 30000;
+                    }
+                    _log($"[AI天梯联赛] 前往比赛多次未生效，B 退出联赛由类别页重进（第 {_homeRound} 轮，重进后光标回默认位）", LogLevel.Warn);
                     SetPhase(AlPhase.Flow);
                     _hubTry = 0;
                     await _engine.Pad.Back();
@@ -398,6 +424,12 @@ public sealed class AiLadderScenario : IScenario
         _log("[AI天梯联赛] 类别页：左×2 归位「对阵AI类别」→ A 进入", LogLevel.Info);
         await _engine.Pad.DpadRepeat(PadDir.Left, 2);
         await _engine.Pad.Confirm();
+        // 乐观进入主页阶段：A 后的组别主页在捕获退化机器上识别不出（2026-10-21 反馈包），
+        // 若留在 Flow 会被共享决策按「联赛页无关键词」B 逃生成死循环——Home 阶段对
+        // 无特征 LeaguePage 页按盲归位配方开赛，不再依赖 Classify 先认出 DivisionHome
+        _hubTry = 0;
+        _hubRound = 0;
+        SetPhase(AlPhase.Home);
         return 2800;
     }
 
