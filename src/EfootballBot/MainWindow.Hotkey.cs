@@ -51,13 +51,12 @@ public partial class MainWindow
         }
         _paused = next;
         RefreshRunButtons();
-        // 共存模式（3.2.0）：暂停=纯场景暂停，不再切换真实手柄的禁用状态——
-        // 手柄全程可用、不禁用（XInput 无进程隔离，暂停期间用户手柄按键会进后台游戏菜单，
-        // 恢复挂机时引擎的让步恢复与场景逃生机制自动归位）。
+        // 全权接管（v3.3.0）：暂停=纯场景暂停并清空手柄输出。真实手柄挂机期间本就处于
+        // 禁用让位态，拿去玩其他游戏请先停止挂机（停止即自动恢复）。
         if (next)
-            AppendLog("已暂停：虚拟手柄已断开，真实手柄完全归你（可拿去玩其他游戏）；恢复后自动重连继续挂机。", LogLevel.Success);
+            AppendLog("已暂停：已清空手柄输出，暂停观察与操作（真实手柄仍处让位态，拿去玩游戏请先停止挂机）。", LogLevel.Success);
         else
-            AppendLog("已恢复挂机：虚拟手柄已重连。", LogLevel.Info);
+            AppendLog("已恢复挂机。", LogLevel.Info);
     }
 
     /// <summary>统一停止（GUI 按钮与热键共用）。</summary>

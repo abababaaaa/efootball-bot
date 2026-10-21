@@ -17,7 +17,7 @@
     <!-- 测试版约定：4 段版本号（如 2.0.5.1）+ 同名 4 段 tag（v2.0.5.1）→ CI 按 pre-release 发布，
          更新器 Version.TryParse 原生支持、仅「包含测试版」开启的用户可见；迭代测试版递增第 4 段，
          正式版顺延三段号（2.0.6）。带横杠的 tag（v2.0.5-beta1）不可用——Version.TryParse 解析失败 -->
-    <Version>3.2.1.1</Version>
+    <Version>3.3.0.0</Version>
     <Product>eFootball 挂机助手</Product>
     <Company>EfootballBot</Company>
     <InvariantGlobalization>false</InvariantGlobalization>
@@ -55,6 +55,9 @@
          OnnxSessionFactory 保留 CUDA→DirectML→CPU 降级链：无 DML 原生库时运行时探测失败自动落 CPU，
          后续接入 Windows ML EP 或更换 OCR 后端即可恢复 GPU 加速，代码无需改动。 -->
     <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.31.0" />
+    <!-- ViGEm 客户端托管封装（v3.3.0 自 HIDMaestro 回退 ViGEmBus）：自带原生 vigemclient.dll（x64），
+         与 ViGEmBus 内核驱动通信；驱动本体由内置官方安装器按需静默安装（见 DriverInstaller） -->
+    <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.256" />
     <!-- YOLO letterbox 预处理已自写（ImageScaling，双线性+灰边，测试工程用 OpenCV 参照实现做逐像素等价对照）；
          主工程不再依赖 OpenCvSharp（原 OpenCvSharpExtern.dll 58.9MB + ffmpeg 25.2MB 随包剔除，发布体积 -~50MB 压缩后） -->
   </ItemGroup>
@@ -70,6 +73,14 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="EfootballBot.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 内置 ViGEmBus 1.22.0 官方三架构安装器（离线安装，Advanced Installer 打包）：
+         DriverPayload 释放 + SHA256 校验 + DriverInstaller 静默安装，用户机器无需手动装驱动 -->
+    <EmbeddedResource Include="..\..\assets\ViGEmBusSetup.exe">
+      <LogicalName>EfootballBot.ViGEmBusSetup.exe</LogicalName>
+    </EmbeddedResource>
   </ItemGroup>
 
   <!-- RapidOcrNet 的 build target 在 Publish 后无条件把 models/v5 松散复制到发布目录；

@@ -222,8 +222,8 @@ public sealed class ModuleFallbackConfig
     /// <summary>true = OCR 关闭高分辨率降采样（4K 级画面默认压缩到 1080p 再识别；高分屏识别变差时勾选）。</summary>
     public bool DisableOcrDownscale { get; set; } = false;
 
-    /// <summary>true = 虚拟手柄改用 HIDMaestro 驱动（旧开关，已由 Pad.Backend 取代：
-    /// 仅保留 JSON 反序列化兼容，加载时迁移进 Pad.Backend 后清零，UI 不再读写）。</summary>
+    /// <summary>true = 虚拟手柄改用 HIDMaestro 驱动（3.0~3.2 的开关，v3.3.0 已随 HIDMaestro
+    /// 整体回退而作废：仅保留 JSON 反序列化兼容，加载时清零，UI 不再读写）。</summary>
     public bool EnableHidMaestro { get; set; } = false;
 
     /// <summary>true = 鼠标点击关闭拟人移动轨迹（回退单步跳变到目标位置）。</summary>
@@ -233,55 +233,43 @@ public sealed class ModuleFallbackConfig
     public bool DisableFailureDumps { get; set; } = false;
 }
 
-/// <summary>虚拟手柄后端配置（唯一后端 HidMaestro）+ 共存模式。</summary>
+/// <summary>虚拟手柄后端配置（唯一后端 ViGEm Xbox 360）。</summary>
 public sealed class PadConfig
 {
     /// <summary>
-    /// 虚拟手柄后端。唯一后端 HidMaestro（纯 HID，XInput-only 应用不可见）；
-    /// 旧配置里的 ViGEm 档位（0=DualShock4 / 2=Xbox 360）加载时归一化。
+    /// 虚拟手柄后端。唯一后端 Vigem（ViGEmBus 虚拟 Xbox 360，XInput 玩家 1 全通道被
+    /// eFootball 消费）；旧配置遗留的 HIDMaestro 枚举值加载时归一化（同为 0，天然兼容）。
     /// </summary>
-    public PadBackendKind Backend { get; set; } = PadBackendKind.HidMaestro;
+    public PadBackendKind Backend { get; set; } = PadBackendKind.Vigem;
 
     /// <summary>
-    /// 共存模式（3.2.0 起唯一隔离模型）：真实手柄全程不禁用；挂机检测到真实手柄活动即自动
-    /// 让步暂停，停手静默 <see cref="CoexistQuietSeconds"/> 秒后自动恢复。
-    /// 关闭后挂机不再感知真实手柄（不推荐：用户按键会与 bot 抢后台游戏输入）。
-    /// </summary>
-    public bool CoexistenceEnabled { get; set; } = true;
-
-    /// <summary>让步恢复静默秒数：真实手柄持续无活动的时长达到该值即自动恢复挂机。</summary>
-    public int CoexistQuietSeconds { get; set; } = 30;
-
-    /// <summary>
-    /// 旧版布尔开关迁移：EnableHidMaestro=true → 清零旧开关（后端本就只有 HidMaestro 一档）。
-    /// 同时把旧配置遗留的 ViGEm 枚举值归一化到 HidMaestro，防止下次保存把废值写回磁盘。
+    /// 旧版布尔开关迁移：清零旧开关（枚举归一化已在 PadBackendKind 层天然完成）。
     /// </summary>
     public void MigrateFrom(ModuleFallbackConfig legacy)
     {
-        if (Backend != PadBackendKind.HidMaestro)
-            Backend = PadBackendKind.HidMaestro;
+        if (Backend != PadBackendKind.Vigem)
+            Backend = PadBackendKind.Vigem;
         legacy.EnableHidMaestro = false;
-        CoexistQuietSeconds = Math.Clamp(CoexistQuietSeconds, 5, 600);
     }
 }
 
-/// <summary>手柄隔离（HidHide）配置：3.2.0 起只负责「虚拟手柄仅游戏可见」，
-/// 物理手柄的禁用机制已整体移除（共存模式）。驱动侧持久化到注册表，此处仅存 UI 快照与回滚清单。</summary>
+/// <summary>手柄隔离（HidHide）配置：虚拟手柄仅游戏可见（白名单）+ 真实手柄接管
+/// （设备节点禁用清单由 PhysicalPadControl 维护）。驱动侧持久化到注册表，
+/// 此处仅存 UI 快照与回滚清单。</summary>
 public sealed class HidHideConfig
 {
     /// <summary>已应用隔离（虚拟手柄已加入黑名单）。默认开启：首次由提权子进程自动完成配置。</summary>
     public bool Enabled { get; set; } = true;
 
     /// <summary>
-    /// ★已废弃（3.2.0 共存模式移除「挂机禁用真实手柄」机制）。保留字段仅为旧 config.json
-    /// 反序列化兼容，加载时置 false，任何代码不再消费。
+    /// 挂机期间自动禁用真实手柄以释放 XInput 玩家 1（全权接管模型，v3.3.0 恢复）。
+    /// 虚拟手柄为 Xbox 360 形态，必须拿到 slot0 才被 eFootball 消费；
+    /// 停止挂机自动恢复真实手柄。
     /// </summary>
-    public bool HidePhysicalGamepad { get; set; }
+    public bool HidePhysicalGamepad { get; set; } = true;
 
-    /// <summary>
-    /// 旧版「被禁用的真实手柄节点」恢复清单。3.2.0 不再产生新记录；启动时的一次性遗留恢复
-    /// （LegacyPadRestore）消费并清空它，防老版本升级用户的手柄卡在禁用态。
-    /// </summary>
+    /// <summary>被禁用的真实手柄节点恢复清单（先记录后禁用，崩溃也能按清单恢复；
+    /// 由 pad-hide/pad-restore 提权任务与 GUI 启动兜底消费）。</summary>
     public List<string> DisabledPadDevs { get; set; } = new();
 
     /// <summary>白名单游戏的完整镜像路径快照（应用隔离时快照，游戏未运行时无法更新）。</summary>
@@ -293,15 +281,15 @@ public sealed class HidHideConfig
     /// <summary>
     /// 老默认迁移：从未成功应用过隔离（AppliedBlacklist 为空，即旧出厂 Enabled=false 配置）
     /// → 翻成新默认（隔离开）。成功应用/解除过一次后不再干预，尊重用户选择。
-    /// 3.2.0 起 HidePhysicalGamepad 一律压回 false（禁用机制已移除）；
-    /// DisabledPadDevs 保留原值，由启动时的一次性遗留恢复消费后清空。
+    /// 3.2.x 曾把 HidePhysicalGamepad 压回 false（共存模式）；v3.3.0 恢复全权接管模型，
+    /// 迁移一律翻回 true（挂机禁用真实手柄、停止恢复）。
     /// 只改内存，首次 Save 时落盘（同 TimingConfig 迁移模式）。
     /// </summary>
     public void MigrateDefaults()
     {
         if (AppliedBlacklist.Count == 0)
             Enabled = true;
-        HidePhysicalGamepad = false;
+        HidePhysicalGamepad = true;
     }
 }
 

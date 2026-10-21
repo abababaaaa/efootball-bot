@@ -324,7 +324,7 @@ public partial class App : Application
         Console.WriteLine($"目标窗口：{win.Title}（{win.ProcessName}）客户区 {w}×{h}");
         capture.Start(win.Handle, w, h);
 
-        HidMaestroPad? vg = null;
+        VigemPad? vg = null;
         var mouse = new BackgroundMouse();
         var fgMouse = new ForegroundMouse();
         var oldFg = new IntPtr[1];
@@ -336,9 +336,9 @@ public partial class App : Application
                     .Any(t => t.ToUpperInvariant() is "L" or "R" or "U" or "D" or "A" or "B" or "X" or "Y" or "START" or "RT");
                 if (needPad)
                 {
-                    vg = new HidMaestroPad(Console.WriteLine);
+                    vg = new VigemPad(Console.WriteLine);
                     vg.Connect();
-                    Console.WriteLine("虚拟手柄已连接（HIDMaestro 纯 HID）");
+                    Console.WriteLine("虚拟手柄已连接（ViGEm Xbox 360）");
                 }
                 var pad = vg is null ? null : new Pad(vg, new TimingConfig());
                 Console.WriteLine($"执行动作：{actions}");

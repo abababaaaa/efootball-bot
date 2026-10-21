@@ -88,15 +88,8 @@ public partial class MainWindow
         // OCR 引擎（枚举顺序 RapidV6=0 / Windows=1，与下拉项一致）
         CmbOcrEngine.SelectedIndex = _cfg.OcrEngine == OcrEngineKind.Windows ? 1 : 0;
 
-        // 共存模式（真实手柄让步）：静默秒数下拉 0=10s / 1=30s / 2=60s / 3=120s
-        ChkCoexistence.IsChecked = _cfg.Pad.CoexistenceEnabled;
-        CmbCoexistQuiet.SelectedIndex = _cfg.Pad.CoexistQuietSeconds switch
-        {
-            <= 19 => 0,
-            <= 45 => 1,
-            <= 90 => 2,
-            _ => 3,
-        };
+        // 全权接管（挂机禁用真实手柄）：开关见「手柄隔离」卡
+        ChkPadTakeover.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
 
         // OCR 频率
         int[] ocrMsValues = { 500, 900, 1500, 2500, 5000 };
@@ -214,7 +207,7 @@ public partial class MainWindow
         // 手柄隔离（赋值会触发 Changed：加载期间必须屏蔽，否则每次启动误弹一次提权配置）
         _loadingConfig = true;
         ChkHidHideEnabled.IsChecked = _cfg.HidHide.Enabled;
-        ChkCoexistence.IsChecked = _cfg.Pad.CoexistenceEnabled;
+        ChkPadTakeover.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
         _loadingConfig = false;
         _ = RefreshHidHidePanelAsync();
     }
@@ -231,10 +224,8 @@ public partial class MainWindow
         }
         _cfg.OcrEngine = CmbOcrEngine.SelectedIndex == 1 ? OcrEngineKind.Windows : OcrEngineKind.RapidV6;
 
-        // 共存模式（下次开始挂机生效；静默秒数 0=10s / 1=30s / 2=60s / 3=120s）
-        _cfg.Pad.CoexistenceEnabled = ChkCoexistence.IsChecked == true;
-        if (CmbCoexistQuiet.SelectedIndex >= 0)
-            _cfg.Pad.CoexistQuietSeconds = new[] { 10, 30, 60, 120 }[CmbCoexistQuiet.SelectedIndex];
+        // 全权接管（下次开始挂机生效；停止挂机自动恢复真实手柄）
+        _cfg.HidHide.HidePhysicalGamepad = ChkPadTakeover.IsChecked == true;
 
         if (CmbOcrInterval.SelectedIndex >= 0)
         {
@@ -744,13 +735,13 @@ public partial class MainWindow
 
     private bool _hidHideBusy;
 
-    private void ChkCoexistence_Changed(object sender, RoutedEventArgs e)
+    private void ChkPadTakeover_Changed(object sender, RoutedEventArgs e)
     {
         if (_loadingConfig) return;
-        _cfg.Pad.CoexistenceEnabled = ChkCoexistence.IsChecked == true;
+        _cfg.HidHide.HidePhysicalGamepad = ChkPadTakeover.IsChecked == true;
         _cfg.Save();
         if (TxtHidHideStatus is not null && TxtHidHideStatus.Text.StartsWith("已开启", StringComparison.Ordinal))
-            TxtHidHideStatus.Text = "已开启：虚拟手柄仅游戏内可见；真实手柄占用时挂机自动让步、停手后自动恢复";
+            TxtHidHideStatus.Text = "已开启：虚拟手柄仅游戏内可见；挂机时自动禁用真实手柄（全权接管），停止挂机自动恢复";
     }
 
     /// <summary>查询 HidHide 状态并刷新开关下方状态行；默认开启且未就绪时自动触发一次提权配置。</summary>

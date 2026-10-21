@@ -145,8 +145,8 @@ public partial class MainWindow : Window
             _hotkey.Unregister();
             // Worker 非正常退出（更新重启/崩溃/强杀）可能没机会还原停靠的窗口：兜底还原
             EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
-            // 旧版本遗留的禁用手柄一次性迁移恢复
-            RestoreLegacyDisabledPads();
+            // Worker 非正常退出（崩溃/强杀）没走停止流程：兜底恢复被禁用的真实手柄
+            RestoreDisabledPadsIfNeeded();
         });
         return _workerHost;
     }
@@ -454,18 +454,19 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 一次性遗留恢复：3.1 及更早版本的「挂机禁用真实手柄」机制可能给用户留下卡在禁用态的手柄
-    /// （旧版崩溃/强杀没走恢复流程）。检测到遗留禁用 → 进程内启用（需管理员；未提权则下次启动重试）。
-    /// 3.2.0 共存模式不再产生新禁用，本恢复是纯迁移。
+    /// 兜底恢复被禁用的真实手柄：挂机中 Worker 崩溃/强杀没走停止流程时，pad-hide 禁用的
+    /// 手柄会卡在禁用态。按禁用清单 + 已禁用节点兜底扫描进程内启用（需管理员；未提权则
+    /// 下次启动重试，pad-restore 提权任务也会在登录/启动时兜底）。
     /// </summary>
-    private void RestoreLegacyDisabledPads()
+    private void RestoreDisabledPadsIfNeeded()
     {
         try
         {
-            if (!LegacyPadRestore.HasLegacyDisabled()) return;
-            AppendLog("检测到旧版本遗留的禁用手柄，正在自动恢复…", LogLevel.Info);
-            var (_, msg) = LegacyPadRestore.RestoreAll();
-            AppendLog($"遗留手柄恢复：{msg}", LogLevel.Info);
+            if (!EfootballBot.Core.Input.PhysicalPadControl.HasPendingRestore()
+                && !EfootballBot.Core.Input.PhysicalPadControl.HasDisabledGamepad()) return;
+            AppendLog("检测到仍被禁用的真实手柄，正在自动恢复…", LogLevel.Info);
+            var (_, msg) = EfootballBot.Core.Input.PhysicalPadControl.RestoreAll();
+            AppendLog($"手柄恢复：{msg}", LogLevel.Info);
         }
         catch { /* 恢复失败不影响启动流程，下次启动重试 */ }
     }
@@ -559,7 +560,7 @@ public partial class MainWindow : Window
         _workerHost?.Dispose();
         // 停靠中的游戏窗口还原兜底：Worker 已死，看门狗不会再对抗还原
         EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
-        RestoreLegacyDisabledPads();
+        RestoreDisabledPadsIfNeeded();
         FileLogger.Instance.Dispose();
         base.OnClosing(e);
     }

@@ -155,19 +155,19 @@ public class HidHideTests
     {
         // 旧出厂：Enabled=false / 从未应用（黑名单空）→ 迁移翻成隔离开
         var legacy = new EfootballBot.Core.Config.HidHideConfig
-        { Enabled = false, HidePhysicalGamepad = true };
+        { Enabled = false, HidePhysicalGamepad = false };
         legacy.MigrateDefaults();
         Assert.True(legacy.Enabled);
-        // 3.2.0 共存模式：禁用真实手柄机制已移除，旧 true 值一律压回 false
-        Assert.False(legacy.HidePhysicalGamepad);
+        // v3.3.0 恢复全权接管：3.2.x 共存模式压成的 false 一律翻回 true
+        Assert.True(legacy.HidePhysicalGamepad);
 
-        // 已成功应用过（黑名单非空）：用户手动关闭后不再迁移，尊重选择
+        // 已成功应用过（黑名单非空）：Enabled 不再迁移，尊重选择；接管开关仍翻回默认开
         var userOff = new EfootballBot.Core.Config.HidHideConfig
-        { Enabled = false, HidePhysicalGamepad = true };
+        { Enabled = false, HidePhysicalGamepad = false };
         userOff.AppliedBlacklist.Add(@"HID\VID_045E&PID_028E\3&5D59EC1&0&0000");
         userOff.MigrateDefaults();
         Assert.False(userOff.Enabled);
-        Assert.False(userOff.HidePhysicalGamepad);
+        Assert.True(userOff.HidePhysicalGamepad);
     }
 
     [Fact]

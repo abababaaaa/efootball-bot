@@ -8,54 +8,29 @@ namespace EfootballBot.Core.Input;
 /// <summary>
 /// HID 设备枚举：虚拟手柄实例（路径前缀/驱动特征判定）与物理手柄实例（HID Usage 判定）。
 /// 黑名单条目格式 = 设备实例路径（如 HID\VID_045E&PID_028E\6&2DF92C3&0&0000）。
-/// ViGEm 前缀常量保留：旧版本写入 HidHide 黑名单的 ViGEm 实例条目仍需识别以精确清理。
+/// ViGEm 前缀常量同时服务在线判定与旧版本黑名单条目的识别清理。
 /// </summary>
 public static class HidDeviceEnumerator
 {
-    /// <summary>旧 ViGEm 虚拟 Xbox360 手柄在 HID 层的固定硬件 ID 前缀（仅用于清理旧黑名单条目）。</summary>
+    /// <summary>ViGEm 虚拟 Xbox360 手柄在 HID 层的固定硬件 ID 前缀（唯一后端形态）。</summary>
     public const string ViGEmInstancePrefix = @"HID\VID_045E&PID_028E";
 
-    /// <summary>旧 ViGEm 虚拟 DualShock4 手柄的硬件 ID 前缀（与真实 DS4 同形，靠父设备判真假）。</summary>
+    /// <summary>ViGEm 虚拟 DualShock4 手柄的硬件 ID 前缀（v2.0.x 旧档残留，与真实 DS4 同形，
+    /// 靠父设备判真假；保留用于清理旧黑名单条目）。</summary>
     public const string ViGEmDs4InstancePrefix = @"HID\VID_054C&PID_05C4";
-
-    /// <summary>HIDMaestro 虚拟总线节点前缀（探针 2026-10-20 实测定案）：ROOT\HIDCLASS\HM_<hash>，
-    /// hash 由 identityKey 决定性生成；实例路径不含 VID/PID，也不含"HIDMAESTRO"字样。</summary>
-    public const string HidMaestroBusPrefix = @"ROOT\HIDCLASS\HM_";
-
-    /// <summary>HIDMaestro 的 HID 集合节点前缀：HID\HIDCLASS\1&amp;<hash>&amp;0&amp;0000（其父即虚拟总线节点）。
-    /// "HIDCLASS" 硬件 ID 仅 HIDMaestro 使用，真实设备不会撞此形态。</summary>
-    public const string HidMaestroHidPrefix = @"HID\HIDCLASS\";
-
-    /// <summary>HIDMaestro XInput 形态档的节点形态（padprobe 2026-10-21 实测）：
-    /// 总线节点 ROOT\VID_045E&PID_028E&amp;IG_00\HM_&lt;hash&gt;（含 HM_ 尾段，真实手柄无此形态）+
-    /// HID 集合 HID\VID_045E&amp;PID_028E&amp;IG_00\1&amp;&lt;hash&gt;（与真实 360 手柄集合同形，
-    /// 由 ViGEm 前缀兜住、物理条目由 ApplyIsolation 的 RemoveAll 保护）。另有 SWD/HID\HIDMAESTRO_ 形态。</summary>
-    public const string HidMaestroSwdPrefix = @"SWD\HIDMAESTRO_";
-    public const string HidMaestroHidVidPrefix = @"HID\HIDMAESTRO_";
-    public const string HidMaestroXboxBusPrefix = @"ROOT\VID_045E&PID_028E&IG_";
-
-    /// <summary>HIDMaestro 虚拟设备实例判定（在线检查与黑名单共用；路径纯字符串，不打开设备）。</summary>
-    public static bool IsHidMaestroInstance(string instancePath)
-        => instancePath.StartsWith(HidMaestroBusPrefix, StringComparison.OrdinalIgnoreCase)
-           || instancePath.StartsWith(HidMaestroHidPrefix, StringComparison.OrdinalIgnoreCase)
-           || instancePath.StartsWith(HidMaestroSwdPrefix, StringComparison.OrdinalIgnoreCase)
-           || instancePath.StartsWith(HidMaestroHidVidPrefix, StringComparison.OrdinalIgnoreCase)
-           || instancePath.StartsWith(HidMaestroXboxBusPrefix, StringComparison.OrdinalIgnoreCase);
 
     public static bool IsViGEmInstance(string instancePath)
         => instancePath.StartsWith(ViGEmInstancePrefix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// 黑名单/名单用的「虚拟手柄实例路径」判定（纯字符串，不打开设备）：
-    /// ViGEm Xbox360 前缀 ∥ ViGEm DS4 前缀 ∥ HIDMaestro 节点前缀（ROOT\HIDCLASS\HM_ ∥ HID\HIDCLASS\，
-    /// 2026-10-20 探针实测定案；旧的 Contains("HIDMAESTRO") 永远匹配不上真实路径，导致隔离空转）。
+    /// ViGEm Xbox360 前缀 ∥ ViGEm DS4 前缀。
     /// 真实 DS4 与虚拟 DS4 路径同形——凡需分辨真假（如禁用物理手柄）必须再过父设备判定，
     /// 此处仅用于「我们加入黑名单的虚拟设备」。
     /// </summary>
     public static bool IsVirtualPadInstancePath(string instancePath)
         => IsViGEmInstance(instancePath)
-           || instancePath.StartsWith(ViGEmDs4InstancePrefix, StringComparison.OrdinalIgnoreCase)
-           || IsHidMaestroInstance(instancePath);
+           || instancePath.StartsWith(ViGEmDs4InstancePrefix, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// 设备节点的祖先链（最多 4 级）里是否出现虚拟总线特征——真假手柄唯一可靠判据。
@@ -77,10 +52,7 @@ public static class HidDeviceEnumerator
                     return true; // 节点查询失败：按虚拟兜底
                 var id = sb.ToString();
                 if (id.StartsWith("ViGEmBus", StringComparison.OrdinalIgnoreCase)
-                    || id.StartsWith(@"ROOT\SYSTEM\", StringComparison.OrdinalIgnoreCase)
-                    || id.StartsWith(@"ROOT\HIDCLASS\", StringComparison.OrdinalIgnoreCase)
-                    || id.StartsWith(@"ROOT\VID_", StringComparison.OrdinalIgnoreCase) // HIDMaestro xbox 档总线节点（真实设备祖先链是 USB 集线器，永不撞 ROOT\VID_）
-                    || id.Contains("HIDMAESTRO", StringComparison.OrdinalIgnoreCase))
+                    || id.StartsWith(@"ROOT\SYSTEM\", StringComparison.OrdinalIgnoreCase))
                     return true;
                 if (CM_Get_Parent(out cur, cur, 0) != 0)
                     return false; // 到达树根：整链查清，非虚拟
@@ -141,7 +113,7 @@ public static class HidDeviceEnumerator
         catch { return null; }
     }
 
-    /// <summary>当前存在的虚拟手柄实例路径（当前仅 HIDMaestro；含旧黑名单里的 ViGEm 条目形态）。</summary>
+    /// <summary>当前存在的虚拟手柄实例路径（ViGEm Xbox360；含旧黑名单里的 DS4 档条目形态）。</summary>
     public static List<string> FindVirtualPadInstances()
     {
         var result = new List<string>();

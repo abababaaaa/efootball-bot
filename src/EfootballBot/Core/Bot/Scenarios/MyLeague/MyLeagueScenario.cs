@@ -59,9 +59,6 @@ public class MyLeagueScenario : IScenario
     /// <summary>难度页连续轮数与确认腿轮数（离开难度页清零，见 HandleDifficultyAsync）。</summary>
     private int _difficultyPageRounds;
     private int _difficultyConfirmRound;
-    /// <summary>右摇杆轴不被游戏消费（HIDMaestro 轴通道限制，探针 2026-10-21 实测）：
-    /// 粘性标记——本次运行跳过面板购买流程（开赛主流程不受影响），下次启动自动重试。</summary>
-    private bool _rsPanelUnavailable;
     /// <summary>主页连续按 A 前往比赛但画面未离开主页的次数（无响应自愈计数）。</summary>
     private int _goMatchAttempts;
     /// <summary>上次按 A 前往比赛的时间（用于只 dump 一次前往后的弹窗画面 OCR）。</summary>
@@ -503,7 +500,6 @@ public class MyLeagueScenario : IScenario
 
                 // 联赛主页（有前往比赛=上层无弹窗，弹窗会被分类为其他界面）
                 if (screen != MlScreen.LeaguePage || !ocr.ContainsJoined("前往比赛")) return null;
-                if (_rsPanelUnavailable) return null; // 右摇杆轴已被判定不被消费：跳过面板购买（不影响开赛）
                 if (MyLeagueBrain.ShowsItemsPanel(ocr))
                 {
                     // 面板已是「使用的物品」：直接核验
@@ -535,13 +531,6 @@ public class MyLeagueScenario : IScenario
                     string verdict = MyLeagueBrain.ShowsItemsPanel(ocr) ? "物品面板（判定词已见，疑似假阴性）"
                         : MyLeagueBrain.ShowsChallengePanel(ocr) ? "仍在挑战面板（右拨未生效）" : "面板词均未读出";
                     _log($"[我的联赛] 面板切换失败（{verdict}），当前主页 OCR：{OcrDigest(ocr)}", LogLevel.Debug);
-                    // 右拨未生效 = 右摇杆轴不被游戏消费（HIDMaestro 轴通道限制，探针 2026-10-21 实测）：
-                    // 置粘性标记，本次运行内跳过面板购买（每场省 ~1 分钟重试白等；下次启动自动重试）
-                    if (verdict.Contains("右拨未生效") && !_rsPanelUnavailable)
-                    {
-                        _rsPanelUnavailable = true;
-                        _log("[我的联赛] 右摇杆拨动不被游戏消费（HIDMaestro 轴通道限制）：本次运行跳过道具面板购买，不影响开赛", LogLevel.Warn);
-                    }
                     await _engine.Pad.RsFlick(PadDir.Left);
                     ResetPhase("面板切换失败");
                     return null;

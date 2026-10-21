@@ -100,21 +100,13 @@ public partial class MainWindow
 
     private void RunEnvChecks()
     {
-        // 虚拟手柄驱动：HIDMaestro（唯一后端，驱动在开始挂机首次连接时经 SDK 幂等安装）。
-        // 绿点 = 驱动已装；虚拟设备节点仅挂机连接期间在线，观察其在线状态补充文案
-        bool hidm = HidMaestroPad.IsDriverInstalled();
-        DotPad.Fill = hidm ? BrushOk : BrushBad;
-        bool padOnline = false;
-        try
-        {
-            padOnline = HidDeviceEnumerator.EnumerateAllInstances()
-                .Any(i => HidDeviceEnumerator.IsHidMaestroInstance(i.InstancePath));
-        }
-        catch { /* 枚举失败不影响面板 */ }
-        TxtPad.Text = !hidm ? "HIDMaestro 驱动未安装（开始挂机时自动装）"
-            : padOnline ? "虚拟手柄驱动（HIDMaestro，设备在线）"
-            : "虚拟手柄驱动（HIDMaestro，挂机时连接）";
-        bool padMissing = !hidm;
+        // 虚拟手柄驱动：ViGEmBus（唯一后端，内核驱动服务；缺失时开始挂机自动安装）。
+        // 绿点 = 驱动已装；虚拟手柄仅挂机连接期间在线
+        bool vigem = VigemPad.IsDriverInstalled();
+        DotPad.Fill = vigem ? BrushOk : BrushBad;
+        TxtPad.Text = vigem ? "虚拟手柄驱动（ViGEmBus 已就绪）"
+            : "ViGEmBus 驱动未安装（开始挂机时自动装）";
+        bool padMissing = !vigem;
 
         // WGC 后台捕获
         bool wgc = WindowCapture.IsSupported();
@@ -150,7 +142,7 @@ public partial class MainWindow
 
         if (padMissing)
         {
-            AppendLog("HIDMaestro 驱动未安装：开始挂机时会自动下载 SDK 并安装（需管理员授权，首次约 5-15 秒）。", LogLevel.Warn);
+            AppendLog("ViGEmBus 驱动未安装：开始挂机时会自动静默安装（需管理员授权，首次约 10-30 秒）。", LogLevel.Warn);
         }
         if (win is null)
             AppendLog(cn
@@ -164,8 +156,9 @@ public partial class MainWindow
     /// <summary>
     /// 启动自愈（后台，不阻塞 UI）：
     /// ① 重写提权任务 shim 指向当前 exe（程序移动/更新后任务动作恒有效）；
-    /// ② 旧版本遗留的禁用手柄 → 进程内一次性恢复（3.2.0 共存模式已移除禁用机制）；
-    /// ③ 清理旧版注册的 pad-hide/pad-restore 遗留任务与 shim（登录触发指向已不存在的参数，残留无害但难看）。
+    /// ② 幂等注册全部提权任务（sync / pad-hide / pad-restore——3.2.x 升级用户的两个任务
+    ///    曾被共存模式迁移清理，这里恢复注册）；
+    /// ③ 挂机中崩溃残留的禁用真实手柄 → 触发 pad-restore 恢复（未提权时 schtasks 静默失败，下次重试）。
     /// </summary>
     private async Task EnsurePadEnvironmentAsync()
     {
@@ -177,45 +170,25 @@ public partial class MainWindow
             {
                 try
                 {
-                    if (LegacyPadRestore.HasLegacyDisabled())
+                    HidHideManager.EnsureTasksRegistered();
+
+                    if (EfootballBot.Core.Input.PhysicalPadControl.HasPendingRestore()
+                        || EfootballBot.Core.Input.PhysicalPadControl.HasDisabledGamepad())
                     {
                         Dispatcher.BeginInvoke(() =>
-                            AppendLog("检测到旧版本遗留的禁用手柄，正在自动恢复…", LogLevel.Info));
-                        var (_, msg) = LegacyPadRestore.RestoreAll();
-                        Dispatcher.BeginInvoke(() => AppendLog($"遗留手柄恢复：{msg}", LogLevel.Info));
+                            AppendLog("检测到仍被禁用的真实手柄，触发自动恢复…", LogLevel.Info));
+                        HidHideManager.RunTaskSilently(HidHideManager.PadRestoreTaskName);
+                        Dispatcher.BeginInvoke(() =>
+                            AppendLog("手柄恢复任务已触发（详见 data\\hidhide-sync.log）", LogLevel.Info));
                     }
                 }
                 catch { /* 未提权等：下次启动重试 */ }
-            });
-
-            await Task.Run(() =>
-            {
-                // 3.2.0 移除的两个提权任务：残留会在每次登录时触发已不存在的模式，静默删除（幂等）
-                foreach (var name in new[] { "EfootballBotPadHide", "EfootballBotPadRestore" })
-                    DeleteScheduledTaskQuietly(name);
-                foreach (var shim in new[] { "hidhide-pad-hide.vbs", "hidhide-pad-restore.vbs" })
-                {
-                    try { File.Delete(Path.Combine(HidHideManager.ShimDir, shim)); } catch { }
-                }
-                // 旧版 pad-hide 一次性凭证：已无消费者，删
-                try { File.Delete(Path.Combine(EfootballBot.Core.System.AppPaths.TempDir, "padhide.req")); } catch { }
             });
         }
         catch (Exception ex)
         {
             AppendLog($"手柄环境自检异常：{ex.Message}", LogLevel.Warn);
         }
-    }
-
-    private static void DeleteScheduledTaskQuietly(string name)
-    {
-        try
-        {
-            using var p = Process.Start(new ProcessStartInfo("schtasks", $"/Delete /TN {name} /F")
-            { CreateNoWindow = true, UseShellExecute = false });
-            p?.WaitForExit(5000);
-        }
-        catch { /* 未提权删除最高权限任务会失败：无害，下次启动重试 */ }
     }
 
     private void BtnRecheck_Click(object sender, RoutedEventArgs e) => RunEnvChecks();
