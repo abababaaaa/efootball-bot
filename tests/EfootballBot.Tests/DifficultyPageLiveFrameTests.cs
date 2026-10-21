@@ -47,12 +47,13 @@ public class DifficultyPageLiveFrameTests
     [Fact]
     public void DifficultyLegPlan_MatchesUserRecipe()
     {
-        // 首轮 = 纯用户配方（进页光标恒在第 1 行，不先上归位）：下×10 落底行 右×1 A
-        Assert.Equal((false, 10, 1), MyLeagueBrain.DifficultyLegPlan(1));
-        // 重试腿先上×9 饱和回顶行；偶数轮右×2 防吞键
+        // 首轮 = 纯 A（2026-10-21 实机视频：对话框光标可能直接落在「确认」上——
+        // 光标位置是游戏记忆的；确认已聚焦时 A 直接开赛，列表行上 A 是空操作无副作用）
+        Assert.Equal((false, 0, 0), MyLeagueBrain.DifficultyLegPlan(1));
+        // 重试腿先上×9 饱和回顶行，下×10 落底行；偶数轮右×2 防吞键
         Assert.Equal((true, 10, 2), MyLeagueBrain.DifficultyLegPlan(2));
         Assert.Equal((true, 10, 1), MyLeagueBrain.DifficultyLegPlan(3));
-        // 第 4/7 轮 B 逃生（关对话框重进，光标复位第 1 行）；第 10 轮起调用方停止挂机
+        // 第 4/7 轮 B 逃生（关对话框重进）；第 10 轮起调用方停止挂机
         Assert.Null(MyLeagueBrain.DifficultyLegPlan(4));
         Assert.Equal((true, 10, 1), MyLeagueBrain.DifficultyLegPlan(5));
         Assert.Equal((true, 10, 2), MyLeagueBrain.DifficultyLegPlan(6));
