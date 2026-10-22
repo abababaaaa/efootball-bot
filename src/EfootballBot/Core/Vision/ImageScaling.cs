@@ -37,6 +37,37 @@ public static class ImageScaling
         return new FrameData(dst, dstW, dstH, src.TimestampMs);
     }
 
+    /// <summary>
+    /// 按归一化矩形裁切并做整数倍最近邻放大（放大后 OCR 小字更稳）。
+    /// 用于「赛后活动地图」左上小图标旁的数字：全帧 OCR 会把细白字与红图标并读成
+    /// 「C'」而丢掉数字，裁切放大后稳定读出「©1」。越界坐标自动钳制。
+    /// </summary>
+    public static FrameData CropUpscale(FrameData src, double x0, double x1, double y0, double y1, int scale)
+    {
+        if (src.Width <= 0 || src.Height <= 0 || src.Bgra.Length == 0 || scale < 1)
+            return src;
+        int sx0 = Math.Clamp((int)(x0 * src.Width), 0, src.Width - 1);
+        int sx1 = Math.Clamp((int)(x1 * src.Width), sx0 + 1, src.Width);
+        int sy0 = Math.Clamp((int)(y0 * src.Height), 0, src.Height - 1);
+        int sy1 = Math.Clamp((int)(y1 * src.Height), sy0 + 1, src.Height);
+        int cw = (sx1 - sx0) * scale, ch = (sy1 - sy0) * scale;
+        var dst = new byte[cw * ch * 4];
+        for (int y = 0; y < ch; y++)
+        {
+            int sy = sy0 + y / scale;
+            for (int x = 0; x < cw; x++)
+            {
+                int si = (sy * src.Width + sx0 + x / scale) * 4;
+                int di = (y * cw + x) * 4;
+                dst[di] = src.Bgra[si];
+                dst[di + 1] = src.Bgra[si + 1];
+                dst[di + 2] = src.Bgra[si + 2];
+                dst[di + 3] = 255;
+            }
+        }
+        return new FrameData(dst, cw, ch, src.TimestampMs);
+    }
+
     /// <summary>BGRA → BGRA 双线性缩放。坐标映射与边界钳制复刻 OpenCV INTER_LINEAR：
     /// src = (dst + 0.5) * invScale - 0.5，越界坐标钳到边缘（等价 BORDER_REPLICATE）。</summary>
     internal static unsafe void ResizeBilinearBgra(byte* pSrc, int srcW, int srcH, byte* pDst, int dstW, int dstH)

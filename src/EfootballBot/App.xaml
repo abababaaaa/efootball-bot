@@ -46,6 +46,11 @@
         <SolidColorBrush x:Key="TrackBg" Color="#FF101722"/>
         <SolidColorBrush x:Key="Scrim" Color="#F00B0F14"/>
         <SolidColorBrush x:Key="TextOnAccent" Color="#FFFFFFFF"/>
+        <!-- v4.2 视觉重排新增 Token（三套主题都必须提供，见 ThemeManager） -->
+        <SolidColorBrush x:Key="Divider" Color="#FF1E2633"/>
+        <SolidColorBrush x:Key="TabTrackBg" Color="#FF0B1016"/>
+        <SolidColorBrush x:Key="DangerSoft" Color="#2AE5484D"/>
+        <SolidColorBrush x:Key="AccentSoft" Color="#1F0FA968"/>
 
         <!-- 柔和阴影（仅用于浮层 / 横幅 / 弹窗，卡片本身用发丝描边） -->
         <DropShadowEffect x:Key="FloatShadow" Color="#FF000000" BlurRadius="24"
@@ -59,7 +64,7 @@
             <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="Padding" Value="20"/>
+            <Setter Property="Padding" Value="18,16"/>
             <Setter Property="Margin" Value="0,0,0,12"/>
         </Style>
         <!-- 内嵌凹槽：日志 / 提示 / 输入组 -->
@@ -70,9 +75,101 @@
             <Setter Property="CornerRadius" Value="10"/>
         </Style>
         <Style x:Key="H2" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="FontSize" Value="13.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+        </Style>
+
+        <!-- ============ 字体阶梯（全应用统一，禁止各处再手写 FontSize） ============ -->
+        <!-- 页面主标题：模块页 / 设置页顶部 -->
+        <Style x:Key="PageTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="18"/>
             <Setter Property="FontWeight" Value="Bold"/>
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+        </Style>
+        <!-- 页面副标题：标题下的一句用途说明 -->
+        <Style x:Key="PageSub" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
+            <Setter Property="Margin" Value="0,5,0,0"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="MaxWidth" Value="520"/>
+        </Style>
+        <!-- 卡片标题 -->
+        <Style x:Key="CardTitle" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+        </Style>
+        <!-- 卡片标题下的补充说明 -->
+        <Style x:Key="CardSub" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
+            <Setter Property="Margin" Value="0,3,0,0"/>
+        </Style>
+        <!-- 正文：说明段落 -->
+        <Style x:Key="BodyText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="LineHeight" Value="20"/>
+        </Style>
+        <!-- 小字：要点行 / 表单说明 -->
+        <Style x:Key="SmallText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="LineHeight" Value="19"/>
+        </Style>
+        <!-- 等宽：日志 / 路径 -->
+        <Style x:Key="MonoText" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Consolas"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+        </Style>
+        <!-- 要点行左侧圆点 -->
+        <Style x:Key="BulletDot" TargetType="Ellipse">
+            <Setter Property="Width" Value="4"/>
+            <Setter Property="Height" Value="4"/>
+            <Setter Property="Fill" Value="{DynamicResource TextMuted}"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+            <Setter Property="Margin" Value="0,8,9,0"/>
+        </Style>
+        <!-- 要点行文字（配合 BulletDot 使用：一行一句，行首不再手写「·」） -->
+        <Style x:Key="BulletText" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+            <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="LineHeight" Value="18"/>
+            <Setter Property="Margin" Value="0,0,0,6"/>
+        </Style>
+
+        <!-- 分区小标题（运行设置 / 模块选项 / 本次运行） -->
+        <Style x:Key="GroupLabel" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="10.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
+            <Setter Property="Margin" Value="0,0,0,7"/>
+        </Style>
+        <!-- 卡内小节标题（声明页的分项、表单分组名） -->
+        <Style x:Key="SubHead" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="Margin" Value="0,14,0,6"/>
+        </Style>
+        <!-- 发丝分隔线 -->
+        <Style x:Key="Hairline" TargetType="Rectangle">
+            <Setter Property="Height" Value="1"/>
+            <Setter Property="Fill" Value="{DynamicResource Divider}"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+        <!-- 小胶囊标签（状态 / 平台 / 备注） -->
+        <Style x:Key="Chip" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Surface2}"/>
+            <Setter Property="CornerRadius" Value="20"/>
+            <Setter Property="Padding" Value="8,2.5"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
         <!-- 侧栏分组小标题 -->
         <Style x:Key="SectionLabel" TargetType="TextBlock">
@@ -83,8 +180,8 @@
         </Style>
         <!-- 表单字段标签 -->
         <Style x:Key="FieldLabel" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="12.5"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
 
@@ -131,8 +228,8 @@
             <Setter Property="Background" Value="Transparent"/>
             <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
             <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Height" Value="34"/>
-            <Setter Property="Margin" Value="0,0,0,3"/>
+            <Setter Property="Height" Value="32"/>
+            <Setter Property="Margin" Value="0,0,0,2"/>
             <Setter Property="FontSize" Value="12.5"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="HorizontalContentAlignment" Value="Left"/>
@@ -141,11 +238,11 @@
                     <ControlTemplate TargetType="Button">
                         <Grid>
                             <Border x:Name="bd" CornerRadius="8" Background="Transparent"/>
-                            <Rectangle x:Name="bar" Width="3" Height="16" RadiusX="1.5"
+                            <Rectangle x:Name="bar" Width="3" Height="15" RadiusX="1.5"
                                        Fill="{DynamicResource AccentGlow}"
                                        HorizontalAlignment="Left" VerticalAlignment="Center"
                                        Margin="3,0,0,0" Visibility="Collapsed"/>
-                            <ContentPresenter Margin="12,0,10,0" VerticalAlignment="Center"
+                            <ContentPresenter Margin="11,0,8,0" VerticalAlignment="Center"
                                               HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
                         </Grid>
                         <ControlTemplate.Triggers>
@@ -175,7 +272,7 @@
             <Setter Property="BorderThickness" Value="0"/>
             <Setter Property="Padding" Value="20,9"/>
             <Setter Property="MinHeight" Value="38"/>
-            <Setter Property="FontSize" Value="13.5"/>
+            <Setter Property="FontSize" Value="13"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Cursor" Value="Hand"/>
             <Setter Property="Template">
@@ -190,28 +287,111 @@
                                 </Border.RenderTransform>
                                 <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                             </Border>
-                            <!-- 悬停白色高光层：对绿色 / 红色按钮都成立 -->
+                            <!-- 顶部内高光：给实心按钮一点立体感（对绿色 / 红色按钮都成立） -->
+                            <Border CornerRadius="9" IsHitTestVisible="False">
+                                <Border.Background>
+                                    <LinearGradientBrush StartPoint="0,0" EndPoint="0,1">
+                                        <GradientStop Color="#24FFFFFF" Offset="0"/>
+                                        <GradientStop Color="#00FFFFFF" Offset="0.55"/>
+                                    </LinearGradientBrush>
+                                </Border.Background>
+                            </Border>
+                            <!-- 悬停白色高光层 -->
                             <Border x:Name="flash" CornerRadius="9" Background="White" Opacity="0"
                                     IsHitTestVisible="False"/>
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="flash" Property="Opacity" Value="0.12"/>
+                                <Setter TargetName="flash" Property="Opacity" Value="0.10"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bd" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.97" ScaleY="0.97"/></Setter.Value></Setter>
-                                <Setter TargetName="flash" Property="Opacity" Value="0.18"/>
+                                <Setter TargetName="bd" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.975" ScaleY="0.975"/></Setter.Value></Setter>
+                                <Setter TargetName="flash" Property="Opacity" Value="0.16"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
-                                <Setter Property="Opacity" Value="0.38"/>
+                                <Setter Property="Opacity" Value="0.34"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
         </Style>
+
+
+        <!-- 运行中「一键结束」：实心危险色（由代码 MainWindow.ModuleRun 切换样式，勿删） -->
         <Style x:Key="DangerBtn" TargetType="Button" BasedOn="{StaticResource PrimaryBtn}">
             <Setter Property="Background" Value="{DynamicResource Danger}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+        </Style>
+
+        <!-- ============ 危险操作（描边版）：默认低饱和，悬停才泛红 ============ -->
+        <Style x:Key="DangerOutlineBtn" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="#FFE0767A"/>
+            <Setter Property="BorderBrush" Value="#55E5484D"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="Padding" Value="16,8"/>
+            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="9"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                Padding="{TemplateBinding Padding}"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="1"/>
+                            </Border.RenderTransform>
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource DangerSoft}"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Danger}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource Danger}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="bd" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.975" ScaleY="0.975"/></Setter.Value></Setter>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.32"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ============ 文字按钮：最低视觉等级（单步调试等辅助操作） ============ -->
+        <Style x:Key="LinkBtn" TargetType="Button">
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="Padding" Value="4,3"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="bd" Background="Transparent" CornerRadius="6"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource HoverOverlay}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource AccentGlow}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.35"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
 
         <!-- ============ 幽灵按钮（透明底，hover 浮现） ============ -->
@@ -443,17 +623,27 @@
             </Setter>
         </Style>
 
-        <!-- ============ 分段选择（轨道胶囊内的页签） ============ -->
+        <!-- ============ 分段页签：轨道容器 + 选中页签上浮 ============ -->
+        <!-- 用法：<Border Style="{StaticResource TabTrack}"> 内放若干 SegTab -->
+        <Style x:Key="TabTrack" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource TabTrackBg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="11"/>
+            <Setter Property="Padding" Value="3"/>
+            <Setter Property="HorizontalAlignment" Value="Center"/>
+        </Style>
         <Style x:Key="SegTab" TargetType="RadioButton">
             <Setter Property="Foreground" Value="{DynamicResource SegTabFg}"/>
-            <Setter Property="FontSize" Value="13"/>
+            <Setter Property="FontSize" Value="12.5"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Margin" Value="0"/>
+            <Setter Property="Margin" Value="2,0"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="RadioButton">
-                        <Border x:Name="bd" CornerRadius="8" Padding="20,7" Background="Transparent"
+                        <Border x:Name="bd" CornerRadius="8" Padding="16,6.5" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="1"
                                 RenderTransformOrigin="0.5,0.5">
                             <Border.RenderTransform>
                                 <ScaleTransform ScaleX="1" ScaleY="1"/>
@@ -462,8 +652,9 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource Accent}"/>
-                                <Setter Property="Foreground" Value="{DynamicResource TextOnAccent}"/>
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource CardBg}"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Divider}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource AccentGlow}"/>
                             </Trigger>
                             <MultiTrigger>
                                 <MultiTrigger.Conditions>
@@ -483,6 +674,36 @@
                     </ControlTemplate>
                 </Setter.Value>
             </Setter>
+        </Style>
+
+        <!-- ============ 图标（导航 / 行内）：统一 16px、线宽 1.6、圆头 ============ -->
+        <Style x:Key="IconPath" TargetType="Path">
+            <Setter Property="Width" Value="16"/>
+            <Setter Property="Height" Value="16"/>
+            <Setter Property="Stretch" Value="Uniform"/>
+            <Setter Property="StrokeThickness" Value="1.6"/>
+            <Setter Property="StrokeStartLineCap" Value="Round"/>
+            <Setter Property="StrokeEndLineCap" Value="Round"/>
+            <Setter Property="StrokeLineJoin" Value="Round"/>
+            <Setter Property="VerticalAlignment" Value="Center"/>
+        </Style>
+
+        <!-- ============ 右侧统计块 ============ -->
+        <Style x:Key="StatTile" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource Surface2}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Divider}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="10,8"/>
+        </Style>
+
+        <!-- ============ 操作栏容器（本次运行 / 主要操作） ============ -->
+        <Style x:Key="RailCard" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource InsetBg}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="12"/>
+            <Setter Property="Padding" Value="12"/>
         </Style>
 
         <!-- ============ 进度条（胶囊轨道 + 绿色填充） ============ -->

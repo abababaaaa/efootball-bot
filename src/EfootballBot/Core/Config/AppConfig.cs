@@ -278,6 +278,20 @@ public sealed class PadTakeoverConfig
 }
 
 /// <summary>
+/// 赛后活动任务页（全屏活动地图，随服务器推送轮换）配置。仅国际服独享。
+/// 该页固定出现在比赛结束后 / 比赛开始前：右上「奖励」胶囊 + 右下「下一步」+
+/// 底部「X 详情 / Y 当前位置」；活动名与小图标均为可变内容，不作判定点。
+/// </summary>
+public sealed class PostMatchActivityConfig
+{
+    /// <summary>
+    /// 自动完成（推进）周任务：在活动地图上按 Y 回初始位置 →（↑ → 下一步 → 弹窗 ↑ → 下一步）
+    /// 循环左侧小图标旁的数字次数 → 退出。默认关闭（关闭时只执行退出：→ 下一步）。
+    /// </summary>
+    public bool AutoAdvanceWeeklyTasks { get; set; } = false;
+}
+
+/// <summary>
 /// 我的联赛道具自动购买配置（名称与游戏内「我的联赛物品」页一一对应）。
 /// 经验值加成档位 2x/3x/4x；状态加成档位 普通+/好+/杰出。
 /// 每次挂机运行中满足一次即不再购买（道具有效场数覆盖多场比赛）。
@@ -512,6 +526,9 @@ public sealed class AppConfig
 
     // —— 我的联赛道具 ——
     public MyLeagueConfig MyLeague { get; set; } = new();
+
+    // —— 赛后活动任务页（全屏活动地图，仅国际服）——
+    public PostMatchActivityConfig PostMatchActivity { get; set; } = new();
 
     // —— 周活动（国际服）——
     public WeeklyConfig Weekly { get; set; } = new();

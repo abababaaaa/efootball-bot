@@ -110,6 +110,8 @@ public partial class MainWindow
         // 防检测保护（★重要设定）
         ChkBackgroundParking.IsChecked = _cfg.BackgroundParking.Enabled;
         ChkHumanPacing.IsChecked = _cfg.Timing.HumanPacingEnabled;
+        // 赛后活动任务（★重要设定，仅国际服）：默认关闭
+        ChkPmAutoAdvance.IsChecked = _cfg.PostMatchActivity.AutoAdvanceWeeklyTasks;
         _loadingConfig = true;
         ChkScheduleEnabled.IsChecked = _cfg.Schedule.Enabled;
         TxtScheduleStart.Text = _cfg.Schedule.StartTime;
@@ -277,6 +279,7 @@ public partial class MainWindow
         _cfg.Timing.HumanPacingEnabled = ChkHumanPacing.IsChecked == true;
         _cfg.Schedule.Enabled = ChkScheduleEnabled.IsChecked == true;
         ApplySchedule(persist: false);
+        _cfg.PostMatchActivity.AutoAdvanceWeeklyTasks = ChkPmAutoAdvance.IsChecked == true;
 
         // 我的联赛道具
         _cfg.MyLeague.BuyExpBoost = ChkBuyExpBoost.IsChecked == true;

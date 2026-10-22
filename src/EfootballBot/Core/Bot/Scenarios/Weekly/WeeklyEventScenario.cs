@@ -93,6 +93,8 @@ public sealed class WeeklyEventScenario : IScenario
     private int _streak;
     private readonly MlFlowMemory _memory = new();
     private readonly MatchSessionTracker _matchSession = new();
+    /// <summary>赛后活动任务页（全屏活动地图）状态机：比赛结束后/开始前出现，随服务器推送轮换。</summary>
+    private readonly PostMatchActivityController _postMatch = new();
     private DateTime _lastTapLogAt = DateTime.MinValue;
     private DateTime _lastMaxLevelAt = DateTime.MinValue;
     private bool _takeoverLogged;
@@ -113,6 +115,13 @@ public sealed class WeeklyEventScenario : IScenario
     {
         var obs = await _engine.ObserveAsync(ct);
         var now = DateTime.Now;
+
+        // 赛后活动任务页（全屏活动地图）优先拦截：不进共享分类（含「下一步」会被判
+        // HasConfirm 盲按 A / 活动主页词干扰），由专用状态机按用户规则推进或退出。
+        var pmWait = await _postMatch.StepAsync(_engine, obs,
+            _engine.Config.PostMatchActivity.AutoAdvanceWeeklyTasks, _log, "周活动", ct);
+        if (pmWait is not null) return pmWait.Value;
+
         // 角区探针兜底 InMatch 需比赛上下文（同我的联赛场景）
         bool corner = MyLeagueScenario.CornerHasContent(obs.Frame);
         bool light = MyLeagueScenario.IsMostlyLightPage(obs.Frame);

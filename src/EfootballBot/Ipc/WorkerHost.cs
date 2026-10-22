@@ -44,23 +44,44 @@ public sealed class WorkerHost : IDisposable
     public event Action<string>? Exited;                // reason
     public event Action? Disconnected;                  // 管道断开 / 进程退出（自动重启已放弃时才触发）
 
-    /// <summary>自动重启进行中也视为运行中：GUI 的统计轮询依赖此标志判断"场景仍在跑"，避免重启间隙误报"场景已结束"。</summary>
+    /// <summary>需要用户动手才能继续的阻断（目前只有"真实手柄占着玩家 1"）：
+    /// 退出原因文本，GUI 收到后弹窗说明，且不做自动重启。</summary>
+    public event Action<string>? ActionRequired;
+
+    /// <summary>Worker 最后一次"需要用户动手"的退出原因（自动重启分支里靠它止损）。</summary>
+    private volatile string? _actionRequiredReason;
+
+    /// <summary>场景在跑（见 <see cref="ScenarioRunning"/>）：start 命令送达即置位，
+    /// stopped / exited / 管道断开 / 回收会话 / 启动失败时复位。</summary>
+    private volatile bool _scenarioRunning;
+
+    /// <summary>Worker 进程是否存活（含自动重启间隙）。仅表示"进程还活着"，**不代表场景在跑**。</summary>
     public bool IsRunning => !_disposed && (_autoRestarting || _process is { HasExited: false });
+
+    /// <summary>
+    /// 场景（Bot 引擎）是否在跑。GUI 的开始/暂停/热键/监控一律看这个标志。
+    /// 为什么必须与 IsRunning 分开：Worker 收到 stop 或引擎启动失败后**进程仍保活等重连**
+    /// （设计如此，便于再次开始时复用热进程），此时 IsRunning=true 但场景已结束。
+    /// 旧实现统一用 IsRunning → "引擎启动失败 → 进程还活着 → GUI 永远认为在跑 →
+    /// 所有开始按钮永久禁用（只有结束按钮没有、点开始也没反应）"，即用户报的
+    /// 「非正常退出后开始卡住/永久点不动」。自动重启期间保持 true（重启即恢复同一场景）。
+    /// </summary>
+    public bool ScenarioRunning => !_disposed && _scenarioRunning;
     public BotStats LastStats => _lastStats;
 
     /// <summary>启动 Worker 子进程并建立管道连接（与 StopAsync 互斥，重入时排队等待）。</summary>
     public async Task StartAsync(string mode)
     {
         // 关闭竞态：Dispose 可能在启停进行中销毁信号量，Wait/Release 都必须容忍
-        try { await _lifecycle.WaitAsync(); }
-        catch (ObjectDisposedException) { return; }
+        if (!await TryEnterLifecycleAsync()) return;
         try
         {
             ObjectDisposedException.ThrowIf(_disposed, this);
             _lastMode = mode;
             _expectedRunning = true;
-            // 用户手动开始 = 全新的信任预算：清空自动重启计数
+            // 用户手动开始 = 全新的信任预算：清空自动重启计数与上次的阻断原因
             _autoRestartCount = 0;
+            _actionRequiredReason = null;
             await StartInternalAsync(mode);
         }
         catch
@@ -82,7 +103,10 @@ public sealed class WorkerHost : IDisposable
         // 已在跑且管道健康：直接发 start。管道为空说明是上次失败残留的孤儿，走下方重建
         if (_process is { HasExited: false } && _pipe is { IsConnected: true })
         {
-            await SendAsync(PipeProtocol.CmdStart(mode));
+            // ★先置位再发命令：Worker 可能秒回 exited（如找不到游戏窗口），
+            // 若置位在发送之后，读循环先清零、这里再置 true → 永久"在跑"（按钮全禁）
+            _scenarioRunning = true;
+            await SendAsync(PipeProtocol.CmdStart(mode), CommandWriteTimeout);
             return;
         }
         if (_process is not null)
@@ -96,7 +120,11 @@ public sealed class WorkerHost : IDisposable
         // 多开：Worker 必须继承 GUI 的档案名，否则它会读写默认 data\ 下的配置
         string ProfileArg = AppPaths.Profile.Length == 0 ? "" : $" --profile {AppPaths.Profile}";
 
-        var psi = new ProcessStartInfo(exePath, $"--worker {mode} --pipe {pipeName}{ProfileArg}")
+        // --parent：Worker 用它监视 GUI 进程；GUI 崩溃/被强杀时 Worker 自主停引擎、
+        // 恢复真实手柄、还原停靠窗口后退出（否则孤儿 Worker 会一直跑着并占着玩家 1，
+        // 让下一次「开始」被判定为手柄抢不到而反复失败）
+        int parentPid = Environment.ProcessId;
+        var psi = new ProcessStartInfo(exePath, $"--worker {mode} --pipe {pipeName} --parent {parentPid}{ProfileArg}")
         {
             UseShellExecute = false,
             CreateNoWindow = true,
@@ -202,9 +230,19 @@ public sealed class WorkerHost : IDisposable
                             PreviewReceived?.Invoke(msg.Png);
                         break;
                     case "exited":
+                        _scenarioRunning = false;
+                        // 手柄未让路这类"要用户动手"的退出：记下原因并通知 GUI 弹窗，
+                        // 后续进程退出处理据此跳过自动重启（用户不解决重开也是同样结果）
+                        if (EfootballBot.Core.Input.PadTakeoverBlockedException.IsBlocked(msg.Text))
+                        {
+                            var reason = EfootballBot.Core.Input.PadTakeoverBlockedException.StripCode(msg.Text!);
+                            _actionRequiredReason = reason;
+                            ActionRequired?.Invoke(reason);
+                        }
                         Exited?.Invoke(msg.Text ?? "");
                         break;
                     case "stopped":
+                        _scenarioRunning = false;
                         _stopAck?.TrySetResult(true);
                         break;
                 }
@@ -227,8 +265,9 @@ public sealed class WorkerHost : IDisposable
             await HandleProcessExitAsync(process);
         });
 
-        // 发送 start 命令
-        await SendAsync(PipeProtocol.CmdStart(mode));
+        // 发送 start 命令（同样的先置位原因，见上）
+        _scenarioRunning = true;
+        await SendAsync(PipeProtocol.CmdStart(mode), CommandWriteTimeout);
         _lastRunStartAt = DateTime.Now;
     }
 
@@ -251,6 +290,17 @@ public sealed class WorkerHost : IDisposable
         {
             if (_disposed || !_expectedRunning)
             {
+                FireDisconnected();
+                return;
+            }
+
+            // 需要用户动手的退出（真实手柄占着玩家 1）：重开一次还是同样结果，
+            // 直接收摊交回 GUI，由弹窗指引用户关手柄电源/拔线。
+            if (_actionRequiredReason is { } blockedReason)
+            {
+                _actionRequiredReason = null;
+                EmitLog("Error", $"场景已终止：{blockedReason}");
+                await TeardownAsync();
                 FireDisconnected();
                 return;
             }
@@ -304,6 +354,19 @@ public sealed class WorkerHost : IDisposable
         }
     }
 
+    /// <summary>等待启停串行锁；超时（上一次操作卡死）返回 false，绝不让调用方永久排队。</summary>
+    private async Task<bool> TryEnterLifecycleAsync()
+    {
+        var timeout = TimeSpan.FromSeconds(60);
+        try
+        {
+            if (await _lifecycle.WaitAsync(timeout)) return true;
+            EmitLog("Error", $"上一个启停操作仍未结束（超过 {timeout.TotalSeconds:F0}s），本次操作已放弃。请点「发现问题手动停止」或重启程序。");
+            return false;
+        }
+        catch (ObjectDisposedException) { return false; } // 关闭中：Dispose 已硬回收
+    }
+
     private void FireDisconnected()
     {
         try { Disconnected?.Invoke(); } catch { /* 订阅方异常不影响回收 */ }
@@ -314,8 +377,13 @@ public sealed class WorkerHost : IDisposable
     public async Task StopAsync()
     {
         _expectedRunning = false; // 用户主动停止：看门狗不再自动重启
-        try { await _lifecycle.WaitAsync(); }
-        catch (ObjectDisposedException) { return; } // 关闭中：Dispose 已硬回收，无需再停
+        if (!await TryEnterLifecycleAsync())
+        {
+            // 上一次启停还卡着（Worker 半死）：不再排队，直接硬杀进程兜底
+            try { _process?.Kill(); } catch { }
+            _scenarioRunning = false;
+            return;
+        }
         try
         {
             await TeardownAsync();
@@ -330,13 +398,14 @@ public sealed class WorkerHost : IDisposable
     /// <summary>回收当前会话：发 stop → 等 stopped 确认（≤2s）→ Kill 兜底 → 取消读循环 → 释放句柄。幂等。</summary>
     private async Task TeardownAsync()
     {
+        _scenarioRunning = false;
         if (_pipe is { IsConnected: true })
         {
             try
             {
                 var ack = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _stopAck = ack;
-                await SendAsync(PipeProtocol.CmdStop());
+                await SendAsync(PipeProtocol.CmdStop(), CommandWriteTimeout);
                 await ack.Task.WaitAsync(TimeSpan.FromSeconds(2));
             }
             catch { }
@@ -402,11 +471,72 @@ public sealed class WorkerHost : IDisposable
         catch { return ""; }
     }
 
-    private async Task SendAsync(PipeProtocol.Msg msg)
+    /// <summary>写命令到管道。★必须带超时：
+    /// Worker 卡死/半死时管道写入可能永久阻塞，旧实现无超时会让 StartAsync/StopAsync
+    /// 一直挂着、_lifecycle 永不释放，于是后续每次点开始都石沉大海（永久不可点）。</summary>
+    private static readonly TimeSpan PipeWriteTimeout = TimeSpan.FromSeconds(5);
+
+    /// <summary>
+    /// start / stop 用更长的写超时：Worker 的引擎启动（WGC 建会话 + 手柄接管/让位最长 20s）
+    /// 期间读循环是忙的，越小越容易把"启动中"误判成"Worker 卡死"。其余命令照旧 5s。
+    /// </summary>
+    private static readonly TimeSpan CommandWriteTimeout = TimeSpan.FromSeconds(25);
+
+    private Task SendAsync(PipeProtocol.Msg msg) => SendAsync(msg, PipeWriteTimeout);
+
+    private async Task SendAsync(PipeProtocol.Msg msg, TimeSpan timeout)
     {
-        if (_pipe is null || !_pipe.IsConnected)
+        var pipe = _pipe;
+        if (pipe is null || !pipe.IsConnected)
             throw new InvalidOperationException("Worker 管道未连接");
-        await PipeProtocol.WriteLineAsync(_pipe, msg);
+        using var cts = new CancellationTokenSource(timeout);
+        try
+        {
+            await PipeProtocol.WriteLineAsync(pipe, msg, cts.Token);
+        }
+        catch (OperationCanceledException)
+        {
+            throw new TimeoutException($"向 Worker 发送命令超时（{timeout.TotalSeconds:F0}s），Worker 可能已卡死");
+        }
+    }
+
+    /// <summary>
+    /// 清理上一代 GUI 异常退出后遗留的 Worker（读 Worker 启动时写的 data\worker-session.txt）。
+    /// Worker 自身有父进程看门狗，正常情况会自己退出；这里是旧版本 Worker / 看门狗失效时的兜底，
+    /// 否则它会一直占着玩家 1，让新的「开始」被判"手柄抢不到"而反复失败。
+    /// 只处理 pid 存活 + 映像路径与本程序一致 + 记录的父进程不是本次 GUI 的进程。
+    /// </summary>
+    public static void KillOrphanedWorkers(Action<string, string>? log = null)
+    {
+        try
+        {
+            string path = Path.Combine(AppPaths.DataDir, "worker-session.txt");
+            if (!File.Exists(path)) return;
+            string text = File.ReadAllText(path).Trim();
+            var parts = text.Split('|');
+            File.Delete(path);
+            if (parts.Length < 2 || !int.TryParse(parts[0], out int pid) || !int.TryParse(parts[1], out int parentPid))
+                return;
+            if (pid == Environment.ProcessId) return;
+
+            Process proc;
+            try { proc = Process.GetProcessById(pid); }
+            catch { return; } // 进程早已退出
+            using (proc)
+            {
+                if (proc.HasExited) return;
+                string self = Process.GetCurrentProcess().MainModule?.FileName ?? "";
+                string image = "";
+                try { image = proc.MainModule?.FileName ?? ""; } catch { return; }
+                if (self.Length == 0 || !string.Equals(self, image, StringComparison.OrdinalIgnoreCase)) return;
+
+                log?.Invoke("Warn", $"发现上次异常退出遗留的挂机工作进程（PID {pid}，原 GUI {parentPid}），正在清理…");
+                try { proc.Kill(entireProcessTree: true); } catch { try { proc.Kill(); } catch { } }
+                try { proc.WaitForExit(3000); } catch { }
+                log?.Invoke("Info", "遗留工作进程已清理，真实手柄与游戏窗口随后自动恢复。");
+            }
+        }
+        catch { /* 清理失败不阻断启动 */ }
     }
 
     public void Dispose()

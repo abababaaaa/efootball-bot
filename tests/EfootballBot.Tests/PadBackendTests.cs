@@ -81,7 +81,7 @@ public class PadBackendTests
     }
 
     [Theory]
-    [InlineData(true, "检测到 XInput 玩家 1")]
+    [InlineData(true, "玩家 1（XInput slot 0）仍被占用")]
     [InlineData(false, null)]
     public void VigemPad_SlotZeroOccupiedMessage_占用时给阻断文案(bool occupied, string? expectedContains)
     {
@@ -89,7 +89,13 @@ public class PadBackendTests
         if (expectedContains is null)
             Assert.Null(msg);
         else
+        {
             Assert.Contains(expectedContains, msg);
+            // 2026-10-22 实机：有真实手柄时 bot 一点输入都没有。阻断文案必须直接告诉用户
+            // 「关手柄电源/拔线」，而不是让用户去猜为什么设备管理器禁用没生效。
+            Assert.Contains("关闭手柄电源", msg);
+            Assert.Contains("拔掉 USB", msg);
+        }
     }
 
     [Fact]

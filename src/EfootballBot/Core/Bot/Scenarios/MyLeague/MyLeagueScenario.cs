@@ -27,6 +27,12 @@ public class MyLeagueScenario : IScenario
     /// <summary>比赛场次跟踪：开赛/终判，驱动 MatchesDone 统计。</summary>
     private readonly MatchSessionTracker _matchSession = new();
 
+    /// <summary>赛后活动任务页（全屏活动地图）状态机：仅国际服（国服子类关闭）。</summary>
+    private readonly PostMatchActivityController _postMatch = new();
+
+    /// <summary>是否处理赛后活动任务页。国服子类覆盖为 false（该功能仅国际服独享）。</summary>
+    protected virtual bool SupportsPostMatchActivity => true;
+
     /// <summary>比赛中挂机点击的随机数（挂机节奏区间内取值）。</summary>
     private readonly Random _rnd = new();
     /// <summary>比赛中点击日志节流：每分钟至多一条，防刷屏/日志膨胀。</summary>
@@ -99,6 +105,15 @@ public class MyLeagueScenario : IScenario
     {
         var obs = await _engine.ObserveAsync(ct);
         var now = DateTime.Now;
+
+        // 赛后活动任务页（全屏活动地图）优先拦截，不进共享分类盲按 A。仅国际服。
+        if (SupportsPostMatchActivity)
+        {
+            var pmWait = await _postMatch.StepAsync(_engine, obs,
+                _engine.Config.PostMatchActivity.AutoAdvanceWeeklyTasks, _log, Name, ct);
+            if (pmWait is not null) return pmWait.Value;
+        }
+
         // 角区探针兜底 InMatch 需比赛上下文（流程帧记忆：最近真的见过比赛/起始页）：
         // 菜单页右上角也可能有内容（2026-10-11 用户实机：联赛主页奖励徽章点亮角区探针），
         // 无上下文时宁可判 Unknown 等一拍，绝不把菜单当比赛盲按 A。

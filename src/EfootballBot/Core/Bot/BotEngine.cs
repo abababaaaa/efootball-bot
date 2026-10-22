@@ -539,8 +539,25 @@ public sealed class BotEngine : IDisposable
                     LogInternal("真实手柄已暂时禁用（虚拟手柄独占输入）", LogLevel.Success);
             }
             await ConnectPadWithFallbackAsync();
-            LogInternal("虚拟手柄已连接（Xbox 360 形态，独占玩家 1：全通道被游戏消费）",
+            LogInternal("虚拟手柄已连接（Xbox 360 形态，需占玩家 1 才能被游戏消费）",
                 LogLevel.Success);
+
+            // 关键一步：连上之后必须验证「玩家 1 到底是虚拟手柄还是真实手柄」。
+            // 旧流程只在上面的"连接前"按设备节点禁用真实手柄，两种情形会漏：
+            // ① 真实手柄在虚拟手柄连上之后才被系统认作玩家 1（蓝牙重连/开机时序）；
+            // ② 设备节点已禁用但 XInput 仍把它报为连接（有线手柄常见）。
+            // 漏掉的表现就是用户看到的那一幕：bot 在跑但游戏对任何按键都没反应。
+            var (outcome, message) = PadSlotWitness.EnsureVirtualPadInSlot0(
+                () => Pad360, _cfg.HidHide.HidePhysicalGamepad, _cfg.DryRun, LogInternal);
+            if (outcome == PadSlotWitness.YieldOutcome.AbortAskUser)
+            {
+                // 玩家 1 抢不回来 = 游戏不会读 bot 的任何输入，继续挂机只会白跑并让用户以为程序坏了。
+                // 直接终止本次流程，错误码由 GUI 转成弹窗，明确请用户物理断开手柄。
+                try { Pad360.Disconnect(); } catch { }
+                throw new PadTakeoverBlockedException(PadTakeoverBlockedException.Code + " " + message);
+            }
+            if (outcome is PadSlotWitness.YieldOutcome.Ready or PadSlotWitness.YieldOutcome.Recovered)
+                LogInternal("玩家 1 归属已确认：虚拟手柄独占游戏输入", LogLevel.Success);
         }
         else
         {

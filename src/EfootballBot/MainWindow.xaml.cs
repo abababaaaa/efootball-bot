@@ -47,6 +47,7 @@ public partial class MainWindow : Window
     public MainWindow()
     {
         InitializeComponent();
+        InitModuleRuns();
         _cfg = AppConfig.Load();
 
         // 首次启动（无 Theme 字段或为空）→ 显示主题选择覆盖层
@@ -84,12 +85,14 @@ public partial class MainWindow : Window
             // 从未保存过主题选择 → 显示选择界面
             if (!System.IO.File.Exists(AppConfig.ConfigPath))
                 ShowThemeOverlay(_cfg.Theme);
+            // 上代异常退出遗留的 Worker 先清理（它会占着玩家 1，导致开始挂机抢不到手柄）
+            WorkerHost.KillOrphanedWorkers((lv, msg) =>
+                AppendLog(msg, Enum.TryParse<LogLevel>(lv, out var l) ? l : LogLevel.Info));
             RunEnvChecks();
 
-            // 绑定全局热键（低级钩子：键盘任意键/鼠标键；主键=暂停→停止，恢复键=继续）
+            // 绑定全局热键（低级钩子：键盘任意键/鼠标键；单热键：第一次暂停，第二次终止）
             _hotkey.Attach(this);
             _hotkey.PauseStopTriggered += () => Dispatcher.BeginInvoke(Hotkey_PauseStop_Triggered);
-            _hotkey.ResumeTriggered += () => Dispatcher.BeginInvoke(Hotkey_Resume_Triggered);
             RefreshHotkeyUi();
 
             StartMonitorIfEnabled();
@@ -149,6 +152,17 @@ public partial class MainWindow : Window
             EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
             // Worker 非正常退出（崩溃/强杀）没走停止流程：兜底恢复被禁用的真实手柄
             RestoreDisabledPadsIfNeeded();
+        });
+        // 需要用户动手的阻断（真实手柄占着玩家 1）：日志之外必须弹窗，
+        // 否则用户只会看到"点开始就停"，根本不知道要去关手柄
+        _workerHost.ActionRequired += reason => Dispatcher.BeginInvoke(() =>
+        {
+            AppendLog($"需要处理：{reason.Replace("\n", " ")}", LogLevel.Error);
+            System.Windows.MessageBox.Show(this,
+                reason + "\n\n处理后点击「开始挂机」重试。",
+                "无法接管手柄",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
         });
         return _workerHost;
     }
@@ -375,7 +389,7 @@ public partial class MainWindow : Window
         if (_starting) return;
         var host = GetOrCreateWorkerHost();
 
-        if (host.IsRunning)
+        if (host.ScenarioRunning)
         {
             await StopScenarioAsync();
             return;
@@ -404,26 +418,24 @@ public partial class MainWindow : Window
             // 立即反馈：Worker 冷启动握手最长 30s，期间按钮必须显示"启动中…"而非无响应
             btn.Content = "启动中…";
             AppendLog("正在启动 Worker（首次冷启动需解压，可能 10 秒以上）…", LogLevel.Info);
-            await host.StartAsync(mode!);
-            if (host.IsRunning)
+            // 总超时兜底：任何一步卡住都不允许「启动中…」永久驻留（按钮永久不可点）
+            await host.StartAsync(mode!).WaitAsync(TimeSpan.FromSeconds(60));
+            if (host.ScenarioRunning)
             {
                 _activeStartBtn = btn;
                 _activeMode = mode ?? "";
-                btn.Style = (Style)FindResource("DangerBtn");
-                btn.IsEnabled = true;
-                BtnPause.IsEnabled = true;
                 _paused = false;
-                RefreshRunButtons(); // 按钮文字带热键可视化（停止/暂停）
+                RefreshRunButtons(); // 刷新三按钮：开始→一键结束，暂停/手动停止启用
                 _statsTimer.Start();
                 if (!_previewOn) BtnPreview_Click(btn, new RoutedEventArgs()); // 自动开预览
 
-                // 引擎启动后注册全局热键（主键=暂停→停止，恢复键=继续）
+                // 引擎启动后注册全局热键（单热键：第一次暂停，第二次终止）
                 if (_cfg.Hotkey.Enabled)
                 {
                     try
                     {
                         if (_hotkey.Register(_cfg.Hotkey))
-                            AppendLog($"全局热键已注册：{_cfg.Hotkey.DisplayString()}（暂停/停止）、{_cfg.Hotkey.ResumeDisplayString()}（恢复）", LogLevel.Info);
+                            AppendLog($"全局热键已注册：{_cfg.Hotkey.DisplayString()}（第一次暂停，第二次终止）", LogLevel.Info);
                         else
                             AppendLog("全局热键注册失败。", LogLevel.Warn);
                     }
@@ -442,6 +454,14 @@ public partial class MainWindow : Window
             if (ex.InnerException is not null)
                 detail += $"\n → 内部异常：{ex.InnerException.GetType().Name}: {ex.InnerException.Message}\n{ex.InnerException.StackTrace}";
             AppendLog($"启动失败：{detail}", LogLevel.Error);
+            // 卡死/超时的极端情况：弃用当前 Worker 句柄（下次开始重建）。
+            // 否则上一次操作可能永远占着启停锁，之后每次点开始都石沉大海。
+            if (ex is TimeoutException)
+            {
+                try { _workerHost?.Dispose(); } catch { }
+                _workerHost = null;
+                AppendLog("启动超时：已重置挂机工作进程，请稍后重新点「开始」。", LogLevel.Warn);
+            }
             // Worker 秒退/连不上时的高频原因提示（2026-10-13 用户案例：Worker 反复启动即死，
             // 日志只见会话头）。这类环境的日志文件里往往查不到细节，先给用户可自查的动作。
             if (detail.Contains("Worker 进程已退出") || detail.Contains("无法连接到 Worker"))
@@ -453,6 +473,10 @@ public partial class MainWindow : Window
         finally
         {
             _starting = false;
+            // ★必须再刷一次：上面的 ResetButtons 执行时 _starting 仍为 true，
+            // 算出来的按钮状态是"禁用"，不在这里重算就会一直禁用到下一个偶然事件
+            //（用户报障的"永久点不动"两个成因之一：另一成因是 IsRunning 混用，见 WorkerHost）
+            RefreshRunButtons();
         }
     }
 
@@ -476,12 +500,7 @@ public partial class MainWindow : Window
 
     private void SetStartButtonsEnabled(bool enabled)
     {
-        BtnStartMyLeague.IsEnabled = enabled;
-        BtnStartWeekly.IsEnabled = enabled;
-        BtnStartAiLadder.IsEnabled = enabled;
-        BtnStartCn.IsEnabled = enabled;
-        BtnStartCnWeekly.IsEnabled = enabled;
-        BtnStartCnMyLeague.IsEnabled = enabled;
+        foreach (var m in _moduleRuns) m.Start.IsEnabled = enabled;
     }
 
     // 暂停状态（仅 GUI 侧镜像，真实状态在 Worker 引擎；停止时复位）
@@ -503,7 +522,7 @@ public partial class MainWindow : Window
             {
                 var s = _workerHost?.LastStats;
                 return new EfootballBot.Core.System.MonitorStatus(
-                    _workerHost is { IsRunning: true },
+                    _workerHost is { ScenarioRunning: true },
                     _paused,
                     _activeMode,
                     s?.MatchesDone ?? 0,
@@ -526,7 +545,7 @@ public partial class MainWindow : Window
     private async Task HandleMonitorCommandCoreAsync(string cmd)
     {
         AppendLog($"[监控页] 收到操作：{cmd}", LogLevel.Info);
-        if (_workerHost is not { IsRunning: true })
+        if (_workerHost is not { ScenarioRunning: true })
         {
             AppendLog("[监控页] 当前没有运行中的挂机，操作已忽略", LogLevel.Info);
             return;
@@ -554,7 +573,7 @@ public partial class MainWindow : Window
     /// <summary>单步：暂停状态下让 Worker 走一拍（观察 + 决策），随后继续保持暂停。</summary>
     private async void BtnStep_Click(object sender, RoutedEventArgs e)
     {
-        if (_workerHost is not { IsRunning: true })
+        if (_workerHost is not { ScenarioRunning: true })
         {
             AppendLog("单步：当前没有运行中的挂机。", LogLevel.Info);
             return;
@@ -577,19 +596,6 @@ public partial class MainWindow : Window
 
     private void ResetButtons()
     {
-        BtnStartMyLeague.Style = (Style)FindResource("PrimaryBtn");
-        BtnStartWeekly.Style = (Style)FindResource("PrimaryBtn");
-        BtnStartWeekly.Content = "开始";
-        BtnStartAiLadder.Content = "开始";
-        BtnStartAiLadder.Style = (Style)FindResource("PrimaryBtn");
-        BtnStartCn.Content = "开始";
-        BtnStartCn.Style = (Style)FindResource("PrimaryBtn");
-        BtnStartCnWeekly.Content = "开始";
-        BtnStartCnWeekly.Style = (Style)FindResource("PrimaryBtn");
-        BtnStartCnMyLeague.Content = "开始";
-        BtnStartCnMyLeague.Style = (Style)FindResource("PrimaryBtn");
-        SetStartButtonsEnabled(true);
-        BtnPause.IsEnabled = false;
         _paused = false;
         _activeStartBtn = null;
         _activeMode = "";
@@ -608,8 +614,8 @@ public partial class MainWindow : Window
         StElapsed.Text = s.StartedAt is null ? "—" : (DateTime.Now - s.StartedAt.Value).ToString(@"hh\:mm\:ss");
         StError.Text = string.IsNullOrEmpty(s.LastError) ? "" : $"最近错误：{s.LastError}";
 
-        // 场景自动结束（正常跑完 / 异常退出）：IsRunning 变 false 后按钮需从"停止"恢复为"开始"
-        if (_workerHost is { IsRunning: false } && _statsTimer.IsEnabled)
+        // 场景自动结束（正常跑完 / 异常退出）：ScenarioRunning 变 false 后按钮需从"停止"恢复为"开始"
+        if (_workerHost is { ScenarioRunning: false } && _statsTimer.IsEnabled)
         {
             _hotkey.Unregister();
             AppendLog("场景已结束，自动停止。", LogLevel.Success);

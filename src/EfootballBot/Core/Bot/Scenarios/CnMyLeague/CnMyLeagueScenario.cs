@@ -40,6 +40,9 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
 
     public override string Name => "我的联赛（国服）";
 
+    /// <summary>赛后活动任务页仅国际服独享：国服不识别不接管。</summary>
+    protected override bool SupportsPostMatchActivity => false;
+
     /// <summary>国服独立配置段：与国际服我的联赛设置互不影响。</summary>
     protected override MyLeagueConfig LeagueConfig => _engine.Config.CnMyLeague;
 

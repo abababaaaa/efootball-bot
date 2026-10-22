@@ -88,6 +88,10 @@ public static class ThemeManager
         ["TrackBg"] = "#FF101722",
         ["Scrim"] = "#F00B0F14",
         ["TextOnAccent"] = "#FFFFFFFF",
+        ["Divider"] = "#FF1E2633",
+        ["TabTrackBg"] = "#FF0B1016",
+        ["DangerSoft"] = "#2AE5484D",
+        ["AccentSoft"] = "#1F0FA968",
     };
 
     // ---------------- 亮色 ----------------
@@ -132,6 +136,10 @@ public static class ThemeManager
         ["TrackBg"] = "#FFE6EBF0",
         ["Scrim"] = "#CCEDF0F4",
         ["TextOnAccent"] = "#FFFFFFFF",
+        ["Divider"] = "#FFE6EBF1",
+        ["TabTrackBg"] = "#FFEDF1F5",
+        ["DangerSoft"] = "#1ADC3B3B",
+        ["AccentSoft"] = "#180B8F5B",
     };
 
     // ---------------- 深蓝 ----------------
@@ -176,5 +184,9 @@ public static class ThemeManager
         ["TrackBg"] = "#FF0D1C2E",
         ["Scrim"] = "#F007101C",
         ["TextOnAccent"] = "#FFFFFFFF",
+        ["Divider"] = "#FF1B2E45",
+        ["TabTrackBg"] = "#FF071120",
+        ["DangerSoft"] = "#2AEF6464",
+        ["AccentSoft"] = "#222F94C9",
     };
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.IO;
 using System.IO.Pipes;
 using System.Text;
@@ -28,6 +29,11 @@ public static class WorkerProgram
         bool console = args.Contains("--console");
 
         int pid = Environment.ProcessId;
+        // --parent：GUI 进程号。GUI 崩溃/被强杀时本进程据它自主收尾并退出，
+        // 不留孤儿（孤儿 Worker 会继续跑场景、占着玩家 1 并让真实手柄保持禁用态）。
+        int parentIdx = Array.IndexOf(args, "--parent");
+        int parentPid = parentIdx >= 0 && parentIdx + 1 < args.Length
+            && int.TryParse(args[parentIdx + 1], out int pp) && pp > 0 ? pp : 0;
         int pipeIdx = Array.IndexOf(args, "--pipe");
         // 管道名优先用 GUI 传入的（GUID，无 PID 猜测）；缺省退回 PID 约定
         string pipeName = pipeIdx >= 0 && pipeIdx + 1 < args.Length
@@ -66,6 +72,53 @@ public static class WorkerProgram
         CancellationTokenSource? previewCts = null;
         NamedPipeServerStream? pipe = null;
         CancellationTokenSource? readCts = null;
+
+        // ---- 会话标记：GUI 下次启动据此清理上代异常退出遗留的 Worker ----
+        string sessionFile = Path.Combine(AppPaths.DataDir, "worker-session.txt");
+        void WriteSessionMarker()
+        {
+            try
+            {
+                Directory.CreateDirectory(AppPaths.DataDir);
+                File.WriteAllText(sessionFile, $"{pid}|{parentPid}|{DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            }
+            catch { /* 标记失败不影响运行 */ }
+        }
+        void DeleteSessionMarker()
+        {
+            try
+            {
+                // 只删自己写的（多开档案各自 data 目录，仍防并发覆盖）
+                if (File.Exists(sessionFile) && File.ReadAllText(sessionFile).StartsWith($"{pid}|"))
+                    File.Delete(sessionFile);
+            }
+            catch { }
+        }
+        WriteSessionMarker();
+
+        // ---- GUI 看门狗：GUI 异常退出（崩溃/被强杀/更新重启）时自主收尾后退出 ----
+        // 没有它：GUI 一死 Worker 仍跑着场景并占着玩家 1、真实手柄也保持禁用，
+        // 用户重开程序点「开始」会被判"手柄抢不到"反复失败（2026-10-23 用户报障）。
+        if (parentPid > 0)
+        {
+            _ = Task.Run(async () =>
+            {
+                try
+                {
+                    using var parent = Process.GetProcessById(parentPid);
+                    await parent.WaitForExitAsync();
+                }
+                catch { /* 父进程早已不在：直接收尾 */ }
+                try { FileLogger.Instance.Write("GUI 进程已退出：Worker 自主收尾（停引擎 / 恢复真实手柄 / 还原停靠窗口）", LogLevel.Warn); } catch { }
+                try { engine?.Stop(); } catch { }
+                try { engine?.Dispose(); } catch { }
+                try { previewCts?.Cancel(); } catch { }
+                try { EfootballBot.Core.Input.PhysicalPadControl.RestoreAll(); } catch { }
+                try { EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord(); } catch { }
+                DeleteSessionMarker();
+                Environment.Exit(0);
+            });
+        }
 
         async Task SendAsync(PipeProtocol.Msg msg)
         {
@@ -217,6 +270,9 @@ public static class WorkerProgram
                         engine = null;
                         await SendAsync(PipeProtocol.EvLog("Error", $"启动失败：{ex.Message}"));
                         await SendAsync(PipeProtocol.EvExited($"启动失败：{ex.Message}"));
+                        // 手柄未让路：记下退出码，GUI 据此弹窗且不再自动重启（用户不动手也是白跑）
+                        if (ex is EfootballBot.Core.Input.PadTakeoverBlockedException)
+                            Environment.ExitCode = EfootballBot.Core.Input.PadTakeoverBlockedException.ExitCode;
                     }
                 }
                 else if (msg.Cmd == "stop")
@@ -297,6 +353,7 @@ public static class WorkerProgram
             pipe = null;
         }
 
+        DeleteSessionMarker();
         return 0;
     }
 

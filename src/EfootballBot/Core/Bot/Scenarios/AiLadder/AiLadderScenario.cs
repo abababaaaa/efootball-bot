@@ -33,6 +33,8 @@ public sealed class AiLadderScenario : IScenario
     private readonly MlFlowMemory _memory = new();
     private readonly MatchSessionTracker _matchSession = new();
     private readonly Random _rnd = new();
+    /// <summary>赛后活动任务页（全屏活动地图）状态机：比赛结束后/开始前出现。</summary>
+    private readonly PostMatchActivityController _postMatch = new();
 
     private AlPhase _phase = AlPhase.Flow;
     /// <summary>当前阶段累计行动次数（SetPhase/换屏清零；超限 B 逃生防死循环）。</summary>
@@ -70,6 +72,12 @@ public sealed class AiLadderScenario : IScenario
     {
         var obs = await _engine.ObserveAsync(ct);
         var now = DateTime.Now;
+
+        // 赛后活动任务页（全屏活动地图）优先拦截，不进共享分类盲按 A。
+        var pmWait = await _postMatch.StepAsync(_engine, obs,
+            _engine.Config.PostMatchActivity.AutoAdvanceWeeklyTasks, _log, Name, ct);
+        if (pmWait is not null) return pmWait.Value;
+
         // 角区探针兜底 InMatch 需比赛上下文（同我的联赛/周活动场景）
         bool corner = MyLeagueScenario.CornerHasContent(obs.Frame);
         bool light = MyLeagueScenario.IsMostlyLightPage(obs.Frame);

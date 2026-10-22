@@ -29,6 +29,19 @@ public sealed class VigemPad : IVirtualPad
     public int UserIndex { get; private set; } = -1;
     public bool IsConnected => _connected;
 
+    /// <summary>
+    /// 身份微码：虚拟手柄用左摇杆打出的"指纹"值（见 <see cref="PadSlotWitness"/>）。
+    /// 两轴同取一个精确值、且在死区外：游戏不会把它当方向输入，真人也不可能恰好摇出这个组合，
+    /// 因此可以在 slot0 上读回来确认"0 号槽上跑的到底是不是我们的虚拟手柄"。
+    /// </summary>
+    public const short IdentityCode = -31000;
+
+    /// <summary>把身份微码打到左摇杆上（之后须用 <see cref="ClearIdentityCode"/> 打回中位）。</summary>
+    public void StampIdentityCode() => SetLeftStick(IdentityCode, IdentityCode);
+
+    /// <summary>撤回身份微码（左摇杆回中）。</summary>
+    public void ClearIdentityCode() => SetLeftStick(0, 0);
+
     public PadBackendKind Kind => PadBackendKind.Vigem;
 
     public VigemPad(Action<string>? log = null)
@@ -55,17 +68,24 @@ public sealed class VigemPad : IVirtualPad
     /// </summary>
     public static string? SlotZeroOccupiedMessage(bool slot0Connected)
         => slot0Connected
-            ? "检测到 XInput 玩家 1（slot 0）仍被占用（自动禁用未生效：提权计划任务未注册或授权被拒）。请重启本程序并在授权窗口点「是」，或先拔下/关闭真实手柄，再点击开始挂机。"
+            ? "玩家 1（XInput slot 0）仍被占用：真实手柄还占着它，虚拟手柄只能落到玩家 2，游戏不会响应 bot 输入。" +
+              "请关闭手柄电源或拔掉 USB 线后重试（有线手柄在设备管理器里禁用后仍可能被系统认作已连接）。"
             : null;
 
-    public void Connect()
+    public void Connect() => Connect(allowSlot0Occupied: false);
+
+    /// <summary>
+    /// <paramref name="allowSlot0Occupied"/>=true 时跳过连接前的 slot0 阻断，由调用方在连接后
+    /// 用 <see cref="PadSlotWitness"/> 判定归属并自行纠正（真实手柄晚到/抢回玩家 1 的恢复路径）。
+    /// </summary>
+    public void Connect(bool allowSlot0Occupied)
     {
         if (_connected) return;
         if (!IsDriverInstalled())
             throw new InvalidOperationException("未检测到 ViGEmBus 驱动，开始挂机会自动安装（需管理员授权，首次约 10-30 秒）。");
 
         // slot 0 被占用时虚拟手柄必然分到 slot 1+，游戏不响应 → 直接阻断
-        if (SlotZeroOccupiedMessage(PadBackendProbe.IsSlot0Occupied()) is { } blockMsg)
+        if (!allowSlot0Occupied && SlotZeroOccupiedMessage(PadBackendProbe.IsSlot0Occupied()) is { } blockMsg)
             throw new InvalidOperationException(blockMsg);
 
         // 连接前快照已占用槽位，连接后用 XInput 轮询找到新设备，即虚拟手柄真实 slot

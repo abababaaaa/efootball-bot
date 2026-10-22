@@ -34,7 +34,7 @@ public partial class MainWindow
         NavigateTo(NavMode.Game);
 
         // 运行中不重新检测环境（避免切换视图时误报另一服务器窗口状态）
-        if (_workerHost?.IsRunning != true)
+        if (_workerHost?.ScenarioRunning != true)
             RunEnvChecks();
     }
 

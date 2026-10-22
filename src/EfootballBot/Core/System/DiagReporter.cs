@@ -24,8 +24,9 @@ public static class DiagReporter
     /// 收集诊断并打包。返回 zip 路径；打包失败时返回报告目录路径。
     /// <paramref name="progress"/> 收到分步进度文案（后台线程回调）；
     /// <paramref name="userNote"/> 是用户在界面上填的问题描述（可选），写进包内 user_note.txt 与报告头部。
+    /// <paramref name="screenshotPath"/> 是「发现问题手动停止」自动截取的游戏画面（可选），拷进包内 screenshots\。
     /// </summary>
-    public static async Task<string> CollectAsync(Action<string>? progress = null, CancellationToken ct = default, string? userNote = null)
+    public static async Task<string> CollectAsync(Action<string>? progress = null, CancellationToken ct = default, string? userNote = null, string? screenshotPath = null)
     {
         string ts = DateTime.Now.ToString("yyyyMMdd_HHmmss");
         string ver = Updater.FormatVersion(typeof(Updater).Assembly.GetName().Version);
@@ -54,6 +55,26 @@ public static class DiagReporter
         report.AppendLine($"App dir     : {AppPaths.ExeDir}");
         report.AppendLine("note: report body is UTF-8; dxdiag.txt is kept exactly as dxdiag wrote it.");
         report.AppendLine("note: this scan is read-only, nothing on the system was changed.");
+
+        // 「发现问题手动停止」自动截取的游戏画面：拷进包内 screenshots\，报告里注明文件名
+        if (!string.IsNullOrWhiteSpace(screenshotPath) && File.Exists(screenshotPath))
+        {
+            progress?.Invoke("附带游戏画面截图…");
+            string shotDir = Path.Combine(dir, "screenshots");
+            Directory.CreateDirectory(shotDir);
+            string shotName = $"game_{ts}.png";
+            try
+            {
+                File.Copy(screenshotPath, Path.Combine(shotDir, shotName), true);
+                report.AppendLine();
+                report.AppendLine("============ GAME SCREENSHOT (点击「发现问题手动停止」时自动截取) ============");
+                report.AppendLine($"screenshot: screenshots/{shotName}");
+            }
+            catch (Exception ex)
+            {
+                report.AppendLine($"(screenshot copy failed: {ex.Message})");
+            }
+        }
 
         // 用户自己描述的问题现象放最显眼的位置（分析时先读这里）
         if (!string.IsNullOrWhiteSpace(userNote))

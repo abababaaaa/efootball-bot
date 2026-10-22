@@ -28,7 +28,7 @@ public partial class MainWindow
         if (!_previewOn)
         {
             var host = GetOrCreateWorkerHost();
-            if (!host.IsRunning)
+            if (!host.ScenarioRunning)
             {
                 AppendLog("预览需要先开始挂机（Worker 未运行）。", LogLevel.Warn);
                 return;
@@ -49,7 +49,7 @@ public partial class MainWindow
         {
             try
             {
-                if (_workerHost is { IsRunning: true })
+                if (_workerHost is { ScenarioRunning: true })
                     await _workerHost.SendPreviewAsync(false);
             }
             catch { }
@@ -71,7 +71,7 @@ public partial class MainWindow
 
     private void UpdatePreviewFrame()
     {
-        if (!_previewOn || _workerHost is not { IsRunning: true }) return;
+        if (!_previewOn || _workerHost is not { ScenarioRunning: true }) return;
         if ((DateTime.Now - _lastPreviewAt).TotalSeconds > 4 &&
             (DateTime.Now - _lastPreviewResend).TotalSeconds > 4)
         {
