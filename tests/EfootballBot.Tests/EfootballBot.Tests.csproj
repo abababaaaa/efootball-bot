@@ -16,6 +16,8 @@
          主工程已移除 OpenCvSharp（见主 csproj），此引用不随发布 -->
     <PackageReference Include="OpenCvSharp4" Version="4.10.0.20240615" />
     <PackageReference Include="OpenCvSharp4.runtime.win" Version="4.10.0.20240615" />
+    <!-- 仅 OCR 横评（OcrModelSweep20261023）用：Tesseract 5 异族基线，不随发布 -->
+    <PackageReference Include="Tesseract" Version="5.2.0" />
   </ItemGroup>
 
   <ItemGroup>

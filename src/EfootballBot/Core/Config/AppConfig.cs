@@ -102,6 +102,25 @@ public sealed class InferenceConfig
     public string PreferredProvider { get; set; } = "Auto";
 }
 
+/// <summary>
+/// Unlimited-OCR（百度 2026 文档解析 VLM）客户端配置。模型只以 Python 服务形态存在
+/// （vLLM / SGLang 均为 OpenAI 兼容接口），本程序通过 HTTP 逐帧请求。
+/// </summary>
+public sealed class UnlimitedOcrConfig
+{
+    /// <summary>OpenAI 兼容 chat/completions 地址（vLLM/SGLang 官方默认端口 10000）。</summary>
+    public string Endpoint { get; set; } = "http://127.0.0.1:10000/v1/chat/completions";
+
+    /// <summary>服务端模型名（--served-model-name）。</summary>
+    public string Model { get; set; } = "Unlimited-OCR";
+
+    /// <summary>解析提示词（官方 gundam 单图模式为 document parsing.）。</summary>
+    public string Prompt { get; set; } = "document parsing.";
+
+    /// <summary>单帧请求超时（CPU 推理实测可达数十秒；GPU 服务 1~3 秒）。</summary>
+    public int TimeoutSeconds { get; set; } = 120;
+}
+
 /// <summary>YOLO 目标检测配置。</summary>
 public sealed class YoloConfig
 {
@@ -474,9 +493,13 @@ public sealed class AppConfig
     public int SchemaVersion { get; set; } = CurrentSchemaVersion;
 
     public string Theme { get; set; } = "Dark"; // Dark / Light / DeepBlue
-    /// <summary>OCR 识别引擎：SimdPaddle（纯托管 PP-OCR，默认）/ RapidV6（ONNX Runtime CPU）。
-    /// 旧值 Windows(1)=已删除的 Windows 内置 OCR，读取后按 SimdPaddle 处理。下次启动挂机生效。</summary>
+    /// <summary>OCR 识别引擎：SimdPaddle（纯托管 PP-OCR，默认）/ RapidV6（ONNX Runtime CPU）/
+    /// UnlimitedOcr（外部 VLM 服务，HTTP 接入）。旧值 Windows(1)=已删除的 Windows 内置 OCR，
+    /// 读取后按 SimdPaddle 处理。下次启动挂机生效。</summary>
     public OcrEngineKind OcrEngine { get; set; } = OcrEngineKind.SimdPaddle;
+
+    /// <summary>Unlimited-OCR 外部服务配置（仅 OcrEngine=UnlimitedOcr 时使用）。</summary>
+    public UnlimitedOcrConfig UnlimitedOcr { get; set; } = new();
     public bool AutoLaunchGame { get; set; }
     /// <summary>画面捕获后端：WGC 窗口捕获（默认，支持后台挂机/窗口被遮挡；已绑定真实 GPU 适配器）或 DXGI 桌面复制（高性能但窗口须可见）。</summary>
     public CaptureMode CaptureMode { get; set; } = CaptureMode.Wgc;

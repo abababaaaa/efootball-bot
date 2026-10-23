@@ -53,3 +53,6 @@ tools/sym_shape_infer_temp.onnx
 
 # Local probe/scratch workspace
 build_local/
+
+# OCR 候选模型权重（调研用，勿入库）
+tools/ocr_candidates_*/

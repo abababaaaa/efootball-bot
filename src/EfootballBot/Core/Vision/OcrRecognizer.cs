@@ -211,6 +211,10 @@ public enum OcrEngineKind
     /// <summary>SimdPaddleOCR（纯托管推理，Apache-2.0，默认引擎）：与 RapidV6 共用 models/v6 模型文件，
     /// 零原生依赖。加载失败自动回退 RapidV6。</summary>
     SimdPaddle = 2,
+    /// <summary>Unlimited-OCR（百度 2026 文档解析 VLM，MIT）：官方仅提供 torch/vLLM/SGLang 部署，
+    /// 本程序以 HTTP 客户端接入 OpenAI 兼容服务（见 <see cref="UnlimitedOcrBackend"/>）。
+    /// 逐帧秒级~数十秒，只作精度参照/离线校准；服务不可达自动回退 SimdPaddle。</summary>
+    UnlimitedOcr = 3,
 }
 
 /// <summary>OCR 后端统一契约：输入一帧 BGRA，输出归一化坐标词块。</summary>
@@ -248,12 +252,33 @@ public sealed class OcrRecognizer : IDisposable
     /// 词块坐标按归一化输出，降采样不影响 0~1 坐标契约。</param>
     /// <param name="preferInt8">true = small 识别模型优先加载 int8 量化版（缺失自动回退 fp32）。</param>
     public OcrRecognizer(OcrEngineKind engine, string? preferredTag = null,
-        int downscaleLongSide = DefaultDownscaleLongSide, bool preferInt8 = true)
+        int downscaleLongSide = DefaultDownscaleLongSide, bool preferInt8 = true,
+        EfootballBot.Core.Config.UnlimitedOcrConfig? unlimitedOcr = null)
     {
         EngineKind = engine;
         _downscaleLongSide = downscaleLongSide;
         switch (engine)
         {
+            case OcrEngineKind.UnlimitedOcr:
+                try
+                {
+                    _backend = new UnlimitedOcrBackend(unlimitedOcr ?? new EfootballBot.Core.Config.UnlimitedOcrConfig());
+                }
+                catch (Exception ex)
+                {
+                    // 外部服务随时可能没起：绝不因试验引擎断了挂机
+                    FallbackNote = $"Unlimited-OCR 加载失败已回退 SimdPaddle：{ex.Message}";
+                    try
+                    {
+                        _backend = new SimdPaddleOcrBackend();
+                    }
+                    catch (Exception ex2)
+                    {
+                        FallbackNote += $"；SimdPaddle 亦失败，回退 RapidV6：{ex2.Message}";
+                        _backend = new RapidV6OcrBackend(preferInt8);
+                    }
+                }
+                break;
             case OcrEngineKind.SimdPaddle:
             case OcrEngineKind.Windows: // 旧配置迁移：Windows 引擎已删除，一律落 SimdPaddle
                 try

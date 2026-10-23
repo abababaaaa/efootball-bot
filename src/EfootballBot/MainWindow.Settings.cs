@@ -75,6 +75,13 @@ public partial class MainWindow
 
     // ---------------- 配置 ----------------
 
+    /// <summary>OCR 引擎下拉切换：Unlimited-OCR 才显示外部服务地址（其余引擎用不上）。</summary>
+    private void CmbOcrEngine_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (PnlUnlimitedOcr is null) return; // XAML 初始化早期可能尚未建好
+        PnlUnlimitedOcr.Visibility = CmbOcrEngine.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
     private void LoadConfigToUi()
     {
         // 设置面板
@@ -85,8 +92,16 @@ public partial class MainWindow
         int dumpIdx = Array.IndexOf(dumpMsValues, _cfg.FrameDump.IntervalMs);
         CmbFrameDumpInterval.SelectedIndex = dumpIdx >= 0 ? dumpIdx : 2; // 缺省 10 秒
 
-        // OCR 引擎（下拉项：0=SimdPaddle 默认 / 1=RapidV6；旧配置 Windows 值已删引擎，一并落 SimdPaddle）
-        CmbOcrEngine.SelectedIndex = _cfg.OcrEngine == OcrEngineKind.RapidV6 ? 1 : 0;
+        // OCR 引擎（下拉项：0=SimdPaddle 默认 / 1=RapidV6 / 2=Unlimited-OCR 外部服务；
+        // 旧配置 Windows 值已删引擎，一并落 SimdPaddle）
+        CmbOcrEngine.SelectedIndex = _cfg.OcrEngine switch
+        {
+            OcrEngineKind.RapidV6 => 1,
+            OcrEngineKind.UnlimitedOcr => 2,
+            _ => 0,
+        };
+        TxtUnlimitedOcrEndpoint.Text = _cfg.UnlimitedOcr.Endpoint;
+        PnlUnlimitedOcr.Visibility = CmbOcrEngine.SelectedIndex == 2 ? Visibility.Visible : Visibility.Collapsed;
 
         // 全权接管（挂机禁用真实手柄）：开关见「手柄接管」卡
         ChkPadTakeover.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
@@ -253,8 +268,15 @@ public partial class MainWindow
             int[] dumpMs = { 2000, 5000, 10000, 30000, 60000 };
             _cfg.FrameDump.IntervalMs = dumpMs[CmbFrameDumpInterval.SelectedIndex];
         }
-        // 下拉项 → 引擎（0=SimdPaddle 默认 / 1=RapidV6-small）
-        _cfg.OcrEngine = CmbOcrEngine.SelectedIndex == 1 ? OcrEngineKind.RapidV6 : OcrEngineKind.SimdPaddle;
+        // 下拉项 → 引擎（0=SimdPaddle 默认 / 1=RapidV6-small / 2=Unlimited-OCR 外部服务）
+        _cfg.OcrEngine = CmbOcrEngine.SelectedIndex switch
+        {
+            1 => OcrEngineKind.RapidV6,
+            2 => OcrEngineKind.UnlimitedOcr,
+            _ => OcrEngineKind.SimdPaddle,
+        };
+        string endpoint = TxtUnlimitedOcrEndpoint.Text.Trim();
+        if (endpoint.Length > 0) _cfg.UnlimitedOcr.Endpoint = endpoint;
 
         // 全权接管（下次开始挂机生效；停止挂机自动恢复真实手柄）
         _cfg.HidHide.HidePhysicalGamepad = ChkPadTakeover.IsChecked == true;

@@ -158,7 +158,8 @@ public sealed class BotEngine : IDisposable
         _factory = new OnnxSessionFactory(cfg.Inference.PreferredProvider, LogInternal);
         Ocr = new OcrRecognizer(cfg.OcrEngine,
             downscaleLongSide: cfg.ModuleFallback.DisableOcrDownscale ? 0 : OcrRecognizer.DefaultDownscaleLongSide,
-            preferInt8: !cfg.ModuleFallback.UseFp32Ocr);
+            preferInt8: !cfg.ModuleFallback.UseFp32Ocr,
+            unlimitedOcr: cfg.UnlimitedOcr);
         if (Ocr.FallbackNote is { } fallbackNote)
             LogInternal($"OCR 引擎回退：{fallbackNote}（现用 {Ocr.LanguageTag}）", LogLevel.Warn);
         else
