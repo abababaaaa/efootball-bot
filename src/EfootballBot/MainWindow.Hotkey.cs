@@ -70,13 +70,38 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>把当前热键配置同步到设置页标签与运行按钮。</summary>
+    /// <summary>各模块页头部的热键胶囊（8 个模块全覆盖，懒初始化）。</summary>
+    private readonly List<TextBlock> _hotkeyChips = new();
+
+    private List<TextBlock> HotkeyChips()
+    {
+        if (_hotkeyChips.Count == 0)
+        {
+            foreach (var t in new[]
+                     {
+                         TxtHkIntlPreMatch, TxtHkIntlLeague, TxtHkIntlWeekly, TxtHkIntlLadder,
+                         TxtHkCnPreMatch, TxtHkCnLeague, TxtHkCnWeekly, TxtHkCnMyLeague,
+                     })
+                if (t is not null) _hotkeyChips.Add(t);
+        }
+        return _hotkeyChips;
+    }
+
+    /// <summary>热键短标签（如 F10）；热键未启用时返回 null，按钮不加后缀。</summary>
+    private string? HotkeyLabel => _cfg is { Hotkey.Enabled: true } c ? c.Hotkey.DisplayString() : null;
+
+    /// <summary>把当前热键配置同步到设置页标签、8 个模块页胶囊与运行按钮。</summary>
     private void RefreshHotkeyUi()
     {
         if (LblHotkeyMain is null) return; // XAML 初始化顺序保护
         string disp = _cfg.Hotkey.Enabled ? _cfg.Hotkey.DisplayString() : "已禁用";
+        var fg = (System.Windows.Media.Brush)FindResource(_cfg.Hotkey.Enabled ? "AccentGlow" : "TextMuted");
         LblHotkeyMain.Text = disp;
-        if (TxtCnHotkey is not null) TxtCnHotkey.Text = disp;
+        foreach (var t in HotkeyChips())
+        {
+            t.Text = disp;
+            t.Foreground = fg;
+        }
         RefreshRunButtons();
     }
 

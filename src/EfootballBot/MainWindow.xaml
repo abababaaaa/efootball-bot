@@ -343,6 +343,16 @@
                                 </StackPanel>
                                 <TextBlock Style="{StaticResource PageSub}"
                                            Text="开赛前先把画质、分辨率与键位调好"/>
+                                <Border Style="{StaticResource Chip}" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                        ToolTip="全局热键：运行中按一次=暂停，暂停中再按一次=彻底终止（设置页可改键，可关闭）">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="暂停/终止热键" FontSize="10.5"
+                                                   Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtHkIntlPreMatch" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                                   FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+
                                 <Grid Margin="0,10,0,0" MaxWidth="520">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
@@ -390,6 +400,16 @@
                             </StackPanel>
                             <TextBlock Style="{StaticResource PageSub}"
                                        Text="自动打完「我的联赛」全部比赛"/>
+                            <Border Style="{StaticResource Chip}" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                        ToolTip="全局热键：运行中按一次=暂停，暂停中再按一次=彻底终止（设置页可改键，可关闭）">
+                                <StackPanel Orientation="Horizontal">
+                                    <TextBlock Text="暂停/终止热键" FontSize="10.5"
+                                               Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                                    <TextBlock x:Name="TxtHkIntlLeague" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                               FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                                </StackPanel>
+                            </Border>
+
                             <Grid Margin="0,10,0,0" MaxWidth="520">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
@@ -439,7 +459,7 @@
                     </Grid>
 
                     <!-- 运行设置：难度 / 停止条件（两列对齐，标签在控件上方） -->
-                    <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,13,0,0"/>
+                    <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,11,0,0"/>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
@@ -522,7 +542,7 @@
                     </Grid>
 
                     <!-- 模块选项：我的联赛道具（挂机经过物品页时自动购买） -->
-                    <TextBlock Text="模块选项" Style="{StaticResource GroupLabel}" Margin="0,13,0,0"/>
+                    <TextBlock Text="模块选项" Style="{StaticResource GroupLabel}" Margin="0,11,0,0"/>
                     <Border Style="{StaticResource Inset}" Padding="14,10">
                         <StackPanel>
                             <TextBlock Text="我的联赛道具（自动购买）" Style="{StaticResource CardTitle}"/>
@@ -578,6 +598,16 @@
                                 </StackPanel>
                                 <TextBlock Style="{StaticResource PageSub}"
                                            Text="自动刷「周活动」，主要奖励拿满后自动换下一个"/>
+                                <Border Style="{StaticResource Chip}" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                        ToolTip="全局热键：运行中按一次=暂停，暂停中再按一次=彻底终止（设置页可改键，可关闭）">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="暂停/终止热键" FontSize="10.5"
+                                                   Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtHkIntlWeekly" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                                   FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+
                                 <Grid Margin="0,10,0,0" MaxWidth="520">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
@@ -616,7 +646,7 @@
                         </Grid>
 
                         <!-- 运行设置：赛事等级 + 完成场次停止 -->
-                        <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,13,0,0"/>
+                        <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,11,0,0"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -691,6 +721,16 @@
                                 </StackPanel>
                                 <TextBlock Style="{StaticResource PageSub}"
                                            Text="自动打「eFootball™ 联赛 · 对阵AI」，组别循环冲级"/>
+                                <Border Style="{StaticResource Chip}" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                        ToolTip="全局热键：运行中按一次=暂停，暂停中再按一次=彻底终止（设置页可改键，可关闭）">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="暂停/终止热键" FontSize="10.5"
+                                                   Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtHkIntlLadder" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                                   FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+
                                 <Grid Margin="0,10,0,0" MaxWidth="520">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
@@ -726,7 +766,7 @@
                         </Grid>
 
                         <!-- 运行设置：达到组别停止 + 完成场次停止 -->
-                        <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,13,0,0"/>
+                        <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,11,0,0"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -844,6 +884,16 @@
                                 </StackPanel>
                                 <TextBlock Style="{StaticResource PageSub}"
                                            Text="国服：开赛前先把画质、分辨率与键位调好"/>
+                                <Border Style="{StaticResource Chip}" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                        ToolTip="全局热键：运行中按一次=暂停，暂停中再按一次=彻底终止（设置页可改键，可关闭）">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="暂停/终止热键" FontSize="10.5"
+                                                   Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtHkCnPreMatch" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                                   FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+
                                 <Grid Margin="0,10,0,0" MaxWidth="520">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
@@ -895,6 +945,16 @@
                                 </StackPanel>
                                 <TextBlock Style="{StaticResource PageSub}"
                                            Text="教练模式 AI 自动踢，场次用尽自动停止"/>
+                                <Border Style="{StaticResource Chip}" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                        ToolTip="全局热键：运行中按一次=暂停，暂停中再按一次=彻底终止（设置页可改键，可关闭）">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="暂停/终止热键" FontSize="10.5"
+                                                   Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtHkCnLeague" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                                   FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+
                                 <Grid Margin="0,10,0,0" MaxWidth="520">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
@@ -912,15 +972,6 @@
                                 <Ellipse Grid.Row="2" Style="{StaticResource BulletDot}"/>
                                 <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}" Text="需连接虚拟手柄，并以管理员身份运行"/>
                                 </Grid>
-                                <Border Style="{StaticResource Chip}" HorizontalAlignment="Left" Margin="0,11,0,0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="暂停/终止热键" FontSize="10.5"
-                                                   Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
-                                        <TextBlock x:Name="TxtCnHotkey" Text="Ctrl+Shift+Q"
-                                                   Foreground="{DynamicResource AccentGlow}" FontSize="10.5"
-                                                   FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
-                                    </StackPanel>
-                                </Border>
                             </StackPanel>
                             <Border Grid.Column="1" Style="{StaticResource RailCard}" Width="190"
                                     Margin="16,0,0,0" VerticalAlignment="Top">
@@ -939,7 +990,7 @@
                             </Border>
                         </Grid>
 
-                        <TextBlock Text="模块选项" Style="{StaticResource GroupLabel}" Margin="0,13,0,0"/>
+                        <TextBlock Text="模块选项" Style="{StaticResource GroupLabel}" Margin="0,11,0,0"/>
                         <Border Style="{StaticResource Inset}" Padding="14,10">
                             <StackPanel>
                                 <TextBlock Text="国服使用提示" Style="{StaticResource CardTitle}"/>
@@ -988,6 +1039,16 @@
                                 </StackPanel>
                                 <TextBlock Style="{StaticResource PageSub}"
                                            Text="自动打「比赛活动 · 冠军赛」，自动报名配阵打满整期"/>
+                                <Border Style="{StaticResource Chip}" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                        ToolTip="全局热键：运行中按一次=暂停，暂停中再按一次=彻底终止（设置页可改键，可关闭）">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="暂停/终止热键" FontSize="10.5"
+                                                   Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtHkCnWeekly" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                                   FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+
                                 <Grid Margin="0,10,0,0" MaxWidth="520">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
@@ -1023,7 +1084,7 @@
                             </Border>
                         </Grid>
 
-                        <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,13,0,0"/>
+                        <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,11,0,0"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -1097,6 +1158,16 @@
                                 </StackPanel>
                                 <TextBlock Style="{StaticResource PageSub}"
                                            Text="同国际服玩法，自动核对难度并打完联赛"/>
+                                <Border Style="{StaticResource Chip}" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                        ToolTip="全局热键：运行中按一次=暂停，暂停中再按一次=彻底终止（设置页可改键，可关闭）">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="暂停/终止热键" FontSize="10.5"
+                                                   Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtHkCnMyLeague" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                                   FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+
                                 <Grid Margin="0,10,0,0" MaxWidth="520">
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="Auto"/>
@@ -1135,7 +1206,7 @@
                             </Border>
                         </Grid>
 
-                        <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,13,0,0"/>
+                        <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,11,0,0"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
@@ -1216,7 +1287,7 @@
                         <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}" Text="达到设定场次（本次挂机累计）自动停止并还原窗口；0 = 一直挂机，自定义请输入正整数"/>
                         </Grid>
 
-                        <TextBlock Text="模块选项" Style="{StaticResource GroupLabel}" Margin="0,13,0,0"/>
+                        <TextBlock Text="模块选项" Style="{StaticResource GroupLabel}" Margin="0,11,0,0"/>
                         <Border Style="{StaticResource Inset}" Padding="14,10">
                             <StackPanel>
                                 <TextBlock Text="我的联赛道具（自动购买）" Style="{StaticResource CardTitle}"/>
@@ -2056,7 +2127,8 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <!-- 工具栏两行：标题 + 操作一行，筛选控件一行（窄窗口也不重叠） -->
+                    <!-- 工具栏两行（★必须包在同一个行容器里：两行都直接放 Grid 会都落在 Row 0 叠在一起） -->
+                    <StackPanel Grid.Row="0">
                     <Grid>
                         <StackPanel Orientation="Horizontal">
                             <Rectangle Style="{StaticResource CardTitleBar}"/>
@@ -2088,6 +2160,7 @@
                             <ComboBoxItem Content="仅报错/提醒"/>
                         </ComboBox>
                     </Grid>
+                    </StackPanel>
 
                     <!-- 日志内容 -->
                     <Border Grid.Row="1" Style="{StaticResource Inset}" Margin="0,10,0,0">

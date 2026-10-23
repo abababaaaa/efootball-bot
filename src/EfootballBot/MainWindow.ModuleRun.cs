@@ -41,15 +41,17 @@ public partial class MainWindow
         // 用进程存活判断会让「开始」永久禁用（用户报障：非正常退出后点不动）。
         bool running = _workerHost is { ScenarioRunning: true };
         bool orphanRunning = running && _activeStartBtn is null; // 状态不一致的自愈出口
+        // 热键提示：运行中直接标在按钮上（一键结束=再按一次即终止；暂停/继续=第一次按即暂停）
+        string hk = HotkeyLabel is { } h ? $"（{h}）" : "";
         foreach (var m in _moduleRuns)
         {
             bool active = running && _activeStartBtn == m.Start;
-            m.Start.Content = active ? "一键结束" : "开始";
+            m.Start.Content = active ? $"一键结束{hk}" : "开始";
             m.Start.Style = (Style)FindResource(active ? "DangerBtn" : "PrimaryBtn");
             m.Start.IsEnabled = (!_starting && (!running || orphanRunning)) || active;
             // 暂停/手动停止作用于当前唯一运行的引擎：开始后所有模块页上都可用
             m.Pause.IsEnabled = running;
-            m.Pause.Content = running && _paused ? "继续" : "暂停";
+            m.Pause.Content = (running && _paused ? "继续" : "暂停") + hk;
             m.Manual.IsEnabled = running;
             if (m.Step is not null)
                 m.Step.IsEnabled = active && _paused;
