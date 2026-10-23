@@ -34,6 +34,19 @@ public class CampaignMapRealFrameTests
         Assert.Equal(expected, PostMatchActivityBrain.Classify(ocr));
     }
 
+    // 实机 2026-10-23 反馈包：活动列表卡的奖励栏就印着「机会交易」，被误判成弹窗后
+    // ↑+A 把光标顶上页签行、切到「对阵玩家」。列表/主页帧必须判 None。
+    // vsplayers 帧即反馈包「手动停止」原截图（GDI 降质捕获，切到对阵玩家页签后的现场）。
+    [Theory]
+    [InlineData("weekly_events_list.png")]
+    [InlineData("weekly_events_list_vsplayers.png")]
+    [InlineData("weekly_event_home.png")]
+    public void Classify_EventPages_AreNotPopup(string name)
+    {
+        var ocr = OcrOf(name, out _);
+        Assert.Equal(PmScreen.None, PostMatchActivityBrain.Classify(ocr));
+    }
+
     [Theory]
     [InlineData("campaign_map.png")]
     [InlineData("campaign_map_after.png")]

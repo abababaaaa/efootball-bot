@@ -28,9 +28,33 @@ public enum PmScreen
 /// </summary>
 public static class PostMatchActivityBrain
 {
-    /// <summary>「机会交易」弹窗强特征：标题/正文固定出现该词或「地图前进步数」。</summary>
-    public static bool IsPopup(OcrResult ocr) =>
-        ocr.ContainsJoined("机会交易") || ocr.ContainsJoined("前进步数");
+    /// <summary>
+    /// 「机会交易」弹窗判定。
+    /// 坑（实机 2026-10-23 反馈包）：「机会交易」本身是奖励物品名，活动列表卡片与活动主页的
+    /// 奖励栏都会印该词——只看这个词会把活动列表误判成弹窗，随后 ↑+A 把光标顶上页签行，
+    /// 直接切到「对阵玩家」（用户看到的正是这个）。
+    /// 因此：活动列表/主页特征词硬否决；该词还须叠加弹窗专属结构词才算弹窗。
+    /// 「前进步数」只出现在弹窗正文「消耗1点地图前进步数以获得奖励」，单独命中即可。
+    /// </summary>
+    public static bool IsPopup(OcrResult ocr)
+    {
+        bool progress = ocr.ContainsJoined("前进步数");
+        bool trade = ocr.ContainsJoined("机会交易");
+        if (!progress && !trade) return false;
+        if (IsListOrHomePage(ocr)) return false;
+        if (progress) return true;
+        return ocr.ContainsJoined("获取") || ocr.ContainsJoined("消耗") || ocr.ContainsJoined("取消");
+    }
+
+    /// <summary>
+    /// 活动列表 / 活动主页特征（卡片奖励栏印着「机会交易」）：弹窗只覆盖在活动地图上，
+    /// 这些页面出现候选词一律不是弹窗。
+    /// </summary>
+    private static bool IsListOrHomePage(OcrResult ocr) =>
+        ocr.ContainsJoined("结束倒数") || ocr.ContainsJoined("结束到数") ||
+        ocr.ContainsJoined("对阵AI") || ocr.ContainsJoined("对阵玩家") ||
+        ocr.ContainsJoined("活动设置") || ocr.ContainsJoined("比赛计划") ||
+        ocr.ContainsJoined("前往比赛");
 
     /// <summary>
     /// 活动地图主界面：「当前位置」为全游戏唯一词（底部 Y 键说明），再叠加「下一步」或

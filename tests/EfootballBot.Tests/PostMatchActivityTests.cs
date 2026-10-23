@@ -36,6 +36,42 @@ public class PostMatchActivityTests
     }
 
     [Fact]
+    public void Classify_ListRewardName_IsNotPopup()
+    {
+        // 「机会交易」是奖励物品名：活动列表卡的奖励栏会印该词，不能被当成弹窗
+        // （实机 2026-10-23：误判后 ↑+A 把光标顶上页签行 → 切到「对阵玩家」）
+        var ocr = Ocr(W("对阵AI", 0.395, 0.078), W("对阵玩家", 0.604, 0.078),
+            W("结束倒数:6天11小时", 0.125, 0.326), W("机会交易", 0.763, 0.697),
+            W("进入", 0.200, 0.796), W("返回", 0.095, 0.934));
+        Assert.Equal(PmScreen.None, PostMatchActivityBrain.Classify(ocr));
+    }
+
+    [Fact]
+    public void Classify_LoneTradeWord_IsNotPopup()
+    {
+        // 无任何弹窗结构词时，单靠「机会交易」不足以判弹窗
+        Assert.Equal(PmScreen.None, PostMatchActivityBrain.Classify(Ocr(W("机会交易", 0.50, 0.53))));
+    }
+
+    [Fact]
+    public void Classify_Popup_ByBodyText()
+    {
+        // 弹窗正文「消耗1点地图前进步数以获得奖励」→ 前进步数
+        var ocr = Ocr(W("奖励", 0.777, 0.076), W("下一步", 0.874, 0.826),
+            W("消耗1点地图前进步数以获得奖励", 0.495, 0.565));
+        Assert.Equal(PmScreen.Popup, PostMatchActivityBrain.Classify(ocr));
+    }
+
+    [Fact]
+    public void Classify_Popup_TradePlusGetWord()
+    {
+        // 标题被逐字拆开/漏读时，标题词「获取」+「机会交易」仍成立
+        var ocr = Ocr(W("获取", 0.500, 0.656), W("机会交易", 0.871, 0.686),
+            W("取消", 0.499, 0.756), W("下一步", 0.874, 0.826));
+        Assert.Equal(PmScreen.Popup, PostMatchActivityBrain.Classify(ocr));
+    }
+
+    [Fact]
     public void ReadAdvanceCount_TakesIconRow_NotTotalRow()
     {
         // 图标计数行 1（y=0.284）在「总积分 1/9」行（y=0.354）上方；不得把总积分的 19 当次数
