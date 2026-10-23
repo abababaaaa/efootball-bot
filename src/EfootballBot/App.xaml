@@ -64,8 +64,8 @@
             <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="Padding" Value="18,16"/>
-            <Setter Property="Margin" Value="0,0,0,12"/>
+            <Setter Property="Padding" Value="16,13"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
         </Style>
         <!-- 内嵌凹槽：日志 / 提示 / 输入组 -->
         <Style x:Key="Inset" TargetType="Border">
@@ -799,6 +799,64 @@
                     <Setter Property="Height" Value="8"/>
                 </Trigger>
             </Style.Triggers>
+        </Style>
+
+        <!-- ============ 页面滚动区：悬浮细滚动条（覆盖在内容上、不占宽度，
+             静止时不可见，鼠标移入页面才淡入；日志区仍用上面的常显滚动条） ============ -->
+        <Style x:Key="OverlayScrollBar" TargetType="ScrollBar" BasedOn="{StaticResource {x:Type ScrollBar}}">
+            <Setter Property="Opacity" Value="0"/>
+            <Setter Property="Focusable" Value="False"/>
+        </Style>
+        <Style x:Key="PageScroll" TargetType="ScrollViewer">
+            <Setter Property="VerticalScrollBarVisibility" Value="Auto"/>
+            <Setter Property="HorizontalScrollBarVisibility" Value="Disabled"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ScrollViewer">
+                        <Grid Background="{TemplateBinding Background}">
+                            <ScrollContentPresenter x:Name="PART_ScrollContentPresenter"
+                                                    CanContentScroll="{TemplateBinding CanContentScroll}"
+                                                    Content="{TemplateBinding Content}"
+                                                    ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                    Margin="{TemplateBinding Padding}"/>
+                            <!-- 悬浮条：不单独占列，直接压在内容右侧留白上；MinWidth 必须清零，
+                                 否则系统主题的 17px 下限会把细条撑粗 -->
+                            <ScrollBar x:Name="PART_VerticalScrollBar" Width="8" MinWidth="0"
+                                       Style="{StaticResource OverlayScrollBar}"
+                                       Orientation="Vertical"
+                                       HorizontalAlignment="Right" VerticalAlignment="Stretch"
+                                       Margin="0,4,3,4" Cursor="Arrow"
+                                       Minimum="0"
+                                       Maximum="{TemplateBinding ScrollableHeight}"
+                                       Value="{TemplateBinding VerticalOffset}"
+                                       ViewportSize="{TemplateBinding ViewportHeight}"
+                                       Visibility="{TemplateBinding ComputedVerticalScrollBarVisibility}"/>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="PART_VerticalScrollBar"
+                                                             Storyboard.TargetProperty="Opacity"
+                                                             To="1" Duration="0:0:0.15"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="PART_VerticalScrollBar"
+                                                             Storyboard.TargetProperty="Opacity"
+                                                             To="0" Duration="0:0:0.4"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
     </Application.Resources>
 </Application>

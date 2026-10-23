@@ -325,8 +325,8 @@
                         </Border>
                     </Border>
 
-                    <!-- 内容区：超高时滚动，窄窗口也不裁切 -->
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                    <!-- 内容区：超高时滚动（悬浮细滚动条，静止不显示） -->
+                    <ScrollViewer Grid.Row="1" Style="{StaticResource PageScroll}"
                                   HorizontalScrollBarVisibility="Disabled" Padding="18,14,14,10">
                         <StackPanel>
 
@@ -433,7 +433,7 @@
                             <!-- 单步：暂停状态下走一拍（陌生界面排障），不改变暂停状态 -->
                             <Button x:Name="BtnStep" Content="单步走一拍（暂停中）" Style="{StaticResource LinkBtn}"
                                     Grid.Row="4" Grid.Column="1" HorizontalAlignment="Left" Margin="-4,2,0,0"
-                                    IsEnabled="False" Click="BtnStep_Click"
+                                    Padding="8,5" IsEnabled="False" Click="BtnStep_Click"
                                     ToolTip="暂停时执行一轮「观察 + 决策」后继续暂停：看 Bot 对当前画面打算做什么，且只做一步"/>
                             </Grid>
                         </StackPanel>
@@ -446,7 +446,7 @@
                                         Click="BtnStartMyLeague_Click"
                                         ToolTip="开始挂机；开始后此按钮变为「一键结束」"/>
                                 <Button x:Name="BtnPauseMyLeague" Content="暂停" Style="{StaticResource GhostBtn}"
-                                        Height="32" Margin="0,7,0,0"
+                                        Height="30" Margin="0,7,0,0"
                                         IsEnabled="False" Click="BtnPause_Click"
                                         ToolTip="开始后可用：点击暂停，暂停后再点继续"/>
                                 <Button x:Name="BtnManualMyLeague" Content="发现问题手动停止"
@@ -458,17 +458,18 @@
                         </Border>
                     </Grid>
 
-                    <!-- 运行设置：难度 / 停止条件（两列对齐，标签在控件上方） -->
-                    <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,11,0,0"/>
+                    <!-- 运行设置：难度 / 场次停止 / 关键比赛（三列一行，避免多占一行把页面撑出滚动条） -->
+                    <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,10,0,0"/>
                     <Grid>
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="*"/>
                             <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                        <StackPanel Grid.Column="0" Margin="0,0,10,0">
                             <TextBlock Text="比赛难度" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
                                        HorizontalAlignment="Left"/>
-                            <ComboBox x:Name="CmbDifficulty" Width="150" HorizontalAlignment="Left"
+                            <ComboBox x:Name="CmbDifficulty" Width="132" HorizontalAlignment="Left"
                                       SelectedIndex="0">
                                 <ComboBoxItem Content="新手"/>
                                 <ComboBoxItem Content="业余"/>
@@ -479,11 +480,11 @@
                                 <ComboBoxItem Content="传奇"/>
                             </ComboBox>
                         </StackPanel>
-                        <StackPanel Grid.Column="1">
+                        <StackPanel Grid.Column="1" Margin="0,0,10,0">
                             <TextBlock Text="完成场次停止" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
                                        HorizontalAlignment="Left"/>
                             <StackPanel Orientation="Horizontal">
-                                <ComboBox x:Name="CmbStopAfterMatches" Width="104" SelectedIndex="0"
+                                <ComboBox x:Name="CmbStopAfterMatches" Width="92" SelectedIndex="0"
                                           VerticalAlignment="Center" SelectionChanged="CmbStopAfter_SelectionChanged">
                                     <ComboBoxItem Content="0（无限）"/>
                                     <ComboBoxItem Content="1"/>
@@ -493,23 +494,17 @@
                                     <ComboBoxItem Content="20"/>
                                     <ComboBoxItem Content="自定义"/>
                                 </ComboBox>
-                                <TextBox x:Name="TxtStopAfterMatches" Width="52" Margin="8,0,0,0" VerticalAlignment="Center"
+                                <TextBox x:Name="TxtStopAfterMatches" Width="36" Margin="4,0,0,0" VerticalAlignment="Center"
                                          Visibility="Collapsed" Text="1" ToolTip="完成多少场后停止（正整数）"/>
-                                <TextBlock Text="场" FontSize="11.5" VerticalAlignment="Center" Margin="6,0,0,0"
+                                <TextBlock Text="场" FontSize="11.5" VerticalAlignment="Center" Margin="5,0,0,0"
                                            Foreground="{DynamicResource TextMuted}"/>
                             </StackPanel>
                         </StackPanel>
-                    </Grid>
-                    <Grid Margin="0,12,0,0">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <StackPanel Grid.Column="1">
+                        <StackPanel Grid.Column="2">
                             <TextBlock Text="关键比赛停止" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
                                        HorizontalAlignment="Left"/>
                             <StackPanel Orientation="Horizontal">
-                                <ComboBox x:Name="CmbStopAfterKeyMatches" Width="104" SelectedIndex="0"
+                                <ComboBox x:Name="CmbStopAfterKeyMatches" Width="92" SelectedIndex="0"
                                           VerticalAlignment="Center" SelectionChanged="CmbStopAfter_SelectionChanged">
                                     <ComboBoxItem Content="0（无限）"/>
                                     <ComboBoxItem Content="1"/>
@@ -519,9 +514,9 @@
                                     <ComboBoxItem Content="20"/>
                                     <ComboBoxItem Content="自定义"/>
                                 </ComboBox>
-                                <TextBox x:Name="TxtStopAfterKeyMatches" Width="52" Margin="8,0,0,0" VerticalAlignment="Center"
+                                <TextBox x:Name="TxtStopAfterKeyMatches" Width="36" Margin="4,0,0,0" VerticalAlignment="Center"
                                          Visibility="Collapsed" Text="1" ToolTip="完成多少场关键比赛后停止（正整数）"/>
-                                <TextBlock Text="场" FontSize="11.5" VerticalAlignment="Center" Margin="6,0,0,0"
+                                <TextBlock Text="场" FontSize="11.5" VerticalAlignment="Center" Margin="5,0,0,0"
                                            Foreground="{DynamicResource TextMuted}"/>
                             </StackPanel>
                         </StackPanel>
@@ -867,7 +862,7 @@
                         </Border>
                     </Border>
 
-                    <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto"
+                    <ScrollViewer Grid.Row="1" Style="{StaticResource PageScroll}"
                                   HorizontalScrollBarVisibility="Disabled" Padding="18,14,14,10">
                         <StackPanel>
 
@@ -1206,16 +1201,17 @@
                             </Border>
                         </Grid>
 
-                        <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,11,0,0"/>
+                        <TextBlock Text="运行设置" Style="{StaticResource GroupLabel}" Margin="0,10,0,0"/>
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="*"/>
                                 <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="*"/>
                             </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                            <StackPanel Grid.Column="0" Margin="0,0,10,0">
                                 <TextBlock Text="比赛难度" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
                                            HorizontalAlignment="Left"/>
-                                <ComboBox x:Name="CmbCnMlDifficulty" Width="150" HorizontalAlignment="Left" SelectedIndex="0">
+                                <ComboBox x:Name="CmbCnMlDifficulty" Width="132" HorizontalAlignment="Left" SelectedIndex="0">
                                     <ComboBoxItem Content="新手"/>
                                     <ComboBoxItem Content="业余"/>
                                     <ComboBoxItem Content="标准"/>
@@ -1225,11 +1221,11 @@
                                     <ComboBoxItem Content="传奇"/>
                                 </ComboBox>
                             </StackPanel>
-                            <StackPanel Grid.Column="1">
+                            <StackPanel Grid.Column="1" Margin="0,0,10,0">
                                 <TextBlock Text="完成场次停止" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
                                            HorizontalAlignment="Left"/>
                                 <StackPanel Orientation="Horizontal">
-                                    <ComboBox x:Name="CmbCnMlStopAfterMatches" Width="104" SelectedIndex="0"
+                                    <ComboBox x:Name="CmbCnMlStopAfterMatches" Width="92" SelectedIndex="0"
                                               VerticalAlignment="Center" SelectionChanged="CmbStopAfter_SelectionChanged">
                                         <ComboBoxItem Content="0（无限）"/>
                                         <ComboBoxItem Content="1"/>
@@ -1239,23 +1235,17 @@
                                         <ComboBoxItem Content="20"/>
                                         <ComboBoxItem Content="自定义"/>
                                     </ComboBox>
-                                    <TextBox x:Name="TxtCnMlStopAfterMatches" Width="52" Margin="8,0,0,0" VerticalAlignment="Center"
+                                    <TextBox x:Name="TxtCnMlStopAfterMatches" Width="36" Margin="4,0,0,0" VerticalAlignment="Center"
                                              Visibility="Collapsed" Text="1" ToolTip="完成多少场后停止（正整数）"/>
-                                    <TextBlock Text="场" FontSize="11.5" VerticalAlignment="Center" Margin="6,0,0,0"
+                                    <TextBlock Text="场" FontSize="11.5" VerticalAlignment="Center" Margin="5,0,0,0"
                                                Foreground="{DynamicResource TextMuted}"/>
                                 </StackPanel>
                             </StackPanel>
-                        </Grid>
-                        <Grid Margin="0,12,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <StackPanel Grid.Column="1">
+                            <StackPanel Grid.Column="2">
                                 <TextBlock Text="关键比赛停止" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
                                            HorizontalAlignment="Left"/>
                                 <StackPanel Orientation="Horizontal">
-                                    <ComboBox x:Name="CmbCnMlStopAfterKeyMatches" Width="104" SelectedIndex="0"
+                                    <ComboBox x:Name="CmbCnMlStopAfterKeyMatches" Width="92" SelectedIndex="0"
                                               VerticalAlignment="Center" SelectionChanged="CmbStopAfter_SelectionChanged">
                                         <ComboBoxItem Content="0（无限）"/>
                                         <ComboBoxItem Content="1"/>
@@ -1265,9 +1255,9 @@
                                         <ComboBoxItem Content="20"/>
                                         <ComboBoxItem Content="自定义"/>
                                     </ComboBox>
-                                    <TextBox x:Name="TxtCnMlStopAfterKeyMatches" Width="52" Margin="8,0,0,0" VerticalAlignment="Center"
+                                    <TextBox x:Name="TxtCnMlStopAfterKeyMatches" Width="36" Margin="4,0,0,0" VerticalAlignment="Center"
                                              Visibility="Collapsed" Text="1" ToolTip="完成多少场关键比赛后停止（正整数）"/>
-                                    <TextBlock Text="场" FontSize="11.5" VerticalAlignment="Center" Margin="6,0,0,0"
+                                    <TextBlock Text="场" FontSize="11.5" VerticalAlignment="Center" Margin="5,0,0,0"
                                                Foreground="{DynamicResource TextMuted}"/>
                                 </StackPanel>
                             </StackPanel>
@@ -1334,11 +1324,11 @@
 
             <!-- ===== 设置面板 ===== -->
             <ScrollViewer x:Name="SettingsPanel" Grid.Row="2" Visibility="Collapsed"
-                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                          Style="{StaticResource PageScroll}">
                 <StackPanel>
-                    <!-- 一级分类（分段页签，与模块页签同一套视觉） -->
+                    <!-- 一级分类（分段页签，与模块页签同一套视觉）；WrapPanel：窄窗时自动换行，避免页签被裁 -->
                     <Border Style="{StaticResource TabTrack}" Margin="0,0,0,12">
-                        <StackPanel Orientation="Horizontal">
+                        <WrapPanel Orientation="Horizontal">
                             <RadioButton x:Name="RbSetImportant" GroupName="SettingsNav" Style="{StaticResource SegTab}"
                                          IsChecked="True" Checked="SettingsTab_Checked">
                                 <StackPanel Orientation="Horizontal">
@@ -1356,7 +1346,7 @@
                             <RadioButton x:Name="RbSetDev" GroupName="SettingsNav" Style="{StaticResource SegTab}"
                                          Content="开发者选项" Checked="SettingsTab_Checked"
                                          ToolTip="训练数据采集等面向开发调试的功能，普通用户无需改动"/>
-                        </StackPanel>
+                        </WrapPanel>
                     </Border>
 
                     <!-- ============ 二级页：★ 重要设定（防检测 + 热键） ============ -->
@@ -1380,7 +1370,7 @@
                             </Grid>
 
                             <!-- 后台停靠 -->
-                            <CheckBox x:Name="ChkBackgroundParking" FontWeight="SemiBold" Margin="0,14,0,0"
+                            <CheckBox x:Name="ChkBackgroundParking" FontWeight="SemiBold" Margin="0,10,0,0"
                                       Content="后台停靠：挂机时把游戏窗口移出屏幕"/>
                                                         <Grid Margin="28,4,0,0" MaxWidth="520">
                                 <Grid.ColumnDefinitions>
@@ -1396,7 +1386,7 @@
                             <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
                             <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="全屏模式无法移出" Foreground="{DynamicResource Warning}"/><Run Text="，请用无边框窗口"/></TextBlock>
                             </Grid>
-                            <CheckBox x:Name="ChkHumanPacing" FontWeight="SemiBold" Margin="0,12,0,0"
+                            <CheckBox x:Name="ChkHumanPacing" FontWeight="SemiBold" Margin="0,9,0,0"
                                       Content="拟人节奏：按键时长/间隔对数正态随机化"/>
                                                         <Grid Margin="28,4,0,0" MaxWidth="520">
                                 <Grid.ColumnDefinitions>
@@ -1409,7 +1399,7 @@
                             <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
                             <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="按键时长/间隔"/><Run Text="按真人节奏随机化"/><Run Text="，并随机插入「犹豫」停顿，消除恒定节奏这一机器签名"/></TextBlock>
                             </Grid>
-                            <CheckBox x:Name="ChkScheduleEnabled" FontWeight="SemiBold" Margin="0,12,0,0"
+                            <CheckBox x:Name="ChkScheduleEnabled" FontWeight="SemiBold" Margin="0,9,0,0"
                                       Content="作息调度：每日活跃时段与时长上限"/>
                             <Grid Margin="28,10,0,0">
                                 <Grid.ColumnDefinitions>
@@ -1471,7 +1461,7 @@
                                 <TextBlock Style="{StaticResource H2}"><Run Text="★ " Foreground="{DynamicResource Warning}"/>赛后活动任务（仅国际服）</TextBlock>
                             </StackPanel>
                             <TextBlock Style="{StaticResource SmallText}" Margin="0,6,0,0" MaxWidth="520"><Run Text="比赛结束后 / 开始前会出现的全屏活动地图（活动名与图标每周随服务器推送变化）。"/><Run Text="仅国际服独享" Foreground="{DynamicResource Warning}"/></TextBlock>
-                            <CheckBox x:Name="ChkPmAutoAdvance" FontWeight="SemiBold" Margin="0,14,0,0"
+                            <CheckBox x:Name="ChkPmAutoAdvance" FontWeight="SemiBold" Margin="0,10,0,0"
                                       Content="自动完成（推进）周任务"/>
                                                         <Grid Margin="28,4,0,0" MaxWidth="520">
                                 <Grid.ColumnDefinitions>
@@ -1598,12 +1588,20 @@
                             </Grid>
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                                 <TextBlock Text="OCR 识别引擎" Style="{StaticResource FieldLabel}" Width="104" VerticalAlignment="Center"/>
-                                <ComboBox x:Name="CmbOcrEngine" Width="300" Margin="10,0,0,0" SelectedIndex="0">
+                                <ComboBox x:Name="CmbOcrEngine" Width="300" Margin="10,0,0,0" SelectedIndex="0"
+                                          SelectionChanged="CmbOcrEngine_SelectionChanged">
                                     <ComboBoxItem Content="SimdPaddle（推荐，默认）"/>
                                     <ComboBoxItem Content="RapidOCR Small（备用）"/>
+                                    <ComboBoxItem Content="Unlimited-OCR（外部服务，慢）"/>
                                 </ComboBox>
                             </StackPanel>
-                                                        <Grid Margin="0,6,0,9">
+                            <StackPanel x:Name="PnlUnlimitedOcr" Orientation="Horizontal" Margin="0,10,0,0"
+                                        Visibility="Collapsed">
+                                <TextBlock Text="服务地址" Style="{StaticResource FieldLabel}" Width="104" VerticalAlignment="Center"/>
+                                <TextBox x:Name="TxtUnlimitedOcrEndpoint" Width="420" Margin="10,0,0,0" VerticalAlignment="Center"
+                                         ToolTip="OpenAI 兼容的 chat/completions 地址（vLLM / SGLang 官方默认 10000 端口）"/>
+                            </StackPanel>
+                            <Grid Margin="0,6,0,9">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
@@ -1614,11 +1612,11 @@
                                 <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
                             <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="两引擎共用随程序自带的 "/><Run Text="离线 PP-OCRv6 Small 模型"/><Run Text="，不联网、不装第三方软件"/></TextBlock>
+                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="前两项共用随程序自带的 "/><Run Text="离线 PP-OCRv6 Small 模型"/><Run Text="，不联网、不装第三方软件"/></TextBlock>
                             <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
                             <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="SimdPaddle"/><Run Text=" 更快更稳（真机 1085ms/帧 vs 1764ms），异常时自动回落 RapidOCR"/></TextBlock>
                             <Ellipse Grid.Row="2" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="更改在下次开始挂机时生效"/></TextBlock>
+                            <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="Unlimited-OCR 是外部"/><Run Text=" VLM 服务"/><Run Text="（需自行部署 vLLM/SGLang），秒级~数十秒/帧，仅作精度参照；服务不可达自动回落 SimdPaddle"/></TextBlock>
                             </Grid>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,0">
                                 <TextBlock Text="OCR 识别频率" Style="{StaticResource FieldLabel}" Width="104" VerticalAlignment="Center"/>
@@ -1726,27 +1724,29 @@
                     </Border>
                     </StackPanel>
                     <StackPanel x:Name="SetTabDaily" Visibility="Collapsed">
-                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                    <Border Style="{StaticResource Card}">
                         <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
                                 <TextBlock Text="结束行为" Style="{StaticResource H2}"/>
                             </StackPanel>
-                            <CheckBox x:Name="ChkAutoClose" Content="全部流程完毕后自动关闭程序" IsChecked="False"/>
-                            <CheckBox x:Name="ChkMinimizeTray" Content="结束后最小化到托盘（暂未实现）" IsChecked="False" IsEnabled="False" Margin="0,6,0,0"/>
+                            <WrapPanel Margin="0,2,0,0">
+                                <CheckBox x:Name="ChkAutoClose" Content="全部流程完毕后自动关闭程序" IsChecked="False"/>
+                                <CheckBox x:Name="ChkMinimizeTray" Content="结束后最小化到托盘（暂未实现）" IsChecked="False" IsEnabled="False" Margin="20,0,0,0"/>
+                            </WrapPanel>
                         </StackPanel>
                     </Border>
 
                     <!-- （挂机节奏已移至「★重要设定」页） -->
 
-                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                    <Border Style="{StaticResource Card}">
                         <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
                                 <TextBlock Text="通知与远程监控" Style="{StaticResource H2}"/>
                             </StackPanel>
                             <TextBlock Text="挂机结束或异常时推一条消息到你自己的服务（Bark / 飞书 / 钉钉 / ntfy 等）。URL 里含 msg 占位符（花括号包住 msg）时改发 GET；否则 POST JSON。留空 = 不发送。"
-                                       TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" FontSize="11.5" Margin="0,0,0,10"/>
+                                       TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" FontSize="11.5" Margin="0,0,0,8"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="*"/>
@@ -1762,12 +1762,12 @@
                                     <TextBox x:Name="TxtNotifyName" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </Grid>
-                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                            <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
                                 <CheckBox x:Name="ChkNotifyStop" Content="正常停止时通知" IsChecked="True"/>
                                 <CheckBox x:Name="ChkNotifyError" Content="异常停止时通知" IsChecked="True" Margin="18,0,0,0"/>
                             </StackPanel>
-                            <CheckBox x:Name="ChkMonitor" Content="开启局域网监控页" IsChecked="False" Margin="0,14,0,0"/>
-                            <Grid Margin="28,9,0,0">
+                            <CheckBox x:Name="ChkMonitor" Content="开启局域网监控页" IsChecked="False" Margin="0,10,0,0"/>
+                            <Grid Margin="28,8,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="Auto"/>
@@ -1783,31 +1783,35 @@
                                          HorizontalAlignment="Left" VerticalAlignment="Center"/>
                             </Grid>
                             <TextBlock Text="监控页：手机连同一 WiFi，打开 http://本机IP:端口/?t=token 即可看状态、暂停/继续/单步。默认关闭；只监听本机网卡，不上传任何数据。"
-                                       TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" FontSize="11.5" Margin="0,8,0,0"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                       TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" FontSize="11.5" Margin="0,6,0,0"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                 <CheckBox x:Name="ChkDryRun" Content="影子模式（不实际按键，只记录「本来会按什么」）" IsChecked="False"/>
                             </StackPanel>
                             <TextBlock Text="影子模式：感知与判定照常运行，手柄输出被拦截并写进日志。用于游戏更新后零风险验证决策，下次开始挂机生效。"
-                                       TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" FontSize="11.5" Margin="0,6,0,0"/>
+                                       TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" FontSize="11.5" Margin="0,5,0,0"/>
                         </StackPanel>
                     </Border>
 
-                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                    <Border Style="{StaticResource Card}">
                         <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Text="日志" Style="{StaticResource H2}"/>
-                            </StackPanel>
+                            <Grid Margin="0,0,0,8">
+                                <StackPanel Orientation="Horizontal">
+                                    <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                    <TextBlock Text="日志" Style="{StaticResource H2}"/>
+                                </StackPanel>
+                                <TextBlock Text="所有改动自动保存" Foreground="{DynamicResource TextMuted}" FontSize="11.5"
+                                           HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                            </Grid>
                             <CheckBox x:Name="ChkFileLog" Content="启用文件日志（写入 logs\ 目录）" IsChecked="True"/>
                             <CheckBox x:Name="ChkShowRuntimeLog" Content="显示底部运行日志卡" IsChecked="True" Margin="0,6,0,0"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                 <TextBlock Text="保留数量" Style="{StaticResource FieldLabel}" Width="104" VerticalAlignment="Center"/>
                                 <TextBox x:Name="TxtMaxLogFiles" Width="56" Margin="8,0,0,0" Text="10"/>
                                 <TextBlock Text="个，超过" Style="{StaticResource FieldLabel}" Margin="8,0,0,0"/>
                                 <TextBox x:Name="TxtLogRetentionDays" Width="56" Margin="8,0,0,0" Text="7"/>
                                 <TextBlock Text="天自动清理" Style="{StaticResource FieldLabel}" Margin="8,0,0,0"/>
                             </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                 <TextBlock Text="文件日志级别" Style="{StaticResource FieldLabel}" Width="104" VerticalAlignment="Center"/>
                                 <ComboBox x:Name="CmbFileLogLevel" Width="116" Margin="10,0,0,0" SelectedIndex="3">
                                     <ComboBoxItem Content="Info"/>
@@ -1815,12 +1819,8 @@
                                     <ComboBoxItem Content="Error"/>
                                     <ComboBoxItem Content="Debug"/>
                                 </ComboBox>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
                                 <Button x:Name="BtnOpenLogFolder" Content="打开日志文件夹" Style="{StaticResource GhostBtn}"
-                                        Padding="13,6" Click="BtnOpenLogFolder_Click"/>
-                                <TextBlock Text="所有改动自动保存" Foreground="{DynamicResource TextMuted}" FontSize="11.5"
-                                           VerticalAlignment="Center" Margin="12,0,0,0"/>
+                                        Padding="13,5" Margin="16,0,0,0" Click="BtnOpenLogFolder_Click"/>
                             </StackPanel>
                         </StackPanel>
                     </Border>
@@ -1880,7 +1880,7 @@
 
             <!-- ===== 关于面板（左栏独立分类：诊断报告 / 声明 / 反馈） ===== -->
             <ScrollViewer x:Name="AboutPanel" Grid.Row="2" Visibility="Collapsed"
-                          VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                          Style="{StaticResource PageScroll}">
                 <StackPanel Margin="0,0,12,0">
                     <!-- ===== 诊断报告 ===== -->
                     <Border Style="{StaticResource Card}" Margin="0,2,0,12">
@@ -1986,11 +1986,11 @@
 
             <!-- ===== 自动更新面板（独立） ===== -->
             <ScrollViewer x:Name="UpdatePanel" Grid.Row="2" Visibility="Collapsed"
-                          VerticalScrollBarVisibility="Auto">
+                          Style="{StaticResource PageScroll}">
                 <StackPanel Margin="0,0,12,0">
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
                                 <TextBlock Text="自动更新" Style="{StaticResource H2}"/>
                             </StackPanel>
@@ -2032,22 +2032,22 @@
                                 </Border>
                             </Grid>
 
-                            <CheckBox x:Name="ChkCheckOnStartup" Content="启动时自动检查更新" IsChecked="True" Margin="0,4,0,0"/>
+                            <CheckBox x:Name="ChkCheckOnStartup" Content="启动时自动检查更新" IsChecked="True" Margin="0,2,0,0"/>
                             <CheckBox x:Name="ChkIncludePrerelease" Content="包含测试版（pre-release）" IsChecked="False"/>
                             <CheckBox x:Name="ChkAutoDownloadInstall" Content="发现更新后自动下载安装" IsChecked="False"/>
 
-                            <StackPanel Orientation="Horizontal" Margin="0,14,0,0">
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                 <Button x:Name="BtnCheckUpdate" Content="检查更新" Style="{StaticResource GhostBtn}"
                                         Padding="14,7" Click="BtnCheckUpdate_Click"/>
                                 <Button x:Name="BtnApplyUpdate" Content="立即更新" Style="{StaticResource PrimaryBtn}"
                                         Margin="10,0,0,0" IsEnabled="False" Click="BtnApplyUpdate_Click"/>
                             </StackPanel>
 
-                            <ProgressBar x:Name="PbUpdate" Margin="0,12,0,0" Visibility="Collapsed"/>
+                            <ProgressBar x:Name="PbUpdate" Margin="0,10,0,0" Visibility="Collapsed"/>
                             <TextBlock x:Name="TxtUpdateStatus" Text="" Foreground="{DynamicResource TextSecondary}"
-                                       FontSize="11.5" Margin="0,8,0,0"/>
+                                       FontSize="11.5" Margin="0,6,0,0"/>
 
-                            <Border Margin="0,14,0,0" Background="{DynamicResource Surface2}" CornerRadius="8"
+                            <Border Margin="0,10,0,0" Background="{DynamicResource Surface2}" CornerRadius="8"
                                     Padding="12" Visibility="Collapsed" x:Name="ChangelogBox">
                                 <StackPanel>
                                     <TextBlock Text="更新日志" Foreground="{DynamicResource AccentGlow}" FontSize="12"
@@ -2069,7 +2069,7 @@
                                 <Ellipse Width="9" Height="9" Fill="#FF4FA8E0" VerticalAlignment="Center" Margin="0,0,9,1"/>
                                 <TextBlock Text="网络优化" FontSize="14" FontWeight="Bold"/>
                             </StackPanel>
-                                                        <Grid Margin="0,9,0,0">
+                                                        <Grid Margin="0,7,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
@@ -2081,23 +2081,23 @@
                             <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="GitHub 无法直连时，可"/><Run Text="一键指向测速最快的 IP"/><Run Text="（修改 "/><Run Text="hosts" Foreground="{DynamicResource Warning}"/><Run Text="）"/></TextBlock>
                             </Grid>
                             <Button x:Name="BtnOptimizeGitHub" Content="一键优化 GitHub 直连" Style="{StaticResource PrimaryBtn}"
-                                    HorizontalAlignment="Left" Margin="0,14,0,0" Click="BtnOptimizeGitHub_Click"/>
-                            <ProgressBar x:Name="PbGitHub" Margin="0,12,0,0" Visibility="Collapsed"/>
+                                    HorizontalAlignment="Left" Margin="0,10,0,0" Click="BtnOptimizeGitHub_Click"/>
+                            <ProgressBar x:Name="PbGitHub" Margin="0,10,0,0" Visibility="Collapsed"/>
                             <TextBlock x:Name="TxtGitHubStatus" Text="" Foreground="{DynamicResource TextSecondary}"
-                                       FontSize="11.5" Margin="0,8,0,0" TextWrapping="Wrap"/>
+                                       FontSize="11.5" Margin="0,6,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
 
                     <!-- ===== 模块回退（新版实现的手动退路） ===== -->
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
                                 <TextBlock Style="{StaticResource H2}">
                                     <Run Text="★ " Foreground="{DynamicResource Warning}"/>模块回退
                                 </TextBlock>
                             </StackPanel>
-                                                        <Grid Margin="0,6,0,0">
+                                                        <Grid Margin="0,5,0,0">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
@@ -2108,11 +2108,11 @@
                             <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
                             <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="各功能默认用新版实现；表现异常时可单独"/><Run Text="勾选退回旧版"/><Run Text="，"/><Run Text="更改下次开始挂机时生效" Foreground="{DynamicResource Warning}"/></TextBlock>
                             </Grid>
-                            <CheckBox x:Name="ChkFbSharpDxCapture" Content="画面捕获用旧版引擎（出现黑屏 / 黑画面时勾选）" Margin="0,12,0,0"/>
-                            <CheckBox x:Name="ChkFbFp32Ocr" Content="文字识别退回原版精度模式（提速版出现读错 / 漏字时勾选）" Margin="0,4,0,0"/>
-                            <CheckBox x:Name="ChkFbNoOcrDownscale" Content="文字识别关闭高分辨率压缩（高分屏识别变差时勾选）" Margin="0,4,0,0"/>
-                            <CheckBox x:Name="ChkFbNoMouseTrajectory" Content="鼠标点击关闭拟人移动（直接跳到目标位置）" Margin="0,4,0,0"/>
-                            <CheckBox x:Name="ChkFbNoFailureDumps" Content="异常停止时不保存画面截图留档" Margin="0,4,0,0"/>
+                            <CheckBox x:Name="ChkFbSharpDxCapture" Content="画面捕获用旧版引擎（出现黑屏 / 黑画面时勾选）" Margin="0,10,0,0"/>
+                            <CheckBox x:Name="ChkFbFp32Ocr" Content="文字识别退回原版精度模式（提速版出现读错 / 漏字时勾选）" Margin="0,3,0,0"/>
+                            <CheckBox x:Name="ChkFbNoOcrDownscale" Content="文字识别关闭高分辨率压缩（高分屏识别变差时勾选）" Margin="0,3,0,0"/>
+                            <CheckBox x:Name="ChkFbNoMouseTrajectory" Content="鼠标点击关闭拟人移动（直接跳到目标位置）" Margin="0,3,0,0"/>
+                            <CheckBox x:Name="ChkFbNoFailureDumps" Content="异常停止时不保存画面截图留档" Margin="0,3,0,0"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
