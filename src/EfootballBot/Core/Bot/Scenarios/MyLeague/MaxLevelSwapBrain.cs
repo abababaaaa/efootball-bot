@@ -203,6 +203,65 @@ public static partial class MaxLevelSwapBrain
         return text.Length == 0 ? null : text;
     }
 
+    // ---------------- 换入生效判据（整体实力 / 剩余球员数）与弹窗词 ----------------
+
+    /// <summary>
+    /// 整体实力数值（站位页/后备球员页右上角，值在标签正下方偏右，实机 1280×720：
+    /// 标签 (0.855, 0.20)、值 2403 位于 (0.89, 0.26)）。换入生效后阵容变化该值必变，
+    /// 被同名卡挡下（交换未生效）则保持不变——用户 2026-10-25 实机。读不出 null。
+    /// </summary>
+    public static int? ReadOverallRating(OcrResult ocr)
+    {
+        var label = ocr.FindFirst("整体实力");
+        if (label is null) return null;
+        // 整体实力 3~4 位（2403），ParseSingleNumber 的 1~3 位上限不适用，单独解析
+        static int? ParseRating(string text)
+        {
+            string d = new string(text.Where(char.IsDigit).ToArray());
+            return d.Length is >= 3 and <= 4 && int.TryParse(d, out int v) && v >= 100 ? v : null;
+        }
+        return ocr.MergedWords
+            .Where(w => w.NormText != label.NormText &&
+                        w.CenterY > label.CenterY - 0.02 && w.CenterY <= label.CenterY + 0.12 &&
+                        w.CenterX >= label.CenterX - 0.05 && w.CenterX <= label.CenterX + 0.15)
+            .Select(w => ParseRating(w.Text))
+            .FirstOrDefault(v => v is not null);
+    }
+
+    /// <summary>
+    /// 后备球员页左下「剩余球员数：N」。换入生效后名单少一人该值必减。
+    /// 数字通常与标签同词（OCR 连读「剩余球员数828」）；分离时取右侧最近数字词。读不出 null。
+    /// </summary>
+    public static int? ReadBenchRemaining(OcrResult ocr)
+    {
+        var label = ocr.FindFirst("剩余球员数") ?? ocr.FindFirst("剩余球员");
+        if (label is null) return null;
+        string digits = new(label.Text.Where(char.IsDigit).ToArray());
+        if (digits.Length > 0 && int.TryParse(digits, out int same)) return same;
+        return ocr.MergedWords
+            .Where(w => w.NormText != label.NormText &&
+                        Math.Abs(w.CenterY - label.CenterY) <= 0.05 &&
+                        w.CenterX > label.CenterX - 0.02 && w.CenterX <= label.CenterX + 0.15)
+            .OrderBy(w => w.CenterX)
+            .Select(w => ParseSingleNumber(w.Text))
+            .FirstOrDefault(v => v is not null);
+    }
+
+    /// <summary>
+    /// 游戏错误弹窗（实机 2026-10-25 02:17：换人流程被同名卡打乱后弹出
+    /// 「功能目前无法使用／详情请参阅[最新消息]／不便之处,敬请原谅／代码:C_XIQX_0019／OK」，
+    /// B 按不掉只能 A 点 OK）。出现即全局拦截。
+    /// </summary>
+    public static bool IsGameErrorDialog(OcrResult ocr) =>
+        ocr.ContainsJoined("功能目前无法使用") || ocr.ContainsJoined("不便之处");
+
+    /// <summary>
+    /// 确认类弹窗盖在站位页/后备页上（底层页面词仍在，画面分类不变）：
+    /// 以「确定/确认/是否」为准——原页固定词里没有这三个词（完成/返回/战术…），命中即有弹窗。
+    /// </summary>
+    public static bool HasDialogConfirmWords(OcrResult ocr) =>
+        ocr.ContainsJoined("确定") || ocr.ContainsJoined("确认") || ocr.ContainsJoined("是否");
+
     // ---------------- 排序/筛选「已设置」探针（中断续跑不重复勾选） ----------------
 
     /// <summary>

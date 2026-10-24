@@ -37,9 +37,14 @@ internal sealed class EngineSwapPad(Pad pad) : ISwapPad
 /// 能力点 = 0 跳过分配直接 B。之后 A 选中 → ←×8 进侧栏 → 上×5 下×3 落「后备球员」
 /// → A → ←+A 开排序 → 上×6 下×5 落「当前等级」→ 右上箭头为下则 Y 改升序 → A；
 /// 回列表 ← ↓ A 开筛选 → ↓×4 A 进卡片类型 → 上×9 ↓↓ + 6×(A ↓) 勾高阶卡 → B；
-/// ↓×4 ↓ A 应用筛选 → A 换入首位（当前等级最低）→ B 回站位页 → B 完成 →
-/// 主页 Y 重进（光标回门将）→ 盲走光标回刚换人的位置继续下一位。
-/// 非满级：详情页 B 退出，直接下一位。11 人完成 B 返回主页交还正常流程。
+/// ↓×4 ↓ A 应用筛选 → A 换入首位（当前等级最低）。
+/// 换入验证（用户 2026-10-25 实机）：名单（首发+替补）有同名卡时 A 换不进去——
+/// 画面回到站位页（场上只剩同名卡高亮）或整体实力/剩余球员数不变。被挡时按 B
+/// 退回后备列表，→×N 跳到第 N+1 顺位后备球员再按 A（第 2 个也不行就 →×2 试第 3
+/// 个，以此类推，至多 4 次跳位后放弃本轮）。生效（整体实力或剩余球员数变化）后
+/// B 完成 → 退出比赛计划（阵容已变更时游戏弹确认窗：上移+A 确认；游戏错误弹窗
+/// 「功能目前无法使用」也用 A 关）→ 主页 Y 重进（光标回门将）→ 盲走光标回刚换人
+/// 的位置继续下一位。非满级：详情页 B 退出，直接下一位。11 人完成 B 返回主页交还正常流程。
 /// </summary>
 public sealed class MaxLevelSwapController
 {
@@ -78,12 +83,14 @@ public sealed class MaxLevelSwapController
         CardTypeWait,
         /// <summary>回筛选页：↓×4 落比赛风格 ↓ 落完成 → A 应用。</summary>
         FilterApply,
-        /// <summary>筛选后的列表：A 换入首位后备球员。</summary>
+        /// <summary>筛选后的列表：A 换入后备球员（当前等级最低，同名卡被挡时跳位重试）。</summary>
         BenchSwap,
-        /// <summary>交换后 B 回站位页。</summary>
-        SwapReturn,
-        /// <summary>站位页 B 完成 → 回联赛主页。</summary>
-        ExitPlan,
+        /// <summary>交换后验证：整体实力/剩余球员数变化=生效；画面回站位页或数值不变=被同名卡挡下。</summary>
+        SwapVerify,
+        /// <summary>被同名卡挡下按 B 后：等回到后备列表 → →×N 跳位 → A 重试。</summary>
+        SkipRetreat,
+        /// <summary>B 完成后驱动退出比赛计划到主页（途中确认窗上移+A、错误弹窗 A）。</summary>
+        SwapExit,
         /// <summary>主页 Y 重进比赛计划（光标回门将）。</summary>
         Reopen,
         /// <summary>盲走光标回刚换人的位置（不带等级识别）。</summary>
@@ -97,8 +104,12 @@ public sealed class MaxLevelSwapController
         { PadDir.Up, PadDir.Left, PadDir.Up, PadDir.Right, PadDir.Right,
           PadDir.Right, PadDir.Right, PadDir.Right, PadDir.Down, PadDir.Left };
 
-    /// <summary>整轮巡检轮数保险丝（含等待重试；约 400 轮 × ~2s ≈ 13 分钟上限）。</summary>
-    internal const int MaxRounds = 400;
+    /// <summary>整轮巡检轮数保险丝（含等待重试；约 700 轮 × ~1.5s ≈ 18 分钟上限，
+    /// 给同名卡跳位重试留余量）。</summary>
+    internal const int MaxRounds = 700;
+
+    /// <summary>同名卡跳位重试上限：第 1~4 顺位被挡后再试一次第 5 顺位，仍被挡放弃本轮换人。</summary>
+    internal const int MaxSkipRetries = 4;
 
     private Phase _phase = Phase.Idle;
     /// <summary>当前巡检位（0=门将 … 10=最后一位）。</summary>
@@ -113,6 +124,16 @@ public sealed class MaxLevelSwapController
     private int _maxed;
     /// <summary>本次排序弹窗已按过一次 Y 翻方向（至多一次，防探针误判来回翻死循环）。</summary>
     private bool _sortFlipDone;
+    /// <summary>当前位换入被同名卡挡下的次数（= 下一次要跳过的后备球员位数）。</summary>
+    private int _skip;
+    /// <summary>SwapVerify / SkipRetreat / SwapExit 内的观察轮计数（进相位置 0）。</summary>
+    private int _verifyRounds;
+    /// <summary>按 A 前的后备页判据快照：整体实力 / 剩余球员数。</summary>
+    private int? _overallBefore;
+    private int? _remainBefore;
+    /// <summary>退出驱动的上一次逃生键是否为 A（A/B 交替，防止卡死在确认窗上）。</summary>
+    private bool _exitUsedA;
+    private bool _errorDumped;
 
     /// <summary>巡检是否空闲（空闲时场景层才允许触发新的巡检）。</summary>
     public bool Idle => _phase == Phase.Idle;
@@ -122,6 +143,10 @@ public sealed class MaxLevelSwapController
         _phase = Phase.Idle;
         _pos = _swapPos = _stall = _readTries = _escapes = _rounds = _swapped = _maxed = 0;
         _sortFlipDone = false;
+        _skip = _verifyRounds = 0;
+        _overallBefore = _remainBefore = null;
+        _exitUsedA = false;
+        _errorDumped = false;
     }
 
     /// <summary>在联赛主页（无弹窗）触发：按 Y 打开比赛计划。返回下一轮延时。</summary>
@@ -256,6 +281,20 @@ public sealed class MaxLevelSwapController
 
         var screen = MaxLevelSwapBrain.Classify(ocr);
         bool home = ocr.ContainsJoined("前往比赛");
+
+        // 游戏错误弹窗（功能目前无法使用 代码:C_XIQX_0019，实机 2026-10-25 换人流程
+        // 被同名卡打乱后出现）：B 按不掉，只能 A 点 OK——任何阶段出现都先关掉再继续。
+        if (MaxLevelSwapBrain.IsGameErrorDialog(ocr))
+        {
+            if (!_errorDumped)
+            {
+                _errorDumped = true;
+                dumpFrame?.Invoke(frame, "swap_error_dialog");
+            }
+            log("[我的联赛] 游戏错误弹窗（功能暂时不可用）：按 A 关闭后继续", LogLevel.Error);
+            await pad.Confirm();
+            return 1600;
+        }
 
         switch (_phase)
         {
@@ -455,6 +494,7 @@ public sealed class MaxLevelSwapController
                 if (screen == SwapScreen.Lineup)
                 {
                     _stall = 0;
+                    _skip = 0; // 本位换人从头开始（跳位计数只在本位内累计）
                     await pad.Confirm(); // A 选中该球员
                     _phase = Phase.SidebarNav;
                     return 1300;
@@ -641,51 +681,176 @@ public sealed class MaxLevelSwapController
                 if (screen == SwapScreen.Bench)
                 {
                     _stall = 0;
-                    _swapped++;
-                    log($"[我的联赛] 换人：首位后备球员（当前等级最低）换入第 {_swapPos + 1} 位", LogLevel.Success);
+                    // 按 A 前留判据快照：换入生效则整体实力/剩余球员数必变（用户 2026-10-25）
+                    _overallBefore = MaxLevelSwapBrain.ReadOverallRating(ocr);
+                    _remainBefore = MaxLevelSwapBrain.ReadBenchRemaining(ocr);
+                    _verifyRounds = 0;
+                    log($"[我的联赛] 换人：第 {_skip + 1} 顺位后备球员（当前等级最低）换入第 {_swapPos + 1} 位", LogLevel.Info);
                     await pad.Confirm(); // A 交换
-                    _phase = Phase.SwapReturn;
+                    _phase = Phase.SwapVerify;
                     return 1800;
                 }
                 return await StallAsync("筛选后列表异常", screen, pad, log);
             }
 
-            case Phase.SwapReturn:
+            case Phase.SwapVerify:
             {
+                _verifyRounds++;
+                if (screen == SwapScreen.Lineup)
+                {
+                    // 交换后画面离开后备列表回到站位页 = 同名卡挡下的「双影」视图
+                    // （场上只剩同名卡高亮，用户 2026-10-25）：先观察 2 轮排除交换动画，
+                    // 再按 B 退回后备列表，从下一位后备球员重试
+                    if (_verifyRounds <= 2) return 1400;
+                    _skip++;
+                    log($"[我的联赛] 换入被同名卡挡下（画面回到站位页）：B 退回后备列表，改试第 {_skip + 1} 顺位", LogLevel.Warn);
+                    await pad.Back();
+                    _phase = Phase.SkipRetreat;
+                    _verifyRounds = 0;
+                    return 1500;
+                }
+                if (screen == SwapScreen.Bench)
+                {
+                    if (_verifyRounds <= 2) return 1400; // 交换动画/列表刷新
+                    var overall = MaxLevelSwapBrain.ReadOverallRating(ocr);
+                    var remain = MaxLevelSwapBrain.ReadBenchRemaining(ocr);
+                    bool? ratingChanged = _overallBefore is int o0 && overall is int o1 ? o1 != o0 : null;
+                    bool? remainDropped = _remainBefore is int r0 && remain is int r1 ? r1 < r0 : null;
+                    bool? remainSame = _remainBefore is int rb && remain is int ra ? ra == rb : null;
+                    if (ratingChanged == true || remainDropped == true)
+                    {
+                        _swapped++;
+                        _escapes = 0;
+                        _skip = 0;
+                        string verdict = _overallBefore is int ob && overall is int oa
+                            ? $"整体实力 {ob}→{overall}"
+                            : "整体实力已变化";
+                        if (_remainBefore is int rB && remain is int rA) verdict += $"，剩余球员数 {rB}→{rA}";
+                        log($"[我的联赛] 换入生效（{verdict}）：B 完成，退出比赛计划", LogLevel.Success);
+                        await pad.Back();
+                        _phase = Phase.SwapExit;
+                        _verifyRounds = 0;
+                        _exitUsedA = false;
+                        return 1600;
+                    }
+                    if (ratingChanged == false && remainSame != false)
+                    {
+                        // 数值全都没变 = 交换未生效（同名卡挡下但画面仍停在列表）：同样按 B
+                        // 退回——若 B 直接触发「完成」退出，SkipRetreat 见主页会接管
+                        _skip++;
+                        log($"[我的联赛] 整体实力未变（{_overallBefore}）：换入被同名卡挡下，B 退回后备列表改试第 {_skip + 1} 顺位", LogLevel.Warn);
+                        await pad.Back();
+                        _phase = Phase.SkipRetreat;
+                        _verifyRounds = 0;
+                        return 1500;
+                    }
+                    if (_verifyRounds >= 5)
+                    {
+                        // 整体实力/剩余球员数都读不出：按已换处理走退出（B 在这两页语义安全，
+                        // 真没换成时下轮巡检会重新检出该位）
+                        log("[我的联赛] 换入结果读不出（整体实力/剩余球员数缺失）：按已换处理，B 完成", LogLevel.Warn);
+                        _swapped++;
+                        await pad.Back();
+                        _phase = Phase.SwapExit;
+                        _verifyRounds = 0;
+                        _exitUsedA = false;
+                        return 1600;
+                    }
+                    return 1400; // 判据还没读到，继续观察
+                }
+                if (screen == SwapScreen.None && _verifyRounds <= 4)
+                    return 1300; // 交换过场
+                return await StallAsync("交换后画面异常", screen, pad, log);
+            }
+
+            case Phase.SkipRetreat:
+            {
+                _verifyRounds++;
                 if (screen == SwapScreen.Bench)
                 {
                     _stall = 0;
-                    await pad.Back(); // B 回站位页
-                    _phase = Phase.ExitPlan;
-                    return 1600;
+                    if (_skip > MaxSkipRetries)
+                    {
+                        log($"[我的联赛] 连续 {_skip} 位后备球员都被同名卡挡下，本位换人放弃（下次比赛结束后重试）", LogLevel.Error);
+                        await pad.Back(); // 完成，退出比赛计划
+                        _phase = Phase.SwapExit;
+                        _verifyRounds = 0;
+                        _exitUsedA = false;
+                        return 1600;
+                    }
+                    _overallBefore = MaxLevelSwapBrain.ReadOverallRating(ocr);
+                    _remainBefore = MaxLevelSwapBrain.ReadBenchRemaining(ocr);
+                    _verifyRounds = 0;
+                    // B 退回后光标回到列表首位：→×N 跳过被挡的卡（第 2 个被挡 →×2 试第 3 个…）
+                    if (_skip > 0) await pad.DpadRepeat(PadDir.Right, _skip);
+                    log($"[我的联赛] 改试第 {_skip + 1} 顺位后备球员", LogLevel.Info);
+                    await pad.Confirm();
+                    _phase = Phase.SwapVerify;
+                    return 2000;
                 }
                 if (screen == SwapScreen.Lineup)
                 {
-                    _phase = Phase.ExitPlan; // 已在站位页
-                    return 300;
-                }
-                if (++_stall > 3)
-                {
-                    await pad.Back();
-                    _phase = Phase.ExitPlan;
-                    return 1400;
-                }
-                return 1200; // 交换动画/意外弹窗，先观察
-            }
-
-            case Phase.ExitPlan:
-            {
-                if (screen == SwapScreen.Lineup)
-                {
-                    _stall = 0;
-                    await pad.Back(); // B 完成：退出比赛计划
-                    _phase = Phase.Reopen;
-                    return 1600;
+                    if (_verifyRounds <= 3)
+                    {
+                        await pad.Back(); // B 未生效再按
+                        return 1500;
+                    }
+                    return await StallAsync("退回后备列表异常", screen, pad, log);
                 }
                 if (home)
                 {
+                    // B 直接触发了「完成」退出（交换其实没生效、画面也没离开列表）：
+                    // 接受退出，重进后该位保持满级，下轮换人周期重试
+                    log("[我的联赛] 换入未生效即退出比赛计划：重进后下轮换人重试该位", LogLevel.Warn);
+                    _phase = Phase.Reopen;
+                    return 600;
+                }
+                if (screen == SwapScreen.None && _verifyRounds <= 2)
+                    return 1300; // 退回过场
+                return await StallAsync("退回后备列表异常", screen, pad, log);
+            }
+
+            case Phase.SwapExit:
+            {
+                _verifyRounds++;
+                if (home)
+                {
+                    _stall = 0;
                     _phase = Phase.Reopen;
                     return 500;
+                }
+                if (screen is SwapScreen.Lineup or SwapScreen.Bench)
+                {
+                    _stall = 0;
+                    if (MaxLevelSwapBrain.HasDialogConfirmWords(ocr))
+                    {
+                        // 退出确认窗盖在原页面上（阵容已变更）：取消/关闭在下方时先上移再 A
+                        if (ocr.ContainsJoined("取消") || ocr.ContainsJoined("关闭"))
+                            await pad.Dpad(PadDir.Up);
+                        log("[我的联赛] 退出确认弹窗：按 A 确认", LogLevel.Info);
+                        await pad.Confirm();
+                        _exitUsedA = true;
+                        return 1700;
+                    }
+                    if (_verifyRounds > 2)
+                        await pad.Back(); // 完成（B 未生效/退回动画结束再按）
+                    return 1600;
+                }
+                if (screen == SwapScreen.None)
+                {
+                    if (_verifyRounds <= 3) return 1300; // 退出过场/加载
+                    _stall = 0;
+                    if (_exitUsedA)
+                    {
+                        await pad.Back();
+                        _exitUsedA = false;
+                    }
+                    else
+                    {
+                        await pad.Confirm(); // 确认窗（无取消词的单按钮弹窗）直接 A
+                        _exitUsedA = true;
+                    }
+                    return 1600;
                 }
                 return await StallAsync("退出比赛计划异常", screen, pad, log);
             }
@@ -734,13 +899,38 @@ public sealed class MaxLevelSwapController
                     Reset();
                     return null;
                 }
-                if (++_stall > 5)
+                if (screen is SwapScreen.Lineup or SwapScreen.Bench)
+                {
+                    _stall = 0;
+                    if (MaxLevelSwapBrain.HasDialogConfirmWords(ocr))
+                    {
+                        // 巡检结束时阵容已变更，B 完成会弹确认窗：取消/关闭在下方时先上移再 A
+                        if (ocr.ContainsJoined("取消") || ocr.ContainsJoined("关闭"))
+                            await pad.Dpad(PadDir.Up);
+                        log("[我的联赛] 退出确认弹窗：按 A 确认", LogLevel.Info);
+                        await pad.Confirm();
+                        return 1700;
+                    }
+                    await pad.Back(); // 逐级 B 退出到主页
+                    return 1500;
+                }
+                if (++_stall > 6)
                 {
                     log("[我的联赛] 满级巡检收尾超时，放弃等待", LogLevel.Warn);
                     Reset();
                     return null;
                 }
-                await pad.Back(); // 逐级 B 退出到主页
+                if (screen == SwapScreen.None && _stall <= 2)
+                    return 1300; // 过场/确认窗未渲染出页面词
+                if (screen == SwapScreen.None)
+                {
+                    // 确认窗（无页面词可判）：取消/关闭在下方时先上移再 A
+                    if (ocr.ContainsJoined("取消") || ocr.ContainsJoined("关闭"))
+                        await pad.Dpad(PadDir.Up);
+                    await pad.Confirm();
+                    return 1600;
+                }
+                await pad.Back(); // 其他意外页面：B 退出
                 return 1500;
             }
 
