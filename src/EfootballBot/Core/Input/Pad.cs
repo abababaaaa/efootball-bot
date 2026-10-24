@@ -82,6 +82,18 @@ public sealed class Pad
     public Task DpadRepeat(PadDir dir, int count)
         => RepeatAsync(count, () => Dpad(dir));
 
+    /// <summary>
+    /// 快速连按方向键（换人巡检等状态机的批量移光标用）：保持/间隔减半、跳过拟人犹豫。
+    /// 机械导航不承担拟人语义——真人推方向键本就是连续快按；单步 Dpad 仍走完整拟人节奏。
+    /// </summary>
+    public async Task DpadRepeatFast(PadDir dir, int count)
+    {
+        int hold = Jitter(Math.Max(60, _t.DpadHoldMs / 2));
+        int gap = Jitter(Math.Max(80, _t.TapGapMs / 2));
+        for (int i = 0; i < count; i++)
+            await _vg.TapDpadAsync(dir, hold, gap);
+    }
+
     /// <summary>结算 / 奖励页：缓慢连按 A。</summary>
     public async Task ConfirmMany(int count, CancellationToken ct)
     {

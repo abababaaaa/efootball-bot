@@ -327,6 +327,20 @@ public class MaxLevelSwapTests
     }
 
     [Fact]
+    public async Task RealReadFailFrame_ColumnCrop_RecoversLevel()
+    {
+        // 实机落帧（引擎捕获 1227×720）：全帧 OCR 大字「1」漏读只剩 /31 → 曾判「读不出」跳过；
+        // 分列放大重读必须救回 (1, 31, 能力点 0)
+        var frame = LoadFrame("read_fail_1227.png");
+        using var ocrEngine = RealOcr();
+        var full = TestOcr.Run(ocrEngine, frame);
+        var status = await MaxLevelSwapController.ReadPartsFromFrameAsync(
+            ocrEngine, full, frame, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal((1, 31, 0), (status!.Level, status.LevelMax, status.Points));
+    }
+
+    [Fact]
     public async Task SortAlreadyChecked_BReturnsImmediately()
     {
         // 排序弹窗已勾「当前等级」+ 箭头为上：不导航不按 A，直接 B 返回继续筛选
