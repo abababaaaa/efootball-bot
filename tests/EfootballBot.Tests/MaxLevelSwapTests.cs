@@ -3,6 +3,7 @@ using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
+using OpenCvSharp;
 using Xunit;
 
 namespace EfootballBot.Tests;
@@ -21,7 +22,7 @@ public class MaxLevelSwapTests
     private static FrameData BlackFrame(int w = 640, int h = 360)
         => new(new byte[w * h * 4], w, h, 0);
 
-    private static readonly Action<string, LogLevel> SilentLog = (_, _) => { };
+    private static readonly Action<string, EfootballBot.Core.Bot.LogLevel> SilentLog = (_, _) => { };
     private static readonly CancellationToken CT = CancellationToken.None;
 
     // ---------------- 界面分类 ----------------
@@ -164,6 +165,62 @@ public class MaxLevelSwapTests
         Assert.Equal(0, MaxLevelSwapBrain.ReadRemainingPoints(AllocOcr("0")));
     }
 
+    [Theory]
+    [InlineData("27/29", 27, 29)]
+    [InlineData("37/37", 37, 37)]
+    [InlineData("537", 5, 37)]    // 斜杠丢失：3 位按 cur ≤ max 拆（不能拆成 53/7）
+    [InlineData("2729", 27, 29)]  // 斜杠丢失：4 位等分
+    public void ParseLevelPair_HandlesLostSlash(string raw, int cur, int max)
+    {
+        Assert.Equal((cur, max), MaxLevelSwapBrain.ParseLevelPair(raw));
+    }
+
+    [Fact]
+    public async Task MaxedZeroPoints_SkipsAlloc_GoesStraightToSwap()
+    {
+        // 满级且能力点 = 0（用户 2026-10-24 修正）：不按 X 分配，B 退出详情后直接 A 选中走换人
+        var c = new MaxLevelSwapController();
+        var pad = new FakePad();
+        var reader = new ScriptReader();
+        int maxedCalls = 0;
+        reader.Enqueue(new PlayerStatus(40, 40, 0));
+        var lineup = Ocr(LineupOcr());
+        Action onMaxed = () => maxedCalls++;
+
+        await c.StartCore(pad, SilentLog);
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, onMaxed, null, CT);  // Opening → Inspect
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, onMaxed, null, CT);  // Inspect：Y
+        await c.StepCore(Ocr(DetailOcr("40", "40", "0")), BlackFrame(), pad, reader.Read, SilentLog, onMaxed, null, CT); // 满级 0 点：B
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, onMaxed, null, CT);  // A 选中
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, onMaxed, null, CT);  // 侧栏 → 后备球员
+
+        Assert.Equal(new[] { "Y", "Y", "B", "A", "Leftx8", "Upx5", "Downx3", "A" }, pad.Log);
+        Assert.Equal(1, maxedCalls);
+    }
+
+    [Fact]
+    public async Task Alloc_PressesYOnceThenBack_NoInfiniteRetry()
+    {
+        // 分配页只按一次 Y 就 B 返回（用户 2026-10-24 实机：OCR 丢斜杠曾致无限按 Y）
+        var c = new MaxLevelSwapController();
+        var pad = new FakePad();
+        var reader = new ScriptReader();
+        reader.Enqueue(new PlayerStatus(40, 40, 12));
+        reader.Enqueue(new PlayerStatus(40, 40, 0));
+        var lineup = Ocr(LineupOcr());
+
+        await c.StartCore(pad, SilentLog);
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(Ocr(DetailOcr("40", "40", "12")), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // X
+        await c.StepCore(PopupOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);  // ↓+A
+        // 分配页连续出现多轮（无论读出什么数字）也只按一次 Y、然后 B
+        await c.StepCore(AllocOcr("72"), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // Y
+        await c.StepCore(AllocOcr("72"), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // B（已分配完成）
+        var tail = pad.Log.Skip(3).ToList();
+        Assert.Equal(new[] { "Down", "A", "Y", "B" }, tail);
+    }
+
     // ---------------- 排序箭头像素判定 ----------------
 
     private static FrameData ArrowFrame(bool up)
@@ -176,16 +233,25 @@ public class MaxLevelSwapTests
             int i = (y * w + x) * 4;
             bgra[i] = bgra[i + 1] = bgra[i + 2] = 255;
         }
-        // 探针区域：x 588~627（0.92~0.98）、y 21~61（0.06~0.17）；箭头画在其中
-        int cx = 607, apex = up ? 24 : 58, baseY = up ? 44 : 38;
-        for (int y = Math.Min(apex, baseY); y <= Math.Max(apex, baseY); y++)
+        // 探针区域：x 588~627（0.92~0.98）；实机箭头为「菱形头 + 细杆」emoji 形态
+        // （2026-10-24 实机帧 dump：最宽 22px 的菱形 + 6px 杆），合成帧按同款画
+        int cx = 607;
+        int[] diamond = { 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22, 22, 22, 22 };
+        int y = 24;
+        if (up)
         {
-            int half = Math.Abs(y - apex) / 2 + 1;
-            for (int x = cx - half; x <= cx + half; x++) Lit(x, y);
+            foreach (var hw in diamond) { for (int x = cx - hw / 2; x <= cx + hw / 2; x++) Lit(x, y); y++; }
+            for (; y <= 51; y++) { for (int x = cx - 3; x <= cx + 3; x++) Lit(x, y); }   // 杆在下半
         }
-        int stem0 = up ? 44 : 24, stem1 = up ? 58 : 38;
-        for (int y = Math.Min(stem0, stem1); y <= Math.Max(stem0, stem1); y++)
-            for (int x = cx - 2; x <= cx + 2; x++) Lit(x, y);
+        else
+        {
+            for (; y <= 37; y++) { for (int x = cx - 3; x <= cx + 3; x++) Lit(x, y); }   // 杆在上半
+            for (int k = diamond.Length - 1; k >= 0; k--)
+            {
+                for (int x = cx - diamond[k] / 2; x <= cx + diamond[k] / 2; x++) Lit(x, y);
+                y++;
+            }
+        }
         return new FrameData(bgra, w, h, 0);
     }
 
@@ -197,6 +263,38 @@ public class MaxLevelSwapTests
 
     [Fact]
     public void SortArrow_BlackFrame_Unknown() => Assert.Null(MaxLevelSwapBrain.IsSortArrowUp(BlackFrame()));
+
+    // ---------------- 实机帧校准（用户 2026-10-24 排序弹窗截图，1280×720） ----------------
+
+    private static string SwapDir => Path.Combine(
+        AppContext.BaseDirectory, "..", "..", "..", "TestData", "swap");
+
+    private static FrameData LoadFrame(string file)
+    {
+        using var mat = Cv2.ImRead(Path.Combine(SwapDir, file), ImreadModes.Color);
+        Assert.False(mat.Empty(), $"图片加载失败: {file}");
+        using var bgra = new Mat();
+        Cv2.CvtColor(mat, bgra, ColorConversionCodes.BGR2BGRA);
+        int byteCount = (int)(bgra.Total() * bgra.ElemSize());
+        var data = new byte[byteCount];
+        System.Runtime.InteropServices.Marshal.Copy(bgra.Data, data, 0, byteCount);
+        return new FrameData(data, mat.Width, mat.Height, 0);
+    }
+
+    [Fact]
+    public void RealSortPopup_ArrowDirection()
+    {
+        Assert.False(MaxLevelSwapBrain.IsSortArrowUp(LoadFrame("sort_arrow_down.png")));
+        Assert.True(MaxLevelSwapBrain.IsSortArrowUp(LoadFrame("sort_arrow_up.png")));
+    }
+
+    [Fact]
+    public void RealSortPopup_OcrClassifySort()
+    {
+        using var ocr = new OcrRecognizer();
+        foreach (var f in new[] { "sort_arrow_down.png", "sort_arrow_up.png" })
+            Assert.Equal(SwapScreen.Sort, MaxLevelSwapBrain.Classify(TestOcr.Run(ocr, LoadFrame(f))));
+    }
 
     // ---------------- 状态机全流程（录制手柄） ----------------
 
@@ -228,16 +326,16 @@ public class MaxLevelSwapTests
         reader.Enqueue(new PlayerStatus(40, 40, 0));  // 分配后详情核验
 
         await c.StartCore(pad, SilentLog);
-        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, CT);          // Opening → Inspect
-        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, CT);          // Inspect pos0：Y
-        await c.StepCore(Ocr(DetailOcr("40", "40", "12")), BlackFrame(), pad, reader.Read, SilentLog, CT); // X
-        await c.StepCore(PopupOcr(), BlackFrame(), pad, reader.Read, SilentLog, CT);      // ↓+A
-        await c.StepCore(AllocOcr("72"), BlackFrame(), pad, reader.Read, SilentLog, CT);  // Y 推荐分配
-        await c.StepCore(AllocOcr("0"), BlackFrame(), pad, reader.Read, SilentLog, CT);   // B 关闭
-        await c.StepCore(Ocr(DetailOcr("40", "40", "0")), BlackFrame(), pad, reader.Read, SilentLog, CT); // B
-        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, CT);          // A 选中
-        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, CT);          // 侧栏 → 后备球员
-        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, CT);      // ←+A 开排序
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);          // Opening → Inspect
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);          // Inspect pos0：Y
+        await c.StepCore(Ocr(DetailOcr("40", "40", "12")), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // X
+        await c.StepCore(PopupOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // ↓+A
+        await c.StepCore(AllocOcr("72"), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);  // Y 推荐分配
+        await c.StepCore(AllocOcr("0"), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);   // B 关闭
+        await c.StepCore(Ocr(DetailOcr("40", "40", "0")), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // B
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);          // A 选中
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);          // 侧栏 → 后备球员
+        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // ←+A 开排序
         return pad;
     }
 
@@ -249,7 +347,7 @@ public class MaxLevelSwapTests
 
         int before = pad.Log.Count;
         await c.StepCore(SortOcr(), ArrowFrame(up: false), pad,
-            new ScriptReader().Read, SilentLog, CT);
+            new ScriptReader().Read, SilentLog, null, null, CT);
         Assert.Equal(new[] { "Upx6", "Downx5", "Y", "A" }, pad.Log.Skip(before).ToArray());
     }
 
@@ -261,7 +359,7 @@ public class MaxLevelSwapTests
 
         int before = pad.Log.Count;
         await c.StepCore(SortOcr(), ArrowFrame(up: true), pad,
-            new ScriptReader().Read, SilentLog, CT);
+            new ScriptReader().Read, SilentLog, null, null, CT);
         Assert.Equal(new[] { "Upx6", "Downx5", "A" }, pad.Log.Skip(before).ToArray());
     }
 
@@ -278,30 +376,30 @@ public class MaxLevelSwapTests
         for (int k = 0; k < 10; k++) reader.Enqueue(new PlayerStatus(23, 26, 44));
 
         // 排序 → 筛选 → 卡片类型 → 应用 → 交换 → 退出 → 重进 → 继续巡检
-        await c.StepCore(SortOcr(), upArrow, pad, reader.Read, SilentLog, CT);        // ↑×6 ↓×5 A
-        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, CT);  // ← ↓ A 开筛选
-        await c.StepCore(FilterOcr(), BlackFrame(), pad, reader.Read, SilentLog, CT); // ↑×9 ↓×4 A
-        await c.StepCore(CardTypeOcr(), BlackFrame(), pad, reader.Read, SilentLog, CT); // 勾选 + B
-        await c.StepCore(FilterOcr(), BlackFrame(), pad, reader.Read, SilentLog, CT); // ↓×4 ↓ A 应用
-        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, CT);  // A 交换
-        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, CT);  // B 回站位页
-        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, CT);      // B 完成
-        await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, CT);   // Y 重进
-        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, CT);      // 盲走回换人位（swapPos=0 无移动）
+        await c.StepCore(SortOcr(), upArrow, pad, reader.Read, SilentLog, null, null, CT);        // ↑×6 ↓×5 A
+        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);  // ← ↓ A 开筛选
+        await c.StepCore(FilterOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // ↑×9 ↓×4 A
+        await c.StepCore(CardTypeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 勾选 + B
+        await c.StepCore(FilterOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // ↓×4 ↓ A 应用
+        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);  // A 交换
+        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);  // B 回站位页
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // B 完成
+        await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);   // Y 重进
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // 盲走回换人位（swapPos=0 无移动）
 
         // 位 1~10 巡检（非满级 B 退出）；路径 ↑←↑→→→→→↓←
         PadDir[] moves = MaxLevelSwapController.CursorMoves;
         for (int p = 1; p <= 10; p++)
         {
-            await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, CT);      // Inspect：move + Y
-            await c.StepCore(detailNot, BlackFrame(), pad, reader.Read, SilentLog, CT);   // DetailRead：B
-            await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, CT);      // InspectAdvance：推进
+            await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // Inspect：move + Y
+            await c.StepCore(detailNot, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);   // DetailRead：B
+            await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // InspectAdvance：推进
         }
 
         // 收尾：Done（B）→ 主页 → Reset 交还
-        int? wait = await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, CT);
+        int? wait = await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
         Assert.NotNull(wait);
-        wait = await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, CT);
+        wait = await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
         Assert.Null(wait);
         Assert.True(c.Idle);
 

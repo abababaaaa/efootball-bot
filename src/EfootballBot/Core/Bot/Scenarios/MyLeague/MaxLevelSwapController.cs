@@ -1,6 +1,7 @@
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
+using System.IO; // Core.System 命名空间遮蔽：裸 Path/File/Directory 必须靠本 using（同 MyLeagueScenario）
 
 namespace EfootballBot.Core.Bot.Scenarios.MyLeague;
 
@@ -30,8 +31,9 @@ internal sealed class EngineSwapPad(Pad pad) : ISwapPad
 /// 满级自动换人状态机（跨帧，「一帧一步、屏幕验证后才按下一键」）：
 /// 联赛主页 Y → 比赛计划（首发站位页，光标默认门将）→ 沿
 /// ↑ ← ↑ → → → → → ↓ ← 巡检 11 人，每站 Y 进详情读「等级 x/x + 能力点」；
-/// 满级且能力点 ≠ 0：X 球员动作（核验「等级训练完成」）→ ↓+A 能力点分配 →
-/// Y 推荐分配归零 → B×2 回站位页 → A 选中 → ←×8 进侧栏 → 上×5 下×3 落「后备球员」
+/// 满级（x/x）一律换人（用户 2026-10-24 修正）：能力点 ≠ 0 先 X 球员动作（核验
+/// 「等级训练完成」）→ ↓+A 能力点分配 → Y 推荐分配一次归零 → B×2 回站位页；
+/// 能力点 = 0 跳过分配直接 B。之后 A 选中 → ←×8 进侧栏 → 上×5 下×3 落「后备球员」
 /// → A → ←+A 开排序 → 上×6 下×5 落「当前等级」→ 右上箭头为下则 Y 改升序 → A；
 /// 回列表 ← ↓ A 开筛选 → ↓×4 A 进卡片类型 → 上×9 ↓↓ + 6×(A ↓) 勾高阶卡 → B；
 /// ↓×4 ↓ A 应用筛选 → A 换入首位（当前等级最低）→ B 回站位页 → B 完成 →
@@ -53,10 +55,10 @@ public sealed class MaxLevelSwapController
         InspectAdvance,
         /// <summary>球员动作弹窗：核验等级训练完成 → ↓+A 进能力点分配。</summary>
         ActionPopup,
-        /// <summary>分配页：Y 推荐分配。</summary>
+        /// <summary>分配页：Y 推荐分配（只按一次，即归零）。</summary>
         AllocWait,
-        /// <summary>分配页：等能力点归零 → B 关闭。</summary>
-        AllocCheck,
+        /// <summary>分配完成：B 关闭分配页（不读数不复按——OCR 丢斜杠会误判还有剩余）。</summary>
+        AllocDone,
         /// <summary>回详情页确认能力点 = 0 → B。</summary>
         DetailVerify,
         /// <summary>站位页：A 选中该球员。</summary>
@@ -136,19 +138,64 @@ public sealed class MaxLevelSwapController
     public Task<int?> StepAsync(BotEngine engine, Observation obs, Action<string, LogLevel> log,
         CancellationToken ct = default)
         => StepCore(obs.Ocr, obs.Frame, new EngineSwapPad(engine.Pad),
-            (o, f) => ReadStatusAsync(engine, o, f, ct), log, ct);
+            (o, f) => ReadStatusAsync(engine, o, f, ct), log,
+            onMaxed: () => engine.Stats.PlayersMaxed++,
+            dumpFrame: (f, tag) => DumpFrame(f, tag, log), ct);
 
-    /// <summary>等级/能力点读取：全帧 OCR 直读，失败裁切数据栏放大重 OCR（约数百毫秒，仅读不出时）。</summary>
+    /// <summary>读不出的详情页帧落 data\dump\（远程排障：OCR 几何与截图差异只有真帧能定位）。</summary>
+    private static void DumpFrame(Capture.FrameData f, string tag, Action<string, LogLevel> log)
+    {
+        try
+        {
+            var pixels = (byte[])f.Bgra.Clone();
+            string dir = Path.Combine(EfootballBot.Core.System.AppPaths.DataDir, "dump");
+            string file = Path.Combine(dir, $"{tag}_{DateTime.Now:yyyyMMdd_HHmmss}.png");
+            _ = Task.Run(() =>
+            {
+                try
+                {
+                    Directory.CreateDirectory(dir);
+                    var info = new SkiaSharp.SKImageInfo(f.Width, f.Height,
+                        SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul);
+                    unsafe
+                    {
+                        fixed (byte* p = pixels)
+                        {
+                            using var bmp = new SkiaSharp.SKBitmap();
+                            if (!bmp.InstallPixels(info, (nint)p, info.RowBytes)) return;
+                            using var img = SkiaSharp.SKImage.FromBitmap(bmp);
+                            using var data = img.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+                            using var fs = File.OpenWrite(file);
+                            data.SaveTo(fs);
+                        }
+                    }
+                    log($"[我的联赛] 已存实机帧：{file}", LogLevel.Info);
+                }
+                catch { }
+            });
+        }
+        catch { }
+    }
+
+    /// <summary>
+    /// 等级/能力点读取：全帧 OCR 分要素直读；某列读不出时裁切数据栏放大重 OCR 单独补齐
+    /// （实机有的球员某一列读不出，另一列正常——2026-10-24 反馈）。约数百毫秒，仅失败时。
+    /// </summary>
     internal static async Task<PlayerStatus?> ReadStatusAsync(BotEngine engine, OcrResult ocr,
         FrameData frame, CancellationToken ct)
     {
-        var direct = MaxLevelSwapBrain.ReadPlayerStatus(ocr);
-        if (direct is not null) return direct;
+        var direct = MaxLevelSwapBrain.ReadParts(ocr);
+        if (direct.Pair is not null && direct.Points is not null)
+            return new PlayerStatus(direct.Pair.Value.Cur, direct.Pair.Value.Max, direct.Points.Value);
         try
         {
-            var crop = ImageScaling.CropUpscale(frame, 0.44, 0.70, 0.32, 0.50, 6);
+            var crop = ImageScaling.CropUpscale(frame, 0.44, 0.70, 0.32, 0.52, 6);
             var res = await engine.Ocr.RecognizeAsync(crop, ct);
-            return MaxLevelSwapBrain.ReadPlayerStatus(res, headYMin: 0.15, valueMaxDy: 0.35);
+            var cropParts = MaxLevelSwapBrain.ReadParts(res, headYMin: 0.10, valueMaxDy: 0.38);
+            var merged = MaxLevelSwapBrain.MergeParts(direct, cropParts);
+            return merged.Pair is not null && merged.Points is not null
+                ? new PlayerStatus(merged.Pair.Value.Cur, merged.Pair.Value.Max, merged.Points.Value)
+                : null;
         }
         catch
         {
@@ -156,10 +203,13 @@ public sealed class MaxLevelSwapController
         }
     }
 
-    /// <summary>核心状态机（OCR/帧/手柄/读取器全参数化，可单测）。返回本轮延时；null = 巡检结束。</summary>
+    /// <summary>核心状态机（OCR/帧/手柄/读取器全参数化，可单测）。返回本轮延时；null = 巡检结束。
+    /// onMaxed：每检出一个满级球员回调（GUI 统计录入）；dumpFrame：读不出时落实机帧。</summary>
     internal async Task<int?> StepCore(OcrResult ocr, FrameData frame, ISwapPad pad,
         Func<OcrResult, FrameData, Task<PlayerStatus?>> readStatus,
-        Action<string, LogLevel> log, CancellationToken ct = default)
+        Action<string, LogLevel> log,
+        Action? onMaxed = null, Action<FrameData, string>? dumpFrame = null,
+        CancellationToken ct = default)
     {
         if (_phase == Phase.Idle) return null;
         if (++_rounds > MaxRounds)
@@ -202,7 +252,7 @@ public sealed class MaxLevelSwapController
                 _stall = 0;
                 if (_pos > 0) await pad.Dpad(CursorMoves[_pos - 1]);
                 await pad.Y();
-                log($"[我的联赛] 巡检第 {_pos + 1}/11 位：打开球员详情", LogLevel.Debug);
+                log($"[我的联赛] 巡检第 {_pos + 1}/11 位：打开球员详情", LogLevel.Info);
                 _phase = Phase.DetailRead;
                 return 2400;
             }
@@ -216,24 +266,32 @@ public sealed class MaxLevelSwapController
                     if (status is null)
                     {
                         if (++_readTries <= 2) return 1200; // 页面静止，下一轮重读
-                        log("[我的联赛] 等级/能力点读不出，跳过该位（B 退出）", LogLevel.Warn);
+                        log("[我的联赛] 等级/能力点读不出，跳过该位（B 退出）；实机帧已落 data\\dump 供排查", LogLevel.Warn);
+                        dumpFrame?.Invoke(frame, "swap_read_fail");
                         _readTries = 0;
                         await pad.Back();
                         _phase = Phase.InspectAdvance;
                         return 2000;
                     }
                     _readTries = 0;
-                    if (status.NeedsSwap)
-                    {
-                        _maxed++;
-                        _swapPos = _pos;
-                        log($"[我的联赛] 第 {_pos + 1}/11 位球员满级（{status.Level}/{status.LevelMax}，能力点 {status.Points}）：分配能力点并换人", LogLevel.Success);
-                        await pad.X();
-                        _phase = Phase.ActionPopup;
-                        return 2200;
-                    }
                     if (status.Level == status.LevelMax)
-                        log($"[我的联赛] 第 {_pos + 1}/11 位球员已满级但能力点已用完（{status.Level}/{status.LevelMax}），跳过", LogLevel.Info);
+                    {
+                        // 满级一律换人（用户 2026-10-24 修正）：能力点没用完先分配，已用完直接换
+                        _maxed++;
+                        onMaxed?.Invoke();
+                        _swapPos = _pos;
+                        if (status.Points > 0)
+                        {
+                            log($"[我的联赛] 第 {_pos + 1}/11 位球员满级（{status.Level}/{status.LevelMax}，能力点 {status.Points}）：分配能力点并换人", LogLevel.Success);
+                            await pad.X();
+                            _phase = Phase.ActionPopup;
+                            return 2200;
+                        }
+                        log($"[我的联赛] 第 {_pos + 1}/11 位球员满级（{status.Level}/{status.LevelMax}，能力点已用完）：直接换人", LogLevel.Success);
+                        await pad.Back();
+                        _phase = Phase.LineupSelect;
+                        return 2000;
+                    }
                     await pad.Back();
                     _phase = Phase.InspectAdvance;
                     return 2000;
@@ -301,8 +359,11 @@ public sealed class MaxLevelSwapController
                 if (screen == SwapScreen.Alloc)
                 {
                     _stall = 0;
-                    await pad.Y(); // 推荐分配：能力点一次性归零
-                    _phase = Phase.AllocCheck;
+                    // 推荐分配一次即归零（用户 2026-10-24 实机：按 Y 后「已自动分配能力点」，
+                    // 下一步就是 B 返回——不读数不复按，OCR 把 0/86 丢斜杠读成 086 会误判
+                    // 「还有剩余」无限按 Y，2026-10-24 实机死循环）
+                    await pad.Y();
+                    _phase = Phase.AllocDone;
                     return 2400;
                 }
                 if (screen == SwapScreen.ActionPopup && ++_stall <= 2)
@@ -313,28 +374,21 @@ public sealed class MaxLevelSwapController
                 return await StallAsync("能力点分配页未打开", screen, pad, log);
             }
 
-            case Phase.AllocCheck:
+            case Phase.AllocDone:
             {
                 if (screen == SwapScreen.Alloc)
                 {
-                    var pts = MaxLevelSwapBrain.ReadRemainingPoints(ocr);
-                    if (pts is null && ++_stall <= 2) return 1200; // 再读一轮
                     _stall = 0;
-                    if (pts is > 0)
-                    {
-                        await pad.Y(); // 还有剩余，再按一次推荐分配
-                        return 2200;
-                    }
-                    await pad.Back(); // B 关闭分配页
+                    await pad.Back(); // B 关闭分配页 → 详情页
                     _phase = Phase.DetailVerify;
                     return 2000;
                 }
                 if (screen == SwapScreen.Detail)
                 {
-                    _phase = Phase.DetailVerify; // 分配页没进去/已关闭
+                    _phase = Phase.DetailVerify; // 已自动关闭
                     return 300;
                 }
-                return await StallAsync("分配页异常", screen, pad, log);
+                return await StallAsync("分配页关闭异常", screen, pad, log);
             }
 
             case Phase.DetailVerify:

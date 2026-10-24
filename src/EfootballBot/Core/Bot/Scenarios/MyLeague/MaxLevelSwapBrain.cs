@@ -39,9 +39,9 @@ public sealed record PlayerStatus(int Level, int LevelMax, int Points)
 /// <summary>
 /// 满级自动换人的纯判定（OCR 词帧 + 像素探针，全部可单测）。
 /// 流程依据用户 2026-10-24 实机配方：联赛主页 Y 开比赛计划 → 光标默认门将，
-/// 沿 ↑←↑→→→→→↓← 依次巡检 11 人；满级（等级 x/x 且能力点 ≠ 0）先 X 球员动作
-/// 分配能力点，再 A 选中 → 侧栏后备球员 → 排序（当前等级·升序）→ 筛选（勾高阶卡类型）
-/// → A 换入等级最低的后备球员。
+/// 沿 ↑←↑→→→→→↓← 依次巡检 11 人；满级（等级 x/x）一律换人——能力点未用完先 X 球员动作
+/// 分配能力点、已用完直接换（用户 2026-10-24 修正），再 A 选中 → 侧栏后备球员 →
+/// 排序（当前等级·升序）→ 筛选（勾高阶卡类型）→ A 换入等级最低的后备球员。
 /// </summary>
 public static partial class MaxLevelSwapBrain
 {
@@ -104,33 +104,66 @@ public static partial class MaxLevelSwapBrain
 
     /// <summary>
     /// 读取数据栏：找「等级」「能力点」表头词（y 带 <paramref name="headYMin"/>~0.52），
-    /// 取正下方 <paramref name="valueMaxDy"/> 内、横向 ±0.055 的词拼出 23/26 与 44。
+    /// 取正下方 <paramref name="valueMaxDy"/> 内、横向 ±0.06 的词拼出 23/26 与 44。
     /// 裁切放大帧上相对几何不同，调大 <paramref name="valueMaxDy"/>。
     /// 任一要素读不出返回 null（调用方重试/裁切兜底，绝不盲猜）。
     /// </summary>
     public static PlayerStatus? ReadPlayerStatus(OcrResult ocr, double headYMin = 0.28, double valueMaxDy = 0.10)
     {
+        var (pair, pts) = ReadParts(ocr, headYMin, valueMaxDy);
+        if (pair is null || pts is null) return null;
+        return new PlayerStatus(pair.Value.Cur, pair.Value.Max, pts.Value);
+    }
+
+    /// <summary>分要素读取：等级 (cur,max) 与能力点。实机有的球员某列 OCR 读不出，
+    /// 调用方对失败列单独裁切重 OCR 后合并（<see cref="MergeParts"/>）。</summary>
+    public static ((int Cur, int Max)? Pair, int? Points) ReadParts(
+        OcrResult ocr, double headYMin = 0.28, double valueMaxDy = 0.10)
+    {
         var lvHead = FindHead(ocr, "等级", headYMin);
         var ptHead = FindHead(ocr, "能力点", headYMin);
         var lv = lvHead is null ? null : JoinBelow(ocr, lvHead, ptHead, valueMaxDy);
         var pt = ptHead is null ? null : JoinBelow(ocr, ptHead, lvHead, valueMaxDy);
-        if (lv is null || pt is null) return null;
+        return (ParseLevelPair(lv), ParseSingleNumber(pt));
+    }
 
-        // 等级：cur / max（OCR 可能拆成 "23" + "/26"，拼接后匹配）
+    /// <summary>全帧直读优先，失败要素用裁切重读结果补齐（同要素直读值优先）。</summary>
+    public static ((int Cur, int Max)? Pair, int? Points) MergeParts(
+        ((int Cur, int Max)? Pair, int? Points) direct, ((int Cur, int Max)? Pair, int? Points) crop)
+        => (direct.Pair ?? crop.Pair, direct.Points ?? crop.Points);
+
+    /// <summary>等级列文本 → (cur,max)。OCR 可能拆成 "23" + "/26" 或丢斜杠拼成 "2326"——
+    /// 丢斜杠时按两位数等分/单数×自身兜底（等级上限常见 24~37）。</summary>
+    internal static (int Cur, int Max)? ParseLevelPair(string? lv)
+    {
+        if (string.IsNullOrEmpty(lv)) return null;
         var m = SlashNum().Match(lv);
-        if (!m.Success) return null;
-        if (!int.TryParse(m.Groups[1].Value, out int cur) ||
-            !int.TryParse(m.Groups[2].Value, out int max)) return null;
-        if (cur is < 0 or > 200 || max is < 1 or > 200 || cur > max) return null;
+        if (m.Success &&
+            int.TryParse(m.Groups[1].Value, out int cur) &&
+            int.TryParse(m.Groups[2].Value, out int max) &&
+            cur is >= 0 and <= 200 && max is >= 1 and <= 200 && cur <= max)
+            return (cur, max);
+        // 斜杠丢失：纯数字 3~4 位按「cur ≤ max」拆（537 → 5/37 而非 53/7；2729 → 27/29）
+        string digits = new(lv.Where(char.IsDigit).ToArray());
+        if (digits.Length == 3 &&
+            int.TryParse(digits[..1], out int a3) && int.TryParse(digits[1..], out int b3) &&
+            a3 <= b3 && a3 >= 0 && b3 is >= 1 and <= 99)
+            return (a3, b3);
+        if (digits.Length == 4 &&
+            int.TryParse(digits[..2], out int a4) && int.TryParse(digits[2..], out int b4) &&
+            a4 <= b4 && a4 >= 0 && b4 is >= 1 and <= 99)
+            return (a4, b4);
+        return null;
+    }
 
-        // 能力点：纯数字（O/0 归一）；分配页形态 0/72 取斜杠前段
+    /// <summary>详情页能力点值（纯数字 44/0；O/0 归一；丢斜杠的 0/86 会读成 086 → 仍取整段）。读不出 null。</summary>
+    internal static int? ParseSingleNumber(string? pt)
+    {
+        if (string.IsNullOrEmpty(pt)) return null;
         string p = pt.ToUpperInvariant().Replace('O', '0');
         int slash = p.IndexOf('/');
-        string ptsRaw = slash >= 0 ? p[..slash] : p;
-        string digits = new(ptsRaw.Where(char.IsDigit).ToArray());
-        if (digits.Length is 0 or > 3) return null;
-        if (!int.TryParse(digits, out int points) || points < 0) return null;
-        return new PlayerStatus(cur, max, points);
+        string digits = new((slash >= 0 ? p[..slash] : p).Where(char.IsDigit).ToArray());
+        return digits.Length is > 0 and <= 3 && int.TryParse(digits, out int v) && v >= 0 ? v : null;
     }
 
     /// <summary>能力点分配页剩余点数（左栏「能力点」表头正下方 72/72 → 取斜杠前段）。读不出返回 null。</summary>
@@ -138,11 +171,7 @@ public static partial class MaxLevelSwapBrain
     {
         var head = FindHead(ocr, "能力点", 0.16);
         var raw = head is null ? null : JoinBelow(ocr, head, null, 0.12);
-        if (raw is null) return null;
-        string p = raw.ToUpperInvariant().Replace('O', '0');
-        int slash = p.IndexOf('/');
-        string digits = new((slash >= 0 ? p[..slash] : p).Where(char.IsDigit).ToArray());
-        return digits.Length is > 0 and <= 3 && int.TryParse(digits, out int v) && v >= 0 ? v : null;
+        return ParseSingleNumber(raw);
     }
 
     /// <summary>找表头词（含 keyword、y 带内；同 y 取最靠左）。</summary>
