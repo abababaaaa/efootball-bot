@@ -203,6 +203,52 @@ public static partial class MaxLevelSwapBrain
         return text.Length == 0 ? null : text;
     }
 
+    // ---------------- 排序/筛选「已设置」探针（中断续跑不重复勾选） ----------------
+
+    /// <summary>
+    /// 排序弹窗「当前等级」行是否已有蓝勾（勾 = 该排序键已生效）。实机 2026-10-24
+    /// （1280×720 用户截图）：勾在行右端 x≈0.94~0.97，亮蓝 ≈RGB(33,155,243)；
+    /// 行文字也是蓝色但都在 x&lt;0.7，探针只看右端不误伤。勾在时配合箭头判断即可
+    /// 直接 B 返回（配合 <see cref="IsSortArrowUp"/>）。
+    /// </summary>
+    public static bool IsCurrentLevelChecked(OcrResult ocr, FrameData f)
+    {
+        var head = ocr.Words.FirstOrDefault(w => w.NormText.Contains("当前等级"));
+        if (head is null || f.Width < 200 || f.Height < 120 || f.Bgra.Length < f.Width * f.Height * 4)
+            return false;
+        int x0 = (int)(f.Width * 0.93), x1 = (int)(f.Width * 0.985);
+        int yc = (int)(head.CenterY * f.Height);
+        int y0 = Math.Max(0, yc - (int)(f.Height * 0.028));
+        int y1 = Math.Min(f.Height, yc + (int)(f.Height * 0.028));
+        int blue = 0;
+        for (int y = y0; y < y1; y++)
+        {
+            for (int x = x0; x < x1; x++)
+            {
+                int i = (y * f.Width + x) * 4;
+                int b = f.Bgra[i], g = f.Bgra[i + 1], r = f.Bgra[i + 2];
+                if (b > 170 && r < 120 && g > 90 && g < 215) blue++;
+            }
+        }
+        return blue >= 15;
+    }
+
+    /// <summary>
+    /// 筛选页「卡片类型」行是否已设置（右侧值 ≠「无」，如「精选/高光/高光-Show Time/传奇/史诗/…」）。
+    /// 用户 2026-10-24：文字判断放宽，非「无」即可。★实机帧（TestData/swap/filter_cardtype_set）
+    /// OCR 会漏读「卡片类型」灰字标签但读得到右侧值词——表头定位不可靠，改用固定行带：
+    /// 筛选页第 5 行 y≈0.483（实机 1280×720 归一化，行距 0.066），值列 x∈[0.46,0.82]。
+    /// 值词整行漏读按未设置处理（进子页重设，代价是几秒）。
+    /// </summary>
+    public static bool IsCardTypeFilterSet(OcrResult ocr)
+    {
+        var joined = string.Concat(ocr.Words
+            .Where(w => w.CenterY is > 0.455 and < 0.512 && w.CenterX is > 0.46 and < 0.82)
+            .OrderBy(w => w.CenterX)
+            .Select(w => w.NormText));
+        return joined.Replace("无", "").Length > 0;
+    }
+
     // ---------------- 排序弹窗方向箭头（像素探针） ----------------
 
     /// <summary>

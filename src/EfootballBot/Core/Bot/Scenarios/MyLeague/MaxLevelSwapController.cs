@@ -464,6 +464,21 @@ public sealed class MaxLevelSwapController
                 if (screen == SwapScreen.Sort)
                 {
                     _stall = 0;
+                    // 先识别是否已设置（中断续跑/重复进入）：当前等级已勾 + 箭头为上 = 正确，
+                    // 直接 B 返回走筛选；已勾但箭头为下只按 Y 翻方向（A 会切换勾，绝不按）
+                    if (MaxLevelSwapBrain.IsCurrentLevelChecked(ocr, frame))
+                    {
+                        if (MaxLevelSwapBrain.IsSortArrowUp(frame) is false)
+                        {
+                            await pad.Y();
+                            log("[我的联赛] 当前等级已勾选但箭头为下：按 Y 翻为升序", LogLevel.Info);
+                            return 1800;
+                        }
+                        log("[我的联赛] 排序已是「当前等级·升序」：B 返回，继续筛选", LogLevel.Info);
+                        await pad.Back();
+                        _phase = Phase.SortApplied;
+                        return 2000;
+                    }
                     await pad.DpadRepeat(PadDir.Up, 6);    // 饱和到「球员姓名」
                     await pad.DpadRepeat(PadDir.Down, 5);  // → 当前等级
                     var up = MaxLevelSwapBrain.IsSortArrowUp(frame);
@@ -514,6 +529,15 @@ public sealed class MaxLevelSwapController
                 {
                     _stall = 0;
                     await pad.DpadRepeat(PadDir.Up, 9);   // 饱和到「俱乐部球队」
+                    if (MaxLevelSwapBrain.IsCardTypeFilterSet(ocr))
+                    {
+                        // 已设置过（中断续跑）：归顶 ↓×9 直达「完成」应用，不进子页重复勾选
+                        log("[我的联赛] 卡片类型筛选已设置：直接完成应用", LogLevel.Info);
+                        await pad.DpadRepeat(PadDir.Down, 9);
+                        await pad.Confirm();
+                        _phase = Phase.BenchSwap;
+                        return 2600;
+                    }
                     await pad.DpadRepeat(PadDir.Down, 4); // → 卡片类型
                     await pad.Confirm();
                     _phase = Phase.CardTypeWait;
@@ -553,8 +577,9 @@ public sealed class MaxLevelSwapController
                 if (screen == SwapScreen.Filter)
                 {
                     _stall = 0;
-                    await pad.DpadRepeat(PadDir.Down, 4); // 卡片类型 → 比赛风格
-                    await pad.Dpad(PadDir.Down);          // 比赛风格 → 完成
+                    // 卡牌子页 B 返回后光标在「卡片类型」：归顶后 ↓×9 直达「完成」（到头多按无害）
+                    await pad.DpadRepeat(PadDir.Up, 9);
+                    await pad.DpadRepeat(PadDir.Down, 9);
                     await pad.Confirm();                  // 应用筛选
                     _phase = Phase.BenchSwap;
                     return 2600;

@@ -269,6 +269,8 @@ public class MaxLevelSwapTests
     private static string SwapDir => Path.Combine(
         AppContext.BaseDirectory, "..", "..", "..", "TestData", "swap");
 
+    private static OcrRecognizer RealOcr() => new();
+
     private static FrameData LoadFrame(string file)
     {
         using var mat = Cv2.ImRead(Path.Combine(SwapDir, file), ImreadModes.Color);
@@ -294,6 +296,88 @@ public class MaxLevelSwapTests
         using var ocr = new OcrRecognizer();
         foreach (var f in new[] { "sort_arrow_down.png", "sort_arrow_up.png" })
             Assert.Equal(SwapScreen.Sort, MaxLevelSwapBrain.Classify(TestOcr.Run(ocr, LoadFrame(f))));
+    }
+
+    [Fact]
+    public void RealSortPopup_CurrentLevelChecked_Probe()
+    {
+        // p1 实机帧（2026-10-24）：当前等级已勾 + 箭头向上 → 已设置探针 true、方向 true
+        var ocr = TestOcr.Run(RealOcr(), LoadFrame("sort_checked_up.png"));
+        var frame = LoadFrame("sort_checked_up.png");
+        Assert.True(MaxLevelSwapBrain.IsCurrentLevelChecked(ocr, frame));
+        Assert.True(MaxLevelSwapBrain.IsSortArrowUp(frame));
+
+        // 旧帧：勾在「整体评价」行 → 当前等级未勾
+        var ocr2 = TestOcr.Run(RealOcr(), LoadFrame("sort_arrow_up.png"));
+        Assert.False(MaxLevelSwapBrain.IsCurrentLevelChecked(ocr2, LoadFrame("sort_arrow_up.png")));
+    }
+
+    [Fact]
+    public void RealFilterPage_CardTypeSet_Probe()
+    {
+        // p2 实机帧：卡片类型右侧值 = 精选/高光/… → 已设置
+        var ocr = TestOcr.Run(RealOcr(), LoadFrame("filter_cardtype_set.png"));
+        Assert.True(MaxLevelSwapBrain.IsCardTypeFilterSet(ocr));
+
+        // 合成帧：值 = 无 / 值词缺失 → 未设置
+        Assert.False(MaxLevelSwapBrain.IsCardTypeFilterSet(FilterOcr()));
+        var none = Ocr(W("筛选", 0.24, 0.09), W("俱乐部球队", 0.40, 0.19), W("卡片类型", 0.40, 0.43),
+            W("无", 0.72, 0.43), W("比赛风格", 0.40, 0.67), W("完成", 0.50, 0.93));
+        Assert.False(MaxLevelSwapBrain.IsCardTypeFilterSet(none));
+    }
+
+    [Fact]
+    public async Task SortAlreadyChecked_BReturnsImmediately()
+    {
+        // 排序弹窗已勾「当前等级」+ 箭头为上：不导航不按 A，直接 B 返回继续筛选
+        var c = new MaxLevelSwapController();
+        var pad = new FakePad();
+        var reader = new ScriptReader();
+        var lineup = Ocr(LineupOcr());
+        reader.Enqueue(new PlayerStatus(40, 40, 0)); // 满级 0 点 → 直接换人路径
+        var checkedSortOcr = TestOcr.Run(RealOcr(), LoadFrame("sort_checked_up.png"));
+        var checkedFrame = LoadFrame("sort_checked_up.png");
+
+        await c.StartCore(pad, SilentLog);
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(Ocr(DetailOcr("40", "40", "0")), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);  // A 选中
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);  // 侧栏
+        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // ←+A 开排序
+
+        int before = pad.Log.Count;
+        await c.StepCore(checkedSortOcr, checkedFrame, pad, reader.Read, SilentLog, null, null, CT);
+        Assert.Equal(new[] { "B" }, pad.Log.Skip(before).ToArray());
+    }
+
+    [Fact]
+    public async Task FilterAlreadySet_CompletesDirectly()
+    {
+        // 筛选页卡片类型已设置：归顶 ↓×9 直达完成，不进卡牌子页重复勾选
+        var c = new MaxLevelSwapController();
+        var pad = new FakePad();
+        var reader = new ScriptReader();
+        var setFilterOcr = TestOcr.Run(RealOcr(), LoadFrame("filter_cardtype_set.png"));
+
+        // 手动把内部状态推到 FilterWait：借 FullFlow 前置太长，直接从排序阶段复用驱动
+        var lineup = Ocr(LineupOcr());
+        reader.Enqueue(new PlayerStatus(40, 40, 0));
+        await c.StartCore(pad, SilentLog);
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(Ocr(DetailOcr("40", "40", "0")), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        // 排序弹窗已正确（p1 帧）→ B；回列表 ←↓A 开筛选
+        await c.StepCore(TestOcr.Run(RealOcr(), LoadFrame("sort_checked_up.png")), LoadFrame("sort_checked_up.png"),
+            pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+
+        int before = pad.Log.Count;
+        await c.StepCore(setFilterOcr, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        Assert.Equal(new[] { "Upx9", "Downx9", "A" }, pad.Log.Skip(before).ToArray());
     }
 
     // ---------------- 状态机全流程（录制手柄） ----------------
@@ -423,7 +507,7 @@ public class MaxLevelSwapTests
         for (int k = 0; k < 6; k++)
             Assert.Equal(new[] { "A", "Down" }, log[i..(i += 2)]);  // 6 张高阶卡逐个勾选
         Assert.Equal("B", log[i++]);                                // 回筛选页
-        Assert.Equal(new[] { "Downx4", "Down", "A" }, log[i..(i += 3)]); // 完成（应用筛选）
+        Assert.Equal(new[] { "Upx9", "Downx9", "A" }, log[i..(i += 3)]); // 归顶 ↓×9 → 完成（应用筛选）
         Assert.Equal("A", log[i++]);                                // 交换球员
         Assert.Equal("B", log[i++]);                                // 回站位页
         Assert.Equal("B", log[i++]);                                // 完成退出计划
