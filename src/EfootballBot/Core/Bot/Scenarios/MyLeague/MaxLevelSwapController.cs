@@ -138,6 +138,21 @@ public sealed class MaxLevelSwapController
         return 1800;
     }
 
+    /// <summary>已在比赛计划（首发站位页）触发：跳过按 Y，直接从门将开始巡检。</summary>
+    public Task<int> StartOnPlanAsync(BotEngine engine, Action<string, LogLevel> log,
+        CancellationToken ct = default)
+        => StartOnPlanCore(new EngineSwapPad(engine.Pad), log);
+
+    /// <summary>核心入口（手柄参数化，可单测）。</summary>
+    internal Task<int> StartOnPlanCore(ISwapPad pad, Action<string, LogLevel> log)
+    {
+        Reset();
+        _phase = Phase.Inspect;
+        _pos = 0;
+        log("[我的联赛] 满级巡检开始：已在比赛计划内，直接从门将巡检", LogLevel.Info);
+        return Task.FromResult(1000);
+    }
+
     /// <summary>每轮观察后调用；巡检未激活返回 null（交还场景正常流程）。</summary>
     public Task<int?> StepAsync(BotEngine engine, Observation obs, Action<string, LogLevel> log,
         CancellationToken ct = default)

@@ -151,6 +151,7 @@ public partial class MainWindow
         TxtScheduleError.Visibility = Visibility.Collapsed;
 
         // 我的联赛道具
+        _loadingConfig = true;
         ChkBuyExpBoost.IsChecked = _cfg.MyLeague.BuyExpBoost;
         string[] expLevels = { "2x", "3x", "4x" };
         int expIdx = Array.IndexOf(expLevels, _cfg.MyLeague.ExpBoostLevel);
@@ -165,6 +166,7 @@ public partial class MainWindow
         ChkMaxLevelNotify.IsChecked = _cfg.MyLeague.NotifyPlayerMaxLevel;
         ChkAutoSwapMaxLevel.IsChecked = _cfg.MyLeague.AutoSwapMaxLevel;
         CmbAutoSwapEvery.SelectedIndex = AutoSwapEveryIndex(_cfg.MyLeague.AutoSwapEveryMatches);
+        _loadingConfig = false;
 
         // 场次计数停止（0=无限；预设 1/3/5/10/20，其他值进自定义输入框）
         LoadStopAfterUi(CmbStopAfterMatches, TxtStopAfterMatches, _cfg.MyLeague.StopAfterMatches);

@@ -602,6 +602,22 @@ public partial class MainWindow : Window
     private async void BtnTestSwap_Click(object sender, RoutedEventArgs e)
         => await ToggleScenarioAsync(BtnTestSwap, "intlswaptest");
 
+    /// <summary>
+    /// 开启「满级自动换人」时弹确认窗（SwapGuideWindow）：展示巡检路径图，要求用户先手动
+    /// 验证路径能走完首发 11 人，并说明替补球员不参与换人；取消则回退勾选。
+    /// 配置载入的 IsChecked 赋值由 _loadingConfig 守卫挡掉，弹窗只在用户手动勾选时出现。
+    /// </summary>
+    private void ChkAutoSwapMaxLevel_Checked(object sender, RoutedEventArgs e)
+    {
+        if (_loadingConfig || _cfg is null) return;
+        if (SwapGuideWindow.Confirm(this))
+        {
+            AppendLog("【满级自动换人】已开启：每 N 场比赛结束回联赛主页时自动巡检（替补球员不参与）", LogLevel.Success);
+            return;
+        }
+        ChkAutoSwapMaxLevel.IsChecked = false;
+    }
+
     private void ResetButtons()
     {
         _paused = false;

@@ -25,6 +25,10 @@ public enum MlScreen
     PurchaseDialog,
     /// <summary>选择赛事等级页（难度选择，覆盖在联赛主页之上，点前往比赛后出现）。</summary>
     DifficultyPage,
+    /// <summary>我的联赛·首发站位页（比赛计划内阵容/主力球员查看）：侧栏 战术/球队/替补球员…
+    /// + 右侧「整体实力」，无「前往比赛」。处置：B 返回联赛主页交还正常流程；
+    /// 满级换人巡检可在该页直接开跑（StartOnPlanAsync）。</summary>
+    LeagueSquadPage,
     /// <summary>关键比赛弹窗（预告/固定难度，含「OK」按钮）：上移光标点 OK 进入。</summary>
     KeyMatchDialog,
     /// <summary>比赛起始页（队名/球场确认，底部「设置|球场|下一步」）——按 A 开赛，其后进入比赛。</summary>
@@ -192,6 +196,16 @@ public static class MyLeagueBrain
         // → 按在默认焦点「取消」上 → 前往比赛↔弹窗死循环），词级做 O/0 归一再认一次
         if ((ocr.ContainsJoined("关键比赛") || ocr.ContainsJoined("重要比赛")) && HasOkButton(ocr))
             return MlScreen.KeyMatchDialog;
+
+        // 我的联赛·首发站位页（比赛计划内：用户手动停在阵容/主力球员查看页时的落点）：
+        // 侧栏 战术/球队/替补球员/后备球员/自动配置球员 + 右侧「整体实力」。
+        // ★先于 btn_confirm/LeaguePage 兜底——该页无「前往比赛」，旧分类落 Unknown 无操作。
+        // 处置见 Decide：B 返回联赛主页交还正常流程；满级换人巡检见
+        // MaxLevelSwapController.StartOnPlanAsync（该页可直接开跑）。
+        if (!ocr.ContainsJoined("前往比赛") && !ocr.ContainsJoined("下个赛季") &&
+            (ocr.ContainsJoined("替补球员") || ocr.ContainsJoined("自动配置球员")) &&
+            ocr.ContainsJoined("整体实力"))
+            return MlScreen.LeagueSquadPage;
 
         // 比赛起始页（实机 match_start_page）：底部行「设置|球场|下一步」+ 队名/球场名
         // （eFootball™ Stadium）。先于通用 btn_confirm：判定为起始页可带上"即将开赛"上下文
@@ -486,6 +500,12 @@ public static class MyLeagueBrain
                 return screenStreak >= StuckStreak
                     ? new MlAction(MlActionKind.GamepadBack, 3000, "联赛页无关键词，B 返回自愈")
                     : MlAction.Wait(2500);
+            }
+            case MlScreen.LeagueSquadPage:
+            {
+                // 首发站位页：B 返回联赛主页，由正常流程继续（前往比赛→难度→开赛）。
+                // 满级换人巡检激活时不走此分支（场景层 hook 先行接管并在该页直接开跑）。
+                return new MlAction(MlActionKind.GamepadBack, 2500, "首发站位页→B 返回联赛主页");
             }
             case MlScreen.FullTime:
             {

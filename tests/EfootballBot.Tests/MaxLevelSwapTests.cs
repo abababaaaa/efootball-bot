@@ -3,6 +3,7 @@ using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
+using EfootballBot.Core.Vision.Yolo;
 using OpenCvSharp;
 using Xunit;
 
@@ -338,6 +339,45 @@ public class MaxLevelSwapTests
             ocrEngine, full, frame, CancellationToken.None);
         Assert.NotNull(status);
         Assert.Equal((1, 31, 0), (status!.Level, status.LevelMax, status.Points));
+    }
+
+    [Fact]
+    public void SharedClassify_SquadPage()
+    {
+        // 首发站位页（比赛计划内）：侧栏词 + 整体实力 → LeagueSquadPage；联赛主页（前往比赛可见）不算
+        var squad = Ocr(W("完成", 0.90, 0.07), W("整体实力", 0.88, 0.18),
+            W("战术", 0.10, 0.28), W("球队", 0.10, 0.40),
+            W("替补球员", 0.10, 0.48), W("后备球员", 0.10, 0.55), W("自动配置球员", 0.10, 0.63),
+            W("球员详细数据", 0.60, 0.92));
+        Assert.Equal(MlScreen.LeagueSquadPage, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), squad));
+        Assert.Equal(MlScreen.LeagueSquadPage, MyLeagueBrain.Classify(
+            Array.Empty<YoloDetection>(),
+            Ocr(W("整体实力", 0.88, 0.18), W("替补球员", 0.10, 0.48), W("球员详细数据", 0.60, 0.92)))); // 侧栏词漏读兜底
+        var home = Ocr(W("前往比赛", 0.17, 0.24), W("整体实力", 0.88, 0.18),
+            W("替补球员", 0.10, 0.48), W("自动配置球员", 0.10, 0.63));
+        Assert.NotEqual(MlScreen.LeagueSquadPage, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), home));
+    }
+
+    [Fact]
+    public void Decide_SquadPage_Back()
+    {
+        // 站位页：B 返回联赛主页交还正常流程（用户手动停在阵容查看页时不再无操作）
+        var a = MyLeagueBrain.Decide(MlScreen.LeagueSquadPage, Ocr(), 0, false, null);
+        Assert.Equal(MlActionKind.GamepadBack, a.Kind);
+    }
+
+    [Fact]
+    public async Task StartOnPlan_RunsImmediately_WithoutY()
+    {
+        // 用户手动停在比赛计划页：跳过按 Y，直接从门将开始巡检
+        var c = new MaxLevelSwapController();
+        var pad = new FakePad();
+        var reader = new ScriptReader();
+        reader.Enqueue(new PlayerStatus(23, 26, 44));
+        await c.StartOnPlanCore(pad, SilentLog);
+        Assert.Empty(pad.Log); // 未按任何键
+        await c.StepCore(Ocr(LineupOcr()), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        Assert.Equal(new[] { "Y" }, pad.Log); // 直接进入门将巡检
     }
 
     [Fact]

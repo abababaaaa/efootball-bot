@@ -464,6 +464,14 @@ public class MyLeagueScenario : IScenario
                 return 0;
             }
             if (!_swapQueued) return null;
+            // 用户手动停在比赛计划（首发站位页）时直接开跑，不绕道主页重按 Y
+            if (screen == MlScreen.LeagueSquadPage)
+            {
+                _swapQueued = false;
+                _matchesSinceSwap = 0;
+                _swapSeen = true;
+                return await _maxSwap.StartOnPlanAsync(_engine, _log, ct);
+            }
             if (screen != MlScreen.LeaguePage || !obs.Ocr.ContainsJoined("前往比赛")) return null;
             _swapQueued = false;
             _matchesSinceSwap = 0;
