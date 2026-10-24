@@ -595,32 +595,12 @@ public partial class MainWindow : Window
     }
 
     /// <summary>
-    /// 一键测试满级换人：立即排队一次巡检（无视每 N 场间隔与自动开关）。
-    /// Worker 置位引擎请求位，场景回到我的联赛主页（无弹窗）后自动开始；
-    /// 巡检全程仍受暂停/一键结束热键与按钮控制（停止即中断，退出后交还正常流程）。
+    /// 一键测试满级换人（独立会话）：无需先开始挂机，直接以「满级换人测试」模式启动 Worker——
+    /// 启动即排队一次巡检（无视每 N 场间隔与自动开关），回到我的联赛主页（无弹窗）后自动开始，
+    /// 巡检结束或中途「一键结束」后自动停止。运行中受暂停/一键结束热键与按钮控制。
     /// </summary>
     private async void BtnTestSwap_Click(object sender, RoutedEventArgs e)
-    {
-        if (_workerHost is not { ScenarioRunning: true })
-        {
-            AppendLog("【满级换人】当前没有运行中的挂机，请先在「我的联赛挂机」点开始。", LogLevel.Info);
-            return;
-        }
-        if (_activeStartBtn != BtnStartMyLeague)
-        {
-            AppendLog("【满级换人】测试按钮仅对「我的联赛挂机」模块生效。", LogLevel.Info);
-            return;
-        }
-        try
-        {
-            await _workerHost.SendSwapTestAsync();
-            AppendLog("【满级换人】已请求测试巡检：回到我的联赛主页（无弹窗）后自动开始，结束或中途停止后照常挂机。", LogLevel.Success);
-        }
-        catch (Exception ex)
-        {
-            AppendLog($"【满级换人】请求失败：{ex.Message}", LogLevel.Error);
-        }
-    }
+        => await ToggleScenarioAsync(BtnTestSwap, "intlswaptest");
 
     private void ResetButtons()
     {

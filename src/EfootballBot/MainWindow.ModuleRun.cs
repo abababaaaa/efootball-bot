@@ -26,6 +26,8 @@ public partial class MainWindow
         _moduleRuns = new[]
         {
             new ModuleRun(BtnStartMyLeague, BtnPauseMyLeague, BtnManualMyLeague, "intl", BtnStep),
+            // 满级换人测试（独立会话）：无挂机时可直接开始，跑完自动停；暂停/手动停止共用我的联赛按钮
+            new ModuleRun(BtnTestSwap, BtnPauseMyLeague, BtnManualMyLeague, "intlswaptest", null),
             new ModuleRun(BtnStartWeekly, BtnPauseWeekly, BtnManualWeekly, "intlweekly", null),
             new ModuleRun(BtnStartAiLadder, BtnPauseAiLadder, BtnManualAiLadder, "intlladder", null),
             new ModuleRun(BtnStartCn, BtnPauseCn, BtnManualCn, "cndaily", null),
@@ -56,8 +58,9 @@ public partial class MainWindow
             if (m.Step is not null)
                 m.Step.IsEnabled = active && _paused;
         }
-        // 满级换人手动测试：仅国际服我的联赛模块运行中可用（该场景消费请求）
-        BtnTestSwap.IsEnabled = running && _activeStartBtn == BtnStartMyLeague && !_paused;
+        // 换人测试按钮：未激活时显示专用文案（ModuleRun 循环会把它改成「开始」）
+        bool swapActive = running && _activeStartBtn == BtnTestSwap;
+        BtnTestSwap.Content = swapActive ? $"一键结束{hk}" : "一键测试换人";
     }
 
     private async void BtnManualStop_Click(object sender, RoutedEventArgs e)

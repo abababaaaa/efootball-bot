@@ -93,15 +93,23 @@ public class MyLeagueScenario : IScenario
     /// <summary>导航失败重试计数（每个阶段独立，超过后回 Idle 防死循环）。</summary>
     private int _navAttempts;
 
-    public MyLeagueScenario(BotEngine engine, Action<string, LogLevel> log)
+    public MyLeagueScenario(BotEngine engine, Action<string, LogLevel> log, bool swapTestOnly = false)
     {
         _engine = engine;
         _log = log;
+        _swapTestOnly = swapTestOnly;
         // 焦点检测亮度明细 → Debug 日志（导航错判时日志直接给出各磁贴实际亮度/阈值/判定）
         MyLeagueBrain.FocusDiag = s => _log($"[我的联赛] {s}", LogLevel.Debug);
+        // 换人测试模式：启动即排队一次巡检（无视自动开关与场次间隔），巡检结束自动停止挂机
+        if (_swapTestOnly) _swapQueued = true;
     }
 
-    public virtual string Name => "我的联赛";
+    /// <summary>换人测试模式（GUI「一键测试换人」独立启动）：只跑一次巡检即自动停止。</summary>
+    private readonly bool _swapTestOnly;
+    /// <summary>测试模式巡检已开始过（回 Idle 即收尾停止）。</summary>
+    private bool _swapSeen;
+
+    public virtual string Name => _swapTestOnly ? "满级换人测试" : "我的联赛";
 
     /// <summary>难度/道具购买/停止场次等配置来源。国服子类换用 CnMyLeague 配置段，
     /// 与国际服互不影响（同款玩法、两服各自记设置）。</summary>
@@ -448,12 +456,21 @@ public class MyLeagueScenario : IScenario
         if (!LeagueConfig.AutoSwapMaxLevel && !_swapQueued) return null;
         if (_maxSwap.Idle)
         {
+            // 测试模式：巡检跑完（含中途放弃）即自动停止挂机；普通挂机继续正常流程
+            if (_swapTestOnly && _swapSeen)
+            {
+                _log("[我的联赛] 换人测试结束，自动停止", LogLevel.Success);
+                _engine.Stop();
+                return 0;
+            }
             if (!_swapQueued) return null;
             if (screen != MlScreen.LeaguePage || !obs.Ocr.ContainsJoined("前往比赛")) return null;
             _swapQueued = false;
             _matchesSinceSwap = 0;
+            _swapSeen = true;
             return await _maxSwap.StartAsync(_engine, _log, ct);
         }
+        _swapSeen = true;
         return await _maxSwap.StepAsync(_engine, obs, _log, ct);
     }
 

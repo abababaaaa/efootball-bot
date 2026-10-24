@@ -452,11 +452,6 @@
                                         HorizontalAlignment="Left" Margin="-4,8,0,0"
                                         Padding="8,4" IsEnabled="False" Click="BtnStep_Click"
                                         ToolTip="暂停时执行一轮「观察 + 决策」后继续暂停：看 Bot 对当前画面打算做什么，且只做一步"/>
-                                <!-- 满级换人手动测试：立即排队一次巡检（无视每 N 场间隔与自动开关） -->
-                                <Button x:Name="BtnTestSwap" Content="一键测试满级换人" Style="{StaticResource LinkBtn}"
-                                        HorizontalAlignment="Left" Margin="-4,4,0,0"
-                                        Padding="8,4" IsEnabled="False" Click="BtnTestSwap_Click"
-                                        ToolTip="立即请求一次满级巡检：回到我的联赛主页（无弹窗）后自动开始——满级（等级 x/x 且能力点未用完）球员先分配能力点，再从后备换入当前等级最低的球员；全程可用暂停/一键结束中断"/>
                             </StackPanel>
                         </Border>
                     </Grid>
@@ -569,7 +564,7 @@
                                 <CheckBox x:Name="ChkMaxLevelNotify" Content="球员满级提示" VerticalAlignment="Center"/>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="24,0,0,0">
                                     <CheckBox x:Name="ChkAutoSwapMaxLevel" Content="满级自动换人" VerticalAlignment="Center"
-                                              ToolTip="每 N 场比赛结束后自动打开比赛计划巡检首发 11 人：满级（等级 x/x 且能力点未用完）球员自动分配能力点，并从后备球员换入最低等级球员；巡检优先于道具购买"/>
+                                              ToolTip="每 N 场比赛结束后自动打开比赛计划巡检首发 11 人：满级（等级 x/x）球员自动分配能力点（已用完则跳过），并从后备球员换入最低等级球员；巡检优先于道具购买"/>
                                     <ComboBox x:Name="CmbAutoSwapEvery" Width="74" Margin="12,0,0,0" SelectedIndex="3"
                                               VerticalAlignment="Center"
                                               ToolTip="每 N 场比赛结束后触发一次满级巡检换人">
@@ -579,6 +574,11 @@
                                         <ComboBoxItem Content="每5场"/>
                                         <ComboBoxItem Content="每10场"/>
                                     </ComboBox>
+                                    <!-- 一键测试：无需先开始挂机，直接启动一次巡检（跑完自动停）；运行中变「一键结束」 -->
+                                    <Button x:Name="BtnTestSwap" Content="一键测试换人" Style="{StaticResource GhostBtn}"
+                                            Height="28" Margin="12,0,0,0" Padding="10,0"
+                                            Click="BtnTestSwap_Click"
+                                            ToolTip="无需开始挂机：直接启动一次满级巡检（无视每 N 场间隔与开关）——回到我的联赛主页（无弹窗）后自动开始，结束或中途一键结束后自动停止"/>
                                 </StackPanel>
                             </Grid>
                         </StackPanel>

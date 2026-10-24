@@ -193,9 +193,11 @@ public sealed class BotEngine : IDisposable
         _summaryWritten = false; // 新会话：允许再写一次摘要
         Stats.StartedAt ??= DateTime.Now;
         // 场景模式（cndaily=国服天梯巅峰赛 / cnweekly=国服周活动 / cnmyleague=国服我的联赛 /
-        // intl=国际服我的联赛 / intlweekly=国际服周活动 / intlladder=国际服AI天梯联赛）
+        // intl=国际服我的联赛 / intlweekly=国际服周活动 / intlladder=国际服AI天梯联赛 /
+        // intlswaptest=满级换人测试——只跑一次巡检即自动停）
         // 需接管虚拟手柄（B 键逃生依赖）；observe 纯观察不操作游戏
-        bool scenarioMode = mode is "cndaily" or "cnweekly" or "cnmyleague" or "intl" or "intlweekly" or "intlladder";
+        bool scenarioMode = mode is "cndaily" or "cnweekly" or "cnmyleague" or "intl" or "intlweekly" or "intlladder"
+            or "intlswaptest";
         CancellationToken token;
         try
         {
@@ -227,6 +229,7 @@ public sealed class BotEngine : IDisposable
             "cndaily" => new PeakLadderScenario(this, LogInternal),
             "cnmyleague" => new CnMyLeagueScenario(this, LogInternal),
             "intlladder" => new AiLadderScenario(this, LogInternal),
+            "intlswaptest" => new MyLeagueScenario(this, LogInternal, swapTestOnly: true),
             _ when scenarioMode => new MyLeagueScenario(this, LogInternal),
             _ => null,
         };
