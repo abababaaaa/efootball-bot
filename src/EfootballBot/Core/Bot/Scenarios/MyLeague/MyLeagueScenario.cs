@@ -71,6 +71,12 @@ public class MyLeagueScenario : IScenario
     private DateTime _lastGoMatchPress = DateTime.MinValue;
     /// <summary>本次前往比赛后是否已 dump 过画面 OCR（防刷屏）。</summary>
     private bool _goMatchOcrDumped;
+    /// <summary>满级自动换人状态机（每 N 场比赛结束后巡检首发 11 人，满级换后备低级球员）。</summary>
+    private readonly MaxLevelSwapController _maxSwap = new();
+    /// <summary>自上次换人巡检以来完成的场次数。</summary>
+    private int _matchesSinceSwap;
+    /// <summary>换人巡检已排队（回联赛主页无弹窗时执行，优先于道具核验）。</summary>
+    private bool _swapQueued;
 
     /// <summary>购买流程阶段。</summary>
     private enum PurchasePhase
@@ -197,6 +203,15 @@ public class MyLeagueScenario : IScenario
             _nextMatchIsKey = false;
             _log("[我的联赛] 已复位道具核验：下次回主页重新核查并补购耗尽的加成", LogLevel.Info);
 
+            // 满级自动换人排队：每 N 场比赛结束触发一次（回联赛主页无弹窗时执行，
+            // 优先级高于道具核验；见 HandleMaxLevelSwapAsync）。
+            if (LeagueConfig.AutoSwapMaxLevel)
+            {
+                _matchesSinceSwap++;
+                if (_matchesSinceSwap >= Math.Max(1, LeagueConfig.AutoSwapEveryMatches))
+                    _swapQueued = true;
+            }
+
             // 场次计数停止（0=无限跑）：总场次 / 关键比赛任一达标即自动停止挂机。
             // 计数为本此挂机累计（引擎每次启动重建）。Stop 会还原停靠窗口、复位手柄、
             // 取消观察循环，本方法返回后主循环随取消令牌干净退出。
@@ -258,6 +273,10 @@ public class MyLeagueScenario : IScenario
         bool inMatchRecently =
             _memory.SawWithin(MlScreen.InMatch, TimeSpan.FromSeconds(60), now) ||
             _memory.SawWithin(MlScreen.MatchStartPage, TimeSpan.FromSeconds(90), now);
+        // ---- 满级自动换人状态机（先于国服拦截/共享决策/购买状态机：巡检期间独占流程）----
+        int? swapWait = await HandleMaxLevelSwapAsync(screen, obs, ct);
+        if (swapWait is not null) return swapWait.Value;
+
         // 模块自有界面拦截（国服子类在此接管主页导航与 RT 确认键）：返回非 null = 本轮已处理
         int? customWait = await InterceptAsync(obs, screen, _streak, inMatchRecently);
         if (customWait is not null) return customWait.Value;
@@ -404,6 +423,26 @@ public class MyLeagueScenario : IScenario
                 break;
         }
         return action.WaitMs;
+    }
+
+    // ---------------- 满级自动换人 ----------------
+
+    /// <summary>
+    /// 满级自动换人入口：排队中且回到联赛主页（无弹窗，「前往比赛」可见）时切入巡检；
+    /// 巡检进行中每轮接管（先于道具核验，避免两台状态机抢同一界面）。
+    /// </summary>
+    private async Task<int?> HandleMaxLevelSwapAsync(MlScreen screen, Observation obs, CancellationToken ct)
+    {
+        if (!LeagueConfig.AutoSwapMaxLevel) return null;
+        if (_maxSwap.Idle)
+        {
+            if (!_swapQueued) return null;
+            if (screen != MlScreen.LeaguePage || !obs.Ocr.ContainsJoined("前往比赛")) return null;
+            _swapQueued = false;
+            _matchesSinceSwap = 0;
+            return await _maxSwap.StartAsync(_engine, _log, ct);
+        }
+        return await _maxSwap.StepAsync(_engine, obs, _log, ct);
     }
 
     // ---------------- 国服子类扩展钩子 ----------------

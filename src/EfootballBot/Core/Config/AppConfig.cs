@@ -341,6 +341,16 @@ public sealed class MyLeagueConfig
     /// <summary>球员满级提示开关：开启时检测"满级"字样，计数并在日志提醒换人。</summary>
     public bool NotifyPlayerMaxLevel { get; set; } = true;
 
+    /// <summary>
+    /// 满级自动换人：每 <see cref="AutoSwapEveryMatches"/> 场比赛结束后回到联赛主页（无弹窗）时，
+    /// 自动按 Y 打开比赛计划巡检首发 11 人；满级（等级 x/x 且能力点未用完）球员先分配能力点
+    /// 再从后备球员换入最低等级球员。巡检优先级高于道具核验。
+    /// </summary>
+    public bool AutoSwapMaxLevel { get; set; } = false;
+
+    /// <summary>自动换人间隔场次（每 N 场比赛结束后触发一次巡检，1~50）。</summary>
+    public int AutoSwapEveryMatches { get; set; } = 5;
+
     /// <summary>完成场次后自动停止（本次挂机累计，含关键比赛）。0 = 无限跑。</summary>
     public int StopAfterMatches { get; set; } = 0;
 

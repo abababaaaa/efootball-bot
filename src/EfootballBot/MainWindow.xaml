@@ -573,7 +573,20 @@
                                 </ComboBox>
                             </StackPanel>
                             <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
-                            <CheckBox x:Name="ChkMaxLevelNotify" Content="球员满级提示（检测到满级时计数并提醒换人）"/>
+                            <CheckBox x:Name="ChkMaxLevelNotify" Content="球员满级提示"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                <CheckBox x:Name="ChkAutoSwapMaxLevel" Content="满级自动换人" VerticalAlignment="Center"
+                                          ToolTip="每 N 场比赛结束后自动打开比赛计划巡检首发 11 人：满级（等级 x/x 且能力点未用完）球员自动分配能力点，并从后备球员换入最低等级球员；巡检优先于道具购买"/>
+                                <ComboBox x:Name="CmbAutoSwapEvery" Width="74" Margin="12,0,0,0" SelectedIndex="3"
+                                          VerticalAlignment="Center"
+                                          ToolTip="每 N 场比赛结束后触发一次满级巡检换人">
+                                    <ComboBoxItem Content="每1场"/>
+                                    <ComboBoxItem Content="每2场"/>
+                                    <ComboBoxItem Content="每3场"/>
+                                    <ComboBoxItem Content="每5场"/>
+                                    <ComboBoxItem Content="每10场"/>
+                                </ComboBox>
+                            </StackPanel>
                         </StackPanel>
                     </Border>
                     </StackPanel>
@@ -1313,7 +1326,7 @@
                                     </ComboBox>
                                 </StackPanel>
                                 <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
-                                <CheckBox x:Name="ChkCnMlMaxLevelNotify" Content="球员满级提示（检测到满级时计数并提醒换人）"/>
+                                <CheckBox x:Name="ChkCnMlMaxLevelNotify" Content="球员满级提示"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>

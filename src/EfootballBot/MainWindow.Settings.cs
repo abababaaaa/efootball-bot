@@ -28,6 +28,20 @@ public partial class MainWindow
     /// <summary>场次计数停止固定档位（索引=下拉序，0=无限跑）；索引 6 = 自定义（读输入框）。</summary>
     private static readonly int[] StopAfterPresets = { 0, 1, 3, 5, 10, 20 };
 
+    /// <summary>满级自动换人间隔档位（索引=下拉序）；非档位值载入时就近收敛，缺省每 5 场。</summary>
+    private static readonly int[] AutoSwapEveryPresets = { 1, 2, 3, 5, 10 };
+
+    /// <summary>把换人间隔场次映射到下拉索引（越界值收敛到最近档位）。</summary>
+    private static int AutoSwapEveryIndex(int value)
+    {
+        if (AutoSwapEveryPresets.Contains(value)) return Array.IndexOf(AutoSwapEveryPresets, value);
+        return value <= 0 ? 2 : AutoSwapEveryPresets.Select((p, i) => (p, i))
+            .OrderBy(t => Math.Abs(t.p - value)).First().i;
+    }
+
+    private static int AutoSwapEveryValue(int index) =>
+        index >= 0 && index < AutoSwapEveryPresets.Length ? AutoSwapEveryPresets[index] : 5;
+
     /// <summary>把计数值映射到下拉/自定义输入框（非预设值进自定义并回填数字）。</summary>
     private static void LoadStopAfterUi(ComboBox cmb, TextBox txt, int value)
     {
@@ -149,6 +163,8 @@ public partial class MainWindow
         int diffIdx = Array.IndexOf(MyLeagueDifficulties, _cfg.MyLeague.Difficulty);
         CmbDifficulty.SelectedIndex = diffIdx >= 0 ? diffIdx : 0;
         ChkMaxLevelNotify.IsChecked = _cfg.MyLeague.NotifyPlayerMaxLevel;
+        ChkAutoSwapMaxLevel.IsChecked = _cfg.MyLeague.AutoSwapMaxLevel;
+        CmbAutoSwapEvery.SelectedIndex = AutoSwapEveryIndex(_cfg.MyLeague.AutoSwapEveryMatches);
 
         // 场次计数停止（0=无限；预设 1/3/5/10/20，其他值进自定义输入框）
         LoadStopAfterUi(CmbStopAfterMatches, TxtStopAfterMatches, _cfg.MyLeague.StopAfterMatches);
@@ -314,6 +330,8 @@ public partial class MainWindow
         if (CmbDifficulty.SelectedIndex >= 0)
             _cfg.MyLeague.Difficulty = MyLeagueDifficulties[CmbDifficulty.SelectedIndex];
         _cfg.MyLeague.NotifyPlayerMaxLevel = ChkMaxLevelNotify.IsChecked == true;
+        _cfg.MyLeague.AutoSwapMaxLevel = ChkAutoSwapMaxLevel.IsChecked == true;
+        _cfg.MyLeague.AutoSwapEveryMatches = AutoSwapEveryValue(CmbAutoSwapEvery.SelectedIndex);
         _cfg.MyLeague.StopAfterMatches = SaveStopAfterUi(CmbStopAfterMatches, TxtStopAfterMatches);
         _cfg.MyLeague.StopAfterKeyMatches = SaveStopAfterUi(CmbStopAfterKeyMatches, TxtStopAfterKeyMatches);
 
