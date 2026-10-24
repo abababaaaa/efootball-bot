@@ -81,6 +81,21 @@ jobs:
           $pre = $tag -like '*-*' -or $tag -match '^v\d+\.\d+\.\d+\.\d+$'
           "prerelease=$(if ($pre) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
 
+      # Release 正文 = CHANGELOG.md 里对应 tag 的段落（见文件头部格式约定）。
+      # 此前只靠 generate_release_notes，正文只有 Full Changelog 链接，用户看不到更新内容。
+      # generate_release_notes 保留：自动生成的 notes 追加在自定义正文之后。
+      - name: Extract changelog for this tag
+        id: changelog
+        shell: pwsh
+        run: |
+          $tag = '${{ github.ref_name }}'
+          $text = if (Test-Path CHANGELOG.md) { Get-Content CHANGELOG.md -Raw -Encoding utf8 } else { '' }
+          $pattern = '(?ms)^## ' + [regex]::Escape($tag) + '\s*?(.*?)(?=^## v|\z)'
+          $m = [regex]::Match($text, $pattern)
+          $body = if ($m.Success) { $m.Groups[1].Value.Trim() } else { '' }
+          if (-not $body) { Write-Host "WARNING: CHANGELOG.md 里没有 $tag 段落，Release 正文将缺少更新说明" }
+          "body<<CHANGELOG_EOF`n$body`nCHANGELOG_EOF" >> $env:GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         env:
@@ -89,6 +104,7 @@ jobs:
           files: |
             release-artifact/EfootballBot.exe
             release-artifact/efootball-bot-win-x64.zip
+          body: ${{ steps.changelog.outputs.body }}
           generate_release_notes: true
           draft: false
           prerelease: ${{ steps.meta.outputs.prerelease }}

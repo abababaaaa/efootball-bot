@@ -572,7 +572,7 @@
                                             <TextBlock Text="满级自动换人" VerticalAlignment="Center"/>
                                         </StackPanel>
                                     </CheckBox>
-                                    <ComboBox x:Name="CmbAutoSwapEvery" Width="74" Margin="12,0,0,0" SelectedIndex="3"
+                                    <ComboBox x:Name="CmbAutoSwapEvery" Width="86" Margin="12,0,0,0" SelectedIndex="3"
                                               VerticalAlignment="Center"
                                               ToolTip="每 N 场比赛结束后触发一次满级巡检换人">
                                         <ComboBoxItem Content="每1场"/>
