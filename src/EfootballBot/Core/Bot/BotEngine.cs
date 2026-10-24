@@ -117,6 +117,15 @@ public sealed class BotEngine : IDisposable
 
     public readonly BotStats Stats = new();
 
+    /// <summary>
+    /// 手动「一键测试换人」请求（GUI 按钮 → IPC 置位；我的联赛场景下一轮消费并清零，
+    /// 排队等回联赛主页无弹窗时执行，无视每 N 场间隔与自动开关）。
+    /// </summary>
+    public volatile bool SwapTestRequested;
+
+    /// <summary>请求一次满级换人巡检（GUI「一键测试换人」按钮入口）。</summary>
+    public void RequestSwapInspection() => SwapTestRequested = true;
+
     private CancellationTokenSource? _cts;
     private Task? _loop;
     private Observation? _lastObs;
@@ -442,10 +451,10 @@ public sealed class BotEngine : IDisposable
         {
             var (written, multiGpu, adapters) = GpuPreference.EnsureHighPerformance();
             if (multiGpu && written)
-                LogInternal($"检测到双显卡（{adapters}）：已自动设置本程序使用高性能独显运行" +
+                LogInternal($"检测到多显卡（{adapters}）：已自动设置本程序使用高性能独显运行" +
                     "（等效 Windows 图形设置-高性能），完全生效请重启软件一次", LogLevel.Warn);
             else if (multiGpu)
-                LogInternal($"双显卡环境（{adapters}）：独显直连偏好已就绪", LogLevel.Info);
+                LogInternal($"多显卡环境（{adapters}）：独显直连偏好已就绪", LogLevel.Info);
         }
         catch (Exception ex)
         {
@@ -525,19 +534,36 @@ public sealed class BotEngine : IDisposable
             // 影子模式不禁用真实手柄：它只是「看 Bot 想做什么」，用户随时可以自己上手玩
             if (_cfg.DryRun && _cfg.HidHide.HidePhysicalGamepad)
                 LogInternal("影子模式：跳过真实手柄禁用（不会影响你正常使用手柄）", LogLevel.Info);
-            if (!Pad360.IsConnected && _cfg.HidHide.HidePhysicalGamepad && !_cfg.DryRun
-                && HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0)
+            if (!Pad360.IsConnected && _cfg.HidHide.HidePhysicalGamepad && !_cfg.DryRun)
             {
-                LogInternal("检测到真实手柄：自动禁用以让虚拟手柄独占游戏输入（停止挂机时自动恢复）…", LogLevel.Warn);
-                Input.PhysicalPadControl.RequestPadHide();
-                var deadline = DateTime.Now.AddSeconds(20);
-                while (HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0
-                       && DateTime.Now < deadline)
-                    await Task.Delay(500);
-                if (HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0)
-                    LogInternal("自动禁用未完全生效——真实手柄可能仍在向游戏输入（若蓝牙手柄仍响应请手动关闭其电源，详见 data\\pad-control.log）", LogLevel.Warn);
-                else
-                    LogInternal("真实手柄已暂时禁用（虚拟手柄独占输入）", LogLevel.Success);
+                // 蓝牙配对但已关机的手柄节点依然 present+enabled（2026-10-24 反馈包实机：每次启动
+                // 都误禁用一轮，禁用升级白耗 16-20 秒，还连带触发预览超时与"未完全生效"两条假报错）。
+                // 按设备连接态过滤：只把「真的插着/开着」的手柄算作在用。
+                var padNodes = HidDeviceEnumerator.FindPhysicalGamepadDevNodes();
+                var connectedPads = HidDeviceEnumerator.FindConnectedPhysicalGamepadDevNodes();
+                if (padNodes.Count > connectedPads.Count)
+                    LogInternal("发现手柄设备节点但均未连接（蓝牙配对但已关机），跳过真实手柄禁用", LogLevel.Info);
+                if (connectedPads.Count > 0)
+                {
+                    LogInternal("检测到真实手柄：自动禁用以让虚拟手柄独占游戏输入（停止挂机时自动恢复）…", LogLevel.Warn);
+                    Input.PhysicalPadControl.RequestPadHide();
+                    // 退出条件是「目标达成」而非「节点消失」：禁用升级走父设备时子节点状态不是
+                    // CM_PROB_DISABLED，按节点消失判定会把 20 秒烧满并误报"未完全生效"。
+                    // 禁用的真正目标是释放玩家 1——slot0 空闲即达成。
+                    var deadline = DateTime.Now.AddSeconds(20);
+                    while (DateTime.Now < deadline)
+                    {
+                        if (!PadBackendProbe.IsSlot0Occupied()
+                            || HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count == 0)
+                            break;
+                        await Task.Delay(500);
+                    }
+                    if (!PadBackendProbe.IsSlot0Occupied()
+                        || HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count == 0)
+                        LogInternal("真实手柄已暂时禁用（虚拟手柄独占输入）", LogLevel.Success);
+                    else
+                        LogInternal("自动禁用未完全生效——真实手柄可能仍在向游戏输入（若蓝牙手柄仍响应请手动关闭其电源，详见 data\\pad-control.log）", LogLevel.Warn);
+                }
             }
             await ConnectPadWithFallbackAsync();
             LogInternal("虚拟手柄已连接（Xbox 360 形态，需占玩家 1 才能被游戏消费）",

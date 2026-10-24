@@ -430,10 +430,22 @@ public class MyLeagueScenario : IScenario
     /// <summary>
     /// 满级自动换人入口：排队中且回到联赛主页（无弹窗，「前往比赛」可见）时切入巡检；
     /// 巡检进行中每轮接管（先于道具核验，避免两台状态机抢同一界面）。
+    /// 手动「一键测试换人」（GUI 按钮 → IPC → 引擎请求位）无视自动开关与场次间隔，
+    /// 排队一次，同样等回联赛主页无弹窗时执行。
     /// </summary>
     private async Task<int?> HandleMaxLevelSwapAsync(MlScreen screen, Observation obs, CancellationToken ct)
     {
-        if (!LeagueConfig.AutoSwapMaxLevel) return null;
+        if (_engine.SwapTestRequested)
+        {
+            _engine.SwapTestRequested = false;
+            if (!_swapQueued)
+            {
+                _swapQueued = true;
+                _matchesSinceSwap = 0;
+                _log("[我的联赛] 手动测试：满级换人巡检已排队（回到联赛主页无弹窗时开始）", LogLevel.Success);
+            }
+        }
+        if (!LeagueConfig.AutoSwapMaxLevel && !_swapQueued) return null;
         if (_maxSwap.Idle)
         {
             if (!_swapQueued) return null;

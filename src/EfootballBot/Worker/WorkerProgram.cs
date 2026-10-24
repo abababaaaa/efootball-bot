@@ -299,6 +299,10 @@ public static class WorkerProgram
                 {
                     engine?.RequestStep();
                 }
+                else if (msg.Cmd == "swapTest")
+                {
+                    engine?.RequestSwapInspection();
+                }
                 else if (msg.Cmd == "preview")
                 {
                     previewOn = msg.On == true;

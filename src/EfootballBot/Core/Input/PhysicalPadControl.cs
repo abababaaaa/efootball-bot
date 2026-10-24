@@ -217,7 +217,10 @@ public static class PhysicalPadControl
     /// </summary>
     public static (bool Success, string Message) DisableAll()
     {
-        var leaves = FindGamepadDevNodes();
+        // 只禁「真的连着」的手柄：蓝牙配对但已关机的节点禁了也不产生输入，
+        // 还会把禁用升级（叶子→父设备，最长 16s）整条流程白跑一遍
+        var leaves = FindGamepadDevNodes()
+            .Where(n => HidDeviceEnumerator.IsDevNodeConnected(n.DevInst)).ToList();
         if (leaves.Count == 0)
             return (true, "未发现已启用的物理手柄（可能已禁用或未连接）");
 

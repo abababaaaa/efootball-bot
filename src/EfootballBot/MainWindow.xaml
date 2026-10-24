@@ -420,7 +420,6 @@
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
                             <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
                             <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}" Text="自动核对难度，不一致自动改选"/>
@@ -430,11 +429,6 @@
                             <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}" Text="达到场次停止并还原窗口，卡住自动恢复"/>
                             <Ellipse Grid.Row="3" Style="{StaticResource BulletDot}"/>
                             <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource BulletText}" Text="需虚拟手柄；占用时自动让步"/>
-                            <!-- 单步：暂停状态下走一拍（陌生界面排障），不改变暂停状态 -->
-                            <Button x:Name="BtnStep" Content="单步走一拍（暂停中）" Style="{StaticResource LinkBtn}"
-                                    Grid.Row="4" Grid.Column="1" HorizontalAlignment="Left" Margin="-4,2,0,0"
-                                    Padding="8,5" IsEnabled="False" Click="BtnStep_Click"
-                                    ToolTip="暂停时执行一轮「观察 + 决策」后继续暂停：看 Bot 对当前画面打算做什么，且只做一步"/>
                             </Grid>
                         </StackPanel>
                         <Border Grid.Column="1" Style="{StaticResource RailCard}" Width="190"
@@ -453,7 +447,16 @@
                                         Style="{StaticResource DangerOutlineBtn}" Height="30" Margin="0,6,0,0"
                                         IsEnabled="False" Click="BtnManualStop_Click"
                                         ToolTip="停止挂机并自动截取当前游戏画面，生成反馈包发给作者"/>
-
+                                <!-- 单步：暂停状态下走一拍（陌生界面排障），不改变暂停状态；仅暂停中可用 -->
+                                <Button x:Name="BtnStep" Content="单步走一拍（暂停中）" Style="{StaticResource LinkBtn}"
+                                        HorizontalAlignment="Left" Margin="-4,8,0,0"
+                                        Padding="8,4" IsEnabled="False" Click="BtnStep_Click"
+                                        ToolTip="暂停时执行一轮「观察 + 决策」后继续暂停：看 Bot 对当前画面打算做什么，且只做一步"/>
+                                <!-- 满级换人手动测试：立即排队一次巡检（无视每 N 场间隔与自动开关） -->
+                                <Button x:Name="BtnTestSwap" Content="一键测试满级换人" Style="{StaticResource LinkBtn}"
+                                        HorizontalAlignment="Left" Margin="-4,4,0,0"
+                                        Padding="8,4" IsEnabled="False" Click="BtnTestSwap_Click"
+                                        ToolTip="立即请求一次满级巡检：回到我的联赛主页（无弹窗）后自动开始——满级（等级 x/x 且能力点未用完）球员先分配能力点，再从后备换入当前等级最低的球员；全程可用暂停/一键结束中断"/>
                             </StackPanel>
                         </Border>
                     </Grid>
@@ -470,7 +473,8 @@
                             <TextBlock Text="比赛难度" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
                                        HorizontalAlignment="Left"/>
                             <ComboBox x:Name="CmbDifficulty" Width="132" HorizontalAlignment="Left"
-                                      SelectedIndex="0">
+                                      SelectedIndex="0"
+                                      ToolTip="难度与游戏内一一对应：开赛时自动核对，不一致自动改选；关键比赛固定按游戏默认难度开赛">
                                 <ComboBoxItem Content="新手"/>
                                 <ComboBoxItem Content="业余"/>
                                 <ComboBoxItem Content="标准"/>
@@ -483,7 +487,8 @@
                         <StackPanel Grid.Column="1" Margin="0,0,10,0">
                             <TextBlock Text="完成场次停止" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
                                        HorizontalAlignment="Left"/>
-                            <StackPanel Orientation="Horizontal">
+                            <StackPanel Orientation="Horizontal"
+                                        ToolTip="达到设定场次（本次挂机累计）自动停止并还原窗口；0 = 一直挂机，自定义请输入正整数">
                                 <ComboBox x:Name="CmbStopAfterMatches" Width="92" SelectedIndex="0"
                                           VerticalAlignment="Center" SelectionChanged="CmbStopAfter_SelectionChanged">
                                     <ComboBoxItem Content="0（无限）"/>
@@ -503,7 +508,8 @@
                         <StackPanel Grid.Column="2">
                             <TextBlock Text="关键比赛停止" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
                                        HorizontalAlignment="Left"/>
-                            <StackPanel Orientation="Horizontal">
+                            <StackPanel Orientation="Horizontal"
+                                        ToolTip="达到设定关键比赛场次（本次挂机累计）自动停止并还原窗口；0 = 一直挂机，自定义请输入正整数">
                                 <ComboBox x:Name="CmbStopAfterKeyMatches" Width="92" SelectedIndex="0"
                                           VerticalAlignment="Center" SelectionChanged="CmbStopAfter_SelectionChanged">
                                     <ComboBoxItem Content="0（无限）"/>
@@ -521,72 +527,60 @@
                             </StackPanel>
                         </StackPanel>
                     </Grid>
-                    <Grid Margin="0,10,0,0" MaxWidth="520">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="Auto"/>
-                            <ColumnDefinition Width="*"/>
-                        </Grid.ColumnDefinitions>
-                        <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto"/>
-                        <RowDefinition Height="Auto"/>
-                        </Grid.RowDefinitions>
-                    <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                    <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}" Text="难度与游戏内一一对应：开赛时自动核对，不一致自动改选；关键比赛固定按游戏默认难度开赛"/>
-                    <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
-                    <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}" Text="达到设定场次（本次挂机累计）自动停止并还原窗口；0 = 一直挂机，自定义请输入正整数"/>
-                    </Grid>
-
                     <!-- 模块选项：我的联赛道具（挂机经过物品页时自动购买） -->
                     <TextBlock Text="模块选项" Style="{StaticResource GroupLabel}" Margin="0,11,0,0"/>
-                    <Border Style="{StaticResource Inset}" Padding="14,10">
+                    <Border Style="{StaticResource Inset}" Padding="14,10"
+                            ToolTip="挂机经过物品页时按下列选择自动购买（消耗联赛积分）；每项每次至多一次，赛后核验，道具耗尽会自动补购">
                         <StackPanel>
                             <TextBlock Text="我的联赛道具（自动购买）" Style="{StaticResource CardTitle}"/>
-                            <Grid Margin="0,6,0,0" MaxWidth="520">
+                            <Grid Margin="0,8,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0">
+                                    <StackPanel Orientation="Horizontal">
+                                        <CheckBox x:Name="ChkBuyExpBoost" Content="购买经验值加成" VerticalAlignment="Center"/>
+                                        <ComboBox x:Name="CmbExpBoostLevel" Width="78" Margin="12,0,0,0" SelectedIndex="0">
+                                            <ComboBoxItem Content="2x"/>
+                                            <ComboBoxItem Content="3x"/>
+                                            <ComboBoxItem Content="4x"/>
+                                        </ComboBox>
+                                    </StackPanel>
+                                    <CheckBox x:Name="ChkBuyCoachBoost" Content="购买教练强化" Margin="0,7,0,0"/>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1">
+                                    <StackPanel Orientation="Horizontal">
+                                        <CheckBox x:Name="ChkBuyConditionBoost" Content="购买状态加成" VerticalAlignment="Center"/>
+                                        <ComboBox x:Name="CmbConditionLevel" Width="78" Margin="12,0,0,0" SelectedIndex="0">
+                                            <ComboBoxItem Content="普通+"/>
+                                            <ComboBoxItem Content="好+"/>
+                                            <ComboBoxItem Content="杰出"/>
+                                        </ComboBox>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                            <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
+                            <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                            <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}" Text="挂在物品页时按下列选择自动购买（消耗联赛积分）"/>
-                            <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}" Text="每项每次至多一次；赛后核验，道具耗尽会自动补购"/>
+                                <CheckBox x:Name="ChkMaxLevelNotify" Content="球员满级提示" VerticalAlignment="Center"/>
+                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="24,0,0,0">
+                                    <CheckBox x:Name="ChkAutoSwapMaxLevel" Content="满级自动换人" VerticalAlignment="Center"
+                                              ToolTip="每 N 场比赛结束后自动打开比赛计划巡检首发 11 人：满级（等级 x/x 且能力点未用完）球员自动分配能力点，并从后备球员换入最低等级球员；巡检优先于道具购买"/>
+                                    <ComboBox x:Name="CmbAutoSwapEvery" Width="74" Margin="12,0,0,0" SelectedIndex="3"
+                                              VerticalAlignment="Center"
+                                              ToolTip="每 N 场比赛结束后触发一次满级巡检换人">
+                                        <ComboBoxItem Content="每1场"/>
+                                        <ComboBoxItem Content="每2场"/>
+                                        <ComboBoxItem Content="每3场"/>
+                                        <ComboBoxItem Content="每5场"/>
+                                        <ComboBoxItem Content="每10场"/>
+                                    </ComboBox>
+                                </StackPanel>
                             </Grid>
-                            <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
-                                <CheckBox x:Name="ChkBuyExpBoost" Content="购买经验值加成" VerticalAlignment="Center"/>
-                                <ComboBox x:Name="CmbExpBoostLevel" Width="78" Margin="12,0,0,0" SelectedIndex="0">
-                                    <ComboBoxItem Content="2x"/>
-                                    <ComboBoxItem Content="3x"/>
-                                    <ComboBoxItem Content="4x"/>
-                                </ComboBox>
-                            </StackPanel>
-                            <CheckBox x:Name="ChkBuyCoachBoost" Content="购买教练强化" Margin="0,7,0,0"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
-                                <CheckBox x:Name="ChkBuyConditionBoost" Content="购买状态加成" VerticalAlignment="Center"/>
-                                <ComboBox x:Name="CmbConditionLevel" Width="78" Margin="12,0,0,0" SelectedIndex="0">
-                                    <ComboBoxItem Content="普通+"/>
-                                    <ComboBoxItem Content="好+"/>
-                                    <ComboBoxItem Content="杰出"/>
-                                </ComboBox>
-                            </StackPanel>
-                            <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
-                            <CheckBox x:Name="ChkMaxLevelNotify" Content="球员满级提示"/>
-                            <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
-                                <CheckBox x:Name="ChkAutoSwapMaxLevel" Content="满级自动换人" VerticalAlignment="Center"
-                                          ToolTip="每 N 场比赛结束后自动打开比赛计划巡检首发 11 人：满级（等级 x/x 且能力点未用完）球员自动分配能力点，并从后备球员换入最低等级球员；巡检优先于道具购买"/>
-                                <ComboBox x:Name="CmbAutoSwapEvery" Width="74" Margin="12,0,0,0" SelectedIndex="3"
-                                          VerticalAlignment="Center"
-                                          ToolTip="每 N 场比赛结束后触发一次满级巡检换人">
-                                    <ComboBoxItem Content="每1场"/>
-                                    <ComboBoxItem Content="每2场"/>
-                                    <ComboBoxItem Content="每3场"/>
-                                    <ComboBoxItem Content="每5场"/>
-                                    <ComboBoxItem Content="每10场"/>
-                                </ComboBox>
-                            </StackPanel>
                         </StackPanel>
                     </Border>
                     </StackPanel>

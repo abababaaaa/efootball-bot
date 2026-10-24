@@ -434,14 +434,19 @@ public sealed class WorkerHost : IDisposable
         try { Log?.Invoke(level, text); } catch { /* 订阅方异常不影响管道流程 */ }
     }
 
-    /// <summary>发送预览开关命令。</summary>
-    public Task SendPreviewAsync(bool on) => SendAsync(PipeProtocol.CmdPreview(on));
+    /// <summary>发送预览开关命令。用 start/stop 同级的写超时：自动开预览恰在开始挂机后，
+    /// Worker 正忙着引擎启动（手柄接管/停靠，实测最长 20s+），5s 写超时会把「启动中」
+    /// 误判成「Worker 可能已卡死」（2026-10-24 反馈包实机）。</summary>
+    public Task SendPreviewAsync(bool on) => SendAsync(PipeProtocol.CmdPreview(on), CommandWriteTimeout);
 
     /// <summary>暂停/继续场景循环（暂停时 Worker 清空手柄输出并停止观察与操作）。</summary>
     public Task SendPauseAsync(bool on) => SendAsync(PipeProtocol.CmdPause(on));
 
     /// <summary>单步执行一拍（仅暂停状态有效）：观察一次 + 场景决策一次后继续暂停。</summary>
     public Task SendStepAsync() => SendAsync(PipeProtocol.CmdStep());
+
+    /// <summary>手动一键测试满级换人：Worker 置位引擎请求，回联赛主页无弹窗时立即巡检。</summary>
+    public Task SendSwapTestAsync() => SendAsync(PipeProtocol.CmdSwapTest());
 
     /// <summary>枚举 \\.\pipe\ 判断 Worker 管道是否已存在（避免在服务器未监听时空连产生幽灵句柄）。</summary>
     private static bool PipeExists(string pipeName)

@@ -427,7 +427,7 @@ public partial class MainWindow : Window
                 _paused = false;
                 RefreshRunButtons(); // 刷新三按钮：开始→一键结束，暂停/手动停止启用
                 _statsTimer.Start();
-                if (!_previewOn) BtnPreview_Click(btn, new RoutedEventArgs()); // 自动开预览
+                AutoOpenPreview(); // 自动开预览（非阻塞，帧看门狗负责重发直到引擎就绪出帧）
 
                 // 引擎启动后注册全局热键（单热键：第一次暂停，第二次终止）
                 if (_cfg.Hotkey.Enabled)
@@ -591,6 +591,34 @@ public partial class MainWindow : Window
         catch (Exception ex)
         {
             AppendLog($"单步命令发送失败：{ex.Message}", LogLevel.Error);
+        }
+    }
+
+    /// <summary>
+    /// 一键测试满级换人：立即排队一次巡检（无视每 N 场间隔与自动开关）。
+    /// Worker 置位引擎请求位，场景回到我的联赛主页（无弹窗）后自动开始；
+    /// 巡检全程仍受暂停/一键结束热键与按钮控制（停止即中断，退出后交还正常流程）。
+    /// </summary>
+    private async void BtnTestSwap_Click(object sender, RoutedEventArgs e)
+    {
+        if (_workerHost is not { ScenarioRunning: true })
+        {
+            AppendLog("【满级换人】当前没有运行中的挂机，请先在「我的联赛挂机」点开始。", LogLevel.Info);
+            return;
+        }
+        if (_activeStartBtn != BtnStartMyLeague)
+        {
+            AppendLog("【满级换人】测试按钮仅对「我的联赛挂机」模块生效。", LogLevel.Info);
+            return;
+        }
+        try
+        {
+            await _workerHost.SendSwapTestAsync();
+            AppendLog("【满级换人】已请求测试巡检：回到我的联赛主页（无弹窗）后自动开始，结束或中途停止后照常挂机。", LogLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"【满级换人】请求失败：{ex.Message}", LogLevel.Error);
         }
     }
 

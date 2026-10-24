@@ -141,7 +141,71 @@ public static class HidDeviceEnumerator
         return result;
     }
 
+    /// <summary>当前存在的物理手柄设备节点中「真的连着」的那部分：
+    /// 蓝牙配对但已关机的手柄节点依然 present+enabled（2026-10-24 反馈包实机：Xbox 手柄蓝牙
+    /// 配对后关机，每次启动都被当成在用的真实手柄误禁用一轮，禁用升级白耗 16-20 秒启动）。
+    /// 连接态以 DEVPKEY_Device_IsConnected 为准（自节点与祖先链任一明确报「未连接」即算未连接；
+    /// 全链查不到该属性——USB 节点常见——按已连接兜底，宁可多禁不漏禁）。</summary>
+    public static List<HidInstance> FindConnectedPhysicalGamepadDevNodes()
+        => FindPhysicalGamepadDevNodes()
+            .Where(n => IsDevNodeConnected(n.DevInst)).ToList();
+
+    /// <summary>设备节点（含祖先链）是否「当前物理连接」。蓝牙栈在 BTHLE/BTHENUM 节点上维护
+    /// DEVPKEY_Device_IsConnected，是「配对」与「连接」的唯一可靠区分；属性缺失或查询异常按
+    /// 已连接兜底（保持旧行为）。</summary>
+    public static bool IsDevNodeConnected(int devInst)
+    {
+        try
+        {
+            int cur = devInst;
+            for (int depth = 0; depth <= 3; depth++)
+            {
+                var (hasProperty, connected) = QueryDevNodeIsConnected(cur);
+                if (hasProperty) return connected;
+                if (CM_Get_Parent(out cur, cur, 0) != 0)
+                    return true; // 到达树根整链无该属性：按已连接兜底
+            }
+            return true;
+        }
+        catch { return true; }
+    }
+
+    /// <summary>读单个节点的 DEVPKEY_Device_IsConnected。hasProperty=false = 节点无此属性。</summary>
+    private static (bool HasProperty, bool Connected) QueryDevNodeIsConnected(int devInst)
+    {
+        var key = new DEVPROPKEY
+        {
+            FmtId = new Guid("540B947E-8B40-45BC-A8A2-6A0B894CBDA2"), // DEVPKEY_Device_IsConnected
+            Pid = 2,
+        };
+        var buf = new byte[1];
+        uint size = (uint)buf.Length;
+        int cr = CM_Get_DevNode_PropertyW(devInst, ref key, out uint type, buf, ref size, 0);
+        if (cr == CrBufferSmall)
+        {
+            buf = new byte[size];
+            cr = CM_Get_DevNode_PropertyW(devInst, ref key, out type, buf, ref size, 0);
+        }
+        if (cr != 0) return (false, true);
+        if (type != DevpropTypeBoolean || size < 1) return (false, true);
+        return (true, buf[0] != 0);
+    }
+
     // ---------- Win32 ----------
+
+    private const int CrBufferSmall = 0x1A; // CR_BUFFER_SMALL
+    private const uint DevpropTypeBoolean = 0x0000000B;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct DEVPROPKEY
+    {
+        public Guid FmtId;
+        public uint Pid;
+    }
+
+    [DllImport("cfgmgr32.dll", CharSet = CharSet.Unicode)]
+    private static extern int CM_Get_DevNode_PropertyW(int dnDevInst, ref DEVPROPKEY propertyKey,
+        out uint propertyType, byte[] propertyBuffer, ref uint propertyBufferSize, uint ulFlags);
 
     private const uint DIGCF_PRESENT = 0x2;
     private const uint DnHasProblem = 0x00000400;

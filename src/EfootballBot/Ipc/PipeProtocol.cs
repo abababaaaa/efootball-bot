@@ -49,6 +49,8 @@ public static class PipeProtocol
     public static Msg CmdPause(bool on) => new() { Cmd = on ? "pause" : "resume" };
     /// <summary>单步：暂停状态下执行一轮观察+决策（陌生界面排障用）。</summary>
     public static Msg CmdStep() => new() { Cmd = "step" };
+    /// <summary>手动一键测试满级换人：立即排队一次巡检（无视每 N 场间隔与自动开关）。</summary>
+    public static Msg CmdSwapTest() => new() { Cmd = "swapTest" };
     public static Msg CmdPreview(bool on) => new() { Cmd = "preview", On = on };
     public static Msg CmdReloadConfig() => new() { Cmd = "reloadConfig" };
     public static Msg CmdPing() => new() { Cmd = "ping" };

@@ -56,6 +56,8 @@ public partial class MainWindow
             if (m.Step is not null)
                 m.Step.IsEnabled = active && _paused;
         }
+        // 满级换人手动测试：仅国际服我的联赛模块运行中可用（该场景消费请求）
+        BtnTestSwap.IsEnabled = running && _activeStartBtn == BtnStartMyLeague && !_paused;
     }
 
     private async void BtnManualStop_Click(object sender, RoutedEventArgs e)

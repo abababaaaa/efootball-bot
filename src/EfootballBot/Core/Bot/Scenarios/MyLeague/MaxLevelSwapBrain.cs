@@ -178,32 +178,51 @@ public static partial class MaxLevelSwapBrain
 
     /// <summary>
     /// 排序弹窗右上角方向箭头：↑ = 当前等级升序（列表首位为最低等级，换人目标）。
-    /// 实机 2026-10-24（1280×720）：箭头 x≈0.937~0.969、y≈0.080~0.149——上箭头箭头主体
-    /// （宽）在上半、箭杆（细）在下半，上/下半亮像素比 ≈1.8；下箭头相反。
-    /// 亮像素太少（箭头没渲染/区域错）或比例接近返回 null（方向未知，调用方按升序处理并告警）。
+    /// 实机 2026-10-24（1280×720 用户截图）：箭头为「菱形头 + 细杆」emoji 形态，
+    /// 菱形最宽行恰好跨在探针区域中线上——按固定中线分割上下半恒近对称（实机 ↓ 140/154）。
+    /// 正确做法：先框出亮像素包围盒，再按包围盒中线分——↑ 的宽行在上半（约 2.4:1），
+    /// ↓ 在下半（约 0.6:1），阈值 1.5。读不出返回 null（调用方按升序处理并告警）。
     /// </summary>
     public static bool? IsSortArrowUp(FrameData f)
     {
-        if (f.Width < 200 || f.Height < 120 || f.Bgra.Length < f.Width * f.Height * 4) return null;
+        var (top, bottom, total) = DiagSortArrow(f);
+        if (total < 40) return null;
+        if (top >= bottom * 3 / 2 + 3) return true;   // 上半明显更亮 → ↑
+        if (bottom >= top * 3 / 2 + 3) return false;  // 下半明显更亮 → ↓
+        return null;
+    }
+
+    /// <summary>箭头探针明细（包围盒上半/下半亮像素数），校准实机帧用。</summary>
+    internal static (int Top, int Bottom, int Total) DiagSortArrow(FrameData f)
+    {
+        if (f.Width < 200 || f.Height < 120 || f.Bgra.Length < f.Width * f.Height * 4) return (0, 0, 0);
         int x0 = (int)(f.Width * 0.92), x1 = (int)(f.Width * 0.98);
-        int y0 = (int)(f.Height * 0.06), y1 = (int)(f.Height * 0.17);
-        int mid = (y0 + y1) / 2;
-        int top = 0, bottom = 0;
+        int y0 = (int)(f.Height * 0.04), y1 = (int)(f.Height * 0.20);
+        var rowLit = new int[y1 - y0];
+        int firstRow = -1, lastRow = -1;
         for (int y = y0; y < y1; y++)
         {
+            int lit = 0;
             for (int x = x0; x < x1; x++)
             {
                 int i = (y * f.Width + x) * 4;
                 if (f.Bgra[i] < 120 && f.Bgra[i + 1] < 120 && f.Bgra[i + 2] < 120) continue;
-                if (y < mid - 1) top++;
-                else if (y > mid + 1) bottom++;
+                lit++;
             }
+            rowLit[y - y0] = lit;
+            if (lit >= 2) { if (firstRow < 0) firstRow = y; lastRow = y; }
         }
-        int total = top + bottom;
-        if (total < 15) return null;
-        if (top * 4 >= bottom * 5 && top >= bottom + 3) return true;   // 上半明显更亮 → ↑
-        if (bottom * 4 >= top * 5 && bottom >= top + 3) return false;  // 下半明显更亮 → ↓
-        return null;
+        int total = rowLit.Sum();
+        // 包围盒太矮（杂点/未渲染箭头）：不算方向
+        if (firstRow < 0 || lastRow - firstRow < 12) return (0, 0, total);
+        int mid = (firstRow + lastRow) / 2;
+        int top = 0, bottom = 0;
+        for (int y = firstRow; y <= lastRow; y++)
+        {
+            if (y <= mid) top += rowLit[y - y0];
+            else bottom += rowLit[y - y0];
+        }
+        return (top, bottom, top + bottom);
     }
 
     [global::System.Text.RegularExpressions.GeneratedRegex(@"(\d{1,3})\s*/\s*(\d{1,3})")]

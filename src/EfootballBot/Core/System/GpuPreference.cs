@@ -20,13 +20,17 @@ public static class GpuPreference
     private const string HighPerformanceValue = "GpuPreference=2;";
 
     /// <summary>
-    /// 检测双显卡（≥2 块硬件适配器）且本 exe 未设独显偏好时，写入 GpuPreference=2。
+    /// 检测多显卡（≥2 个不同名的硬件适配器）且本 exe 未设独显偏好时，写入 GpuPreference=2。
     /// 返回 written=本次是否写入了新偏好（本进程不受影响，下次进程启动生效）；
-    /// multiGpu=是否双显卡环境；adapters=硬件适配器名（日志诊断用）。
+    /// multiGpu=是否多显卡环境；adapters=硬件适配器名（日志诊断用）。
     /// </summary>
     public static (bool Written, bool MultiGpu, string Adapters) EnsureHighPerformance()
     {
-        var adapters = CaptureInterop.GetHardwareAdapterNames();
+        // 枚举内已按 Luid 去重，但 AMD 的虚拟显示适配器（Indirect Display，ROOT\DISPLAY）
+        // 与真卡同名不同 Luid——2026-10-24 反馈包实机：单卡 7800 XT 连同名一起被列出 3 次，
+        // 误报「双显卡环境（7800 XT + 7800 XT + 7800 XT）」。这里再按名字去重。
+        var adapters = CaptureInterop.GetHardwareAdapterNames()
+            .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         string desc = string.Join(" + ", adapters);
         if (adapters.Count < 2)
             return (false, false, desc); // 单显卡（台式机/无独显本）：Windows 默认即唯一 GPU，无需处理
