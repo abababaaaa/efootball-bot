@@ -120,6 +120,8 @@ public sealed class MaxLevelSwapController
     private bool _sortFilterDone;
     /// <summary>当前位详情页读到的「有剩余能力点」（橙圈徽标像素判定）。</summary>
     private bool _hasPoints;
+    /// <summary>暗卡探针连续全暗中重探计数（网格未渲染完的过场帧）。</summary>
+    private int _darkProbeTries;
     /// <summary>SwapExit 内的观察轮计数（进相位置 0）。</summary>
     private int _verifyRounds;
     /// <summary>Rewind 是否需要从门将盲走到换人位（意外退出重进时 true；换人后 B→→ 进阵时为 false）。</summary>
@@ -142,6 +144,7 @@ public sealed class MaxLevelSwapController
         _rewindWalk = false;
         _skipInspectMove = false;
         _hasPoints = false;
+        _darkProbeTries = 0;
         _exitUsedA = false;
         _errorDumped = false;
         // _sortFilterDone 有意保留：挂机会话级状态
@@ -716,10 +719,18 @@ public sealed class MaxLevelSwapController
                 {
                     _stall = 0;
                     // 跳过头像压暗的卡（同名卡在首发/替补名单内，游戏禁止重复登场，用户 2026-10-25：
-                    // 第一排左一张、第三排右一张都不可选）。全暗/探针失效时从第一张按 A。
-                    // ★选到亮卡按 A 一定成功（用户 2026-10-25 实机结论）：不做任何被挡判定，
-                    // A 完直接进退出流程（换人动画期间输入被吞，SwapExit 反复 B 直到「完成」生效）
-                    int darkSkip = MaxLevelSwapBrain.FirstBrightCardIndex(frame);
+                    // 第一排左一张、第三排右一张都不可选）。列坐标从名字行动态推导（网格列距随窗口
+                    // 变化，实机第二次进列表列距与截图标定不同——固定坐标探错格会按到暗卡）。
+                    // 探针 -1 = 网格有效但一张亮卡都没探到（多为列表未渲染完的过场帧）：等一帧重探，
+                    // 重试 2 次仍全暗才按第一张兜底。
+                    int darkSkip = MaxLevelSwapBrain.FirstBrightCardIndex(ocr, frame);
+                    if (darkSkip < 0)
+                    {
+                        if (++_darkProbeTries <= 2) return 700;
+                        log("[我的联赛] 暗卡探针连续全暗（帧未渲染？）：按第一张兜底", LogLevel.Warn);
+                        darkSkip = 0;
+                    }
+                    _darkProbeTries = 0;
                     if (darkSkip > 0)
                     {
                         log($"[我的联赛] 前 {darkSkip} 张后备卡头像压暗（同名卡在名单内）：→×{darkSkip} 跳到第 {darkSkip + 1} 张", LogLevel.Info);

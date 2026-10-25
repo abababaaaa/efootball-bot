@@ -77,6 +77,34 @@ public class SwapCalibrationDiagnostics
     }
 
     [Fact]
+    public void Dump_BenchColumnClusters()
+    {
+        foreach (var file in new[] { "bench_dark_cards.png", "bench_second_entry.png" })
+        {
+            var frame = LoadFrame(file);
+            using var ocr = new OcrRecognizer();
+            var res = TestOcr.Run(ocr, frame);
+            var words = res.Words.Where(w => w.CenterY is > 0.28 and < 0.345 && w.CenterX is > 0.08 and < 0.68)
+                .OrderBy(w => w.CenterX).ToList();
+            _out.WriteLine($"== {file}: words=[{string.Join(", ", words.Select(w => $"'{w.Text}'@{w.CenterX:F3},{w.CenterY:F3}"))}]");
+            var cols = MaxLevelSwapBrain.BenchColumnCenters(res);
+            _out.WriteLine($"   cols=[{string.Join(", ", cols.Select(c => c.ToString("F3")))}]");
+            DumpCrops(frame, res);
+        }
+    }
+
+    private void DumpCrops(FrameData frame, OcrResult res)
+    {
+        var cols = MaxLevelSwapBrain.BenchColumnCenters(res);
+        if (cols.Length == 0) cols = new[] { 0.174, 0.290, 0.405, 0.520, 0.635 };
+        var vals = new List<string>();
+        for (int row = 0; row < 4; row++)
+            for (int col = 0; col < cols.Length; col++)
+                vals.Add($"{row},{col}={MaxLevelSwapBrain.CardHighlightPixels(frame, row, col, cols)}");
+        _out.WriteLine($"   cells: {string.Join(" ", vals)}");
+    }
+
+    [Fact]
     public void Dump_ClassifyDetail_Zico()
     {
         // 详情页被误判「画面 Lineup」排查：打印命中关键词

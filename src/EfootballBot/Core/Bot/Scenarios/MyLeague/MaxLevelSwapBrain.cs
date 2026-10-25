@@ -276,22 +276,55 @@ public static partial class MaxLevelSwapBrain
 
     // ---------------- 后备列表暗卡探针（同名在首发/替补名单的卡整体压暗，用户 2026-10-25） ----------------
 
-    /// <summary>列几何：5 列卡心 x（实机 2026-10-25 截图 1280×720 归一化）。</summary>
-    private static readonly double[] BenchCols = { 0.174, 0.290, 0.405, 0.520, 0.635 };
+    /// <summary>列几何（兜底）：5 列卡心 x（实机 2026-10-25 截图 1280×720 归一化）。
+    /// 网格会随窗口/预览面板变化（实测两帧列距 0.116 vs 0.097），优先用
+    /// <see cref="BenchColumnCenters"/> 从名字行动态推导。</summary>
+    private static readonly double[] BenchColumnsFixed = { 0.174, 0.290, 0.405, 0.520, 0.635 };
 
-    /// <summary>行几何：4 行卡顶 y（名字行中心上移 0.085）。</summary>
+    /// <summary>行几何：4 行卡顶 y（名字行中心上移 0.085，两帧实测一致）。</summary>
     private static readonly double[] BenchRowTops = { 0.228, 0.389, 0.550, 0.710 };
 
     /// <summary>
-    /// 卡格高亮像素数（采样窗 x=cx±0.045、y=卡顶+0.012 起 0.09×0.115，含评分数字与头像、
+    /// 卡格列心：用第一行球员名字的 OCR 词按 x 间隙聚类推导（名字行 y≈0.31 带、
+    /// 右边预览卡区域 x&gt;0.68 排除）。网格几何随窗口变化，固定坐标会采错格
+    /// （实机 2026-10-25：第二次进列表列距与截图标定不同 → 探针失效按了暗卡）。
+    /// 词数不足返回空数组，由调用方退回固定列。
+    /// </summary>
+    internal static double[] BenchColumnCenters(OcrResult ocr)
+    {
+        var words = ocr.Words
+            .Where(w => w.CenterY is > 0.28 and < 0.345 && w.CenterX is > 0.08 and < 0.68)
+            // 单字符碎片（图标/评分边缘误读，如 'F'@0.436）不算名字词，否则劈出假列
+            .Where(w => w.Text.Replace(" ", "").Length >= 2)
+            .OrderBy(w => w.CenterX)
+            .ToList();
+        var groups = new List<(double Lo, double Hi)>();
+        foreach (var w in words)
+        {
+            if (groups.Count > 0 && w.CenterX - groups[^1].Hi < 0.030)
+                groups[^1] = (groups[^1].Lo, w.CenterX); // 同名字的第二个词（如 Dodi Lukébakio）
+            else
+                groups.Add((w.CenterX, w.CenterX));
+        }
+        return groups.Count >= 3 ? groups.Select(g => (g.Lo + g.Hi) / 2).ToArray() : Array.Empty<double>();
+    }
+
+    /// <summary>
+    /// 卡格高亮像素数（采样窗 x=cx±half、y=卡顶+0.012 起 0.115 高，含评分数字与头像、
     /// 避开名字行与选中蓝框角）。实机 20 格标定：压暗卡 144/147（连白字都暗），
     /// 亮卡最低 259（深色球衣但鲜艳的卡不受影响——压暗是乘性降光，高光最敏感）。
     /// </summary>
-    internal static int CardHighlightPixels(FrameData f, int row, int col)
+    internal static int CardHighlightPixels(FrameData f, int row, int col, double[] columns)
     {
-        if (row < 0 || row >= BenchRowTops.Length || col < 0 || col >= BenchCols.Length) return 0;
+        if (row < 0 || row >= BenchRowTops.Length || col < 0 || col >= columns.Length) return 0;
         if (f.Width < 200 || f.Height < 120 || f.Bgra.Length < f.Width * f.Height * 4) return 0;
-        int x0 = (int)((BenchCols[col] - 0.045) * f.Width), x1 = (int)((BenchCols[col] + 0.045) * f.Width);
+        double half = 0.045;
+        if (columns.Length >= 2)
+        {
+            double spacing = columns.Length >= 2 ? columns[1] - columns[0] : 0.116;
+            if (spacing > 0) half = Math.Min(0.045, spacing * 0.42);
+        }
+        int x0 = (int)((columns[col] - half) * f.Width), x1 = (int)((columns[col] + half) * f.Width);
         int y0 = (int)((BenchRowTops[row] + 0.012) * f.Height);
         int y1 = (int)((BenchRowTops[row] + 0.012 + 0.115) * f.Height);
         x0 = Math.Max(0, x0); y0 = Math.Max(0, y0);
@@ -310,19 +343,35 @@ public static partial class MaxLevelSwapBrain
     /// <summary>
     /// 第一张未压暗卡的下标（行优先、0 起；0 = 第一张就可用）。同名卡头像整体变暗不可换入
     /// （用户 2026-10-25：第一排左一张、第三排右一张都不能选）。亮 = 高亮占比 ≥ 0.021
-    /// （暗卡实测 1.5%、亮卡最低 2.7%）。全部不亮（真全暗/帧不可判，如测试黑帧）返回 0
-    /// 保守不跳——真被挡由换入验证的「画面无变化」兜底逐张右移。
+    /// （暗卡实测 1.5%、亮卡最低 2.7%）。
+    /// 返回 -1 = 网格有效但一张亮卡都没探到（多为列表未渲染完的过场帧）→ 上层等一帧重探；
+    /// 返回 0 = 帧整体太黑（黑帧/探针不可用）→ 保守不跳。
     /// </summary>
-    public static int FirstBrightCardIndex(FrameData f)
+    public static int FirstBrightCardIndex(OcrResult ocr, FrameData f)
     {
+        var cols = BenchColumnCenters(ocr);
+        if (cols.Length != 5) cols = BenchColumnsFixed; // 少检/多检列会让行优先下标错位，退回固定列
         long area = (long)(0.09 * f.Width) * (long)(0.115 * f.Height);
         if (area <= 0) return 0;
         int threshold = (int)(area * 21 / 1000); // 0.021
         for (int row = 0; row < BenchRowTops.Length; row++)
-            for (int col = 0; col < BenchCols.Length; col++)
-                if (CardHighlightPixels(f, row, col) >= threshold)
-                    return row * BenchCols.Length + col;
-        return 0;
+            for (int col = 0; col < cols.Length; col++)
+                if (CardHighlightPixels(f, row, col, cols) >= threshold)
+                    return row * cols.Length + col;
+        return FrameMeanLuma(f) < 8 ? 0 : -1;
+    }
+
+    /// <summary>整帧平均亮度（每 4 像素采样一次）。</summary>
+    private static double FrameMeanLuma(FrameData f)
+    {
+        if (f.Width < 200 || f.Height < 120 || f.Bgra.Length < f.Width * f.Height * 4) return 0;
+        long sum = 0; int n = 0;
+        for (int i = 0; i < f.Bgra.Length; i += 16)
+        {
+            sum += (f.Bgra[i] * 299 + f.Bgra[i + 1] * 587 + f.Bgra[i + 2] * 114) / 1000;
+            n++;
+        }
+        return n == 0 ? 0 : (double)sum / n;
     }
 
     // ---------------- 详情页等级列文本（供整帧+裁切两源合并解析） ----------------

@@ -725,13 +725,34 @@ public class MaxLevelSwapTests
         // 用户 2026-10-25 截图：第一排左一（Koné）与第三排右一（Torres）头像压暗不可选，
         // 第一张亮卡 = 第一排第二张（下标 1）→ BenchSwap 按 →×1 再 A
         var frame = LoadFrame("bench_dark_cards.png");
-        Assert.Equal(1, MaxLevelSwapBrain.FirstBrightCardIndex(frame));
+        using var ocr = RealOcr();
+        var res = TestOcr.Run(ocr, frame);
+        Assert.Equal(1, MaxLevelSwapBrain.FirstBrightCardIndex(res, frame));
 
         var c = new MaxLevelSwapController();
         var reader = new ScriptReader();
         var pad = await DriveToSwapAsync(c, reader);
         int before = pad.Log.Count;
-        await c.StepCore(BenchOcr(), frame, pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(res, frame, pad, reader.Read, SilentLog, null, null, CT);
+        Assert.Equal(new[] { "Rightx1", "A" }, pad.Log.Skip(before).ToArray());
+    }
+
+    [Fact]
+    public async Task RealBenchFrame_SecondEntry_CompressedGrid_SkipsDark()
+    {
+        // 实机 2026-10-25 第二次进后备列表（跳过排序/筛选时）：网格列距 0.097 vs 标定 0.116，
+        // 固定列会探错格按到暗卡——动态列（名字行聚类）必须仍然跳过压暗的第一张
+        var frame = LoadFrame("bench_second_entry.png");
+        using var ocr = RealOcr();
+        var res = TestOcr.Run(ocr, frame);
+        Assert.Equal(5, MaxLevelSwapBrain.BenchColumnCenters(res).Length);
+        Assert.Equal(1, MaxLevelSwapBrain.FirstBrightCardIndex(res, frame));
+
+        var c = new MaxLevelSwapController();
+        var reader = new ScriptReader();
+        var pad = await DriveToSwapAsync(c, reader);
+        int before = pad.Log.Count;
+        await c.StepCore(res, frame, pad, reader.Read, SilentLog, null, null, CT);
         Assert.Equal(new[] { "Rightx1", "A" }, pad.Log.Skip(before).ToArray());
     }
 
@@ -740,11 +761,16 @@ public class MaxLevelSwapTests
     {
         // 暗卡（r1c1/r3c5）高亮像素远低于亮卡（r1c2/r4c3），阈值分离度见 CardHighlightPixels
         var frame = LoadFrame("bench_dark_cards.png");
-        Assert.True(MaxLevelSwapBrain.CardHighlightPixels(frame, 0, 0) < 200);  // Koné 压暗
-        Assert.True(MaxLevelSwapBrain.CardHighlightPixels(frame, 2, 4) < 200);  // Torres 压暗
-        Assert.True(MaxLevelSwapBrain.CardHighlightPixels(frame, 0, 1) > 250);  // 亮卡
-        Assert.True(MaxLevelSwapBrain.CardHighlightPixels(frame, 3, 2) > 250);
-        Assert.Equal(0, MaxLevelSwapBrain.FirstBrightCardIndex(BlackFrame())); // 帧不可判：保守不跳
+        using var ocr = RealOcr();
+        var res = TestOcr.Run(ocr, frame);
+        var cols = MaxLevelSwapBrain.BenchColumnCenters(res);
+        Assert.Equal(5, cols.Length); // 名字行聚类得 5 列
+        Assert.True(MaxLevelSwapBrain.CardHighlightPixels(frame, 0, 0, cols) < 200);  // Koné 压暗
+        Assert.True(MaxLevelSwapBrain.CardHighlightPixels(frame, 2, 4, cols) < 200);  // Torres 压暗
+        Assert.True(MaxLevelSwapBrain.CardHighlightPixels(frame, 0, 1, cols) > 250);  // 亮卡
+        Assert.True(MaxLevelSwapBrain.CardHighlightPixels(frame, 3, 2, cols) > 250);
+        // 黑帧/无名单：探针不可判 → 保守不跳
+        Assert.Equal(0, MaxLevelSwapBrain.FirstBrightCardIndex(HomeOcr(), BlackFrame()));
     }
 
     [Fact]
