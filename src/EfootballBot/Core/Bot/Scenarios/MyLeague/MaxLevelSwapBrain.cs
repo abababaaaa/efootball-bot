@@ -262,6 +262,97 @@ public static partial class MaxLevelSwapBrain
     public static bool HasDialogConfirmWords(OcrResult ocr) =>
         ocr.ContainsJoined("确定") || ocr.ContainsJoined("确认") || ocr.ContainsJoined("是否");
 
+    // ---------------- 后备列表暗卡探针（同名在首发/替补名单的卡整体压暗，用户 2026-10-25） ----------------
+
+    /// <summary>列几何：5 列卡心 x（实机 2026-10-25 截图 1280×720 归一化）。</summary>
+    private static readonly double[] BenchCols = { 0.174, 0.290, 0.405, 0.520, 0.635 };
+
+    /// <summary>行几何：4 行卡顶 y（名字行中心上移 0.085）。</summary>
+    private static readonly double[] BenchRowTops = { 0.228, 0.389, 0.550, 0.710 };
+
+    /// <summary>
+    /// 卡格高亮像素数（采样窗 x=cx±0.045、y=卡顶+0.012 起 0.09×0.115，含评分数字与头像、
+    /// 避开名字行与选中蓝框角）。实机 20 格标定：压暗卡 144/147（连白字都暗），
+    /// 亮卡最低 259（深色球衣但鲜艳的卡不受影响——压暗是乘性降光，高光最敏感）。
+    /// </summary>
+    internal static int CardHighlightPixels(FrameData f, int row, int col)
+    {
+        if (row < 0 || row >= BenchRowTops.Length || col < 0 || col >= BenchCols.Length) return 0;
+        if (f.Width < 200 || f.Height < 120 || f.Bgra.Length < f.Width * f.Height * 4) return 0;
+        int x0 = (int)((BenchCols[col] - 0.045) * f.Width), x1 = (int)((BenchCols[col] + 0.045) * f.Width);
+        int y0 = (int)((BenchRowTops[row] + 0.012) * f.Height);
+        int y1 = (int)((BenchRowTops[row] + 0.012 + 0.115) * f.Height);
+        x0 = Math.Max(0, x0); y0 = Math.Max(0, y0);
+        x1 = Math.Min(f.Width, x1); y1 = Math.Min(f.Height, y1);
+        int hi = 0;
+        for (int y = y0; y < y1; y++)
+            for (int x = x0; x < x1; x++)
+            {
+                int i = (y * f.Width + x) * 4;
+                int lum = (f.Bgra[i] * 299 + f.Bgra[i + 1] * 587 + f.Bgra[i + 2] * 114) / 1000;
+                if (lum >= 180) hi++;
+            }
+        return hi;
+    }
+
+    /// <summary>
+    /// 第一张未压暗卡的下标（行优先、0 起；0 = 第一张就可用）。同名卡头像整体变暗不可换入
+    /// （用户 2026-10-25：第一排左一张、第三排右一张都不能选）。亮 = 高亮占比 ≥ 0.021
+    /// （暗卡实测 1.5%、亮卡最低 2.7%）。全部不亮（真全暗/帧不可判，如测试黑帧）返回 0
+    /// 保守不跳——真被挡由换入验证的「画面无变化」兜底逐张右移。
+    /// </summary>
+    public static int FirstBrightCardIndex(FrameData f)
+    {
+        long area = (long)(0.09 * f.Width) * (long)(0.115 * f.Height);
+        if (area <= 0) return 0;
+        int threshold = (int)(area * 21 / 1000); // 0.021
+        for (int row = 0; row < BenchRowTops.Length; row++)
+            for (int col = 0; col < BenchCols.Length; col++)
+                if (CardHighlightPixels(f, row, col) >= threshold)
+                    return row * BenchCols.Length + col;
+        return 0;
+    }
+
+    // ---------------- 详情页等级列文本（供整帧+裁切两源合并解析） ----------------
+
+    /// <summary>整帧「等级」表头正下方的值文本（与 <see cref="ReadParts"/> 同几何）。</summary>
+    public static string? ReadLevelText(OcrResult ocr)
+    {
+        var lvHead = FindHead(ocr, "等级", 0.28);
+        return lvHead is null ? null : JoinBelow(ocr, lvHead, FindHead(ocr, "能力点", 0.28), 0.10);
+    }
+
+    /// <summary>
+    /// 多来源等级解析兜底：每个来源先按整串（<see cref="ParseLevelPair"/>），全部失败再
+    /// 跨来源拼半截——实机 2026-10-25 落帧 read_fail_split：整帧 OCR 读到「/32」漏了「1」，
+    /// 裁切放大帧读到「1」却丢了「/32」（两帧各读半截）。斜杠后段=上限、无斜杠纯数字=当前，
+    /// 逐来源提取后合并。
+    /// </summary>
+    internal static (int Cur, int Max)? ParseLevelPairLoose(params string?[] sources)
+    {
+        foreach (var s in sources)
+            if (ParseLevelPair(s) is { } p) return p;
+        int? cur = null, max = null;
+        foreach (var s in sources)
+        {
+            if (string.IsNullOrEmpty(s)) continue;
+            int slash = s.IndexOf('/');
+            string before = slash >= 0 ? s[..slash] : s;
+            string after = slash >= 0 ? s[(slash + 1)..] : "";
+            if (cur is null)
+            {
+                string bd = new(before.Where(char.IsDigit).ToArray());
+                if (bd.Length is > 0 and <= 2 && int.TryParse(bd, out int c) && c <= 99) cur = c;
+            }
+            if (max is null && after.Length > 0)
+            {
+                string ad = new(after.Where(char.IsDigit).ToArray());
+                if (ad.Length is > 0 and <= 2 && int.TryParse(ad, out int m) && m is > 0 and <= 99) max = m;
+            }
+        }
+        return cur is { } cc && max is { } mm && cc <= mm ? (cc, mm) : null;
+    }
+
     // ---------------- 排序/筛选「已设置」探针（中断续跑不重复勾选） ----------------
 
     /// <summary>

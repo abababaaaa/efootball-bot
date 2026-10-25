@@ -515,16 +515,14 @@ public class MaxLevelSwapTests
         var upArrow = ArrowFrame(up: true);
         for (int k = 0; k < 10; k++) reader.Enqueue(new PlayerStatus(23, 26, 44));
 
-        // 排序 → 筛选 → 卡片类型 → 应用 → 交换（验证生效）→ 完成 → 重进 → 继续巡检
+        // 排序 → 筛选 → 卡片类型 → 应用 → 交换（黑帧探针不跳卡）→ 画面回站位页=成功 → 完成 → 重进 → 继续巡检
         await c.StepCore(SortOcr(), upArrow, pad, reader.Read, SilentLog, null, null, CT);        // ↑×6 ↓×5 A
         await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);  // ← ↓ A 开筛选
         await c.StepCore(FilterOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // ↑×9 ↓×4 A
         await c.StepCore(CardTypeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 勾选 + B
         await c.StepCore(FilterOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // ↓×4 ↓ A 应用
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 快照+ A 交换
-        await c.StepCore(BenchOcr(2390), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 验证 r1（观察）
-        await c.StepCore(BenchOcr(2390), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 验证 r2（观察）
-        await c.StepCore(BenchOcr(2390), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // r3：整体实力变化 → 生效，B 完成
+        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 暗卡探针(黑帧=0) + A 交换
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // 画面回站位页 = 成效 → B 完成
         await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);   // SwapExit 见主页 → Reopen
         await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);   // Y 重进
         await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // 盲走回换人位（swapPos=0 无移动）
@@ -586,9 +584,9 @@ public class MaxLevelSwapTests
         Assert.Equal(i + 1, log.Length);                            // 没有多余按键
     }
 
-    // ---------------- 换入验证 / 同名卡跳位重试（用户 2026-10-25 实机规则） ----------------
+    // ---------------- 换入验证 / 暗卡跳过 / 同名卡重试（用户 2026-10-25 实机规则） ----------------
 
-    /// <summary>驱动到「筛选已应用、后备列表就绪」：下一步 StepCore(BenchOcr) 即快照+按 A 交换。</summary>
+    /// <summary>驱动到「筛选已应用、后备列表就绪」：下一步 StepCore(BenchOcr) 即选卡+按 A 交换。</summary>
     private static async Task<FakePad> DriveToSwapAsync(MaxLevelSwapController c, ScriptReader reader)
     {
         var pad = await DriveToSortAsync(c, reader);
@@ -601,91 +599,62 @@ public class MaxLevelSwapTests
     }
 
     [Fact]
-    public async Task SwapVerify_OverallChanged_Success_SingleBack()
+    public async Task SwapSucceeds_WhenScreenReturnsToLineup()
     {
-        // 整体实力变化 = 换入生效：观察 2 轮后只按一次 B 完成 → 主页 → Y 重进
+        // 画面回到站位页 = 换入成功（用户 2026-10-25）：一次 B 完成 → 主页 → Y 重进
         var c = new MaxLevelSwapController();
         var reader = new ScriptReader();
         var pad = await DriveToSwapAsync(c, reader);
+        var lineup = Ocr(LineupOcr());
 
         int before = pad.Log.Count;
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 快照 + A
-        await c.StepCore(BenchOcr(2390), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // r1 观察
-        await c.StepCore(BenchOcr(2390), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // r2 观察
-        await c.StepCore(BenchOcr(2390), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // r3 判定生效 → B
+        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // A 交换
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);         // 成功 → B 完成
         await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // 主页 → Reopen
         await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // Y 重进
         Assert.Equal(new[] { "A", "B", "Y" }, pad.Log.Skip(before).ToArray());
     }
 
     [Fact]
-    public async Task SwapBlocked_TwinView_RetriesNextBenchPlayer()
+    public async Task SwapBlocked_BenchUnchanged_MovesRightAndRetries()
     {
-        // 画面回到站位页（场上只剩同名卡高亮）= 被挡：B 退回后备列表 → →×1 → A 改试第 2 顺位；
-        // 第 2 顺位也被挡 → B → →×2 → A 改试第 3 顺位（用户补充规则）
+        // 画面停在后备列表没变化 = 被同名卡挡下：→ 移到下一张再 A；再被挡继续 →（用户补充规则）
         var c = new MaxLevelSwapController();
         var reader = new ScriptReader();
         var pad = await DriveToSwapAsync(c, reader);
-        var lineup = Ocr(LineupOcr());
 
         int before = pad.Log.Count;
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 快照 + A
-        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);         // r1 观察
-        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);         // r2 观察
-        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);         // r3 判被挡 → B
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // Rightx1 + A
-        Assert.Equal(new[] { "A", "B", "Rightx1", "A" }, pad.Log.Skip(before).ToArray());
+        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // A 交换
+        for (int r = 0; r < 4; r++)
+            await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // r1~r3 观察，r4 判被挡
+        Assert.Equal(new[] { "A", "Right", "A" }, pad.Log.Skip(before).ToArray());
 
         before = pad.Log.Count;
-        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);         // r1
-        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);         // r2
-        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);         // r3 → B
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // Rightx2 + A
-        Assert.Equal(new[] { "B", "Rightx2", "A" }, pad.Log.Skip(before).ToArray());
-    }
-
-    [Fact]
-    public async Task SwapBlocked_RatingUnchanged_RetriesNextBenchPlayer()
-    {
-        // 画面仍停在列表但整体实力/剩余球员数都没变 = 交换未生效：B 退回 → →×1 → A
-        var c = new MaxLevelSwapController();
-        var reader = new ScriptReader();
-        var pad = await DriveToSwapAsync(c, reader);
-
-        int before = pad.Log.Count;
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 快照 + A
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // r1
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // r2
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // r3 判未生效 → B
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // Rightx1 + A
-        Assert.Equal(new[] { "A", "B", "Rightx1", "A" }, pad.Log.Skip(before).ToArray());
+        for (int r = 0; r < 4; r++)
+            await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        Assert.Equal(new[] { "Right", "A" }, pad.Log.Skip(before).ToArray());
     }
 
     [Fact]
     public async Task SwapBlocked_GivesUpAfterSkipCap_AndExits()
     {
-        // 连续 5 位都被挡（→×1..4 仍失败）：放弃本位换人，B 完成 → 主页 → Y 重进继续巡检
+        // 连续 8 张仍被挡：放弃本位换人，B 完成 → 主页 → Y 重进继续巡检
         var c = new MaxLevelSwapController();
         var reader = new ScriptReader();
         var pad = await DriveToSwapAsync(c, reader);
-        var lineup = Ocr(LineupOcr());
 
         int before = pad.Log.Count;
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 快照 + A
         var expected = new List<string> { "A" };
-        for (int n = 1; n <= 4; n++)
+        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // A 交换
+        for (int n = 1; n <= MaxLevelSwapController.MaxSkipRetries; n++)
         {
-            for (int r = 0; r < 3; r++)
-                await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // r1~r3 → B
-            expected.Add("B");
-            await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // Rightxn + A
-            expected.Add($"Rightx{n}");
+            for (int r = 0; r < 4; r++)
+                await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+            expected.Add("Right");
             expected.Add("A");
         }
-        for (int r = 0; r < 3; r++)
-            await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);     // 第 5 次被挡 → B
-        expected.Add("B");
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 超上限 → 放弃 B
+        for (int r = 0; r < 4; r++)
+            await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 第 9 次仍被挡 → 放弃
         expected.Add("B");
         await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // 主页 → Reopen
         await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // Y 重进
@@ -696,17 +665,15 @@ public class MaxLevelSwapTests
     [Fact]
     public async Task SwapExit_ConfirmDialog_UpThenConfirm()
     {
-        // 退出确认窗盖在后备页上（页面词仍在 + 确定/取消）：上移避开取消再 A
+        // 退出确认窗盖在站位页上（页面词仍在 + 确定/取消）：上移避开取消再 A
         var c = new MaxLevelSwapController();
         var reader = new ScriptReader();
         var pad = await DriveToSwapAsync(c, reader);
 
         int before = pad.Log.Count;
-        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 快照 + A
-        await c.StepCore(BenchOcr(2390), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
-        await c.StepCore(BenchOcr(2390), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
-        await c.StepCore(BenchOcr(2390), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 生效 → B
-        var words = new List<OcrWord>(BenchOcr(2390).Words) { W("确定", 0.50, 0.50), W("取消", 0.42, 0.62) };
+        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // A 交换
+        await c.StepCore(Ocr(LineupOcr()), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 成功 → B 完成
+        var words = new List<OcrWord>(LineupOcr()) { W("确定", 0.50, 0.50), W("取消", 0.42, 0.62) };
         await c.StepCore(new OcrResult(words, 1, 1), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 确认窗 → Up + A
         await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // 主页 → Reopen
         await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // Y 重进
@@ -724,6 +691,61 @@ public class MaxLevelSwapTests
         var err = Ocr(W("功能目前无法使用", 0.5, 0.30), W("不便之处敬请原谅", 0.5, 0.45), W("OK", 0.5, 0.60));
         await c.StepCore(err, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
         Assert.Equal(new[] { "Y", "A" }, pad.Log);
+    }
+
+    // ---------------- 实机帧回归（暗卡跳过 / 半截等级合并解析） ----------------
+
+    [Fact]
+    public async Task RealBenchFrame_DarkCardsSkipped_FirstBrightIsIndex1()
+    {
+        // 用户 2026-10-25 截图：第一排左一（Koné）与第三排右一（Torres）头像压暗不可选，
+        // 第一张亮卡 = 第一排第二张（下标 1）→ BenchSwap 按 →×1 再 A
+        var frame = LoadFrame("bench_dark_cards.png");
+        Assert.Equal(1, MaxLevelSwapBrain.FirstBrightCardIndex(frame));
+
+        var c = new MaxLevelSwapController();
+        var reader = new ScriptReader();
+        var pad = await DriveToSwapAsync(c, reader);
+        int before = pad.Log.Count;
+        await c.StepCore(BenchOcr(), frame, pad, reader.Read, SilentLog, null, null, CT);
+        Assert.Equal(new[] { "Rightx1", "A" }, pad.Log.Skip(before).ToArray());
+    }
+
+    [Fact]
+    public void RealBenchFrame_CardHighlight_DarkVsBrightGap()
+    {
+        // 暗卡（r1c1/r3c5）高亮像素远低于亮卡（r1c2/r4c3），阈值分离度见 CardHighlightPixels
+        var frame = LoadFrame("bench_dark_cards.png");
+        Assert.True(MaxLevelSwapBrain.CardHighlightPixels(frame, 0, 0) < 200);  // Koné 压暗
+        Assert.True(MaxLevelSwapBrain.CardHighlightPixels(frame, 2, 4) < 200);  // Torres 压暗
+        Assert.True(MaxLevelSwapBrain.CardHighlightPixels(frame, 0, 1) > 250);  // 亮卡
+        Assert.True(MaxLevelSwapBrain.CardHighlightPixels(frame, 3, 2) > 250);
+        Assert.Equal(0, MaxLevelSwapBrain.FirstBrightCardIndex(BlackFrame())); // 帧不可判：保守不跳
+    }
+
+    [Fact]
+    public async Task RealReadFailFrame_SplitSources_MergedLevel()
+    {
+        // 实机落帧（2026-10-25 引擎捕获 1227×720，swap_read_fail_20261025_032020）：
+        // 整帧 OCR 读到「/32」漏「1」、裁切帧读到「1」丢「/32」——两源合并必须救回 (1, 32, 0)
+        var frame = LoadFrame("read_fail_split_1231.png");
+        using var ocrEngine = RealOcr();
+        var full = TestOcr.Run(ocrEngine, frame);
+        var status = await MaxLevelSwapController.ReadPartsFromFrameAsync(
+            ocrEngine, full, frame, CancellationToken.None);
+        Assert.NotNull(status);
+        Assert.Equal((1, 32, 0), (status!.Level, status.LevelMax, status.Points));
+    }
+
+    [Fact]
+    public void ParseLevelPairLoose_CombinesHalfReadings()
+    {
+        // 整串优先；两源各读半截时 跨源拼 cur/max
+        Assert.Equal((1, 32), MaxLevelSwapBrain.ParseLevelPairLoose("/32", "用脚1"));
+        Assert.Equal((27, 29), MaxLevelSwapBrain.ParseLevelPairLoose("2729", null));
+        Assert.Equal((23, 26), MaxLevelSwapBrain.ParseLevelPairLoose("23/26", "x"));
+        Assert.Null(MaxLevelSwapBrain.ParseLevelPairLoose("用脚", "/"));
+        Assert.Null(MaxLevelSwapBrain.ParseLevelPairLoose(null, null));
     }
 
     [Fact]
