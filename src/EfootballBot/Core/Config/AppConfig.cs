@@ -393,6 +393,12 @@ public sealed class WeeklyConfig
 
     /// <summary>完成场次后自动停止（本次挂机累计）。0 = 无限跑（默认：刷到主要奖励完成）。</summary>
     public int StopAfterMatches { get; set; } = 0;
+
+    /// <summary>
+    /// 全部活动刷完后的接力模块：空 = 停止挂机；intl = 我的联赛；intlladder = AI天梯联赛。
+    /// 接力在同一个挂机会话内完成（虚拟手柄与捕获会话不重建），场次计数从 0 重新开始。
+    /// </summary>
+    public string AfterCompleteModule { get; set; } = "";
 }
 
 /// <summary>
@@ -409,6 +415,12 @@ public sealed class CnWeeklyConfig
     /// <summary>比赛难度（前往比赛后的「选择比赛难度」页自动核对）：与我的联赛同表
     /// 新手 / 业余 / 标准 / 职业 / 顶尖球员 / 超级球星 / 传奇。读不到当前所选时按游戏默认直接确认。</summary>
     public string Difficulty { get; set; } = "标准";
+
+    /// <summary>
+    /// 全部活动刷完后的接力模块：空 = 停止挂机；cnmyleague = 我的联赛（国服）；cndaily = 天梯巅峰赛。
+    /// 接力在同一个挂机会话内完成（虚拟手柄与捕获会话不重建），场次计数从 0 重新开始。
+    /// </summary>
+    public string AfterCompleteModule { get; set; } = "";
 }
 
 /// <summary>

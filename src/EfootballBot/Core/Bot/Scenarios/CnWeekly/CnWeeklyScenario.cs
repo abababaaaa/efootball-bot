@@ -46,6 +46,9 @@ public sealed class CnWeeklyScenario : IScenario
         ChallengeList,
         /// <summary>挑战全部完成/锁态异常放弃：B 退介绍页退活动列表（或 B 后 A 重进清单刷新锁态）。</summary>
         ChallengeRetreat,
+        /// <summary>全部活动刷完且配置了接力模块：先 B 退回主页（活动页的词会干扰目标模块的
+        /// 界面判定），到主页后换场景继续挂机。</summary>
+        Handoff,
     }
 
     private readonly BotEngine _engine;
@@ -181,9 +184,9 @@ public sealed class CnWeeklyScenario : IScenario
             }
 
             var cwCfg = _engine.Config.CnWeekly;
-            if (cwCfg.StopAfterMatches > 0 && _engine.Stats.MatchesDone >= cwCfg.StopAfterMatches)
+            if (cwCfg.StopAfterMatches > 0 && _engine.ModuleMatchesDone >= cwCfg.StopAfterMatches)
             {
-                _log($"[国服周活动] 已完成设定场次（{_engine.Stats.MatchesDone}/{cwCfg.StopAfterMatches} 场），自动停止挂机", LogLevel.Success);
+                _log($"[国服周活动] 已完成设定场次（{_engine.ModuleMatchesDone}/{cwCfg.StopAfterMatches} 场），自动停止挂机", LogLevel.Success);
                 _engine.Stop();
                 return 0;
             }
@@ -702,6 +705,9 @@ public sealed class CnWeeklyScenario : IScenario
             case CwPhase.Retreating:
                 return await HandleRetreatingAsync(cw, ml, obs);
 
+            case CwPhase.Handoff:
+                return await HandleHandoffAsync(cw, ml);
+
             default:
                 return null;
         }
@@ -717,11 +723,7 @@ public sealed class CnWeeklyScenario : IScenario
         if (++_attempts > 4)
         {
             if (_slotIndex > 0)
-            {
-                _log($"[国服周活动] 槽位 {_slotIndex} 多次未进入活动卡：可见活动已全部刷完，停止挂机", LogLevel.Success);
-                _engine.Stop();
-                return 0;
-            }
+                return await FinishAllEventsAsync($"槽位 {_slotIndex} 多次未进入活动卡：可见活动已全部刷完");
             _log("[国服周活动] 活动列表多次未进入活动，B 退回比赛页重导航", LogLevel.Warn);
             SetPhase(CwPhase.Flow);
             await _engine.Pad.Back();
@@ -735,6 +737,48 @@ public sealed class CnWeeklyScenario : IScenario
         if (_slotIndex > 0) await _engine.Pad.DpadRepeat(PadDir.Right, _slotIndex);
         await _engine.Pad.Confirm();
         return 2800;
+    }
+
+    /// <summary>活动全部刷完（活动列表刷完 / 挑战全部通关）：配置了「全部完成后接力」就先 B 退回
+    /// 主页再交班（活动页的词会让目标模块误判界面），否则按原逻辑停止。</summary>
+    private async Task<int> FinishAllEventsAsync(string reason)
+    {
+        _log($"[国服周活动] {reason}", LogLevel.Success);
+        if (!string.IsNullOrWhiteSpace(_engine.Config.CnWeekly.AfterCompleteModule))
+        {
+            SetPhase(CwPhase.Handoff);
+            _log("[国服周活动] 已配置全部完成后接力，B 退回主页后交给目标模块", LogLevel.Info);
+            await _engine.Pad.Back();
+            return 2200;
+        }
+        _log("[国服周活动] 国服周活动挂机结束", LogLevel.Success);
+        _engine.Stop();
+        return 0;
+    }
+
+    /// <summary>接力准备：B 退出活动链回到主页（两个国服接力模块的主页都在这里）；到主页即交班。
+    /// 退出受阻（预算耗尽）也照样交班——目标模块自带残留页 B 逃生，绝不停在原地。</summary>
+    private async Task<int> HandleHandoffAsync(CwScreen cw, MlScreen ml)
+    {
+        bool neutral = cw is CwScreen.HomeRecommended or CwScreen.HomeMatch || ml == MlScreen.MainMenu;
+        if (neutral || ++_attempts > 8)
+        {
+            if (_engine.HandoffTo(_engine.Config.CnWeekly.AfterCompleteModule, "国服周活动"))
+                return 1500; // 交接完成：下一轮由新模块接管
+            _log("[国服周活动] 国服周活动挂机结束", LogLevel.Success);
+            _engine.Stop();
+            return 0;
+        }
+        if (cw == CwScreen.RewardPopup || ml == MlScreen.HasConfirm)
+        {
+            // 退出途中的弹窗先 B 关闭，多次不消改 A（确认类弹窗）
+            if (_attempts <= 4) { await _engine.Pad.Back(); return 1800; }
+            await _engine.Pad.Confirm();
+            return 1800;
+        }
+        _log($"[国服周活动] 接力准备：B 退出当前页面（{cw}）", LogLevel.Info);
+        await _engine.Pad.Back();
+        return 2200;
     }
 
     /// <summary>「选择比赛难度」页（2026-10-17 实机 cn_tour_difficulty，前往比赛后弹出）：
@@ -1143,12 +1187,10 @@ public sealed class CnWeeklyScenario : IScenario
             ResetChallengeState();
             if (noPlayable)
             {
-                _log("[国服周活动] 重进清单仍无可挑战的卡：全部挑战已完成，停止挂机", LogLevel.Success);
+                // 全部挑战已完成：与活动列表刷完同一条收尾路径（配了接力模块就继续挂机）
+                return await FinishAllEventsAsync("重进清单仍无可挑战的卡：全部挑战已完成");
             }
-            else
-            {
-                _log("[国服周活动] 挑战清单多次刷新仍无法进入挑战卡，停止挂机（请手动检查活动状态）", LogLevel.Error);
-            }
+            _log("[国服周活动] 挑战清单多次刷新仍无法进入挑战卡，停止挂机（请手动检查活动状态）", LogLevel.Error);
             _engine.StopWithError("挑战清单多次刷新仍无法进卡");
             return 0;
         }

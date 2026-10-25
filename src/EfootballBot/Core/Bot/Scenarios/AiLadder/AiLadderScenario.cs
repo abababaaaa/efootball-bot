@@ -116,9 +116,9 @@ public sealed class AiLadderScenario : IScenario
             _log($"[AI天梯联赛] 一场比赛结束（累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
 
             var cfg = _engine.Config.AiLadder;
-            if (cfg.StopAfterMatches > 0 && _engine.Stats.MatchesDone >= cfg.StopAfterMatches)
+            if (cfg.StopAfterMatches > 0 && _engine.ModuleMatchesDone >= cfg.StopAfterMatches)
             {
-                _log($"[AI天梯联赛] 已完成设定场次（{_engine.Stats.MatchesDone}/{cfg.StopAfterMatches} 场），自动停止挂机", LogLevel.Success);
+                _log($"[AI天梯联赛] 已完成设定场次（{_engine.ModuleMatchesDone}/{cfg.StopAfterMatches} 场），自动停止挂机", LogLevel.Success);
                 _engine.Stop();
                 return 0;
             }

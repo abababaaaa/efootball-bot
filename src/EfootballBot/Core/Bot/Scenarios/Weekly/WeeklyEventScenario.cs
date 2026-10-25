@@ -37,6 +37,9 @@ public sealed class WeeklyEventScenario : IScenario
         ChallengeList,
         /// <summary>挑战全部完成/异常放弃：B 退介绍页退活动列表（或 B 后 A 重进清单刷新锁态）。</summary>
         ChallengeRetreat,
+        /// <summary>全部活动刷完且配置了接力模块：先 B 退回比赛页/主菜单（活动列表的词会干扰
+        /// 目标模块的界面判定，绝不在列表上直接交班），到中性页后换场景继续挂机。</summary>
+        Handoff,
     }
 
     private readonly BotEngine _engine;
@@ -157,9 +160,9 @@ public sealed class WeeklyEventScenario : IScenario
             _log($"[周活动] 一场比赛结束（{(_matchSession.WasKeyMatch ? "关键比赛，" : "")}累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
 
             var wkCfg = _engine.Config.Weekly;
-            if (wkCfg.StopAfterMatches > 0 && _engine.Stats.MatchesDone >= wkCfg.StopAfterMatches)
+            if (wkCfg.StopAfterMatches > 0 && _engine.ModuleMatchesDone >= wkCfg.StopAfterMatches)
             {
-                _log($"[周活动] 已完成设定场次（{_engine.Stats.MatchesDone}/{wkCfg.StopAfterMatches} 场），自动停止挂机", LogLevel.Success);
+                _log($"[周活动] 已完成设定场次（{_engine.ModuleMatchesDone}/{wkCfg.StopAfterMatches} 场），自动停止挂机", LogLevel.Success);
                 _engine.Stop();
                 return 0;
             }
@@ -496,6 +499,9 @@ public sealed class WeeklyEventScenario : IScenario
             case WkPhase.ChallengeRetreat:
                 return await HandleChallengeRetreatAsync(wk, ml);
 
+            case WkPhase.Handoff:
+                return await HandleHandoffAsync(wk, ml);
+
             default:
                 return null;
         }
@@ -526,17 +532,57 @@ public sealed class WeeklyEventScenario : IScenario
             _slotIndex++;
         }
         if (_slotIndex >= 4)
-        {
-            _log("[周活动] 可见活动槽位已全部完成，周活动挂机结束", LogLevel.Success);
-            _engine.Stop();
-            return 0;
-        }
+            return await FinishAllEventsAsync();
         if (_slotIndex > 0) await _engine.Pad.DpadRepeat(PadDir.Right, _slotIndex);
 
         _log($"[周活动] 活动列表：进入槽位 {_slotIndex}", LogLevel.Info);
         SetPhase(WkPhase.IntroPopups);
         await _engine.Pad.Confirm();
         return 2800;
+    }
+
+    /// <summary>周活动全部刷完（可见槽位全部完成或被跳过）：配置了「全部完成后接力」就先 B 退回
+    /// 比赛页/主菜单再交班（活动列表的「活动/前往比赛」等词会让目标模块误判界面），否则停止。</summary>
+    private async Task<int> FinishAllEventsAsync()
+    {
+        _log("[周活动] 可见活动槽位已全部刷完（完成或跳过）", LogLevel.Success);
+        if (!string.IsNullOrWhiteSpace(_engine.Config.Weekly.AfterCompleteModule))
+        {
+            SetPhase(WkPhase.Handoff);
+            _log("[周活动] 已配置全部完成后接力，B 退回比赛页后交给目标模块", LogLevel.Info);
+            await _engine.Pad.Back();
+            return 2200;
+        }
+        _log("[周活动] 周活动挂机结束", LogLevel.Success);
+        _engine.Stop();
+        return 0;
+    }
+
+    /// <summary>接力准备：B 退出活动链回到比赛页/主菜单，到中性页后把场景换成目标模块。
+    /// 退出受阻（预算耗尽）也照样交班——目标模块自带 B 逃生，绝不停在原地。</summary>
+    private async Task<int> HandleHandoffAsync(WkScreen wk, MlScreen ml)
+    {
+        bool neutral = ml is MlScreen.MainMenu or MlScreen.MatchHub;
+        if (neutral || ++_attempts > 8)
+        {
+            if (_engine.HandoffTo(_engine.Config.Weekly.AfterCompleteModule, "周活动"))
+                return 1500; // 交接完成：下一轮由新模块接管
+            _log("[周活动] 周活动挂机结束", LogLevel.Success);
+            _engine.Stop();
+            return 0;
+        }
+        if (wk == WkScreen.EntryPopup)
+            return await PressConfirmAsync("退出途中弹窗：确认");
+        if (ml == MlScreen.HasConfirm)
+        {
+            // 返回途中的确认框：先 B 尝试取消，3 次后按 A（视为确认退出）
+            if (_attempts <= 3) { await _engine.Pad.Back(); return 2000; }
+            await _engine.Pad.Confirm();
+            return 2000;
+        }
+        _log($"[周活动] 接力准备：B 退出当前页面（{wk}）", LogLevel.Info);
+        await _engine.Pad.Back();
+        return 2200;
     }
 
     /// <summary>活动设置浮层：逐项核验修正。每轮最多一个动作（改完下一轮重新解析再验下一项），

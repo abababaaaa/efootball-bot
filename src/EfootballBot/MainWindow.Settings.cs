@@ -28,6 +28,13 @@ public partial class MainWindow
     /// <summary>场次计数停止固定档位（索引=下拉序，0=无限跑）；索引 6 = 自定义（读输入框）。</summary>
     private static readonly int[] StopAfterPresets = { 0, 1, 3, 5, 10, 20 };
 
+    /// <summary>周活动（国际服）全部完成后的接力模块（索引=下拉序；空串=不跳转，停止挂机）。
+    /// 值即引擎模式名，由 BotEngine.HandoffTo 按同一张表换场景。</summary>
+    private static readonly string[] WeeklyAfterModules = { "", "intl", "intlladder" };
+
+    /// <summary>周活动（国服）全部完成后的接力模块：国服没有 AI 天梯，只有我的联赛与天梯巅峰赛。</summary>
+    private static readonly string[] CnWeeklyAfterModules = { "", "cnmyleague", "cndaily" };
+
     /// <summary>满级自动换人间隔档位（索引=下拉序）；非档位值载入时就近收敛，缺省每 5 场。</summary>
     private static readonly int[] AutoSwapEveryPresets = { 1, 2, 3, 5, 10 };
 
@@ -172,15 +179,19 @@ public partial class MainWindow
         LoadStopAfterUi(CmbStopAfterMatches, TxtStopAfterMatches, _cfg.MyLeague.StopAfterMatches);
         LoadStopAfterUi(CmbStopAfterKeyMatches, TxtStopAfterKeyMatches, _cfg.MyLeague.StopAfterKeyMatches);
 
-        // 周活动（国际服）：赛事等级默认传奇（索引 6）；场次停止同款档位
+        // 周活动（国际服）：赛事等级默认传奇（索引 6）；场次停止同款档位；全部完成后接力
         int weeklyLevelIdx = Array.IndexOf(MyLeagueDifficulties, _cfg.Weekly.EventLevel);
         CmbWeeklyLevel.SelectedIndex = weeklyLevelIdx >= 0 ? weeklyLevelIdx : 6;
         LoadStopAfterUi(CmbWeeklyStopAfter, TxtWeeklyStopAfter, _cfg.Weekly.StopAfterMatches);
+        int weeklyAfterIdx = Array.IndexOf(WeeklyAfterModules, _cfg.Weekly.AfterCompleteModule);
+        CmbWeeklyAfter.SelectedIndex = weeklyAfterIdx >= 0 ? weeklyAfterIdx : 0;
 
-        // 周活动（国服）：难度（默认标准，索引 2）+ 场次停止
+        // 周活动（国服）：难度（默认标准，索引 2）+ 场次停止 + 全部完成后接力
         int cnWeeklyDiffIdx = Array.IndexOf(MyLeagueDifficulties, _cfg.CnWeekly.Difficulty);
         CmbCnWeeklyDifficulty.SelectedIndex = cnWeeklyDiffIdx >= 0 ? cnWeeklyDiffIdx : 2;
         LoadStopAfterUi(CmbCnWeeklyStopAfter, TxtCnWeeklyStopAfter, _cfg.CnWeekly.StopAfterMatches);
+        int cnWeeklyAfterIdx = Array.IndexOf(CnWeeklyAfterModules, _cfg.CnWeekly.AfterCompleteModule);
+        CmbCnWeeklyAfter.SelectedIndex = cnWeeklyAfterIdx >= 0 ? cnWeeklyAfterIdx : 0;
 
         // 我的联赛（国服）：难度/道具/满级提示/场次停止（独立配置段，与国际服互不影响）
         ChkCnMlBuyExpBoost.IsChecked = _cfg.CnMyLeague.BuyExpBoost;
@@ -341,11 +352,17 @@ public partial class MainWindow
         if (CmbWeeklyLevel.SelectedIndex >= 0)
             _cfg.Weekly.EventLevel = MyLeagueDifficulties[CmbWeeklyLevel.SelectedIndex];
         _cfg.Weekly.StopAfterMatches = SaveStopAfterUi(CmbWeeklyStopAfter, TxtWeeklyStopAfter);
+        _cfg.Weekly.AfterCompleteModule = WeeklyAfterModules[
+            CmbWeeklyAfter.SelectedIndex >= 0 && CmbWeeklyAfter.SelectedIndex < WeeklyAfterModules.Length
+                ? CmbWeeklyAfter.SelectedIndex : 0];
 
         // 周活动（国服）
         if (CmbCnWeeklyDifficulty.SelectedIndex >= 0)
             _cfg.CnWeekly.Difficulty = MyLeagueDifficulties[CmbCnWeeklyDifficulty.SelectedIndex];
         _cfg.CnWeekly.StopAfterMatches = SaveStopAfterUi(CmbCnWeeklyStopAfter, TxtCnWeeklyStopAfter);
+        _cfg.CnWeekly.AfterCompleteModule = CnWeeklyAfterModules[
+            CmbCnWeeklyAfter.SelectedIndex >= 0 && CmbCnWeeklyAfter.SelectedIndex < CnWeeklyAfterModules.Length
+                ? CmbCnWeeklyAfter.SelectedIndex : 0];
 
         // 我的联赛（国服）
         _cfg.CnMyLeague.BuyExpBoost = ChkCnMlBuyExpBoost.IsChecked == true;

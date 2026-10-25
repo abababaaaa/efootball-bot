@@ -224,15 +224,15 @@ public class MyLeagueScenario : IScenario
             // 计数为本此挂机累计（引擎每次启动重建）。Stop 会还原停靠窗口、复位手柄、
             // 取消观察循环，本方法返回后主循环随取消令牌干净退出。
             var mlCfg = LeagueConfig;
-            if (mlCfg.StopAfterMatches > 0 && _engine.Stats.MatchesDone >= mlCfg.StopAfterMatches)
+            if (mlCfg.StopAfterMatches > 0 && _engine.ModuleMatchesDone >= mlCfg.StopAfterMatches)
             {
-                _log($"[我的联赛] 已完成设定场次（{_engine.Stats.MatchesDone}/{mlCfg.StopAfterMatches} 场），自动停止挂机", LogLevel.Success);
+                _log($"[我的联赛] 已完成设定场次（{_engine.ModuleMatchesDone}/{mlCfg.StopAfterMatches} 场），自动停止挂机", LogLevel.Success);
                 _engine.Stop();
                 return 0;
             }
-            if (mlCfg.StopAfterKeyMatches > 0 && _engine.Stats.KeyMatches >= mlCfg.StopAfterKeyMatches)
+            if (mlCfg.StopAfterKeyMatches > 0 && _engine.ModuleKeyMatchesDone >= mlCfg.StopAfterKeyMatches)
             {
-                _log($"[我的联赛] 已完成设定关键比赛（{_engine.Stats.KeyMatches}/{mlCfg.StopAfterKeyMatches} 场），自动停止挂机", LogLevel.Success);
+                _log($"[我的联赛] 已完成设定关键比赛（{_engine.ModuleKeyMatchesDone}/{mlCfg.StopAfterKeyMatches} 场），自动停止挂机", LogLevel.Success);
                 _engine.Stop();
                 return 0;
             }

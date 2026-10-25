@@ -696,6 +696,16 @@
                                 </StackPanel>
                             </StackPanel>
                         </Grid>
+                        <StackPanel Margin="0,10,0,0" HorizontalAlignment="Left">
+                            <TextBlock Text="全部完成后" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
+                                       HorizontalAlignment="Left"/>
+                            <ComboBox x:Name="CmbWeeklyAfter" Width="150" HorizontalAlignment="Left" SelectedIndex="0"
+                                      ToolTip="周活动全部刷完后自动接力：切到所选模块继续挂机（同一会话，场次从 0 重新计数）；选「不跳转」则停止挂机">
+                                <ComboBoxItem Content="不跳转（停止）"/>
+                                <ComboBoxItem Content="我的联赛"/>
+                                <ComboBoxItem Content="AI天梯联赛"/>
+                            </ComboBox>
+                        </StackPanel>
                         <Grid Margin="0,10,0,0" MaxWidth="520">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>
@@ -1134,6 +1144,16 @@
                                 </StackPanel>
                             </StackPanel>
                         </Grid>
+                        <StackPanel Margin="0,10,0,0" HorizontalAlignment="Left">
+                            <TextBlock Text="全部完成后" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
+                                       HorizontalAlignment="Left"/>
+                            <ComboBox x:Name="CmbCnWeeklyAfter" Width="150" HorizontalAlignment="Left" SelectedIndex="0"
+                                      ToolTip="活动全部刷完后自动接力：切到所选模块继续挂机（同一会话，场次从 0 重新计数）；选「不跳转」则停止挂机">
+                                <ComboBoxItem Content="不跳转（停止）"/>
+                                <ComboBoxItem Content="我的联赛（国服）"/>
+                                <ComboBoxItem Content="天梯巅峰赛"/>
+                            </ComboBox>
+                        </StackPanel>
                         <Grid Margin="0,10,0,0" MaxWidth="520">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="Auto"/>

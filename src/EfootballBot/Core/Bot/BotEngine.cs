@@ -198,10 +198,11 @@ public sealed class BotEngine : IDisposable
         // 需接管虚拟手柄（B 键逃生依赖）；observe 纯观察不操作游戏
         bool scenarioMode = mode is "cndaily" or "cnweekly" or "cnmyleague" or "intl" or "intlweekly" or "intlladder"
             or "intlswaptest";
+        bool cn = mode is "cndaily" or "cnweekly" or "cnmyleague";
+        _cnSession = cn; // 接力目标按服校验：国际服会话绝不切到国服模块（反之亦然）
         CancellationToken token;
         try
         {
-            bool cn = mode is "cndaily" or "cnweekly" or "cnmyleague";
             token = await PrepareSessionAsync(cn ? CnProcessName : null, connectPad: scenarioMode);
         }
         catch
@@ -222,17 +223,7 @@ public sealed class BotEngine : IDisposable
         _perception ??= PerceptionPipeline.Create(_cfg, _factory, LogInternal);
         // 场景体系：cndaily=国服天梯巅峰赛 / cnweekly=国服周活动 / cnmyleague=国服我的联赛 /
         // intl=国际服我的联赛 / intlweekly=国际服周活动 / intlladder=国际服AI天梯联赛
-        Scenario = mode switch
-        {
-            "intlweekly" => new WeeklyEventScenario(this, LogInternal),
-            "cnweekly" => new CnWeeklyScenario(this, LogInternal),
-            "cndaily" => new PeakLadderScenario(this, LogInternal),
-            "cnmyleague" => new CnMyLeagueScenario(this, LogInternal),
-            "intlladder" => new AiLadderScenario(this, LogInternal),
-            "intlswaptest" => new MyLeagueScenario(this, LogInternal, swapTestOnly: true),
-            _ when scenarioMode => new MyLeagueScenario(this, LogInternal),
-            _ => null,
-        };
+        Scenario = scenarioMode ? CreateScenario(mode) : null;
         LogInternal(
             $"引擎就绪（模式：{mode}）—— EP={_factory.ActiveProvider}，" +
             (_perception.YoloEnabled ? $"YOLO 已启用（{_perception.YoloLabel}）" : "YOLO 未启用（仅 OCR 观察）") +
@@ -442,6 +433,63 @@ public sealed class BotEngine : IDisposable
         }, token);
 
         EmitStats();
+    }
+
+    /// <summary>按模式名创建场景插件（启动与「全部完成后接力」共用同一张表）。</summary>
+    private IScenario? CreateScenario(string mode) => mode switch
+    {
+        "intlweekly" => new WeeklyEventScenario(this, LogInternal),
+        "cnweekly" => new CnWeeklyScenario(this, LogInternal),
+        "cndaily" => new PeakLadderScenario(this, LogInternal),
+        "cnmyleague" => new CnMyLeagueScenario(this, LogInternal),
+        "intlladder" => new AiLadderScenario(this, LogInternal),
+        "intlswaptest" => new MyLeagueScenario(this, LogInternal, swapTestOnly: true),
+        "intl" => new MyLeagueScenario(this, LogInternal),
+        _ => null,
+    };
+
+    /// <summary>接力起点的场次基线：接力模块的「完成场次停止」只算自己跑的场次。</summary>
+    private int _matchBaseline;
+    private int _keyMatchBaseline;
+    /// <summary>本次会话是否国服（决定允许接力到哪些模块：两服窗口/界面互不通用）。</summary>
+    private bool _cnSession;
+
+    /// <summary>国际服可接力模块（模式名=引擎场景 id）：intl=我的联赛，intlladder=AI天梯联赛。</summary>
+    public static readonly string[] IntlHandoffTargets = { "intl", "intlladder" };
+
+    /// <summary>国服可接力模块：cnmyleague=我的联赛（国服），cndaily=天梯巅峰赛。</summary>
+    public static readonly string[] CnHandoffTargets = { "cnmyleague", "cndaily" };
+
+    /// <summary>接力目标是否属于该服（配置手改/跨服残留时拒绝，绝不在国际服界面上跑国服导航）。</summary>
+    public static bool IsHandoffTarget(string mode, bool cn) =>
+        Array.IndexOf(cn ? CnHandoffTargets : IntlHandoffTargets, mode) >= 0;
+
+    /// <summary>当前模块已完成的场次（不含接力前模块的场次）。</summary>
+    public int ModuleMatchesDone => Stats.MatchesDone - _matchBaseline;
+
+    /// <summary>当前模块已完成的关键比赛场次（不含接力前模块的场次）。</summary>
+    public int ModuleKeyMatchesDone => Stats.KeyMatches - _keyMatchBaseline;
+
+    /// <summary>
+    /// 模块接力：当前模块「全部完成」后换成另一个模块继续挂机。同一会话内切换——
+    /// 虚拟手柄、捕获会话、后台停靠、作息调度全部保持不动，只替换决策插件；
+    /// 场次计数按接力点重新起算（否则新模块的「完成场次停止」会把前一个模块的场次算进去，
+    /// 一进去就误判达标停止）。返回 false = 目标模块无效（调用方按原逻辑停止挂机）。
+    /// </summary>
+    public bool HandoffTo(string mode, string fromModule)
+    {
+        var next = IsHandoffTarget(mode, _cnSession) ? CreateScenario(mode) : null;
+        if (next is null)
+        {
+            LogInternal($"[{fromModule}] 接力目标「{mode}」无效，改为停止挂机", LogLevel.Warn);
+            return false;
+        }
+        _matchBaseline = Stats.MatchesDone;
+        _keyMatchBaseline = Stats.KeyMatches;
+        Scenario = next;
+        LogInternal($"[{fromModule}] 全部完成 → 接力「{next.Name}」继续挂机（同一会话，场次从 0 重新计数）",
+            LogLevel.Success);
+        return true;
     }
 
     /// <summary>会话初始化：驱动检测 → 找窗口 → 启动捕获 → 接手柄 → 建取消令牌。
