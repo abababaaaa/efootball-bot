@@ -29,29 +29,113 @@ public class SwapCalibrationDiagnostics
     }
 
     [Fact]
+    public async Task Dump_ReadMaxedDetailFrames()
+    {
+        // 用户 2026-10-25 午后：Zico 7/7、Salah 22/22 满级未识别——直接对截图跑读取器
+        using var ocrEngine = new OcrRecognizer();
+        foreach (var file in new[] { "detail_zico_74_7of7.png", "detail_salah_22of22.png", "detail_zico_7of7.png" })
+        {
+            var frame = LoadFrame(file);
+            var res = TestOcr.Run(ocrEngine, frame);
+            var status = await MaxLevelSwapController.ReadPartsFromFrameAsync(
+                ocrEngine, res, frame, CancellationToken.None);
+            var direct = MaxLevelSwapBrain.ReadParts(res);
+            _out.WriteLine($"== {file}: class={MaxLevelSwapBrain.Classify(res)} direct=({direct.Pair},{direct.Points}) full={status}");
+            var valueWords = MaxLevelSwapBrain.LevelValueWords(res)
+                .Select(w => $"'{w.Text}'@({w.CenterX:F3},{w.CenterY:F3})");
+            _out.WriteLine($"   valueWords=[{string.Join(",", valueWords)}]");
+            foreach (var w in res.Words.Where(w => w.CenterY is > 0.37 and < 0.52 && w.CenterX is > 0.40 and < 0.75)
+                .OrderBy(w => w.CenterY).ThenBy(w => w.CenterX))
+                _out.WriteLine($"   ({w.CenterX:F3},{w.CenterY:F3}) '{w.Text}'");
+        }
+    }
+
+    [Fact]
+    public void Dump_OrangeBadge_Calibration()
+    {
+        // 能力点区域橙色圆圈计数标定：Salah(2 点，橙圈) vs Zico/Orsolini(白字 0)
+        foreach (var file in new[] { "detail_salah_22of22.png", "detail_zico_74_7of7.png",
+            "detail_zico_7of7.png", "read_fail_110427.png", "read_fail_1227.png" })
+        {
+            var frame = LoadFrame(file);
+            _out.WriteLine($"== {file}: orange={CountOrange(frame, 0.55, 0.66, 0.395, 0.475)} " +
+                $"wide={CountOrange(frame, 0.52, 0.72, 0.38, 0.50)}");
+        }
+    }
+
+    private static int CountOrange(FrameData f, double x, double x1, double y, double y1)
+    {
+        int n = 0;
+        for (int yy = (int)(y * f.Height); yy < (int)(y1 * f.Height); yy++)
+            for (int xx = (int)(x * f.Width); xx < (int)(x1 * f.Width); xx++)
+            {
+                int i = (yy * f.Width + xx) * 4;
+                int b = f.Bgra[i], g = f.Bgra[i + 1], r = f.Bgra[i + 2];
+                if (r > 180 && g is > 90 and < 200 && b < 100 && r - b > 120) n++;
+            }
+        return n;
+    }
+
+    [Fact]
+    public void Dump_ClassifyDetail_Zico()
+    {
+        // 详情页被误判「画面 Lineup」排查：打印命中关键词
+        foreach (var file in new[] { "detail_zico_7of7.png", "read_fail_110427.png" })
+        {
+            var frame = LoadFrame(file);
+            using var ocr = new OcrRecognizer();
+            var res = TestOcr.Run(ocr, frame);
+            var screen = MaxLevelSwapBrain.Classify(res);
+            _out.WriteLine($"== {file}: class={screen} words={res.Words.Count}");
+            foreach (var kw in new[] { "替补球员", "自动配置球员", "战术", "整体实力", "球员动作", "惯用脚", "剩余球员数", "后备球员", "当前等级" })
+                if (res.ContainsJoined(kw)) _out.WriteLine($"   HIT '{kw}'");
+            foreach (var w in res.Words.Where(w => w.Text.Contains('战') || w.Text.Contains('替') || w.Text.Contains('配') || w.Text.Contains('脚')))
+                _out.WriteLine($"   word ({w.CenterX:F3},{w.CenterY:F3}) '{w.Text}'");
+        }
+    }
+
+    [Fact]
     public async Task Dump_OcrWords_ReadFailSplit()
     {
-        var frame = LoadFrame("read_fail_split_1231.png");
-        using var ocr = new OcrRecognizer();
-        var res = TestOcr.Run(ocr, frame);
-        _out.WriteLine($"frame {frame.Width}x{frame.Height}, {res.Words.Count} words");
-        foreach (var w in res.Words.OrderBy(w => w.CenterY).ThenBy(w => w.CenterX))
-            _out.WriteLine($"({w.CenterX:F3},{w.CenterY:F3}) '{w.Text}'");
+        foreach (var file in new[] { "read_fail_split_1231.png", "read_fail_110427.png",
+            "read_fail_110447.png", "read_fail_110454.png", "read_fail_110500.png" })
+        {
+            var frame = LoadFrame(file);
+            using var ocr = new OcrRecognizer();
+            var res = TestOcr.Run(ocr, frame);
+            var (pair, pts) = MaxLevelSwapBrain.ReadParts(res);
+            var lvText = MaxLevelSwapBrain.ReadLevelText(res);
+            var valueWords = MaxLevelSwapBrain.LevelValueWords(res)
+                .Select(w => $"'{w.Text}'@({w.CenterX:F3},{w.CenterY:F3})");
+            _out.WriteLine($"== {file}: {frame.Width}x{frame.Height}, {res.Words.Count}w, direct=({pair},{pts}) lvText='{lvText}' valueWords=[{string.Join(",", valueWords)}]");
 
-        var (pair, pts) = MaxLevelSwapBrain.ReadParts(res);
-        _out.WriteLine($"direct pair={pair}, pts={pts}");
-        var status = await MaxLevelSwapController.ReadPartsFromFrameAsync(ocr, res, frame, CancellationToken.None);
-        _out.WriteLine($"full read: {status}");
-
-        // 裁切重读逐字打印：定位「1」为何救不回
-        var lvCrop = ImageScaling.CropUpscale(frame, 0.42, 0.585, 0.36, 0.52, 8);
-        var lvRes = await ocr.RecognizeAsync(lvCrop, CancellationToken.None);
-        foreach (var w in lvRes.Words.OrderBy(w => w.CenterX))
-            _out.WriteLine($"lvCrop ({w.CenterX:F3},{w.CenterY:F3}) '{w.Text}'");
-        var ptCrop = ImageScaling.CropUpscale(frame, 0.575, 0.72, 0.36, 0.52, 8);
-        var ptRes = await ocr.RecognizeAsync(ptCrop, CancellationToken.None);
-        foreach (var w in ptRes.Words.OrderBy(w => w.CenterX))
-            _out.WriteLine($"ptCrop ({w.CenterX:F3},{w.CenterY:F3}) '{w.Text}'");
+            var status = await MaxLevelSwapController.ReadPartsFromFrameAsync(ocr, res, frame, CancellationToken.None);
+            _out.WriteLine($"   full read: {status}");
+            foreach (var (x0, x1, y0, y1) in new[] { (0.46, 0.575, 0.425, 0.505), (0.42, 0.585, 0.36, 0.52) })
+            {
+                foreach (var binarize in new[] { false, true })
+                {
+                    var lvCrop = ImageScaling.CropUpscale(frame, x0, x1, y0, y1, 8);
+                    if (binarize)
+                    {
+                        var px = (byte[])lvCrop.Bgra.Clone();
+                        for (int i = 0; i < px.Length; i += 4)
+                        {
+                            int lum = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000;
+                            byte v = lum >= 150 ? byte.MaxValue : byte.MinValue;
+                            px[i] = px[i + 1] = px[i + 2] = v;
+                        }
+                        lvCrop = new FrameData(px, lvCrop.Width, lvCrop.Height, 0);
+                    }
+                    var lvRes = await ocr.RecognizeAsync(lvCrop, CancellationToken.None);
+                    string tag = binarize ? "bin" : "raw";
+                    _out.WriteLine($"   crop[{x0},{tag}]: '{string.Join("' '", lvRes.Words.OrderBy(w => w.CenterX).Select(w => w.Text))}'");
+                }
+            }
+            foreach (var w in res.Words.Where(w => w.CenterX is > 0.40 and < 0.75 && w.CenterY is > 0.36 and < 0.55)
+                .OrderBy(w => w.CenterY).ThenBy(w => w.CenterX))
+                _out.WriteLine($"   ({w.CenterX:F3},{w.CenterY:F3}) '{w.Text}'");
+        }
     }
 
     [Fact]

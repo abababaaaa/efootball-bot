@@ -56,3 +56,6 @@ build_local/
 
 # OCR 候选模型权重（调研用，勿入库）
 tools/ocr_candidates_*/
+
+# 校准诊断临时裁图（诊断测试自动生成）
+tests/EfootballBot.Tests/TestData/swap/diag/

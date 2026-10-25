@@ -24,26 +24,26 @@ internal sealed class EngineSwapPad(Pad pad) : ISwapPad
     public Task X() => pad.X();
     public Task Confirm() => pad.Confirm();
     public Task Back() => pad.Back();
-    public Task Dpad(PadDir dir) => pad.Dpad(dir);
+    // 单次移光标同样走快速连按通道（机械导航不是拟人语义，用户 2026-10-25：方向移动太拖沓）
+    public Task Dpad(PadDir dir) => pad.DpadRepeatFast(dir, 1);
     public Task DpadRepeat(PadDir dir, int count) => pad.DpadRepeatFast(dir, count);
 }
 
 /// <summary>
 /// 满级自动换人状态机（跨帧，「一帧一步、屏幕验证后才按下一键」）：
 /// 联赛主页 Y → 比赛计划（首发站位页，光标默认门将）→ 沿
-/// ↑ ← ↑ → → → → → ↓ ← 巡检 11 人，每站 Y 进详情读「等级 x/x + 能力点」；
-/// 满级（x/x）一律换人（用户 2026-10-24 修正）：能力点 ≠ 0 先 X 球员动作（核验
-/// 「等级训练完成」）→ ↓+A 能力点分配 → Y 推荐分配一次归零 → B×2 回站位页；
-/// 能力点 = 0 跳过分配直接 B。之后 A 选中 → ←×8 进侧栏 → 上×5 下×3 落「后备球员」
-/// → A → ←+A 开排序 → 上×6 下×5 落「当前等级」→ 右上箭头为下则 Y 改升序 → A；
-/// 回列表 ← ↓ A 开筛选 → ↓×4 A 进卡片类型 → 上×9 ↓↓ + 6×(A ↓) 勾高阶卡 → B；
-/// ↓×4 ↓ A 应用筛选 → 在后备列表选第一张未压暗的卡按 A 换入（当前等级最低）。
-/// 换入验证（用户 2026-10-25 实机规则）：按 A 后画面回到站位页 = 换入成功（B 完成，
-/// 退出比赛计划；阵容已变更时游戏弹确认窗：上移+A 确认）；画面停在后备列表没变化 =
-/// 被同名卡挡下（挡下的卡头像整体变暗）→ → 移到下一张卡再按 A，以此类推，
-/// 超过 8 张仍不行放弃本位。游戏错误弹窗「功能目前无法使用」用 A 关。
-/// 退出后主页 Y 重进（光标回门将）→ 盲走光标回刚换人的位置继续下一位。
-/// 非满级：详情页 B 退出，直接下一位。11 人完成 B 返回主页交还正常流程。
+/// ↑ ← ↑ → → → → → ↓ ← 巡检 11 人，每站 Y 进详情 → X 球员动作 →
+/// ★满级判定不用 OCR 数字，用弹窗首项：白字「等级训练完成」=满级（灰字「等级训练」=未满级，
+/// 用户 2026-10-25 实机对比图）——大字「7」被读成 17、橙色圈「2」被读成 21 等误读全部规避。
+/// 满级：↓+A 能力点分配 → Y 推荐分配一次归零 → B → 详情 B → 站位页 A 选中 → ←×8 进侧栏
+/// → 上×5 下×3 落「后备球员」→ A → ←+A 开排序 → 上×6 下×5 落「当前等级」→ 右上箭头
+/// 为下则 Y 改升序 → A；回列表 ← ↓ A 开筛选 → ↓×4 A 进卡片类型 → 上×9 ↓↓ + 6×(A ↓)
+/// 勾高阶卡 → B；↓×4 ↓ A 应用筛选（★排序+筛选本轮挂机只做一次，之后换人直奔选卡）→
+/// 在后备列表选第一张未压暗的卡按 A 换入（当前等级最低；用户 2026-10-25：选到亮卡
+/// A 一定成功，★不做任何被挡判定）。A 后 B 返回站位页（侧栏光标停在「后备球员」、
+/// 右侧预览后备名单——这个页面同屏有侧栏词，按站位页判）+ → 进阵（光标回到刚换人的
+/// 球员）→ 继续巡检下一位，不退出比赛计划。11 人完成 B（完成）→ 确认窗 上移+A → 主页。
+/// 非满级：B 关弹窗 → B 退出详情，直接下一位。11 人完成交还正常流程。
 /// </summary>
 public sealed class MaxLevelSwapController
 {
@@ -54,15 +54,15 @@ public sealed class MaxLevelSwapController
         Opening,
         /// <summary>站位页：光标移动到当前巡检位 + Y 进详情。</summary>
         Inspect,
-        /// <summary>详情页：读等级/能力点并决策。</summary>
+        /// <summary>详情页：X 球员动作（弹窗「等级训练完成」判满级，不读任何数字）。</summary>
         DetailRead,
         /// <summary>详情页 B 后：确认回站位页并推进到下一位。</summary>
         InspectAdvance,
-        /// <summary>球员动作弹窗：核验等级训练完成 → ↓+A 进能力点分配。</summary>
+        /// <summary>球员动作弹窗：白字「等级训练完成」=满级→↓+A；灰字「等级训练」=未满级→B。</summary>
         ActionPopup,
-        /// <summary>分配页：Y 推荐分配（只按一次，即归零）。</summary>
+        /// <summary>分配页：Y 推荐分配（只按一次即归零）；弹窗滞留=无能力点→B 直接换人。</summary>
         AllocWait,
-        /// <summary>分配完成：B 关闭分配页（不读数不复按——OCR 丢斜杠会误判还有剩余）。</summary>
+        /// <summary>分配完成：B 关闭分配页（不读数不复按）→ 详情页。</summary>
         AllocDone,
         /// <summary>回详情页确认能力点 = 0 → B。</summary>
         DetailVerify,
@@ -82,11 +82,9 @@ public sealed class MaxLevelSwapController
         CardTypeWait,
         /// <summary>回筛选页：↓×4 落比赛风格 ↓ 落完成 → A 应用。</summary>
         FilterApply,
-        /// <summary>筛选后的列表：跳过头像压暗的卡（同名在名单），A 换入第一张亮卡。</summary>
+        /// <summary>筛选后的列表：跳过头像压暗的卡（同名在名单），A 换入第一张亮卡（一定成功）。</summary>
         BenchSwap,
-        /// <summary>交换后验证（用户 2026-10-25）：画面回站位页=成功；停在后备列表=被挡→→下一张再 A。</summary>
-        SwapVerify,
-        /// <summary>B 完成后驱动退出比赛计划到主页（途中确认窗上移+A、错误弹窗 A）。</summary>
+        /// <summary>A 后直接退出：反复 B 完成（动画吞输入）→ 确认窗上移+A、错误弹窗 A → 主页。</summary>
         SwapExit,
         /// <summary>主页 Y 重进比赛计划（光标回门将）。</summary>
         Reopen,
@@ -101,12 +99,8 @@ public sealed class MaxLevelSwapController
         { PadDir.Up, PadDir.Left, PadDir.Up, PadDir.Right, PadDir.Right,
           PadDir.Right, PadDir.Right, PadDir.Right, PadDir.Down, PadDir.Left };
 
-    /// <summary>整轮巡检轮数保险丝（含等待重试；约 700 轮 × ~1.5s ≈ 18 分钟上限，
-    /// 给暗卡跳过与被挡重试留余量）。</summary>
+    /// <summary>整轮巡检轮数保险丝（含等待重试；约 700 轮 × ~1.2s ≈ 14 分钟上限）。</summary>
     internal const int MaxRounds = 700;
-
-    /// <summary>同名卡重试上限：→ 累计移过 8 张卡仍换不进（暗卡探针漏判/其他原因）即放弃本位。</summary>
-    internal const int MaxSkipRetries = 8;
 
     private Phase _phase = Phase.Idle;
     /// <summary>当前巡检位（0=门将 … 10=最后一位）。</summary>
@@ -121,10 +115,17 @@ public sealed class MaxLevelSwapController
     private int _maxed;
     /// <summary>本次排序弹窗已按过一次 Y 翻方向（至多一次，防探针误判来回翻死循环）。</summary>
     private bool _sortFlipDone;
-    /// <summary>当前位已 → 移过的后备卡数（暗卡跳过 + 被挡重试累计；上限 <see cref="MaxSkipRetries"/>）。</summary>
-    private int _skip;
-    /// <summary>SwapVerify / SwapExit 内的观察轮计数（进相位置 0）。</summary>
+    /// <summary>★本轮挂机已完成过一次排序+筛选（用户 2026-10-25：之后换人不再重复进出
+    /// 排序/筛选页，直奔选卡）。挂机重启（场景重建）自然回归 false；不随 <see cref="Reset"/> 清零。</summary>
+    private bool _sortFilterDone;
+    /// <summary>当前位详情页读到的「有剩余能力点」（橙圈徽标像素判定）。</summary>
+    private bool _hasPoints;
+    /// <summary>SwapExit 内的观察轮计数（进相位置 0）。</summary>
     private int _verifyRounds;
+    /// <summary>Rewind 是否需要从门将盲走到换人位（意外退出重进时 true；换人后 B→→ 进阵时为 false）。</summary>
+    private bool _rewindWalk;
+    /// <summary>Rewind 已把光标走到本巡检位，Inspect 不再补移动（只按 Y）。</summary>
+    private bool _skipInspectMove;
     /// <summary>退出驱动的上一次逃生键是否为 A（A/B 交替，防止卡死在确认窗上）。</summary>
     private bool _exitUsedA;
     private bool _errorDumped;
@@ -137,9 +138,13 @@ public sealed class MaxLevelSwapController
         _phase = Phase.Idle;
         _pos = _swapPos = _stall = _readTries = _escapes = _rounds = _swapped = _maxed = 0;
         _sortFlipDone = false;
-        _skip = _verifyRounds = 0;
+        _verifyRounds = 0;
+        _rewindWalk = false;
+        _skipInspectMove = false;
+        _hasPoints = false;
         _exitUsedA = false;
         _errorDumped = false;
+        // _sortFilterDone 有意保留：挂机会话级状态
     }
 
     /// <summary>在联赛主页（无弹窗）触发：按 Y 打开比赛计划。返回下一轮延时。</summary>
@@ -153,7 +158,7 @@ public sealed class MaxLevelSwapController
         _phase = Phase.Opening;
         log("[我的联赛] 满级巡检开始：按 Y 打开比赛计划（光标默认门将）", LogLevel.Info);
         await pad.Y();
-        return 1800;
+        return 1300;
     }
 
     /// <summary>已在比赛计划（首发站位页）触发：跳过按 Y，直接从门将开始巡检。</summary>
@@ -215,11 +220,12 @@ public sealed class MaxLevelSwapController
     }
 
     /// <summary>
-    /// 等级/能力点读取：全帧 OCR 分要素直读；缺哪个要素对该列小区域放大 ×8 重读，仍缺再
-    /// 整帧+裁切两源合并解析（实机落帧 read_fail_split_20261025：整帧读到「/32」漏「1」，
-    /// 裁切读到「1」丢了「/32」——两帧各读半截，跨源拼 cur/max）。列窗口按实机几何留裕量：
-    /// 等级列 x 0.42~0.585（值 23/26 中心 0.527，/31 右端 0.531，能力点表头 0.589 之外）、
-    /// 能力点列 x 0.575~0.72（值 44/0 中心 0.603）；y 0.36~0.52 盖住表头 0.401 + 值 0.46。
+    /// 等级/能力点读取：全帧 OCR 分要素直读；等级缺时走「多配置裁切 × 词级候选投票」
+    /// （实机 20261025_11 四连读不出 + split 帧标定：大字细笔画「1」没有任何单一配置稳定——
+    /// 紧窗原始读 L/J、紧窗二值读 1 偶尔 L、宽窗原始读 1 但混入标签碎片 5、还有帧连 /29 都丢；
+    /// 跨配置投票必然收敛：L/J/I 归一为 1、':' 当 '/'、平票 cur 取小 max 取大）。
+    /// 全配置 max 仍读不出但 cur ≤ 23（等级上限实证 24~37）→ 必未满级，返回
+    /// <see cref="PlayerStatus.LevelMax"/>=0 哨兵由状态机按未满级放行。能力点列 x 0.575~0.72。
     /// </summary>
     internal static Task<PlayerStatus?> ReadStatusAsync(BotEngine engine, OcrResult ocr,
         FrameData frame, CancellationToken ct)
@@ -235,13 +241,21 @@ public sealed class MaxLevelSwapController
         {
             if (cur is null || max is null)
             {
-                var lvCrop = ImageScaling.CropUpscale(frame, 0.42, 0.585, 0.36, 0.52, 8);
-                var lvRes = await ocrEngine.RecognizeAsync(lvCrop, ct);
-                var lvText = string.Concat(lvRes.Words.OrderBy(w => w.CenterX).Select(w => w.Text));
-                var pair = MaxLevelSwapBrain.ParseLevelPairLoose(
-                    MaxLevelSwapBrain.ReadLevelText(ocr), lvText.Replace(" ", ""));
-                cur ??= pair?.Cur;
-                max ??= pair?.Max;
+                // 直接帧候选只取等级列值区词（全页数字会污染票仓），裁切窗口小、全词可入
+                var candidates = MaxLevelSwapBrain
+                    .LevelCandidatesFromWords(MaxLevelSwapBrain.LevelValueWords(ocr)).ToList();
+                foreach (var (x0, x1, y0, y1, binarize) in new[]
+                     { (0.46, 0.575, 0.425, 0.505, false), (0.46, 0.575, 0.425, 0.505, true),
+                       (0.42, 0.585, 0.36, 0.52, false), (0.42, 0.585, 0.36, 0.52, true) })
+                {
+                    var lvCrop = ImageScaling.CropUpscale(frame, x0, x1, y0, y1, 8);
+                    if (binarize) lvCrop = Binarize(lvCrop);
+                    var lvRes = await ocrEngine.RecognizeAsync(lvCrop, ct);
+                    candidates.AddRange(MaxLevelSwapBrain.LevelCandidatesFromWords(lvRes.Words));
+                }
+                var voted = MaxLevelSwapBrain.VoteLevel(candidates);
+                cur ??= voted?.Cur;
+                max ??= voted?.Max;
             }
             if (pts is null)
             {
@@ -255,9 +269,24 @@ public sealed class MaxLevelSwapController
         {
             // 裁切失败按读不出处理（上层重试/落帧）
         }
-        return cur is not null && max is not null && pts is not null
-            ? new PlayerStatus(cur.Value, max.Value, pts.Value)
-            : null;
+        if (cur is null || pts is null) return null;
+        // max 读不出：低等级必未满级（等级上限实证 24~37），哨兵 0 放行；高等级保守 null 走重试
+        if (max is null && cur.Value > 23) return null;
+        return new PlayerStatus(cur.Value, max ?? 0, pts.Value);
+    }
+
+    /// <summary>裁切帧二值化（白字暗底 luma≥150 → 纯白，其余纯黑）：细笔画数字在
+    /// 灰阶过渡里会被读成 L/J/7，二值化后轮廓干净（实机 20261025_11 标定）。</summary>
+    private static FrameData Binarize(FrameData f)
+    {
+        var px = (byte[])f.Bgra.Clone();
+        for (int i = 0; i < px.Length; i += 4)
+        {
+            int lum = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000;
+            byte v = lum >= 150 ? byte.MaxValue : byte.MinValue;
+            px[i] = px[i + 1] = px[i + 2] = v;
+        }
+        return new FrameData(px, f.Width, f.Height, 0);
     }
 
     /// <summary>核心状态机（OCR/帧/手柄/读取器全参数化，可单测）。返回本轮延时；null = 巡检结束。
@@ -286,7 +315,7 @@ public sealed class MaxLevelSwapController
             }
             log("[我的联赛] 游戏错误弹窗（功能暂时不可用）：按 A 关闭后继续", LogLevel.Error);
             await pad.Confirm();
-            return 1600;
+            return 1200;
         }
 
         switch (_phase)
@@ -299,13 +328,13 @@ public sealed class MaxLevelSwapController
                     _pos = 0;
                     _phase = Phase.Inspect;
                     log("[我的联赛] 已进入比赛计划，从门将开始巡检", LogLevel.Info);
-                    return 800;
+                    return 600;
                 }
                 // Y 未生效（弹窗/加载）：重按，最多 3 次
                 if (++_stall <= 3)
                 {
                     await pad.Y();
-                    return 1600;
+                    return 1200;
                 }
                 return await AbortAsync("打开比赛计划失败", pad, log);
             }
@@ -321,11 +350,14 @@ public sealed class MaxLevelSwapController
                 if (screen != SwapScreen.Lineup)
                     return await StallAsync($"站位页异常（{screen}）", screen, pad, log);
                 _stall = 0;
-                if (_pos > 0) await pad.Dpad(CursorMoves[_pos - 1]);
+                if (_skipInspectMove)
+                    _skipInspectMove = false; // Rewind 已把光标走到本巡检位
+                else if (_pos > 0)
+                    await pad.Dpad(CursorMoves[_pos - 1]);
                 await pad.Y();
                 log($"[我的联赛] 巡检第 {_pos + 1}/11 位：打开球员详情", LogLevel.Info);
                 _phase = Phase.DetailRead;
-                return 1800;
+                return 1300;
             }
 
             case Phase.DetailRead:
@@ -333,44 +365,23 @@ public sealed class MaxLevelSwapController
                 if (screen == SwapScreen.Detail)
                 {
                     _stall = 0;
-                    var status = await readStatus(ocr, frame);
-                    if (status is null)
-                    {
-                        if (++_readTries <= 2) return 900; // 页面静止，下一轮重读
-                        log("[我的联赛] 等级/能力点读不出，跳过该位（B 退出）；实机帧已落 data\\dump 供排查", LogLevel.Warn);
-                        dumpFrame?.Invoke(frame, "swap_read_fail");
-                        _readTries = 0;
-                        await pad.Back();
-                        _phase = Phase.InspectAdvance;
-                        return 1500;
-                    }
-                    _readTries = 0;
-                    if (status.Level == status.LevelMax)
-                    {
-                        // 满级一律换人（用户 2026-10-24 修正）：能力点没用完先分配，已用完直接换
-                        _maxed++;
-                        onMaxed?.Invoke();
-                        _swapPos = _pos;
-                        if (status.Points > 0)
-                        {
-                            log($"[我的联赛] 第 {_pos + 1}/11 位球员满级（{status.Level}/{status.LevelMax}，能力点 {status.Points}）：分配能力点并换人", LogLevel.Success);
-                            await pad.X();
-                            _phase = Phase.ActionPopup;
-                            return 1700;
-                        }
-                        log($"[我的联赛] 第 {_pos + 1}/11 位球员满级（{status.Level}/{status.LevelMax}，能力点已用完）：直接换人", LogLevel.Success);
-                        await pad.Back();
-                        _phase = Phase.LineupSelect;
-                        return 1500;
-                    }
-                    await pad.Back();
-                    _phase = Phase.InspectAdvance;
-                    return 1500;
+                    // ★先判能力点（用户 2026-10-25 四路矩阵）：橙圈徽标=有剩余能力点需加点，
+                    // 白字 0=无需加点。再 X 球员动作，弹窗首项「等级训练完成/等级训练」判满级——
+                    // 不 OCR 任何等级数字（大字「7」被读成 17、橙圈「2」被读成 21 的实机误读）
+                    _hasPoints = MaxLevelSwapBrain.HasAbilityPointBadge(frame);
+                    await pad.X();
+                    _phase = Phase.ActionPopup;
+                    return 1100;
+                }
+                if (screen == SwapScreen.ActionPopup)
+                {
+                    _phase = Phase.ActionPopup; // X 已生效
+                    return 300;
                 }
                 if (screen == SwapScreen.Lineup && ++_stall <= 2)
                 {
                     await pad.Y(); // Y 未生效，重按
-                    return 1500;
+                    return 1100;
                 }
                 return await StallAsync("详情页未打开", screen, pad, log);
             }
@@ -385,16 +396,16 @@ public sealed class MaxLevelSwapController
                         log($"[我的联赛] 首发巡检完成：满级 {_maxed} 名，换人 {_swapped} 名", LogLevel.Success);
                         _phase = Phase.Done;
                         await pad.Back();
-                        return 1600;
+                        return 1200;
                     }
                     _pos++;
                     _phase = Phase.Inspect;
-                    return 700;
+                    return 500;
                 }
                 if (screen == SwapScreen.Detail)
                 {
                     await pad.Back(); // B 未生效再按
-                    return 1400;
+                    return 1000;
                 }
                 return await StallAsync("详情退出异常", screen, pad, log);
             }
@@ -406,21 +417,34 @@ public sealed class MaxLevelSwapController
                     _stall = 0;
                     if (!ocr.ContainsJoined("等级训练完成"))
                     {
-                        // 等级 x/x 但弹窗首项仍是「等级训练」：证据冲突，取消换人保安全
-                        log($"[我的联赛] 第 {_pos + 1} 位弹窗无「等级训练完成」，取消换人（B）", LogLevel.Warn);
+                        // 未满级（弹窗首项灰字「等级训练」）→ 不用加点，下一位（用户 2026-10-25 矩阵 1/3 行）
+                        log($"[我的联赛] 第 {_pos + 1}/11 位未满级（弹窗「等级训练」无「完成」）：下一位", LogLevel.Info);
                         await pad.Back();
                         _phase = Phase.InspectAdvance;
-                        return 1500;
+                        return 1100;
                     }
+                    _maxed++;
+                    onMaxed?.Invoke();
+                    _swapPos = _pos;
+                    if (!_hasPoints)
+                    {
+                        // 满级 + 能力点 0 → 不用加点，B 关弹窗直接走选人换人（矩阵 2 行）
+                        log($"[我的联赛] 第 {_pos + 1}/11 位球员满级（弹窗「等级训练完成」，能力点 0）：直接换人", LogLevel.Success);
+                        await pad.Back();
+                        _phase = Phase.LineupSelect;
+                        return 1100;
+                    }
+                    // 满级 + 有剩余能力点 → 先 ↓+A 分配，完成后换人（矩阵 4 行）
+                    log($"[我的联赛] 第 {_pos + 1}/11 位球员满级（弹窗「等级训练完成」，有剩余能力点）：分配能力点并换人", LogLevel.Success);
                     await pad.Dpad(PadDir.Down);  // 等级训练完成 → 能力点分配
                     await pad.Confirm();
                     _phase = Phase.AllocWait;
-                    return 1900;
+                    return 1400;
                 }
                 if (screen == SwapScreen.Detail && ++_stall <= 2)
                 {
                     await pad.X(); // X 未生效
-                    return 1500;
+                    return 1100;
                 }
                 return await StallAsync("球员动作弹窗未出现", screen, pad, log);
             }
@@ -435,12 +459,22 @@ public sealed class MaxLevelSwapController
                     // 「还有剩余」无限按 Y，2026-10-24 实机死循环）
                     await pad.Y();
                     _phase = Phase.AllocDone;
-                    return 1800;
+                    return 1300;
                 }
                 if (screen == SwapScreen.ActionPopup && ++_stall <= 2)
                 {
                     await pad.Confirm(); // A 未生效
-                    return 1500;
+                    return 1100;
+                }
+                if (screen == SwapScreen.ActionPopup)
+                {
+                    // ↓+A 后弹窗仍在：满级但无剩余能力点，「能力点分配」不可用——
+                    // B 关弹窗直接走换人（LineupSelect 会补一次 B 退详情）
+                    _stall = 0;
+                    log("[我的联赛] 能力点分配项不可用（无剩余能力点）：B 关弹窗直接换人", LogLevel.Info);
+                    await pad.Back();
+                    _phase = Phase.LineupSelect;
+                    return 1100;
                 }
                 return await StallAsync("能力点分配页未打开", screen, pad, log);
             }
@@ -452,7 +486,7 @@ public sealed class MaxLevelSwapController
                     _stall = 0;
                     await pad.Back(); // B 关闭分配页 → 详情页
                     _phase = Phase.DetailVerify;
-                    return 1500;
+                    return 1100;
                 }
                 if (screen == SwapScreen.Detail)
                 {
@@ -467,17 +501,14 @@ public sealed class MaxLevelSwapController
                 if (screen == SwapScreen.Detail)
                 {
                     _stall = 0;
-                    var status = await readStatus(ocr, frame);
-                    if (status is { } s && s.Points != 0)
-                        log($"[我的联赛] 注意：能力点分配后仍为 {s.Points}（推荐分配未生效？），继续换人", LogLevel.Warn);
-                    await pad.Back();
+                    await pad.Back(); // B 退出详情 → 站位页选中该球员
                     _phase = Phase.LineupSelect;
-                    return 1500;
+                    return 1100;
                 }
                 if (screen == SwapScreen.Alloc)
                 {
                     await pad.Back();
-                    return 1400;
+                    return 1000;
                 }
                 return await StallAsync("分配后详情页异常", screen, pad, log);
             }
@@ -487,7 +518,6 @@ public sealed class MaxLevelSwapController
                 if (screen == SwapScreen.Lineup)
                 {
                     _stall = 0;
-                    _skip = 0; // 本位换人从头开始（跳位计数只在本位内累计）
                     await pad.Confirm(); // A 选中该球员
                     _phase = Phase.SidebarNav;
                     return 1300;
@@ -495,7 +525,7 @@ public sealed class MaxLevelSwapController
                 if (screen == SwapScreen.Detail)
                 {
                     await pad.Back();
-                    return 1400;
+                    return 1000;
                 }
                 return await StallAsync("选中球员异常", screen, pad, log);
             }
@@ -510,7 +540,7 @@ public sealed class MaxLevelSwapController
                 await pad.DpadRepeat(PadDir.Down, 3);  // 战术→球队→替补球员→后备球员
                 await pad.Confirm();
                 _phase = Phase.BenchWait;
-                return 2400;
+                return 1600;
             }
 
             case Phase.BenchWait:
@@ -518,15 +548,22 @@ public sealed class MaxLevelSwapController
                 if (screen == SwapScreen.Bench)
                 {
                     _stall = 0;
+                    if (_sortFilterDone)
+                    {
+                        // 本轮挂机已设置过排序+筛选（设置会持久）：不再重复进出两个页面，直奔选卡
+                        log("[我的联赛] 排序/筛选本轮已设置：直接选卡换人", LogLevel.Info);
+                        _phase = Phase.BenchSwap;
+                        return 300;
+                    }
                     await pad.Dpad(PadDir.Left);  // 列表 → 侧栏排序图标
                     await pad.Confirm();
                     _phase = Phase.SortWait;
-                    return 1600;
+                    return 1100;
                 }
                 if (screen == SwapScreen.Lineup && ++_stall <= 2)
                 {
                     await pad.Confirm(); // 侧栏 A 未生效
-                    return 1500;
+                    return 1100;
                 }
                 return await StallAsync("后备球员页未打开", screen, pad, log);
             }
@@ -547,12 +584,12 @@ public sealed class MaxLevelSwapController
                             _sortFlipDone = true;
                             await pad.Y();
                             log("[我的联赛] 当前等级已勾选、箭头读数为下：按一次 Y 翻方向（下轮直接返回）", LogLevel.Info);
-                            return 1500;
+                            return 1100;
                         }
                         log("[我的联赛] 排序键已是「当前等级」：B 返回，继续筛选", LogLevel.Info);
                         await pad.Back();
                         _phase = Phase.SortApplied;
-                        return 1500;
+                        return 1100;
                     }
                     await pad.DpadRepeat(PadDir.Up, 6);    // 饱和到「球员姓名」
                     await pad.DpadRepeat(PadDir.Down, 5);  // → 当前等级
@@ -568,13 +605,13 @@ public sealed class MaxLevelSwapController
                     }
                     await pad.Confirm(); // 应用「当前等级」排序
                     _phase = Phase.SortApplied;
-                    return 2000;
+                    return 1500;
                 }
                 if (screen == SwapScreen.Bench && ++_stall <= 2)
                 {
                     await pad.Dpad(PadDir.Left);
                     await pad.Confirm(); // 排序弹窗没开，重试
-                    return 2200;
+                    return 1600;
                 }
                 return await StallAsync("排序弹窗未出现", screen, pad, log);
             }
@@ -589,13 +626,13 @@ public sealed class MaxLevelSwapController
                     await pad.Dpad(PadDir.Down);  // → 筛选图标
                     await pad.Confirm();
                     _phase = Phase.FilterWait;
-                    return 1400;
+                    return 1000;
                 }
                 if (screen == SwapScreen.Sort && ++_stall <= 2)
                 {
                     // 又见排序弹窗（B 未生效或 A 又开了排序）：按 B 关闭，绝不再 A
                     await pad.Back();
-                    return 1500;
+                    return 1100;
                 }
                 return await StallAsync("排序应用异常", screen, pad, log);
             }
@@ -608,17 +645,20 @@ public sealed class MaxLevelSwapController
                     await pad.DpadRepeat(PadDir.Up, 9);   // 饱和到「俱乐部球队」
                     if (MaxLevelSwapBrain.IsCardTypeFilterSet(ocr))
                     {
-                        // 已设置过（中断续跑）：归顶 ↓×9 直达「完成」应用，不进子页重复勾选
+                        // 已设置过（中断续跑/游戏本来就设置好）：归顶 ↓×9 直达「完成」应用，
+                        // 不进子页重复勾选。★同样置会话标志——否则快速路径下每次换人都
+                        // 重新开排序/筛选页（用户 2026-10-25 实机反馈）
                         log("[我的联赛] 卡片类型筛选已设置：直接完成应用", LogLevel.Info);
                         await pad.DpadRepeat(PadDir.Down, 9);
                         await pad.Confirm();
+                        _sortFilterDone = true;
                         _phase = Phase.BenchSwap;
-                        return 2000;
+                        return 1500;
                     }
                     await pad.DpadRepeat(PadDir.Down, 4); // → 卡片类型
                     await pad.Confirm();
                     _phase = Phase.CardTypeWait;
-                    return 1800;
+                    return 1300;
                 }
                 return await StallAsync("筛选页未打开", screen, pad, log);
             }
@@ -630,7 +670,7 @@ public sealed class MaxLevelSwapController
                     if (screen == SwapScreen.Filter && ++_stall <= 2)
                     {
                         await pad.Confirm(); // A 未生效
-                        return 1500;
+                        return 1100;
                     }
                     return await StallAsync("卡片类型页未打开", screen, pad, log);
                 }
@@ -646,7 +686,7 @@ public sealed class MaxLevelSwapController
                 }
                 await pad.Back();
                 _phase = Phase.FilterApply;
-                return 3200;
+                return 2300;
             }
 
             case Phase.FilterApply:
@@ -658,13 +698,14 @@ public sealed class MaxLevelSwapController
                     await pad.DpadRepeat(PadDir.Up, 9);
                     await pad.DpadRepeat(PadDir.Down, 9);
                     await pad.Confirm();                  // 应用筛选
+                    _sortFilterDone = true;               // 本轮挂机不再重复排序/筛选
                     _phase = Phase.BenchSwap;
-                    return 2000;
+                    return 1100;
                 }
                 if (screen == SwapScreen.CardType)
                 {
                     await pad.Back(); // B 未生效
-                    return 1400;
+                    return 1000;
                 }
                 return await StallAsync("筛选应用异常", screen, pad, log);
             }
@@ -675,64 +716,24 @@ public sealed class MaxLevelSwapController
                 {
                     _stall = 0;
                     // 跳过头像压暗的卡（同名卡在首发/替补名单内，游戏禁止重复登场，用户 2026-10-25：
-                    // 第一排左一张、第三排右一张都不可选）。全暗/探针失效时保守从第一张按 A，
-                    // 真被挡由换入验证的「画面停在列表」兜底逐张右移。
+                    // 第一排左一张、第三排右一张都不可选）。全暗/探针失效时从第一张按 A。
+                    // ★选到亮卡按 A 一定成功（用户 2026-10-25 实机结论）：不做任何被挡判定，
+                    // A 完直接进退出流程（换人动画期间输入被吞，SwapExit 反复 B 直到「完成」生效）
                     int darkSkip = MaxLevelSwapBrain.FirstBrightCardIndex(frame);
-                    _skip = darkSkip;
                     if (darkSkip > 0)
                     {
                         log($"[我的联赛] 前 {darkSkip} 张后备卡头像压暗（同名卡在名单内）：→×{darkSkip} 跳到第 {darkSkip + 1} 张", LogLevel.Info);
                         await pad.DpadRepeat(PadDir.Right, darkSkip);
                     }
-                    _verifyRounds = 0;
-                    log($"[我的联赛] 换人：第 {_skip + 1} 张后备球员（当前等级最低）换入第 {_swapPos + 1} 位", LogLevel.Info);
-                    await pad.Confirm(); // A 交换
-                    _phase = Phase.SwapVerify;
-                    return 1800;
-                }
-                return await StallAsync("筛选后列表异常", screen, pad, log);
-            }
-
-            case Phase.SwapVerify:
-            {
-                _verifyRounds++;
-                if (screen == SwapScreen.Lineup)
-                {
-                    // 画面回到站位页 = 换入成功（用户 2026-10-25 实机规则）：
-                    // B 完成退出比赛计划，阵容已变更时游戏会弹确认窗（SwapExit 处理）
                     _swapped++;
-                    _escapes = 0;
-                    log($"[我的联赛] 换入成功（画面回到站位页）：B 完成，退出比赛计划", LogLevel.Success);
-                    await pad.Back();
+                    log($"[我的联赛] 换人：第 {darkSkip + 1} 张后备球员（当前等级最低）换入第 {_swapPos + 1} 位，B 完成退出", LogLevel.Success);
+                    await pad.Confirm(); // A 交换
                     _phase = Phase.SwapExit;
                     _verifyRounds = 0;
                     _exitUsedA = false;
-                    return 1600;
+                    return 1300;
                 }
-                if (screen == SwapScreen.Bench)
-                {
-                    if (_verifyRounds <= 3) return 1400; // 交换动画/列表刷新，先观察
-                    // 画面停在后备列表没变化 = 被同名卡挡下：光标还在被挡的卡上，
-                    // → 移到下一张再按 A（暗卡探针漏判的兜底；用户 2026-10-25 补充规则）
-                    if (_skip >= MaxSkipRetries)
-                    {
-                        log($"[我的联赛] 连续换入 {MaxSkipRetries} 张仍被挡，本位换人放弃（下次巡检重试）", LogLevel.Error);
-                        await pad.Back(); // 完成，退出比赛计划
-                        _phase = Phase.SwapExit;
-                        _verifyRounds = 0;
-                        _exitUsedA = false;
-                        return 1600;
-                    }
-                    _skip++;
-                    log($"[我的联赛] 换入被挡（画面停在后备列表）：→ 移到第 {_skip + 1} 张再试", LogLevel.Warn);
-                    await pad.Dpad(PadDir.Right);
-                    await pad.Confirm();
-                    _verifyRounds = 0;
-                    return 2000;
-                }
-                if (screen == SwapScreen.None && _verifyRounds <= 3)
-                    return 1300; // 交换过场
-                return await StallAsync("交换后画面异常", screen, pad, log);
+                return await StallAsync("筛选后列表异常", screen, pad, log);
             }
 
             case Phase.SwapExit:
@@ -740,30 +741,45 @@ public sealed class MaxLevelSwapController
                 _verifyRounds++;
                 if (home)
                 {
+                    // 意外已退出到主页：Y 重进后盲走光标回换人位（Reopen 置 _rewindWalk）
                     _stall = 0;
                     _phase = Phase.Reopen;
                     return 500;
                 }
-                if (screen is SwapScreen.Lineup or SwapScreen.Bench)
+                if (screen == SwapScreen.Lineup)
                 {
                     _stall = 0;
                     if (MaxLevelSwapBrain.HasDialogConfirmWords(ocr))
                     {
-                        // 退出确认窗盖在原页面上（阵容已变更）：取消/关闭在下方时先上移再 A
+                        // 确认窗盖在站位页上（兜底）：取消/关闭在下方时先上移再 A
                         if (ocr.ContainsJoined("取消") || ocr.ContainsJoined("关闭"))
                             await pad.Dpad(PadDir.Up);
                         log("[我的联赛] 退出确认弹窗：按 A 确认", LogLevel.Info);
                         await pad.Confirm();
                         _exitUsedA = true;
-                        return 1700;
+                        return 1300;
                     }
+                    // ★换人后 B 回到的就是这个站位页（侧栏光标停在「后备球员」、右侧预览
+                    // 后备名单）：不退出比赛计划，→ 进阵（光标固定在**第 3 位**，用户
+                    // 2026-10-25 实机）→ Rewind 按阵型步走到 换人位+1 继续巡检
+                    if (_verifyRounds < 2) return 1100; // 换人动画收尾
+                    log($"[我的联赛] 已返回站位页：→ 进阵（第 3 位）→ 走到第 {_swapPos + 2}/11 位继续巡检", LogLevel.Info);
+                    await pad.Dpad(PadDir.Right);
+                    _rewindWalk = false;
+                    _phase = Phase.Rewind;
+                    _verifyRounds = 0;
+                    return 1000;
+                }
+                if (screen == SwapScreen.Bench)
+                {
+                    _stall = 0;
                     if (_verifyRounds >= 2)
-                        await pad.Back(); // 完成（B 未生效/退回动画结束再按）
-                    return 1600;
+                        await pad.Back(); // 卡格子页：B 返回站位页（动画期间输入被吞，反复按）
+                    return 1200;
                 }
                 if (screen == SwapScreen.None)
                 {
-                    if (_verifyRounds <= 3) return 1300; // 退出过场/加载
+                    if (_verifyRounds <= 3) return 1100; // 换人过场/加载
                     _stall = 0;
                     if (_exitUsedA)
                     {
@@ -775,9 +791,9 @@ public sealed class MaxLevelSwapController
                         await pad.Confirm(); // 确认窗（无取消词的单按钮弹窗）直接 A
                         _exitUsedA = true;
                     }
-                    return 1600;
+                    return 1300;
                 }
-                return await StallAsync("退出比赛计划异常", screen, pad, log);
+                return await StallAsync("换人后返回异常", screen, pad, log);
             }
 
             case Phase.Reopen:
@@ -786,13 +802,14 @@ public sealed class MaxLevelSwapController
                 {
                     _stall = 0;
                     await pad.Y(); // 重进比赛计划，光标回门将
+                    _rewindWalk = true; // 从主页重进：光标在门将，Rewind 需盲走回换人位
                     _phase = Phase.Rewind;
-                    return 1800;
+                    return 1300;
                 }
                 if (screen == SwapScreen.Lineup && ++_stall <= 2)
                 {
                     await pad.Back(); // B 未生效
-                    return 1500;
+                    return 1100;
                 }
                 return await StallAsync("回主页异常", screen, pad, log);
             }
@@ -802,18 +819,38 @@ public sealed class MaxLevelSwapController
                 if (screen != SwapScreen.Lineup)
                     return await StallAsync("重进比赛计划异常", screen, pad, log);
                 _stall = 0;
-                for (int i = 0; i < _swapPos; i++)
-                    await pad.Dpad(CursorMoves[i]); // 盲走回刚换人的位置（不带等级识别）
-                _pos = _swapPos + 1;                // 换入的新球员不再识别，直接下一位
+                // 目标 = 换人位 + 1（换入的新球员不再识别）。
+                // 正常路径（换人后 B→→ 进阵）：光标固定落在第 3 位（用户 2026-10-25 实机），
+                //   按阵型步走到目标位——第 5 个换人→第 6 位 = 从 3 起 ↑、→、→（用户示例）；
+                //   换的是第 1 个→第 2 位 = 从 3 起 →（用户示例）。
+                // 兜底路径（意外退回主页→Y 重进）：光标回门将，盲走 CursorMoves[0..换人位-1]，
+                //   Inspect 补最后一步到目标位。
+                int target = _swapPos + 1;
+                if (_rewindWalk)
+                {
+                    for (int i = 0; i < _swapPos; i++)
+                        await pad.Dpad(CursorMoves[i]);
+                    _skipInspectMove = false;
+                }
+                else
+                {
+                    if (target == 1)
+                        await pad.Dpad(PadDir.Right);              // 2→1（边界反走）
+                    else
+                        for (int d = 2; d < target; d++)
+                            await pad.Dpad(CursorMoves[d]);        // 2→target
+                    _skipInspectMove = true;
+                }
+                _pos = target;
                 _phase = _pos >= CursorMoves.Length ? Phase.Done : Phase.Inspect;
                 if (_phase == Phase.Done)
                 {
                     log($"[我的联赛] 首发巡检完成：满级 {_maxed} 名，换人 {_swapped} 名", LogLevel.Success);
                     await pad.Back();
-                    return 1600;
+                    return 1200;
                 }
-                log($"[我的联赛] 已回到第 {_pos + 1}/11 位，继续巡检", LogLevel.Info);
-                return 900 + 150 * _swapPos;
+                log($"[我的联赛] 已走到第 {_pos + 1}/11 位，继续巡检", LogLevel.Info);
+                return _rewindWalk ? 700 + 110 * _swapPos : 600;
             }
 
             case Phase.Done:
@@ -834,10 +871,10 @@ public sealed class MaxLevelSwapController
                             await pad.Dpad(PadDir.Up);
                         log("[我的联赛] 退出确认弹窗：按 A 确认", LogLevel.Info);
                         await pad.Confirm();
-                        return 1700;
+                        return 1300;
                     }
                     await pad.Back(); // 逐级 B 退出到主页
-                    return 1500;
+                    return 1100;
                 }
                 if (++_stall > 6)
                 {
@@ -853,10 +890,10 @@ public sealed class MaxLevelSwapController
                     if (ocr.ContainsJoined("取消") || ocr.ContainsJoined("关闭"))
                         await pad.Dpad(PadDir.Up);
                     await pad.Confirm();
-                    return 1600;
+                    return 1200;
                 }
                 await pad.Back(); // 其他意外页面：B 退出
-                return 1500;
+                return 1100;
             }
 
             default:
@@ -874,7 +911,7 @@ public sealed class MaxLevelSwapController
         {
             log($"[我的联赛] 满级巡检卡住（{what}，画面 {screen}）：按 B 逃生（第 {_escapes} 次）", LogLevel.Warn);
             await pad.Back();
-            return 1500;
+            return 1100;
         }
         return await AbortAsync($"连续卡住（{what}）", pad, log);
     }

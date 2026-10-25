@@ -28,7 +28,8 @@ public enum SwapScreen
 
 /// <summary>球员详情数据栏读取结果。</summary>
 /// <param name="Level">当前等级（x/x 的 x）。</param>
-/// <param name="LevelMax">等级上限（x/x 的分母）。</param>
+/// <param name="LevelMax">等级上限（x/x 的分母）。★0 = 上限读不出（当前等级远低于
+/// 可能上限时调用方按「未满级」处理，见 <see cref="MaxLevelSwapController"/>）。</param>
 /// <param name="Points">剩余能力点（详情页橙色数字）。</param>
 public sealed record PlayerStatus(int Level, int LevelMax, int Points)
 {
@@ -49,11 +50,14 @@ public static partial class MaxLevelSwapBrain
 
     /// <summary>
     /// 首发站位页：侧栏「替补球员 / 自动配置球员」为该页独有（后备球员页标题虽有
-    /// 「后备球员」但无侧栏文字项；排序/筛选弹窗先于本判定）。整体实力 + 战术 做兜底证据。
+    /// 「后备球员」但无侧栏文字项；排序/筛选弹窗先于本判定）。整体实力 + 战术 做兜底证据——
+    /// ★战术必须整词精确匹配：详情页左上角的球员风格标签「基础战术」会让 ContainsJoined
+    /// 误命中（实机 2026-10-25：详情页被判站位页后 Y 重按死循环）。
     /// </summary>
     public static bool IsLineup(OcrResult ocr) =>
         ocr.ContainsJoined("替补球员") || ocr.ContainsJoined("自动配置球员") ||
-        (ocr.ContainsJoined("整体实力") && ocr.ContainsJoined("战术"));
+        (ocr.ContainsJoined("整体实力") && ocr.FindAll("战术").Any(w =>
+            w.NormText == "战术" || (w.NormText.Length <= 3 && w.NormText.EndsWith("战术"))));
 
     /// <summary>球员详情页：底部「X 球员动作」为主判据，「惯用脚」（数据栏固定列）兜底。</summary>
     public static bool IsDetail(OcrResult ocr) =>
@@ -66,8 +70,12 @@ public static partial class MaxLevelSwapBrain
     /// <summary>能力点分配页：底部「Y 推荐分配」为唯一词（弹窗项只有「能力点分配」）。</summary>
     public static bool IsAlloc(OcrResult ocr) => ocr.ContainsJoined("推荐分配");
 
-    /// <summary>后备球员列表页：左下「剩余球员数: N」唯一；兜底 标题+排除侧栏词
-    /// （首发站位页侧栏也印「后备球员」）。</summary>
+    /// <summary>
+    /// 后备球员卡格子页：左下「剩余球员数: N」唯一；兜底 标题+排除侧栏词
+    /// （首发站位页侧栏也印「后备球员」）。★必须先于本页判站位页：换人后 B 返回的
+    /// 「侧栏光标停在 后备球员 上」的站位页右侧仍预览后备名单（含剩余球员数），
+    /// 但同屏有侧栏词——见 <see cref="IsLineup"/>（用户 2026-10-25 截图实锤）。
+    /// </summary>
     public static bool IsBench(OcrResult ocr) =>
         ocr.ContainsJoined("剩余球员数") || ocr.ContainsJoined("剩余球员") ||
         (ocr.ContainsJoined("后备球员") && !ocr.ContainsJoined("替补球员") &&
@@ -94,9 +102,13 @@ public static partial class MaxLevelSwapBrain
         if (IsCardType(ocr)) return SwapScreen.CardType;
         if (IsSort(ocr)) return SwapScreen.Sort;
         if (IsFilter(ocr)) return SwapScreen.Filter;
-        if (IsBench(ocr)) return SwapScreen.Bench;
+        // 详情页先于站位页（双保险：详情页也有球员风格标签/右侧整体实力等站位页要素）
         if (IsDetail(ocr)) return SwapScreen.Detail;
+        // ★站位页先于后备页：换人后 B 返回的站位页侧栏光标停在「后备球员」上、
+        // 右侧预览后备名单（含剩余球员数），必须按站位页处理（→ 进阵继续巡检）；
+        // 卡格子页无侧栏词，仍走后备页分支
         if (IsLineup(ocr)) return SwapScreen.Lineup;
+        if (IsBench(ocr)) return SwapScreen.Bench;
         return SwapScreen.None;
     }
 
@@ -351,6 +363,98 @@ public static partial class MaxLevelSwapBrain
             }
         }
         return cur is { } cc && max is { } mm && cc <= mm ? (cc, mm) : null;
+    }
+
+    // ---------------- 等级多配置投票（大字细笔画「1」单配置不可信，实机 20261025_11 五帧标定） ----------------
+
+    /// <summary>等级列值区词（「等级」表头正下方 ±0.06 横带内，与 <see cref="ReadParts"/> 同几何）。
+    /// 投票的直接帧候选必须限定在该区域——全页数字词（年龄/能力点/评分）会污染票仓。</summary>
+    public static IReadOnlyList<OcrWord> LevelValueWords(OcrResult ocr)
+    {
+        var head = FindHead(ocr, "等级", 0.28);
+        if (head is null) return Array.Empty<OcrWord>();
+        return ocr.Words
+            .Where(w => w != head &&
+                        w.CenterY > head.CenterY + 0.005 && w.CenterY <= head.CenterY + 0.10 &&
+                        Math.Abs(w.CenterX - head.CenterX) <= 0.06)
+            .OrderBy(w => w.CenterX)
+            .ToList();
+    }
+
+    /// <summary>词级等级候选：单字符 L/J/I/l/i 是细笔画「1」的经典误读归一为 1；
+    /// 斜杠（或误读成的':'）后段=上限、纯数字=当前（等级不存在 0，cur 必须 &gt;0）；
+    /// 无数字词（标签「用脚」「n」）不出候选。</summary>
+    internal static IEnumerable<(int? Cur, int? Max)> LevelCandidatesFromWords(IEnumerable<OcrWord> words)
+    {
+        foreach (var w in words)
+        {
+            string t = w.Text.Trim();
+            if (t.Length == 0) continue;
+            if (t.Length == 1 && "LJIli".Contains(t[0]) && !char.IsDigit(t[0]))
+            {
+                yield return (1, null);
+                continue;
+            }
+            int sep = t.IndexOfAny(new[] { '/', ':' });
+            int? before = sep >= 0 ? DigitsAtMost(t[..sep], 2) : null;
+            int? after = sep >= 0 ? DigitsAtMost(t[(sep + 1)..], 2) : null;
+            if (sep >= 0)
+            {
+                if (after is not null && after > 0)
+                    yield return (before is > 0 ? before : null, after);
+                else if (before is > 0)
+                    yield return (before, null);
+            }
+            else
+            {
+                int? d = DigitsAtMost(t, 2);
+                if (d is > 0) yield return (d, null);
+            }
+        }
+    }
+
+    private static int? DigitsAtMost(string s, int maxLen)
+    {
+        string d = new(s.Where(char.IsDigit).ToArray());
+        return d.Length > 0 && d.Length <= maxLen && int.TryParse(d, out int v) ? v : null;
+    }
+
+    /// <summary>候选投票：当前等级取众数（平票取较小——细「1」会被读大成 5/7，取小安全；
+    /// 低等级下 1 与 5 的决策同为「未满级」），上限取众数（平票取较大——偏小会伪造满级）。
+    /// cur&gt;max 视为读坏：上限作废（交给上层按「等级远低于上限」兜底）。</summary>
+    internal static (int Cur, int? Max)? VoteLevel(IEnumerable<(int? Cur, int? Max)> candidates)
+    {
+        var curs = candidates.Where(c => c.Cur is not null).Select(c => c.Cur!.Value).ToList();
+        var maxs = candidates.Where(c => c.Max is not null).Select(c => c.Max!.Value).ToList();
+        if (curs.Count == 0) return null;
+        int cur = curs.GroupBy(v => v).OrderByDescending(g => g.Count()).ThenBy(g => g.Key).First().Key;
+        int? max = maxs.Count == 0
+            ? null
+            : maxs.GroupBy(v => v).OrderByDescending(g => g.Count()).ThenByDescending(g => g.Key).First().Key;
+        if (max is int m && cur > m) max = null; // 5/51 之类碎片毒化：上限作废交给上层兜底
+        return (cur, max);
+    }
+
+    /// <summary>
+    /// 能力点徽标（详情页数据栏 能力点 值区）：有剩余能力点 = 橙色圆圈 + 白字，
+    /// 0 = 白字「0」无橙圈。实机 2026-10-25 三帧标定：橙圈 1103 像素、0 点 0 像素，
+    /// 颜色判据 r&gt;180 / g 90~200 / b&lt;100 / r−b&gt;120，阈值 150。
+    /// 纯像素判定，不依赖 OCR 数字（橙色圈内的「2」被读成 21 的实机误读教训）。
+    /// </summary>
+    public static bool HasAbilityPointBadge(FrameData f)
+    {
+        if (f.Width < 200 || f.Height < 120 || f.Bgra.Length < f.Width * f.Height * 4) return false;
+        int x0 = (int)(0.55 * f.Width), x1 = (int)(0.66 * f.Width);
+        int y0 = (int)(0.395 * f.Height), y1 = (int)(0.475 * f.Height);
+        int n = 0;
+        for (int y = y0; y < y1; y++)
+            for (int x = x0; x < x1; x++)
+            {
+                int i = (y * f.Width + x) * 4;
+                int b = f.Bgra[i], g = f.Bgra[i + 1], r = f.Bgra[i + 2];
+                if (r > 180 && g is > 90 and < 200 && b < 100 && r - b > 120) n++;
+            }
+        return n >= 150;
     }
 
     // ---------------- 排序/筛选「已设置」探针（中断续跑不重复勾选） ----------------
