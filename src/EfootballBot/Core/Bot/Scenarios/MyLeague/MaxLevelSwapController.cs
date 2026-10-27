@@ -184,7 +184,11 @@ public sealed class MaxLevelSwapController
         CancellationToken ct = default)
         => StepCore(obs.Ocr, obs.Frame, new EngineSwapPad(engine.Pad),
             (o, f) => ReadStatusAsync(engine, o, f, ct), log,
-            onMaxed: () => engine.Stats.PlayersMaxed++,
+            onMaxed: pos =>
+            {
+                engine.Stats.PlayersMaxed++;
+                engine.ReportMaxLevel($"第 {pos + 1}/11 位（满级换人巡检）");
+            },
             dumpFrame: (f, tag) => DumpFrame(f, tag, log), ct);
 
     /// <summary>读不出的详情页帧落 data\dump\（远程排障：OCR 几何与截图差异只有真帧能定位）。</summary>
@@ -293,11 +297,11 @@ public sealed class MaxLevelSwapController
     }
 
     /// <summary>核心状态机（OCR/帧/手柄/读取器全参数化，可单测）。返回本轮延时；null = 巡检结束。
-    /// onMaxed：每检出一个满级球员回调（GUI 统计录入）；dumpFrame：读不出时落实机帧。</summary>
+    /// onMaxed：每检出一个满级球员回调（参数=光标位序 0~10，GUI 统计录入）；dumpFrame：读不出时落实机帧。</summary>
     internal async Task<int?> StepCore(OcrResult ocr, FrameData frame, ISwapPad pad,
         Func<OcrResult, FrameData, Task<PlayerStatus?>> readStatus,
         Action<string, LogLevel> log,
-        Action? onMaxed = null, Action<FrameData, string>? dumpFrame = null,
+        Action<int>? onMaxed = null, Action<FrameData, string>? dumpFrame = null,
         CancellationToken ct = default)
     {
         if (_phase == Phase.Idle) return null;
@@ -427,7 +431,7 @@ public sealed class MaxLevelSwapController
                         return 1100;
                     }
                     _maxed++;
-                    onMaxed?.Invoke();
+                    onMaxed?.Invoke(_pos);
                     _swapPos = _pos;
                     if (!_hasPoints)
                     {
@@ -774,7 +778,11 @@ public sealed class MaxLevelSwapController
                     // 后备名单）：不退出比赛计划，→ 进阵（光标固定在**第 3 位**，用户
                     // 2026-10-25 实机）→ Rewind 按阵型步走到 换人位+1 继续巡检
                     if (_verifyRounds < 2) return 1100; // 换人动画收尾
-                    log($"[我的联赛] 已返回站位页：→ 进阵（第 3 位）→ 走到第 {_swapPos + 2}/11 位继续巡检", LogLevel.Info);
+                    // 末位（第 11 位）换人后没有下一位：不进阵走位，Rewind 直接收尾
+                    if (_swapPos + 2 > 11)
+                        log("[我的联赛] 已返回站位页：末位换人完成，结束巡检", LogLevel.Info);
+                    else
+                        log($"[我的联赛] 已返回站位页：→ 进阵（第 3 位）→ 走到第 {_swapPos + 2}/11 位继续巡检", LogLevel.Info);
                     await pad.Dpad(PadDir.Right);
                     _rewindWalk = false;
                     _phase = Phase.Rewind;
@@ -836,10 +844,12 @@ public sealed class MaxLevelSwapController
                 //   换的是第 1 个→第 2 位 = 从 3 起 →（用户示例）。
                 // 兜底路径（意外退回主页→Y 重进）：光标回门将，盲走 CursorMoves[0..换人位-1]，
                 //   Inspect 补最后一步到目标位。
-                int target = _swapPos + 1;
+                int target = _swapPos + 1;                 // 0 基：下一巡检位；11 = 已越过末位（10）
+                int lastPos = CursorMoves.Length;          // 10 = 末位（第 11 位）
                 if (_rewindWalk)
                 {
-                    for (int i = 0; i < _swapPos; i++)
+                    // 从门将盲走到刚换人的位置：最多 10 步，CursorMoves 只有 10 条（0..9）
+                    for (int i = 0; i < _swapPos && i < CursorMoves.Length; i++)
                         await pad.Dpad(CursorMoves[i]);
                     _skipInspectMove = false;
                 }
@@ -848,12 +858,16 @@ public sealed class MaxLevelSwapController
                     if (target == 1)
                         await pad.Dpad(PadDir.Right);              // 2→1（边界反走）
                     else
-                        for (int d = 2; d < target; d++)
+                        // ★末位换人时 target=11 已越过阵型步表（CursorMoves 只有 10 条）：
+                        // 2026-10-27 实机在这里抛 IndexOutOfRange，状态机每轮同一处异常空转到
+                        // 用户手动停止。越界即不再走位，由下面的相位判定直接收尾。
+                        for (int d = 2; d < target && d < CursorMoves.Length; d++)
                             await pad.Dpad(CursorMoves[d]);        // 2→target
                     _skipInspectMove = true;
                 }
                 _pos = target;
-                _phase = _pos >= CursorMoves.Length ? Phase.Done : Phase.Inspect;
+                // 目标位「越过末位」才算巡检完成；目标刚好是末位（10）仍要 Inspect 一次
+                _phase = _pos > lastPos ? Phase.Done : Phase.Inspect;
                 if (_phase == Phase.Done)
                 {
                     log($"[我的联赛] 首发巡检完成：满级 {_maxed} 名，换人 {_swapped} 名", LogLevel.Success);

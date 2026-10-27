@@ -29,7 +29,7 @@ public static class GpuPreference
         // 枚举内已按 Luid 去重，但 AMD 的虚拟显示适配器（Indirect Display，ROOT\DISPLAY）
         // 与真卡同名不同 Luid——2026-10-24 反馈包实机：单卡 7800 XT 连同名一起被列出 3 次，
         // 误报「双显卡环境（7800 XT + 7800 XT + 7800 XT）」。这里再按名字去重。
-        var adapters = CaptureInterop.GetHardwareAdapterNames()
+        var adapters = CaptureInteropVortice.GetHardwareAdapterNames()
             .Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         string desc = string.Join(" + ", adapters);
         if (adapters.Count < 2)

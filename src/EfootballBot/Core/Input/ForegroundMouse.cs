@@ -5,7 +5,7 @@ namespace EfootballBot.Core.Input;
 /// <summary>
 /// 全局真实鼠标输入（SendInput + SetCursorPos）。
 /// 仅对当前前台/激活窗口可靠，属于“点击瞬间需置前”的方案，作为后台消息失效时的兜底。
-/// 点击前按拟人轨迹多段移动真实光标（与 BackgroundMouse 同款贝塞尔路径），ModuleFallback.DisableMouseTrajectory 可关。
+/// 点击前按拟人轨迹多段移动真实光标（与 BackgroundMouse 同款贝塞尔路径）。
 /// </summary>
 public sealed class ForegroundMouse
 {
@@ -22,7 +22,6 @@ public sealed class ForegroundMouse
     private const uint MOUSEEVENTF_LEFTUP = 0x0004;
 
     private readonly HumanPacer _pacer;
-    private readonly bool _humanTrajectory;
     private readonly Random _rnd = new();
     private int? _lastX;
     private int? _lastY;
@@ -34,10 +33,9 @@ public sealed class ForegroundMouse
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X, Y; }
 
-    public ForegroundMouse(HumanPacer? pacer = null, bool humanTrajectory = true)
+    public ForegroundMouse(HumanPacer? pacer = null)
     {
         _pacer = pacer ?? new HumanPacer();
-        _humanTrajectory = humanTrajectory;
     }
 
     /// <summary>将窗口还原并置前，返回此前前台窗口（便于恢复）。</summary>
@@ -64,7 +62,7 @@ public sealed class ForegroundMouse
         _lastX = screenX;
         _lastY = screenY;
 
-        if (_humanTrajectory && x0 is not null && y0 is not null)
+        if (x0 is not null && y0 is not null)
         {
             foreach (var (px, py) in BackgroundMouse.BuildTrajectory(x0.Value, y0.Value, screenX, screenY, _rnd))
             {

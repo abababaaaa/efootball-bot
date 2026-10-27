@@ -169,13 +169,20 @@ public partial class App : Application
 
     // ================= 单实例（仅 GUI 模式；--dump 诊断命令不受限） =================
 
+#if CHILD_SESSION_BETA
+    /// <summary>测试版与正式版必须能同时运行：单实例锁/唤醒管道加 -beta 后缀。</summary>
+    private const string InstanceTag = "-beta";
+#else
+    private const string InstanceTag = "";
+#endif
+
     // 单实例锁与唤醒管道按档案命名：多个 --profile 实例可同时驻留（各自挂一个账号）
-    private static string SingleMutexName => AppPaths.Profile.Length == 0
-        ? @"Local\EfootballBot-SingleInstance-Mutex"
-        : $@"Local\EfootballBot-SingleInstance-Mutex-{AppPaths.Profile}";
-    private static string SinglePipeName => AppPaths.Profile.Length == 0
-        ? "EfootballBot-SingleInstance-Pipe"
-        : $"EfootballBot-SingleInstance-Pipe-{AppPaths.Profile}";
+    private static string SingleMutexName =>
+        $@"Local\EfootballBot-SingleInstance-Mutex{InstanceTag}"
+        + (AppPaths.Profile.Length == 0 ? "" : $"-{AppPaths.Profile}");
+    private static string SinglePipeName =>
+        $"EfootballBot-SingleInstance-Pipe{InstanceTag}"
+        + (AppPaths.Profile.Length == 0 ? "" : $"-{AppPaths.Profile}");
 
     private Mutex? _singleMutex;
     private CancellationTokenSource? _pipeCts;

@@ -114,6 +114,7 @@ public sealed class AiLadderScenario : IScenario
         {
             _engine.Stats.MatchesDone++;
             _log($"[AI天梯联赛] 一场比赛结束（累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
+            _engine.ReportMatchDone(_matchSession.WasKeyMatch);
 
             var cfg = _engine.Config.AiLadder;
             if (cfg.StopAfterMatches > 0 && _engine.ModuleMatchesDone >= cfg.StopAfterMatches)
@@ -124,13 +125,13 @@ public sealed class AiLadderScenario : IScenario
             }
         }
 
-        // ---- 共用：球员满级提示（60s 节流，开关在联赛设置） ----
-        if (_engine.Config.MyLeague.NotifyPlayerMaxLevel &&
-            obs.Ocr.ContainsJoined("满级") && (now - _lastMaxLevelAt).TotalSeconds > 60)
+        // ---- 共用：球员满级提示（60s 节流，常开） ----
+        if (obs.Ocr.ContainsJoined("满级") && (now - _lastMaxLevelAt).TotalSeconds > 60)
         {
             _lastMaxLevelAt = now;
             _engine.Stats.PlayersMaxed++;
             _log($"[AI天梯联赛] 球员满级提示（累计 {_engine.Stats.PlayersMaxed} 次）", LogLevel.Success);
+            _engine.ReportMaxLevel("比赛中满级提示");
         }
 
         string screenName = DescribeScreen(al, wk, ml);

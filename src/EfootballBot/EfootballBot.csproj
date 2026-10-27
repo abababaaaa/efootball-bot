@@ -2,6 +2,12 @@
 
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
+    <!-- 测试版开关：-p:ChildSessionBeta=true。
+         打开后：独立 exe 名 EfootballBotBeta + 独立数据目录（exe 旁边 data\）+ 独立单实例锁，
+         可以和正式版同时运行；正式版构建完全不受影响。
+         用途：真后台相关实验（原「子会话」方案已删除——eFootball 拒绝在 RDP 会话里运行；
+         现行方向=虚拟显示器方案，代码只在测试版里动工）。 -->
+    <ChildSessionBeta Condition="'$(ChildSessionBeta)' == ''">false</ChildSessionBeta>
     <!-- 默认只构建 net10（单数 TargetFramework，dotnet publish 无需 -f）；
          需要验证 net11 GA 就绪性时加 -p:BuildNet11=true（需 .NET 11 SDK，切换为复数 TargetFrameworks） -->
     <TargetFramework Condition="'$(BuildNet11)' != 'true'">net10.0-windows10.0.19041.0</TargetFramework>
@@ -10,14 +16,15 @@
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
     <LangVersion>latest</LangVersion>
-    <AssemblyName>EfootballBot</AssemblyName>
+    <AssemblyName Condition="'$(ChildSessionBeta)' != 'true'">EfootballBot</AssemblyName>
+    <AssemblyName Condition="'$(ChildSessionBeta)' == 'true'">EfootballBotBeta</AssemblyName>
     <RootNamespace>EfootballBot</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <!-- 测试版约定：4 段版本号（如 2.0.5.1）+ 同名 4 段 tag（v2.0.5.1）→ CI 按 pre-release 发布，
-         更新器 Version.TryParse 原生支持、仅「包含测试版」开启的用户可见；迭代测试版递增第 4 段，
-         正式版顺延三段号（2.0.6）。带横杠的 tag（v2.0.5-beta1）不可用——Version.TryParse 解析失败 -->
-    <Version>5.0.6.0</Version>
+    <!-- 测试版版本号按 4 段测试版约定（未发版，仅本地构建）；正式版保持 5.0.7.0 -->
+    <Version Condition="'$(ChildSessionBeta)' != 'true'">5.0.7.0</Version>
+    <Version Condition="'$(ChildSessionBeta)' == 'true'">5.0.7.1</Version>
+    <DefineConstants Condition="'$(ChildSessionBeta)' == 'true'">$(DefineConstants);CHILD_SESSION_BETA</DefineConstants>
     <Product>eFootball 挂机助手</Product>
     <Company>EfootballBot</Company>
     <InvariantGlobalization>false</InvariantGlobalization>
@@ -43,11 +50,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <!-- DXGI Desktop Duplication 捕获实现（SharpDX 统一锁定 4.2.0） -->
-    <PackageReference Include="SharpDX.Direct3D11" Version="4.2.0" />
-    <PackageReference Include="SharpDX.DXGI" Version="4.2.0" />
-    <!-- 捕获家族新实现（默认）：Vortice.Direct3D11 会传递引入 Vortice.DXGI / SharpGen.Runtime。
-         与 SharpDX 是两套 COM 包装，绝不可混挂同一设备指针；家族切换见 ModuleFallback.UseSharpDxCapture -->
+    <!-- DXGI 桌面复制捕获 + D3D 设备（Vortice 唯一家族）：Vortice.Direct3D11 会传递引入 Vortice.DXGI / SharpGen.Runtime -->
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <!-- PP-OCRv6 本地离线 OCR（ONNX Runtime，包自带 v5 检测/方向分类模型） -->
     <PackageReference Include="RapidOcrNet" Version="4.2.0" />
@@ -80,6 +83,11 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="EfootballBot.Tests" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(ChildSessionBeta)' == 'true'">
+    <!-- 测试版专用：WMI（虚拟显示器适配器检测）。正式版不引用，体积与依赖保持不变。 -->
+    <PackageReference Include="System.Management" Version="9.0.*" />
   </ItemGroup>
 
   <ItemGroup>

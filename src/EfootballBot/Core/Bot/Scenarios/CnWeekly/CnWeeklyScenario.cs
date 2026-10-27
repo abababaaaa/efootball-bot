@@ -172,6 +172,7 @@ public sealed class CnWeeklyScenario : IScenario
             _engine.Stats.MatchesDone++;
             if (_matchSession.WasKeyMatch) _engine.Stats.KeyMatches++;
             _log($"[国服周活动] 一场比赛结束（累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
+            _engine.ReportMatchDone(_matchSession.WasKeyMatch);
 
             // 主要奖励进度只在比赛后变化：解除「未拿满」门控，下次回主页再核验一次
             _rewardContinueUntilMatch = false;
@@ -192,13 +193,13 @@ public sealed class CnWeeklyScenario : IScenario
             }
         }
 
-        // ---- 共用：球员满级提示（60s 节流，开关在联赛设置） ----
-        if (_engine.Config.MyLeague.NotifyPlayerMaxLevel &&
-            obs.Ocr.ContainsJoined("满级") && (now - _lastMaxLevelAt).TotalSeconds > 60)
+        // ---- 共用：球员满级提示（60s 节流，常开） ----
+        if (obs.Ocr.ContainsJoined("满级") && (now - _lastMaxLevelAt).TotalSeconds > 60)
         {
             _lastMaxLevelAt = now;
             _engine.Stats.PlayersMaxed++;
             _log($"[国服周活动] 球员满级提示（累计 {_engine.Stats.PlayersMaxed} 次）", LogLevel.Success);
+            _engine.ReportMaxLevel("比赛中满级提示");
         }
 
         string screenName = cw != CwScreen.None ? $"国服周活动.{cw}" : ml.ToString();

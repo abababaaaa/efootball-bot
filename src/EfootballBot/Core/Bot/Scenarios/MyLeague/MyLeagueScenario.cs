@@ -198,6 +198,7 @@ public class MyLeagueScenario : IScenario
             }
             else
                 _log($"[我的联赛] 一场比赛结束，已完成 {_engine.Stats.MatchesDone} 场", LogLevel.Success);
+            _engine.ReportMatchDone(_matchSession.WasKeyMatch);
 
             // 每场比赛结束后复位购买状态机（用户要求）：下一轮回联赛主页必定重新右拨
             // 核验「使用的物品」面板，加成道具耗尽（有效场数一般 3 场）当场补购。
@@ -238,23 +239,23 @@ public class MyLeagueScenario : IScenario
             }
         }
 
-        // 球员满级提示（开关可关；比赛期间"满级"字样，60s 节流计数一次）
-        if (LeagueConfig.NotifyPlayerMaxLevel &&
-            obs.Ocr.ContainsJoined("满级") && (now - _lastMaxLevelAt).TotalSeconds > 60)
+        // 球员满级提示（常开；比赛期间"满级"字样，60s 节流计数一次）
+        if (obs.Ocr.ContainsJoined("满级") && (now - _lastMaxLevelAt).TotalSeconds > 60)
         {
             _lastMaxLevelAt = now;
             _engine.Stats.PlayersMaxed++;
             _log($"[我的联赛] 球员满级提示（累计 {_engine.Stats.PlayersMaxed} 次）——该换人了", LogLevel.Success);
+            _engine.ReportMaxLevel("比赛中满级提示");
         }
 
         // 赛后「经验值」页（推进链中的一页，动作不变仍按 A 下一步）：页面只列出本场
         // 还能获得经验的球员，≤3 人 = 大部分球员已满级（实机 2026-10-17 用户需求：
         // 从页面人数一眼看出阵容成长空间）→ 彩色日志提醒换人。60s 节流防页面停留
-        // 多帧连报；跟随「球员满级提示」开关。
+        // 多帧连报。
         int expPagePlayers = MyLeagueBrain.IsExpResultPage(obs.Ocr)
             ? MyLeagueBrain.CountExpResultPlayers(obs.Ocr)
             : 0;
-        if (LeagueConfig.NotifyPlayerMaxLevel && expPagePlayers is > 0 and <= 3 &&
+        if (expPagePlayers is > 0 and <= 3 &&
             (now - _lastExpPageMaxLogAt).TotalSeconds > 60)
         {
             _lastExpPageMaxLogAt = now;

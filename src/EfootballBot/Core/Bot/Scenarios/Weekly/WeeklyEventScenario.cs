@@ -158,6 +158,7 @@ public sealed class WeeklyEventScenario : IScenario
             _engine.Stats.MatchesDone++;
             if (_matchSession.WasKeyMatch) _engine.Stats.KeyMatches++;
             _log($"[周活动] 一场比赛结束（{(_matchSession.WasKeyMatch ? "关键比赛，" : "")}累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
+            _engine.ReportMatchDone(_matchSession.WasKeyMatch);
 
             var wkCfg = _engine.Config.Weekly;
             if (wkCfg.StopAfterMatches > 0 && _engine.ModuleMatchesDone >= wkCfg.StopAfterMatches)
@@ -168,13 +169,13 @@ public sealed class WeeklyEventScenario : IScenario
             }
         }
 
-        // ---- 共用：球员满级提示（60s 节流，开关在联赛设置） ----
-        if (_engine.Config.MyLeague.NotifyPlayerMaxLevel &&
-            obs.Ocr.ContainsJoined("满级") && (now - _lastMaxLevelAt).TotalSeconds > 60)
+        // ---- 共用：球员满级提示（60s 节流，常开） ----
+        if (obs.Ocr.ContainsJoined("满级") && (now - _lastMaxLevelAt).TotalSeconds > 60)
         {
             _lastMaxLevelAt = now;
             _engine.Stats.PlayersMaxed++;
             _log($"[周活动] 球员满级提示（累计 {_engine.Stats.PlayersMaxed} 次）", LogLevel.Success);
+            _engine.ReportMaxLevel("比赛中满级提示");
         }
 
         string screenName = wk != WkScreen.None ? $"周活动.{wk}" : ml.ToString();

@@ -234,6 +234,9 @@ public static class WorkerProgram
                 if (msg.Cmd == "ping")
                 {
                     await SendAsync(PipeProtocol.EvPong());
+                    // 紧跟在 pong 之后发 PID：GUI 的握手只读第一行 pong，这一条留给读循环。
+                    // 子会话模式下 GUI 靠它 Process.GetProcessById 反查 Worker。
+                    await SendAsync(PipeProtocol.EvPid(pid));
                 }
                 else if (msg.Cmd == "start" && msg.Mode is not null)
                 {

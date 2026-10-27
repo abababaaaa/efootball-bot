@@ -5,10 +5,9 @@ using WinRT;
 namespace EfootballBot.Core.Capture;
 
 /// <summary>
-/// Windows.Graphics.Capture 相关的 COM interop。
-/// 适配器枚举/设备创建一律走 SharpDX（工程已引用，DXGI 捕获同款路径、实机已验证）——
-/// 手写 CreateDXGIFactory1 P/Invoke 在实机探测中恒返 E_NOINTERFACE（2026-10-11），
-/// 曾让"绑定真实 GPU"的修复静默落空，勿再手写 DXGI/D3D11 原生调用。
+/// Windows.Graphics.Capture 相关的 COM interop（家族中立：仅 WinRT 投影，不持有 D3D/DXGI 对象）。
+/// DXGI 适配器枚举/设备创建走 CaptureInteropVortice（Vortice 家族），勿在此手写 DXGI 原生调用
+/// （手写 CreateDXGIFactory1 P/Invoke 实机探测恒返 E_NOINTERFACE，2026-10-11）。
 /// </summary>
 internal static class CaptureInterop
 {
@@ -65,117 +64,6 @@ internal static class CaptureInterop
     }
 
     public static readonly Guid IDXGIDeviceGuid = new("54EC77FA-1377-44E6-8C32-88FD5F44C84C");
-
-    // ---- DXGI 适配器枚举（SharpDX）----
-
-    /// <summary>软件/WARP 适配器判定：SharpDX AdapterDescription 不含 Flags，
-    /// 用专用显存（软件适配器为 0）+ 名称（Microsoft Basic Render Driver）识别。
-    /// 注意 DedicatedVideoMemory 是 SharpDX.PointerSize：与 int 字面量比较会走溢出的
-    /// 隐式转换（16GB 显存直接 OverflowException），必须与 long 比较。
-    /// WGC 帧池建在 WARP 设备上会确定性触发 dwm.exe (d3d10warp.dll) 崩溃 → 系统卡死黑屏，
-    /// 捕获链路绝不选用软件适配器。</summary>
-    private static bool IsHardwareAdapter(SharpDX.DXGI.AdapterDescription d) =>
-        d.DedicatedVideoMemory > 0L &&
-        !d.Description.Contains("Basic", StringComparison.OrdinalIgnoreCase);
-
-    /// <summary>最近一次适配器枚举失败的诊断信息（正常为空）。</summary>
-    public static string? LastEnumError;
-
-    /// <summary>枚举全部硬件适配器名（软件/WARP 适配器除外，按 Luid 去重——同一适配器
-    /// 可能被枚举多次，实机 2026-10-11：单卡 AMD 7800 XT 被列出 3 次误报"双显卡"）。双显卡环境检测用。</summary>
-    public static List<string> GetHardwareAdapterNames()
-    {
-        var names = new List<string>();
-        var seenLuids = new HashSet<long>();
-        try
-        {
-            using var factory = new SharpDX.DXGI.Factory1();
-            foreach (var adapter in factory.Adapters)
-            {
-                try
-                {
-                    var d = adapter.Description;
-                    if (!IsHardwareAdapter(d)) continue;
-                    if (!seenLuids.Add(d.Luid)) continue;
-                    names.Add(d.Description);
-                }
-                finally { adapter.Dispose(); }
-            }
-        }
-        catch { /* 枚举失败返回已收集部分 */ }
-        return names;
-    }
-
-    /// <summary>
-    /// 选出最适合捕获的真实硬件适配器。返回的适配器由调用方 Dispose；
-    /// null = 无可用硬件适配器（调用方走默认硬件适配器路径）。
-    /// 规则：显存最大者优先；但若该卡没有任何显示输出（矿卡/无头卡典型，如 CMP 30HX），
-    /// 而其他硬件卡有输出，则改选"有输出的硬件卡中显存最大者"——DWM 跑在有输出的卡上，
-    /// WGC 设备绑到无输出卡要跨适配器交付帧，老驱动下窗口一移出屏幕就断帧
-    /// （2026-10-13 矿卡工作站用户实测：绑定 CMP 30HX 后停靠即黑，Intel P4600 是唯一有输出的卡）。
-    /// 名字含 Virtual 的虚拟显示适配器不参与"有输出"优先（其输出是虚拟显示器，非 DWM 属主）。
-    /// </summary>
-    public static SharpDX.DXGI.Adapter? PickHardwareAdapter(out string name, out bool pickedForOutputs)
-    {
-        name = "";
-        pickedForOutputs = false;
-        try
-        {
-            using var factory = new SharpDX.DXGI.Factory1();
-            SharpDX.DXGI.Adapter? bestAny = null, bestOut = null;
-            long bestAnyMem = 0, bestOutMem = 0;
-            var seenLuids = new HashSet<long>();
-            foreach (var adapter in factory.Adapters)
-            {
-                try
-                {
-                    var d = adapter.Description;
-                    if (!IsHardwareAdapter(d)) continue;
-                    if (!seenLuids.Add(d.Luid)) continue; // 同一适配器可能被枚举多次（实机 2026-10-11 AMD 单卡列 3 次）
-                    long mem = (long)d.DedicatedVideoMemory;
-                    bool isVirtual = d.Description.Contains("Virtual", StringComparison.OrdinalIgnoreCase);
-                    var outs = adapter.Outputs;
-                    try
-                    {
-                        if (!isVirtual && outs.Length > 0 &&
-                            (bestOut is null || mem > bestOutMem))
-                        {
-                            if (!ReferenceEquals(bestAny, bestOut)) bestOut?.Dispose();
-                            bestOut = adapter;
-                            bestOutMem = mem;
-                            name = d.Description;
-                        }
-                    }
-                    finally { foreach (var o in outs) o.Dispose(); }
-                    if (bestAny is null || mem > bestAnyMem)
-                    {
-                        if (!ReferenceEquals(bestAny, bestOut)) bestAny?.Dispose();
-                        bestAny = adapter;
-                        bestAnyMem = mem;
-                    }
-                }
-                finally
-                {
-                    if (!ReferenceEquals(bestAny, adapter) && !ReferenceEquals(bestOut, adapter))
-                        adapter.Dispose();
-                }
-            }
-            if (bestOut is not null && !ReferenceEquals(bestOut, bestAny))
-            {
-                // 显存最大的卡没有输出：弃用它，改绑有输出的卡
-                bestAny?.Dispose();
-                pickedForOutputs = true;
-                return bestOut;
-            }
-            if (bestAny is not null)
-            {
-                name = bestAny.Description.Description;
-                return bestAny;
-            }
-            return null;
-        }
-        catch { name = ""; return null; }
-    }
 
     /// <summary>从原生 D3D11 设备创建 WinRT IDirect3DDevice（WGC 会话用）。</summary>
     public static IDirect3DDevice CreateDirect3DDevice(nint d3dDevice)

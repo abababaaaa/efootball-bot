@@ -6,8 +6,7 @@ namespace EfootballBot.Core.Input;
 /// 面向窗口句柄的后台鼠标模拟（不移动全局光标、不抢前台）。
 /// 通过 PostMessage 投递 WM_MOUSEMOVE / WM_LBUTTONDOWN / WM_LBUTTONUP，坐标为客户区像素。
 /// 适用于会处理窗口鼠标消息的游戏（如国服 eFootballOnline 窗口化运行时）。
-/// 点击前按拟人轨迹多段移动（二次贝塞尔 + 段间对数正态延迟），
-/// ModuleFallback.DisableMouseTrajectory 可回退单步跳变。
+/// 点击前按拟人轨迹多段移动（二次贝塞尔 + 段间对数正态延迟）。
 /// </summary>
 public sealed class BackgroundMouse
 {
@@ -21,7 +20,6 @@ public sealed class BackgroundMouse
     private const int MK_RBUTTON = 0x0002;
 
     private readonly HumanPacer _pacer;
-    private readonly bool _humanTrajectory;
     private readonly Random _rnd = new();
     /// <summary>上次落点（轨迹从此接续，模拟真实光标连续移动；null=首次点击单步到位）。</summary>
     private int? _lastX;
@@ -33,10 +31,9 @@ public sealed class BackgroundMouse
     [DllImport("user32.dll", SetLastError = true)]
     private static extern IntPtr SendMessage(IntPtr hWnd, uint msg, IntPtr wParam, IntPtr lParam);
 
-    public BackgroundMouse(HumanPacer? pacer = null, bool humanTrajectory = true)
+    public BackgroundMouse(HumanPacer? pacer = null)
     {
         _pacer = pacer ?? new HumanPacer();
-        _humanTrajectory = humanTrajectory;
     }
 
     /// <summary>向指定窗口客户区坐标投递一次左键单击（拟人移动→按下→抬起）。</summary>
@@ -84,14 +81,14 @@ public sealed class BackgroundMouse
         SendMessage(hWnd, WM_LBUTTONUP, IntPtr.Zero, LParam(x, y));
     }
 
-    /// <summary>拟人移动到目标后短暂停顿（旧单步路径=30ms 定值，轨迹路径=对数正态采样）。</summary>
+    /// <summary>拟人移动到目标后短暂停顿；首次点击（无上次落点）单步到位。</summary>
     private async Task MoveToAsync(IntPtr hWnd, int x, int y, CancellationToken ct)
     {
         int? x0 = _lastX, y0 = _lastY;
         _lastX = x;
         _lastY = y;
 
-        if (!_humanTrajectory || x0 is null || y0 is null)
+        if (x0 is null || y0 is null)
         {
             PostMessage(hWnd, WM_MOUSEMOVE, IntPtr.Zero, LParam(x, y));
             await Task.Delay(30, ct);

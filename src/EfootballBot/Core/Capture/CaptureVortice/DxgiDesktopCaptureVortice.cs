@@ -8,10 +8,8 @@ using SharpGen.Runtime;
 namespace EfootballBot.Core.Capture;
 
 /// <summary>
-/// 基于 DXGI Desktop Duplication API 的全屏捕获器（Vortice 家族，默认实现）。
-/// 与 DxgiDesktopCapture（SharpDX 家族）逐行为对齐的孪生实现：
+/// 基于 DXGI Desktop Duplication API 的全屏捕获器（Vortice 实现）。
 /// 从游戏窗口所在显示器复制桌面帧，按窗口 rect 裁剪后降采样到 ≤720p。
-/// 两家族是两套 COM 包装，绝不混挂同一设备指针；切换见 AppConfig.ModuleFallback.UseSharpDxCapture。
 /// </summary>
 public sealed class DxgiDesktopCaptureVortice : ICaptureProvider
 {

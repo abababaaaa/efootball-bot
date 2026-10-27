@@ -226,32 +226,6 @@ public sealed class UpdateConfig
     public bool AutoDownloadInstall { get; set; } = false;
 }
 
-/// <summary>
-/// 模块回退开关：每个升级过的内部模块保留一条手动退路，全部默认走新版实现。
-/// 更改在下次开始挂机时生效（Worker 每次 start 用最新配置重建引擎，不做运行中热切换）。
-/// </summary>
-public sealed class ModuleFallbackConfig
-{
-    /// <summary>true = 画面捕获退回旧 SharpDX 实现（新 Vortice 实现出现黑屏/黑画面时勾选）。</summary>
-    public bool UseSharpDxCapture { get; set; } = false;
-
-    /// <summary>true = OCR 用原版 fp32 模型（默认用 int8 提速版；int8 模型缺失或读取异常时同样自动回退 fp32）。</summary>
-    public bool UseFp32Ocr { get; set; } = false;
-
-    /// <summary>true = OCR 关闭高分辨率降采样（4K 级画面默认压缩到 1080p 再识别；高分屏识别变差时勾选）。</summary>
-    public bool DisableOcrDownscale { get; set; } = false;
-
-    /// <summary>true = 虚拟手柄改用 HIDMaestro 驱动（3.0~3.2 的开关，v3.3.0 已随 HIDMaestro
-    /// 整体回退而作废：仅保留 JSON 反序列化兼容，加载时清零，UI 不再读写）。</summary>
-    public bool EnableHidMaestro { get; set; } = false;
-
-    /// <summary>true = 鼠标点击关闭拟人移动轨迹（回退单步跳变到目标位置）。</summary>
-    public bool DisableMouseTrajectory { get; set; } = false;
-
-    /// <summary>true = 挂机异常停止时不自动保存画面截图留档。</summary>
-    public bool DisableFailureDumps { get; set; } = false;
-}
-
 /// <summary>虚拟手柄后端配置（唯一后端 ViGEm Xbox 360）。</summary>
 public sealed class PadConfig
 {
@@ -262,13 +236,13 @@ public sealed class PadConfig
     public PadBackendKind Backend { get; set; } = PadBackendKind.Vigem;
 
     /// <summary>
-    /// 旧版布尔开关迁移：清零旧开关（枚举归一化已在 PadBackendKind 层天然完成）。
+    /// 旧版后端值归一化：一律归 Vigem（唯一后端；HIDMaestro 遗留枚举值同为 0 天然兼容，
+    /// 其余遗留值强归，防止损坏/未知值流入）。
     /// </summary>
-    public void MigrateFrom(ModuleFallbackConfig legacy)
+    public void MigrateDefaults()
     {
         if (Backend != PadBackendKind.Vigem)
             Backend = PadBackendKind.Vigem;
-        legacy.EnableHidMaestro = false;
     }
 }
 
@@ -337,9 +311,6 @@ public sealed class MyLeagueConfig
     /// 新手 / 业余 / 标准 / 职业 / 顶尖球员 / 超级球星 / 传奇。
     /// </summary>
     public string Difficulty { get; set; } = "新手";
-
-    /// <summary>球员满级提示开关：开启时检测"满级"字样，计数并在日志提醒换人。</summary>
-    public bool NotifyPlayerMaxLevel { get; set; } = true;
 
     /// <summary>
     /// 满级自动换人：每 <see cref="AutoSwapEveryMatches"/> 场比赛结束后回到联赛主页（无弹窗）时，
@@ -438,6 +409,23 @@ public sealed class BackgroundParkingConfig
 }
 
 /// <summary>
+/// 虚拟显示器后台（测试版）：挂机时把游戏窗口停靠到一块虚拟显示器上——游戏跑在
+/// 控制台会话（非 RDP，eFootball 不拒绝），物理屏幕完全不可见，也没有停靠缩窗问题。
+/// 仅测试版构建（ChildSessionBeta=true）生效；正式版构建读到此配置也会忽略。
+/// </summary>
+public sealed class VirtualDisplayParkConfig
+{
+    /// <summary>启用虚拟显示器停靠（替代「移出屏幕」式后台停靠）。</summary>
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>虚拟显示器分辨率（默认显示器分辨率，写入驱动注册表后对新激活生效）。</summary>
+    public int DesktopWidth { get; set; } = 1920;
+
+    /// <summary>虚拟显示器高度。</summary>
+    public int DesktopHeight { get; set; } = 1080;
+}
+
+/// <summary>
 /// 作息调度配置：模拟真人作息——每天只在活跃时段挂机、每日累计时长上限、
 /// 启停时间每日随机漂移、运行中偶尔短暂离开。服务端行为检测的最强信号是
 /// 7×24 在线与恒定节奏，本调度器直接消除前者。
@@ -482,6 +470,27 @@ public sealed class NotifyConfig
 
     /// <summary>异常终止（捕获熔断、窗口消失、崩溃兜底停止）时通知。建议保持开启。</summary>
     public bool OnError { get; set; } = true;
+
+    /// <summary>每完成一场比赛推送一条（与下一条间隔小于合并窗口时自动合并，防刷屏）。</summary>
+    public bool OnMatchDone { get; set; } = true;
+
+    /// <summary>检出满级球员时推送（比赛中的满级提示与满级换人巡检都算）。</summary>
+    public bool OnMaxLevel { get; set; } = true;
+
+    /// <summary>转发警告/错误级日志（错误立即推，警告走合并窗口）。</summary>
+    public bool OnWarnLog { get; set; } = true;
+
+    /// <summary>挂机运行中按间隔推一条摘要（场次/满级/用时），适合免费渠道条数紧张时只留这一路。</summary>
+    public bool OnRunningSummary { get; set; } = false;
+
+    /// <summary>运行中摘要推送间隔（分钟）。</summary>
+    public int SummaryIntervalMinutes { get; set; } = 60;
+
+    /// <summary>每日推送总条数上限（0 = 不限制）。免费渠道（如 Server酱免费版每天 5 条）务必设置。</summary>
+    public int DailySendLimit { get; set; } = 50;
+
+    /// <summary>同类事件合并窗口（分钟）：窗口内多起事件并成一条推送，避免刷爆条数。</summary>
+    public int MergeMinutes { get; set; } = 5;
 
     /// <summary>通知内容里带的实例名（多开时区分是哪个号）。</summary>
     public string InstanceName { get; set; } = "";
@@ -560,9 +569,6 @@ public sealed class AppConfig
     public HotkeyConfig Hotkey { get; set; } = new();
     public UpdateConfig Update { get; set; } = new();
 
-    // —— 模块回退（新版实现出问题时的手动退路，更新页可改）——
-    public ModuleFallbackConfig ModuleFallback { get; set; } = new();
-
     // —— 真实手柄接管（JSON 键名 "HidHide" 为旧配置兼容保留）——
     public PadTakeoverConfig HidHide { get; set; } = new();
 
@@ -592,6 +598,7 @@ public sealed class AppConfig
 
     // —— 防检测（后台停靠 / 作息调度）——
     public BackgroundParkingConfig BackgroundParking { get; set; } = new();
+    public VirtualDisplayParkConfig VirtualDisplayPark { get; set; } = new();
     public ScheduleConfig Schedule { get; set; } = new();
 
     // —— 影子模式：不实际按键，只把「本来会按什么」写进日志 ——
@@ -632,7 +639,7 @@ public sealed class AppConfig
                 cfg.Migrate();
                 cfg.Timing.MigrateIdleTapDefaults();
                 cfg.HidHide.MigrateDefaults();
-                cfg.Pad.MigrateFrom(cfg.ModuleFallback);
+                cfg.Pad.MigrateDefaults();
                 if (upgraded)
                 {
                     // 升级结果立即回写：下次启动不再重复走迁移，也让用户能看到新增字段

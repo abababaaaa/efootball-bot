@@ -15,28 +15,15 @@ public class PadBackendTests
     }
 
     [Fact]
-    public void ModuleFallback_默认值_全走新版()
+    public void PadConfig_MigrateDefaults_旧值归一化到Vigem()
     {
-        var cfg = new ModuleFallbackConfig();
-        Assert.False(cfg.UseSharpDxCapture);
-        Assert.False(cfg.UseFp32Ocr);
-        Assert.False(cfg.DisableOcrDownscale);
-        Assert.False(cfg.DisableMouseTrajectory);
-        Assert.False(cfg.DisableFailureDumps);
-    }
-
-    [Fact]
-    public void PadConfig_MigrateFrom_旧值归一化到Vigem()
-    {
-        var legacy = new ModuleFallbackConfig { EnableHidMaestro = true };
         var pad = new PadConfig { Backend = (PadBackendKind)2 }; // 更早遗留值
-        pad.MigrateFrom(legacy);
+        pad.MigrateDefaults();
         Assert.Equal(PadBackendKind.Vigem, pad.Backend);
-        Assert.False(legacy.EnableHidMaestro); // 旧开关一律清零
 
         // 3.2.x 的 HidMaestro 档（枚举值同为 0）天然兼容
         var padHm = new PadConfig();
-        padHm.MigrateFrom(new ModuleFallbackConfig());
+        padHm.MigrateDefaults();
         Assert.Equal(PadBackendKind.Vigem, padHm.Backend);
     }
 

@@ -145,6 +145,7 @@ public partial class MainWindow
 
         // 防检测保护（★重要设定）
         ChkBackgroundParking.IsChecked = _cfg.BackgroundParking.Enabled;
+        ChkVirtualDisplay.IsChecked = _cfg.VirtualDisplayPark.Enabled;
         ChkHumanPacing.IsChecked = _cfg.Timing.HumanPacingEnabled;
         // 赛后活动任务（★重要设定，仅国际服）：默认关闭
         ChkPmAutoAdvance.IsChecked = _cfg.PostMatchActivity.AutoAdvanceWeeklyTasks;
@@ -170,7 +171,6 @@ public partial class MainWindow
         CmbConditionLevel.SelectedIndex = condIdx >= 0 ? condIdx : 0;
         int diffIdx = Array.IndexOf(MyLeagueDifficulties, _cfg.MyLeague.Difficulty);
         CmbDifficulty.SelectedIndex = diffIdx >= 0 ? diffIdx : 0;
-        ChkMaxLevelNotify.IsChecked = _cfg.MyLeague.NotifyPlayerMaxLevel;
         ChkAutoSwapMaxLevel.IsChecked = _cfg.MyLeague.AutoSwapMaxLevel;
         CmbAutoSwapEvery.SelectedIndex = AutoSwapEveryIndex(_cfg.MyLeague.AutoSwapEveryMatches);
         _loadingConfig = false;
@@ -203,7 +203,6 @@ public partial class MainWindow
         CmbCnMlConditionLevel.SelectedIndex = cnMlCondIdx >= 0 ? cnMlCondIdx : 0;
         int cnMlDiffIdx = Array.IndexOf(MyLeagueDifficulties, _cfg.CnMyLeague.Difficulty);
         CmbCnMlDifficulty.SelectedIndex = cnMlDiffIdx >= 0 ? cnMlDiffIdx : 0;
-        ChkCnMlMaxLevelNotify.IsChecked = _cfg.CnMyLeague.NotifyPlayerMaxLevel;
         LoadStopAfterUi(CmbCnMlStopAfterMatches, TxtCnMlStopAfterMatches, _cfg.CnMyLeague.StopAfterMatches);
         LoadStopAfterUi(CmbCnMlStopAfterKeyMatches, TxtCnMlStopAfterKeyMatches, _cfg.CnMyLeague.StopAfterKeyMatches);
 
@@ -227,6 +226,13 @@ public partial class MainWindow
         TxtNotifyName.Text = _cfg.Notify.InstanceName;
         ChkNotifyStop.IsChecked = _cfg.Notify.OnStop;
         ChkNotifyError.IsChecked = _cfg.Notify.OnError;
+        ChkNotifyMatch.IsChecked = _cfg.Notify.OnMatchDone;
+        ChkNotifyMaxed.IsChecked = _cfg.Notify.OnMaxLevel;
+        ChkNotifyWarn.IsChecked = _cfg.Notify.OnWarnLog;
+        ChkNotifySummary.IsChecked = _cfg.Notify.OnRunningSummary;
+        TxtNotifyMerge.Text = _cfg.Notify.MergeMinutes.ToString();
+        TxtNotifyDaily.Text = _cfg.Notify.DailySendLimit.ToString();
+        TxtNotifySummaryMin.Text = _cfg.Notify.SummaryIntervalMinutes.ToString();
         ChkMonitor.IsChecked = _cfg.Monitor.Enabled;
         TxtMonitorPort.Text = _cfg.Monitor.Port.ToString();
         TxtMonitorToken.Text = _cfg.Monitor.Token;
@@ -253,13 +259,6 @@ public partial class MainWindow
         ChkIncludePrerelease.IsChecked = _cfg.Update.IncludePrerelease;
         ChkAutoDownloadInstall.IsChecked = _cfg.Update.AutoDownloadInstall;
 
-        // 模块回退（更新页卡片，下次开始挂机生效）
-        ChkFbSharpDxCapture.IsChecked = _cfg.ModuleFallback.UseSharpDxCapture;
-        ChkFbFp32Ocr.IsChecked = _cfg.ModuleFallback.UseFp32Ocr;
-        ChkFbNoOcrDownscale.IsChecked = _cfg.ModuleFallback.DisableOcrDownscale;
-        ChkFbNoMouseTrajectory.IsChecked = _cfg.ModuleFallback.DisableMouseTrajectory;
-        ChkFbNoFailureDumps.IsChecked = _cfg.ModuleFallback.DisableFailureDumps;
-
         // 手柄接管（赋值会触发 Changed：加载期间必须屏蔽）
         _loadingConfig = true;
         ChkPadTakeover.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
@@ -276,6 +275,16 @@ public partial class MainWindow
         _cfg.Notify.InstanceName = TxtNotifyName.Text.Trim();
         _cfg.Notify.OnStop = ChkNotifyStop.IsChecked == true;
         _cfg.Notify.OnError = ChkNotifyError.IsChecked == true;
+        _cfg.Notify.OnMatchDone = ChkNotifyMatch.IsChecked == true;
+        _cfg.Notify.OnMaxLevel = ChkNotifyMaxed.IsChecked == true;
+        _cfg.Notify.OnWarnLog = ChkNotifyWarn.IsChecked == true;
+        _cfg.Notify.OnRunningSummary = ChkNotifySummary.IsChecked == true;
+        if (int.TryParse(TxtNotifyMerge.Text.Trim(), out int mergeMin) && mergeMin is >= 0 and <= 120)
+            _cfg.Notify.MergeMinutes = mergeMin;
+        if (int.TryParse(TxtNotifyDaily.Text.Trim(), out int dailyLimit) && dailyLimit is >= 0 and <= 9999)
+            _cfg.Notify.DailySendLimit = dailyLimit;
+        if (int.TryParse(TxtNotifySummaryMin.Text.Trim(), out int summaryMin) && summaryMin is >= 5 and <= 1440)
+            _cfg.Notify.SummaryIntervalMinutes = summaryMin;
         bool monitorWasEnabled = _cfg.Monitor.Enabled;
         _cfg.Monitor.Enabled = ChkMonitor.IsChecked == true;
         if (int.TryParse(TxtMonitorPort.Text.Trim(), out int monPort) && monPort is > 0 and < 65536)
@@ -327,6 +336,7 @@ public partial class MainWindow
 
         // 防检测保护（★重要设定）
         _cfg.BackgroundParking.Enabled = ChkBackgroundParking.IsChecked == true;
+        _cfg.VirtualDisplayPark.Enabled = ChkVirtualDisplay.IsChecked == true;
         _cfg.Timing.HumanPacingEnabled = ChkHumanPacing.IsChecked == true;
         _cfg.Schedule.Enabled = ChkScheduleEnabled.IsChecked == true;
         ApplySchedule(persist: false);
@@ -342,7 +352,6 @@ public partial class MainWindow
             _cfg.MyLeague.ConditionLevel = new[] { "普通+", "好+", "杰出" }[CmbConditionLevel.SelectedIndex];
         if (CmbDifficulty.SelectedIndex >= 0)
             _cfg.MyLeague.Difficulty = MyLeagueDifficulties[CmbDifficulty.SelectedIndex];
-        _cfg.MyLeague.NotifyPlayerMaxLevel = ChkMaxLevelNotify.IsChecked == true;
         _cfg.MyLeague.AutoSwapMaxLevel = ChkAutoSwapMaxLevel.IsChecked == true;
         _cfg.MyLeague.AutoSwapEveryMatches = AutoSwapEveryValue(CmbAutoSwapEvery.SelectedIndex);
         _cfg.MyLeague.StopAfterMatches = SaveStopAfterUi(CmbStopAfterMatches, TxtStopAfterMatches);
@@ -374,7 +383,6 @@ public partial class MainWindow
             _cfg.CnMyLeague.ConditionLevel = new[] { "普通+", "好+", "杰出" }[CmbCnMlConditionLevel.SelectedIndex];
         if (CmbCnMlDifficulty.SelectedIndex >= 0)
             _cfg.CnMyLeague.Difficulty = MyLeagueDifficulties[CmbCnMlDifficulty.SelectedIndex];
-        _cfg.CnMyLeague.NotifyPlayerMaxLevel = ChkCnMlMaxLevelNotify.IsChecked == true;
         _cfg.CnMyLeague.StopAfterMatches = SaveStopAfterUi(CmbCnMlStopAfterMatches, TxtCnMlStopAfterMatches);
         _cfg.CnMyLeague.StopAfterKeyMatches = SaveStopAfterUi(CmbCnMlStopAfterKeyMatches, TxtCnMlStopAfterKeyMatches);
 
@@ -416,13 +424,6 @@ public partial class MainWindow
         _cfg.Update.CheckOnStartup = ChkCheckOnStartup.IsChecked == true;
         _cfg.Update.IncludePrerelease = ChkIncludePrerelease.IsChecked == true;
         _cfg.Update.AutoDownloadInstall = ChkAutoDownloadInstall.IsChecked == true;
-
-        // 模块回退
-        _cfg.ModuleFallback.UseSharpDxCapture = ChkFbSharpDxCapture.IsChecked == true;
-        _cfg.ModuleFallback.UseFp32Ocr = ChkFbFp32Ocr.IsChecked == true;
-        _cfg.ModuleFallback.DisableOcrDownscale = ChkFbNoOcrDownscale.IsChecked == true;
-        _cfg.ModuleFallback.DisableMouseTrajectory = ChkFbNoMouseTrajectory.IsChecked == true;
-        _cfg.ModuleFallback.DisableFailureDumps = ChkFbNoFailureDumps.IsChecked == true;
 
         // 手柄接管：DisabledPadDevs 恢复清单保存前从磁盘回读，避免 GUI 陈旧快照把
         // 尚未消费的遗留记录清掉（LegacyPadRestore 靠它恢复旧版本卡禁用的手柄）
@@ -513,6 +514,20 @@ public partial class MainWindow
         _cfg.Schedule.DriftMinutes = drift;
         if (persist) _cfg.Save();
         return true;
+    }
+
+    /// <summary>通知「测试发送」：先落当前 UI 配置再发一条 Test（绕过分类开关与每日配额）。</summary>
+    private async void BtnNotifyTest_Click(object sender, RoutedEventArgs e)
+    {
+        SaveUiToConfig();
+        _cfg.Save();
+        BtnNotifyTest.IsEnabled = false;
+        TxtNotifyTestResult.Text = "发送中…";
+        string name = string.IsNullOrWhiteSpace(_cfg.Notify.InstanceName) ? "eFootballBot" : _cfg.Notify.InstanceName.Trim();
+        bool ok = await EfootballBot.Core.System.Notifier.SendAsync(_cfg, "测试通知",
+            $"{name} 的通知通道正常——收到本条即代表手机端配置成功。", EfootballBot.Core.System.NotifyKind.Test);
+        TxtNotifyTestResult.Text = ok ? "✓ 发送成功，手机上应已收到" : "✗ 未发送（URL 为空，或网络/服务失败）";
+        BtnNotifyTest.IsEnabled = true;
     }
 
     // ---------------- 设置页一级分类切换 ----------------

@@ -202,7 +202,7 @@ public class MaxLevelSwapTests
         int maxedCalls = 0;
         reader.Enqueue(new PlayerStatus(40, 40, 0));
         var lineup = Ocr(LineupOcr());
-        Action onMaxed = () => maxedCalls++;
+        Action<int> onMaxed = _ => maxedCalls++;
 
         await c.StartCore(pad, SilentLog);
         await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, onMaxed, null, CT);  // Opening → Inspect
@@ -887,5 +887,91 @@ public class MaxLevelSwapTests
         Assert.True(MaxLevelSwapBrain.HasDialogConfirmWords(new OcrResult(words, 1, 1)));
         Assert.False(MaxLevelSwapBrain.HasDialogConfirmWords(BenchOcr()));
         Assert.False(MaxLevelSwapBrain.HasDialogConfirmWords(Ocr(LineupOcr())));
+    }
+
+    /// <summary>
+    /// 末位（第 11 位）满级换人回归：2026-10-27 实机在 Rewind 走位 CursorMoves[10] 越界，
+    /// 观察循环每轮同一处异常空转。此用例必须走完换人并正常回主页。
+    /// </summary>
+    [Fact]
+    public async Task Eleventh_MaxedLastPlayer_SwapsAndReturnsHome()
+    {
+        var c = new MaxLevelSwapController();
+        var reader = new ScriptReader();
+        var pad = new FakePad();
+        var lineup = Ocr(LineupOcr());
+        var detailNot = Ocr(DetailOcr("23", "26", "44"));
+        var detailMax = Ocr(DetailOcr("40", "40", "0"));
+        var popupNot = Ocr(
+            W("球员动作", 0.70, 0.10), W("等级训练", 0.70, 0.19), W("能力点分配", 0.70, 0.27),
+            W("技巧训练", 0.70, 0.37), W("位置训练", 0.70, 0.47), W("球员融合", 0.70, 0.57),
+            W("锁定", 0.70, 0.65), W("取消", 0.70, 0.93));
+        PadDir[] moves = MaxLevelSwapController.CursorMoves;
+
+        await c.StartCore(pad, SilentLog);
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // Opening → Inspect
+
+        // 位 1~10：全部未满级，逐位 Y → X → 弹窗 B → 详情 B → 推进
+        for (int q = 0; q < 10; q++)
+        {
+            await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);    // Inspect：移动 + Y
+            await c.StepCore(detailNot, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // X 球员动作
+            await c.StepCore(popupNot, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);  // 未满级 → B
+            await c.StepCore(detailNot, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 详情 B
+            await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);    // 推进
+        }
+
+        // 第 11 位：满级、无能力点 → 直接换人（B 关弹窗 → 选中 → 侧栏 → 后备）
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(detailMax, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(PopupOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(detailMax, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);     // A 选中
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);     // 侧栏 → 后备球员
+        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // ←+A 开排序
+        await c.StepCore(SortOcr(), ArrowFrame(up: true), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);  // ←↓A 开筛选
+        await c.StepCore(FilterOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 卡片类型
+        await c.StepCore(CardTypeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        await c.StepCore(FilterOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 应用筛选
+        await c.StepCore(BenchOcr(2403), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT); // 选亮卡 A 换入
+        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);  // 换人动画
+        await c.StepCore(BenchOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);  // B 返回站位页
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // → 进阵
+        await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);      // Rewind：越界前必须收尾
+
+        // Rewind 收尾后 Done：下一轮识别到站位页给出等待，再识别到主页即交还
+        int? wait = await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        Assert.NotNull(wait);
+        wait = await c.StepCore(HomeOcr(), BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
+        Assert.Null(wait);
+        Assert.True(c.Idle);
+
+        // ---- 按键序列 ----
+        var exp = new List<string> { "Y" };
+        for (int q = 0; q < 10; q++)
+        {
+            if (q > 0) exp.Add(moves[q - 1].ToString());
+            exp.AddRange(new[] { "Y", "X", "B", "B" });
+        }
+        exp.Add(moves[9].ToString());
+        exp.AddRange(new[] { "Y", "X", "B", "B", "A" });        // 第 11 位：X → 弹窗 B → 详情 B → 选中
+        exp.AddRange(new[] { "Leftx8", "Upx5", "Downx3", "A" }); // 侧栏 → 后备球员
+        exp.AddRange(new[] { "Left", "A" });                     // 开排序
+        exp.AddRange(new[] { "Upx6", "Downx5", "A" });           // 当前等级
+        exp.AddRange(new[] { "Left", "Down", "A" });             // 开筛选
+        exp.AddRange(new[] { "Upx9", "Downx4", "A" });           // 卡片类型
+        exp.AddRange(new[] { "Upx9", "Downx2" });
+        for (int k = 0; k < 6; k++) exp.AddRange(new[] { "A", "Down" });
+        exp.Add("B");
+        exp.AddRange(new[] { "Upx9", "Downx9", "A" });           // 应用筛选
+        exp.Add("A");                                            // 换入
+        exp.Add("B");                                            // 返回站位页
+        exp.Add("Right");                                        // → 进阵（第 3 位）
+        // Rewind 从第 3 位（索引 2）走到末位（索引 10）：CursorMoves[2..9]，不越界
+        for (int d = 2; d < moves.Length; d++) exp.Add(moves[d].ToString());
+        exp.Add("B");                                            // Rewind 完成 → 站位页返回
+        exp.Add("B");                                            // Done 收尾
+        Assert.Equal(exp, pad.Log);
     }
 }

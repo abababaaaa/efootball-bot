@@ -22,6 +22,7 @@ public sealed class WorkerHost : IDisposable
     private TaskCompletionSource<bool>? _stopAck;     // stop 命令的 Worker 确认（stopped 事件）
     private BotStats _lastStats = new();
     private bool _disposed;
+    private volatile int _remotePid;                   // Worker 通过 pid 事件上报（诊断/兜底反查进程）
 
     // ---- 意外退出自动重启（3.2.0）----
     /// <summary>用户期望场景运行中（手动开始置位、手动停止/Dispose 复位）；仅此状态下才自动重启。</summary>
@@ -124,12 +125,12 @@ public sealed class WorkerHost : IDisposable
         // 恢复真实手柄、还原停靠窗口后退出（否则孤儿 Worker 会一直跑着并占着玩家 1，
         // 让下一次「开始」被判定为手柄抢不到而反复失败）
         int parentPid = Environment.ProcessId;
-        var psi = new ProcessStartInfo(exePath, $"--worker {mode} --pipe {pipeName} --parent {parentPid}{ProfileArg}")
+        string workerArgs = $"--worker {mode} --pipe {pipeName} --parent {parentPid}{ProfileArg}";
+        var psi = new ProcessStartInfo(exePath, workerArgs)
         {
             UseShellExecute = false,
             CreateNoWindow = true,
         };
-
         var process = Process.Start(psi)
             ?? throw new InvalidOperationException("无法启动 Worker 子进程");
         _process = process;
@@ -144,7 +145,7 @@ public sealed class WorkerHost : IDisposable
 
         while (sw.ElapsedMilliseconds < 30000)
         {
-            if (process.HasExited)
+            if (process?.HasExited == true)
                 throw new InvalidOperationException(
                     $"Worker 进程已退出（代码 {process.ExitCode}）。{ReadWorkerError()}");
 
@@ -194,7 +195,7 @@ public sealed class WorkerHost : IDisposable
         if (connectedPipe is null || reader is null)
             throw new InvalidOperationException(
                 $"无法连接到 Worker 命名管道（30s 超时，管道名 {pipeName}，最后错误：{lastConnectError?.Message}）。{ReadWorkerError()}");
-        if (process.HasExited)
+        if (process?.HasExited == true)
             throw new InvalidOperationException(
                 $"握手后 Worker 进程已退出（代码 {process.ExitCode}）。{ReadWorkerError()}");
 
@@ -228,6 +229,14 @@ public sealed class WorkerHost : IDisposable
                     case "preview":
                         if (!string.IsNullOrEmpty(msg.Png))
                             PreviewReceived?.Invoke(msg.Png);
+                        break;
+                    case "pid":
+                        _remotePid = msg.Pid;
+                        if (_process is null)
+                        {
+                            try { _process = Process.GetProcessById(msg.Pid); }
+                            catch { /* 进程可能已退出 */ }
+                        }
                         break;
                     case "exited":
                         _scenarioRunning = false;
@@ -277,7 +286,7 @@ public sealed class WorkerHost : IDisposable
     /// 重启期间 <see cref="IsRunning"/> 保持 true，GUI 不会把重启间隙误判成"场景已结束"；
     /// 预算耗尽或重启失败才触发 Disconnected（GUI 复位界面）。
     /// </summary>
-    private async Task HandleProcessExitAsync(Process process)
+    private async Task HandleProcessExitAsync(Process? process)
     {
         if (_disposed || !_expectedRunning)
         {
@@ -344,8 +353,8 @@ public sealed class WorkerHost : IDisposable
             {
                 _autoRestarting = false;
             }
-            if (_process is null or { HasExited: true })
-                FireDisconnected(); // 重启失败：交回 GUI 复位
+            if ((_process is null or { HasExited: true }) && !(_pipe is { IsConnected: true }))
+                FireDisconnected(); // 重启失败：交回 GUI 复位（子会话模式下管道在即视为已重启）
         }
         finally
         {
@@ -411,7 +420,7 @@ public sealed class WorkerHost : IDisposable
             catch { }
         }
 
-        var process = _process;
+        var process = _process ?? ResolveRemoteProcess();
         if (process is not null && !process.HasExited)
         {
             try { process.Kill(); } catch { }
@@ -432,6 +441,19 @@ public sealed class WorkerHost : IDisposable
     private void EmitLog(string level, string text)
     {
         try { Log?.Invoke(level, text); } catch { /* 订阅方异常不影响管道流程 */ }
+    }
+
+    /// <summary>按 Worker 上报的 pid 反查进程；跨会话 GetProcessById 可用。失败返回 null。</summary>
+    private Process? ResolveRemoteProcess()
+    {
+        int pid = _remotePid;
+        if (pid <= 0) return null;
+        try
+        {
+            var p = Process.GetProcessById(pid);
+            return p.HasExited ? null : p;
+        }
+        catch { return null; }
     }
 
     /// <summary>发送预览开关命令。用 start/stop 同级的写超时：自动开预览恰在开始挂机后，

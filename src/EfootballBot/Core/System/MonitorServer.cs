@@ -20,13 +20,20 @@ public sealed record MonitorStatus(
     string LastError,
     DateTime At);
 
+/// <summary>监控页「实时日志」行（由 GUI 侧回放缓存填充）。</summary>
+public sealed record MonitorLogRow(string Time, string Level, string Text);
+
+/// <summary>监控页「比赛/满级动态」行（由 GUI 侧按日志关键词累积）。</summary>
+public sealed record MonitorEventRow(DateTime At, string Kind, string Text);
+
 /// <summary>
 /// 局域网监控页（默认关闭）：手机/平板与电脑同一 WiFi 时打开
-/// <c>http://电脑IP:端口/?t=token</c> 即可看运行状态，并暂停/继续/停止/单步。
+/// <c>http://电脑IP:端口/?t=token</c> 即可看运行状态与实时日志、比赛/满级动态，
+/// 并暂停/继续/停止/单步。微信内置浏览器直接打开本页即可（手机与电脑同一 WiFi 时）。
 ///
 /// 设计约束：
 /// - 只监听本机所有网卡，不向外网注册任何东西，不上传任何数据；
-/// - 有 token 才能执行操作（无 token 时页面只读）；
+/// - 有 token 才能执行操作（无 token 时页面只读；日志/动态与状态一样只读）；
 /// - 起不来（端口占用 / 无 URL 权限）只记一条日志，绝不影响挂机。
 /// </summary>
 public sealed class MonitorServer : IDisposable
@@ -34,6 +41,8 @@ public sealed class MonitorServer : IDisposable
     private readonly MonitorConfig _cfg;
     private readonly Func<MonitorStatus> _status;
     private readonly Func<string, Task> _command;
+    private readonly Func<int, IReadOnlyList<MonitorLogRow>>? _logProvider;
+    private readonly Func<IReadOnlyList<MonitorEventRow>>? _eventsProvider;
     private readonly Action<string, LogLevel>? _log;
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
@@ -41,14 +50,22 @@ public sealed class MonitorServer : IDisposable
     public string Url { get; private set; } = "";
 
     /// <param name="command">操作回调：pause / resume / stop / step。</param>
+    /// <param name="logProvider">按条数取最近日志（GUI 回放缓存）；空 = 页面不提供日志区。</param>
+    /// <param name="eventsProvider">取比赛/满级动态列表；空 = 页面不提供动态区。</param>
     public MonitorServer(MonitorConfig cfg, Func<MonitorStatus> status, Func<string, Task> command,
-        Action<string, LogLevel>? log = null)
+        Action<string, LogLevel>? log = null,
+        Func<int, IReadOnlyList<MonitorLogRow>>? logProvider = null,
+        Func<IReadOnlyList<MonitorEventRow>>? eventsProvider = null)
     {
         _cfg = cfg;
         _status = status;
         _command = command;
         _log = log;
+        _logProvider = logProvider;
+        _eventsProvider = eventsProvider;
     }
+
+    private bool _allInterfaces;
 
     public void Start()
     {
@@ -66,6 +83,7 @@ public sealed class MonitorServer : IDisposable
                 listener.Prefixes.Add(prefix);
                 listener.Start();
                 Url = prefix.Replace("+", Environment.MachineName);
+                _allInterfaces = prefix.StartsWith("http://+:");
                 _listener = listener;
                 _cts = new CancellationTokenSource();
                 _ = Task.Run(() => LoopAsync(_cts.Token));
@@ -79,6 +97,24 @@ public sealed class MonitorServer : IDisposable
             }
         }
         _log?.Invoke("监控页启动失败（端口被占用或缺少 URL 权限），已跳过——不影响挂机", LogLevel.Warn);
+    }
+
+    /// <summary>本机局域网访问地址（UDP connect 探本机出口 IP，不发任何包）；仅全网卡监听时有意义。</summary>
+    private string LanUrl()
+    {
+        if (!_allInterfaces) return "";
+        int port = _cfg.Port is > 0 and < 65536 ? _cfg.Port : 18321;
+        try
+        {
+            using var s = new global::System.Net.Sockets.Socket(
+                global::System.Net.Sockets.AddressFamily.InterNetwork,
+                global::System.Net.Sockets.SocketType.Dgram, global::System.Net.Sockets.ProtocolType.Udp);
+            s.Connect("8.8.8.8", 65530);
+            if (s.LocalEndPoint is IPEndPoint ep && ep.Address.AddressFamily == global::System.Net.Sockets.AddressFamily.InterNetwork)
+                return $"http://{ep.Address}:{port}/";
+        }
+        catch { }
+        return "";
     }
 
     private async Task LoopAsync(CancellationToken ct)
@@ -121,9 +157,35 @@ public sealed class MonitorServer : IDisposable
                         lastScreen = s.LastScreen,
                         lastError = s.LastError,
                         at = s.At.ToString("yyyy-MM-dd HH:mm:ss"),
+                        lan = LanUrl(),
                         canOperate,
                     }));
                     return;
+                case "/api/log":
+                {
+                    int n = int.TryParse(ctx.Request.QueryString["n"], out var reqN)
+                        ? Math.Clamp(reqN, 1, 300) : 100;
+                    var rows = _logProvider?.Invoke(n) ?? Array.Empty<MonitorLogRow>();
+                    await WriteAsync(ctx, 200, "application/json; charset=utf-8", JsonSerializer.Serialize(new
+                    {
+                        rows = rows.Select(r => new { t = r.Time, lv = r.Level, msg = r.Text }),
+                    }));
+                    return;
+                }
+                case "/api/events":
+                {
+                    var rows = _eventsProvider?.Invoke() ?? Array.Empty<MonitorEventRow>();
+                    await WriteAsync(ctx, 200, "application/json; charset=utf-8", JsonSerializer.Serialize(new
+                    {
+                        rows = rows.Select(r => new
+                        {
+                            t = r.At.ToString("HH:mm:ss"),
+                            kind = r.Kind,
+                            msg = r.Text,
+                        }),
+                    }));
+                    return;
+                }
                 case "/api/pause":
                 case "/api/resume":
                 case "/api/stop":
@@ -180,6 +242,13 @@ public sealed class MonitorServer : IDisposable
           button:disabled{opacity:.35}
           #err{color:#ff9a9a;font-size:13px;margin-top:6px}
           .muted{color:#7b8696;font-size:12px;margin-top:10px}
+          #events{font-size:13px;max-height:260px;overflow-y:auto}
+          #events .ev{padding:4px 0;border-bottom:1px solid #262c3a;line-height:1.45}
+          #events .ev:last-child{border:0}
+          #log{font-family:Consolas,Menlo,monospace;font-size:11.5px;line-height:1.55;
+               max-height:340px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
+          .lv-OK{color:#3ddc84}.lv-Warn{color:#ffd166}.lv-Error{color:#ff9a9a}
+          .ev-比赛完成{color:#3ddc84}.ev-关键比赛{color:#6cb6ff}.ev-球员满级{color:#ffd166}
         </style></head><body>
         <div class="card"><h1>eFootball 挂机监控</h1>
           <div class="row"><span class="k">状态</span><span class="v" id="st">—</span></div>
@@ -197,8 +266,17 @@ public sealed class MonitorServer : IDisposable
           <div id="err"></div>
           <div class="muted">操作需带 token 打开本页；页面每 3 秒自动刷新。</div>
         </div>
+        <div class="card"><h1>比赛 / 满级动态</h1>
+          <div id="events">—</div>
+          <div class="muted">比赛完成与球员满级事件（最近 50 条）。</div>
+        </div>
+        <div class="card"><h1>实时日志</h1>
+          <div id="log">—</div>
+          <div class="muted">最近 100 条运行日志，每 3 秒刷新。</div>
+        </div>
         <script>
           const T = q(); function q(){const u=new URL(location.href);return u.searchParams.get('t')||''}
+          function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML}
           async function tick(){
             try{
               const r = await fetch('/api/status' + (T ? '?t='+encodeURIComponent(T) : ''));
@@ -214,12 +292,33 @@ public sealed class MonitorServer : IDisposable
               document.getElementById('err').textContent = s.lastError ? ('最近错误：'+s.lastError) : '';
             }catch(e){document.getElementById('st').textContent='连接失败'}
           }
+          async function tickEvents(){
+            try{
+              const r = await fetch('/api/events' + (T ? '?t='+encodeURIComponent(T) : ''));
+              const d = await r.json();
+              document.getElementById('events').innerHTML = (d.rows||[]).map(e =>
+                '<div class="ev"><span class="ev-'+esc(e.kind)+'">['+esc(e.t)+'] '+esc(e.kind)+'</span> '+esc(e.msg)+'</div>'
+              ).join('') || '暂无动态';
+            }catch(e){}
+          }
+          async function tickLog(){
+            try{
+              const r = await fetch('/api/log?n=100' + (T ? '&t='+encodeURIComponent(T) : ''));
+              const d = await r.json();
+              const el = document.getElementById('log');
+              const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
+              el.innerHTML = (d.rows||[]).map(l =>
+                '<div class="lv-'+esc(l.lv)+'">['+esc(l.t)+'] '+esc(l.msg)+'</div>').join('');
+              if (nearBottom) el.scrollTop = el.scrollHeight;
+            }catch(e){}
+          }
           async function act(c){
             const r = await fetch('/api/'+c + (T ? '?t='+encodeURIComponent(T) : ''));
             if(!r.ok) document.getElementById('err').textContent = '操作被拒绝（token 或状态不允许）';
             tick();
           }
-          tick(); setInterval(tick, 3000);
+          tick(); tickEvents(); tickLog();
+          setInterval(tick, 3000); setInterval(tickEvents, 3000); setInterval(tickLog, 3000);
         </script></body></html>
         """;
     }

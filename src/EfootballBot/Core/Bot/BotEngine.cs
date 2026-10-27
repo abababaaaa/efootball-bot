@@ -11,6 +11,9 @@ using EfootballBot.Core.Bot.Scenarios.PeakLadder;
 using EfootballBot.Core.Bot.Scenarios.AiLadder;
 using EfootballBot.Core.Observation;
 using EfootballBot.Core.System;
+#if CHILD_SESSION_BETA
+using EfootballBot.Core.System.VirtualDisplay;
+#endif
 using EfootballBot.Core.Vision;
 using SkiaSharp;
 
@@ -51,13 +54,11 @@ public sealed class BotEngine : IDisposable
 
     private readonly AppConfig _cfg;
     public AppConfig Config => _cfg;
-    /// <summary>捕获家族开关：true=整个捕获家族走旧 SharpDX 实现（回退），false=Vortice 新实现（默认）。</summary>
-    private readonly bool _captureUseSharpDx;
     /// <summary>虚拟手柄（连接失败按 <see cref="PadBackendInfo.FallbackChain"/> 回退时整体换实例）。</summary>
     public IVirtualPad Pad360 { get; private set; }
     public Pad Pad { get; private set; }
     public readonly WindowCapture Capture;
-    /// <summary>DXGI 桌面复制捕获器（Vortice/SharpDX 按 _captureUseSharpDx 二选一，均实现 ICaptureProvider）。</summary>
+    /// <summary>DXGI 桌面复制捕获器（Vortice 实现，实现 ICaptureProvider）。</summary>
     private ICaptureProvider? _dxgi;
     private bool _dxgiStepWired;
     private GdiWindowCapture? _gdi;
@@ -126,6 +127,34 @@ public sealed class BotEngine : IDisposable
     /// <summary>请求一次满级换人巡检（GUI「一键测试换人」按钮入口）。</summary>
     public void RequestSwapInspection() => SwapTestRequested = true;
 
+    // ---------------- 微信实时动态（WeChatFeed 接线） ----------------
+
+    /// <summary>写会话摘要期间的日志不再转发推送（摘要本身以 Stop/Error 种类推送，避免双发）。</summary>
+    private bool _summarizing;
+
+    /// <summary>feed 内部日志直达事件、绕过 LogInternal，防「推送失败→Warn 日志→再进推送」回环。</summary>
+    private void FeedQuietLog(string msg, LogLevel lv) => Log?.Invoke($"[{DateTime.Now:HH:mm:ss}] {msg}", lv);
+
+    /// <summary>比赛完成 → 微信动态（合并/配额在 feed 内部）。各场景在 MatchesDone++ 落点调用。</summary>
+    public void ReportMatchDone(bool keyMatch)
+        => WeChatFeed.MatchDone(Scenario?.Name ?? "挂机", keyMatch, Stats.MatchesDone, Stats.KeyMatches, LogInternal);
+
+    /// <summary>满级球员 → 微信动态。detail 带「第 N/11 位」（巡检）或「比赛中满级提示」上下文。</summary>
+    public void ReportMaxLevel(string detail)
+        => WeChatFeed.MaxLevel(detail, Stats.PlayersMaxed, LogInternal);
+
+    /// <summary>运行中摘要正文（定时推送用；与停止摘要同一套口径）。</summary>
+    private string BuildRunningSummaryText()
+    {
+        var s = Stats;
+        TimeSpan dur = s.StartedAt is { } t ? DateTime.Now - t : TimeSpan.Zero;
+        int suppressed = Pad360 is DryRunPad dr ? dr.SuppressedActions : 0;
+        return $"{Scenario?.Name ?? "observe"} · 场次 {s.MatchesDone}（关键 {s.KeyMatches}）" +
+               $" · 满级 {s.PlayersMaxed} · 用时 {dur:hh\\:mm}" +
+               (suppressed > 0 ? $" · 影子拦截 {suppressed}" : "");
+    }
+
+
     private CancellationTokenSource? _cts;
     private Task? _loop;
     private Observation? _lastObs;
@@ -151,10 +180,7 @@ public sealed class BotEngine : IDisposable
     public BotEngine(AppConfig cfg)
     {
         _cfg = cfg;
-        // 捕获家族整体切换（ModuleFallback.UseSharpDxCapture，默认 false=Vortice）：
-        // WGC 设备/GPU 缩放（WindowCapture）与 DXGI 捕获器必须走同一家族，绝不混挂设备指针
-        _captureUseSharpDx = cfg.ModuleFallback.UseSharpDxCapture;
-        Capture = new WindowCapture(_captureUseSharpDx);
+        Capture = new WindowCapture();
         // 手柄后端（AppConfig.Pad.Backend，唯一后端 Vigem=Xbox 360 形态、占用 XInput 玩家 1）。
         // 任一时刻只存在一只虚拟手柄。
         Pad360 = CreatePad(cfg.Pad.Backend);
@@ -165,15 +191,11 @@ public sealed class BotEngine : IDisposable
 
         // EP 降级工厂：OCR 与 YOLO 共享同一 SessionOptions（进程内仅一份 onnxruntime.dll）
         _factory = new OnnxSessionFactory(cfg.Inference.PreferredProvider, LogInternal);
-        Ocr = new OcrRecognizer(cfg.OcrEngine,
-            downscaleLongSide: cfg.ModuleFallback.DisableOcrDownscale ? 0 : OcrRecognizer.DefaultDownscaleLongSide,
-            preferInt8: !cfg.ModuleFallback.UseFp32Ocr,
-            unlimitedOcr: cfg.UnlimitedOcr);
+        Ocr = new OcrRecognizer(cfg.OcrEngine, unlimitedOcr: cfg.UnlimitedOcr);
         if (Ocr.FallbackNote is { } fallbackNote)
             LogInternal($"OCR 引擎回退：{fallbackNote}（现用 {Ocr.LanguageTag}）", LogLevel.Warn);
         else
             LogInternal($"OCR 引擎：{Ocr.LanguageTag}（{Ocr.EngineKind}）", LogLevel.Info);
-        LogInternal($"捕获家族：{(_captureUseSharpDx ? "SharpDX（回退）" : "Vortice（默认）")}", LogLevel.Info);
 
         Observation = new ObservationService(Capture, Ocr, cfg);
         Observation.Log = LogInternal;
@@ -236,12 +258,33 @@ public sealed class BotEngine : IDisposable
         if (_cfg.FrameDump.Enabled)
             LogInternal($"训练数据采集已开启：每 {_cfg.FrameDump.IntervalMs / 1000.0:F0} 秒存帧至 captures\\（exe 同级目录）", LogLevel.Info);
 
+        // 微信实时动态：会话期间的事件合并/配额/定时摘要（配置为 Worker 启动时快照，
+        // 设置页改动在下次开始挂机生效——与 Webhook 一致）
+        WeChatFeed.SessionStart(_cfg, BuildRunningSummaryText, LogInternal);
+
         // 后台停靠：场景模式下把游戏窗口移出屏幕（观察模式用户要亲眼看画面，不隐藏）。
         // 放在捕获会话建立之后：WGC/GDI 绑定的是窗口本身，与窗口是否在屏幕上无关。
+        // 测试版可改用虚拟显示器停靠：游戏停靠到一块"看不见的屏幕"上，非 RDP，游戏不拒绝。
         if (scenarioMode && _cfg.BackgroundParking.Enabled && _window is { } parkWin)
         {
+            ParkRect? parkTarget = null;
+#if CHILD_SESSION_BETA
+            if (_cfg.VirtualDisplayPark.Enabled)
+            {
+                if (VirtualDisplayManager.EnsureEnabled(
+                        _cfg.VirtualDisplayPark.DesktopWidth, _cfg.VirtualDisplayPark.DesktopHeight, LogInternal)
+                    && VirtualDisplayManager.FindVirtualScreen() is { } vs)
+                {
+                    parkTarget = new ParkRect(vs.X, vs.Y, vs.Width, vs.Height);
+                }
+                else
+                {
+                    LogInternal("虚拟显示器不可用：本次回退为屏外停靠", LogLevel.Warn);
+                }
+            }
+#endif
             _parker ??= new BackgroundParker(LogInternal, _cfg.BackgroundParking.WatchdogIntervalMs);
-            _parker.Start(parkWin.Handle);
+            _parker.Start(parkWin.Handle, parkTarget);
         }
 
         // 共存让步传感器已随 3.3.0 共存模式移除（全权接管：真实手柄挂机期间禁用让位）
@@ -252,6 +295,7 @@ public sealed class BotEngine : IDisposable
             try
             {
                 int failStreak = 0;
+                bool faultEscalated = false; // 持续异常是否已升级成 Error 提示（成功一轮后复位）
                 bool idleThrottled = false; // 暂停/作息休息期间已把捕获降到 2s/帧
                 while (!token.IsCancellationRequested)
                 {
@@ -356,6 +400,7 @@ public sealed class BotEngine : IDisposable
                         if (failStreak > 0)
                         {
                             failStreak = 0;
+                            faultEscalated = false;
                             Stats.LastError = "";
                             EmitStats();
                         }
@@ -417,6 +462,13 @@ public sealed class BotEngine : IDisposable
                         LogInternal($"观察循环异常（连续第 {failStreak} 次，{backoffMs / 1000.0:F0}s 后重试）：{ex.Message}", LogLevel.Warn);
                         if (failStreak == 3)
                             SaveFailureDump("观察循环连续异常");
+                        if (failStreak >= 10 && !faultEscalated)
+                        {
+                            // 退避已封顶仍无法恢复：升级为 Error 并留档一次，避免挂机无声空转到用户发现
+                            faultEscalated = true;
+                            LogInternal("观察循环连续异常且未恢复，挂机已停止识别画面：请停止挂机并导出日志反馈", LogLevel.Error);
+                            SaveFailureDump("观察循环持续异常");
+                        }
                         await Task.Delay(backoffMs, token);
                     }
                 }
@@ -724,20 +776,10 @@ public sealed class BotEngine : IDisposable
         {
             try
             {
-                _dxgi ??= _captureUseSharpDx
-                    ? new DxgiDesktopCapture()
-                    : (ICaptureProvider)new DxgiDesktopCaptureVortice();
+                _dxgi ??= new DxgiDesktopCaptureVortice();
                 if (!_dxgiStepWired)
                 {
-                    switch (_dxgi)
-                    {
-                        case DxgiDesktopCapture sharp:
-                            sharp.StepLog += s => LogInternal($"[捕获] {s}", LogLevel.Info);
-                            break;
-                        case DxgiDesktopCaptureVortice vortice:
-                            vortice.StepLog += s => LogInternal($"[捕获] {s}", LogLevel.Info);
-                            break;
-                    }
+                    ((DxgiDesktopCaptureVortice)_dxgi).StepLog += s => LogInternal($"[捕获] {s}", LogLevel.Info);
                     _dxgiStepWired = true;
                 }
                 if (!_dxgi.IsRunning)
@@ -913,6 +955,7 @@ public sealed class BotEngine : IDisposable
         // 仅在提交连续失败（手柄实质已失效）时才重建。
 
         WriteSessionSummary("正常停止", isError: false);
+        WeChatFeed.SessionStop();
     }
 
     /// <summary>异常停止（场景报错终止）：自动留档当前画面后正常停止。
@@ -936,6 +979,7 @@ public sealed class BotEngine : IDisposable
     {
         if (_summaryWritten) return;
         _summaryWritten = true;
+        _summarizing = true;
         try
         {
             var s = Stats;
@@ -963,21 +1007,25 @@ public sealed class BotEngine : IDisposable
             Directory.CreateDirectory(AppPaths.DataDir);
             File.AppendAllText(path, global::System.Text.Json.JsonSerializer.Serialize(record) + Environment.NewLine);
 
-            Notifier.Send(_cfg, $"挂机{(isError ? "异常停止" : "已停止")}", line, isError, LogInternal);
+            Notifier.Send(_cfg, $"挂机{(isError ? "异常停止" : "已停止")}", line,
+                isError ? NotifyKind.Error : NotifyKind.Stop, LogInternal);
         }
         catch (Exception ex)
         {
             LogInternal($"会话摘要写入失败：{ex.Message}", LogLevel.Debug);
         }
+        finally
+        {
+            _summarizing = false;
+        }
     }
 
     /// <summary>
     /// 异常留档：当前帧存 JPG 到 data\failures\日期\（文件名带原因），滚动保留最近 7 天 / 200MB。
-    /// ModuleFallback.DisableFailureDumps 可关；存图失败静默（留档不影响挂机）。
+    /// 存图失败静默（留档不影响挂机）。
     /// </summary>
     public void SaveFailureDump(string reason)
     {
-        if (_cfg.ModuleFallback.DisableFailureDumps) return;
         try
         {
             if (LatestFrame is not { } f || f.Bgra.Length == 0) return;
@@ -1156,6 +1204,9 @@ public sealed class BotEngine : IDisposable
     public void LogInternal(string msg, LogLevel lv)
     {
         Log?.Invoke($"[{DateTime.Now:HH:mm:ss}] {msg}", lv);
+        // 警告/错误同步进微信动态（错误立即推、警告合并；摘要期间跳过防双发）
+        if (!_summarizing && lv is LogLevel.Warn or LogLevel.Error)
+            WeChatFeed.LogLine(msg, lv, FeedQuietLog);
         EmitStats();
     }
 

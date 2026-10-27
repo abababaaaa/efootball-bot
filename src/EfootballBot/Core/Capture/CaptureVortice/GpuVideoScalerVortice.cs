@@ -6,11 +6,11 @@ using Vortice.DXGI;
 namespace EfootballBot.Core.Capture;
 
 /// <summary>
-/// GPU 硬件缩放（Vortice 家族，默认实现）：WGC 全分辨率帧（如 3440×1440）在显卡内经
-/// VideoProcessor 缩到高≤720（1720×720），再回读 CPU。与 GpuVideoScaler（SharpDX 家族）
-/// 逐行为对齐的孪生实现：等比缩放（宽高同一系数），画面不变形；所有归一化 ROI/OCR
-/// 识别逻辑不受影响。任何初始化/执行失败由调用方捕获并回退 CPU 路径，不影响挂机。
-/// 两家族 COM 包装绝不混挂同一设备指针：本类只接收 Vortice 设备的 NativePointer。
+/// GPU 硬件缩放（Vortice 实现）：WGC 全分辨率帧（如 3440×1440）在显卡内经
+/// VideoProcessor 缩到高≤720（1720×720），再回读 CPU。等比缩放（宽高同一系数），
+/// 画面不变形；所有归一化 ROI/OCR 识别逻辑不受影响。
+/// 任何初始化/执行失败由调用方捕获并回退 CPU 路径，不影响挂机。
+/// 本类只接收 Vortice 设备的 NativePointer（设备创建与缩放同家族）。
 /// </summary>
 internal sealed class GpuVideoScalerVortice : IDisposable
 {

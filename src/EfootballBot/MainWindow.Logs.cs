@@ -68,8 +68,12 @@ public partial class MainWindow
         try { FileLogger.Instance.Write(msg, lv); } catch { }
         if (lv == LogLevel.Debug) return; // 默认不显示调试级（文件日志仍全量）
         // 回放缓存（与显示上限同步 300 条）：切换过滤档时按当前档重渲，被隐藏的条目不丢失
-        _logBuffer.Enqueue((msg, lv));
-        while (_logBuffer.Count > 300) _logBuffer.Dequeue();
+        lock (_logBuffer)
+        {
+            _logBuffer.Enqueue((msg, lv));
+            while (_logBuffer.Count > 300) _logBuffer.Dequeue();
+        }
+        TrackMonitorEvent(msg);
         if (!PassesLogFilter(lv, _runtimeLogFilter)) return;
         AppendLogItem(msg, lv);
     }
@@ -88,6 +92,64 @@ public partial class MainWindow
         "Warn" => lv is LogLevel.Warn or LogLevel.Error,
         _ => true,
     };
+
+    // ---------------- 监控页动态（比赛完成 / 球员满级，从日志流提取） ----------------
+
+    /// <summary>稳定业务日志串：所有模块的完赛/满级日志必含其一（Worker 侧微信推送另有独立事件线）。</summary>
+    private static readonly System.Text.RegularExpressions.Regex MonitorEventRegex = new(
+        @"一场关键比赛结束|一场比赛结束|球员满级",
+        System.Text.RegularExpressions.RegexOptions.Compiled);
+
+    private readonly Queue<MonitorEventRow> _monitorEvents = new();
+    private readonly object _monitorEventsLock = new();
+
+    private void TrackMonitorEvent(string msg)
+    {
+        var m = MonitorEventRegex.Match(msg);
+        if (!m.Success) return;
+        string kind = m.Value switch
+        {
+            "一场关键比赛结束" => "关键比赛",
+            "一场比赛结束" => "比赛完成",
+            _ => "球员满级",
+        };
+        string text = msg;
+        var p = LogPrefixRegex.Match(msg);
+        if (p.Success)
+            text = $"{p.Groups["tag"].Value} {p.Groups["rest"].Value}".Trim();
+        lock (_monitorEventsLock)
+        {
+            _monitorEvents.Enqueue(new MonitorEventRow(DateTime.Now, kind, text));
+            while (_monitorEvents.Count > 50) _monitorEvents.Dequeue();
+        }
+    }
+
+    /// <summary>监控页：最近 n 条运行日志（GUI 回放缓存，Debug 级不在其中）。HTTP 线程调用。</summary>
+    internal IReadOnlyList<MonitorLogRow> GetRecentLogs(int n)
+    {
+        lock (_logBuffer)
+        {
+            var list = new List<MonitorLogRow>();
+            foreach (var (msg, lv) in _logBuffer.Skip(Math.Max(0, _logBuffer.Count - n)))
+            {
+                string time = "", text = msg;
+                var m = LogPrefixRegex.Match(msg);
+                if (m.Success)
+                {
+                    time = m.Groups["t"].Value;
+                    text = $"{m.Groups["tag"].Value} {m.Groups["rest"].Value}".Trim();
+                }
+                list.Add(new MonitorLogRow(time, lv.ToString(), text));
+            }
+            return list;
+        }
+    }
+
+    /// <summary>监控页：比赛/满级动态列表（最近 50 条）。HTTP 线程调用。</summary>
+    internal IReadOnlyList<MonitorEventRow> GetMonitorEvents()
+    {
+        lock (_monitorEventsLock) return _monitorEvents.ToList();
+    }
 
     private void AppendLogItem(string msg, LogLevel lv)
     {

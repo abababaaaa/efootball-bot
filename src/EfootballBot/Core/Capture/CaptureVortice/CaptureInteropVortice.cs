@@ -3,9 +3,8 @@ using Vortice.DXGI;
 namespace EfootballBot.Core.Capture;
 
 /// <summary>
-/// DXGI 适配器枚举（Vortice 家族）。与 CaptureInterop（SharpDX 家族）逐行为对齐的孪生实现：
-/// 同一套硬件适配器挑选规则（显存最大者胜；无输出的卡让位有输出的卡；WARP/软件适配器排除；
-/// 按 Luid 去重）。仅供 Vortice 捕获路径使用——两家族 COM 包装绝不混挂同一设备指针。
+/// DXGI 适配器枚举（Vortice 实现）。硬件适配器挑选规则：显存最大者胜；无输出的卡让位有输出的卡；
+/// WARP/软件适配器排除；按 Luid 去重。
 /// </summary>
 internal static class CaptureInteropVortice
 {
@@ -19,7 +18,7 @@ internal static class CaptureInteropVortice
         d.Description.Contains("Basic", StringComparison.OrdinalIgnoreCase) == false;
 
     /// <summary>枚举全部硬件适配器名（软件/WARP 适配器除外，按 Luid 去重）。双显卡环境检测用。
-    /// 与 CaptureInterop.GetHardwareAdapterNames 同契约：失败时返回已收集部分。</summary>
+    /// 失败时返回已收集部分。</summary>
     public static List<string> GetHardwareAdapterNames()
     {
         var names = new List<string>();
@@ -48,8 +47,7 @@ internal static class CaptureInteropVortice
     /// <summary>
     /// 选出最适合捕获的真实硬件适配器。返回的适配器由调用方 Dispose；
     /// null = 无可用硬件适配器（调用方走默认硬件适配器路径）。
-    /// 规则与 CaptureInterop.PickHardwareAdapter（SharpDX 家族）一致：
-    /// 显存最大者优先；但若该卡没有任何显示输出（矿卡/无头卡典型），
+    /// 规则：显存最大者优先；但若该卡没有任何显示输出（矿卡/无头卡典型），
     /// 而其他硬件卡有输出，则改选"有输出的硬件卡中显存最大者"（DWM 跨适配器交付帧会断流）。
     /// 名字含 Virtual 的虚拟显示适配器不参与"有输出"优先。
     /// </summary>

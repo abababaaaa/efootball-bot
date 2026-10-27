@@ -409,6 +409,11 @@ public partial class MainWindow : Window
             MessageBoxImage.Warning);
         if (confirm != MessageBoxResult.OK) return;
 
+        // HDR 检测警告：HDR 开启时捕获帧整体过曝，绝对色探针/OCR 全线漂移——只警告不拦截
+        var hdrWarn = HdrStatus.BuildStartWarning();
+        if (hdrWarn is not null)
+            AppendLog(hdrWarn, LogLevel.Warn);
+
         _starting = true;
         try
         {
@@ -534,7 +539,9 @@ public partial class MainWindow : Window
                     DateTime.Now);
             },
             HandleMonitorCommandAsync,
-            AppendLog);
+            AppendLog,
+            n => GetRecentLogs(n),
+            () => GetMonitorEvents());
         _monitor.Start();
     }
 

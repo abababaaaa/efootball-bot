@@ -57,7 +57,7 @@ public sealed class PeakLadderScenario : IScenario
     {
         _engine = engine;
         _log = log;
-        _mouse = new BackgroundMouse(humanTrajectory: !engine.Config.ModuleFallback.DisableMouseTrajectory);
+        _mouse = new BackgroundMouse();
     }
 
     public async Task<int> RunOnceAsync(CancellationToken ct)
@@ -97,6 +97,7 @@ public sealed class PeakLadderScenario : IScenario
         {
             _engine.Stats.MatchesDone++;
             _log($"[天梯巅峰赛] 一场比赛结束（累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
+            _engine.ReportMatchDone(_matchSession.WasKeyMatch);
         }
 
         string screenName = pl != PlScreen.None ? $"天梯巅峰赛.{pl}" : ml.ToString();

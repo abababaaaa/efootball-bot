@@ -179,7 +179,7 @@
                         </StackPanel>
                     </Button>
                     <Button x:Name="BtnUpdate" Style="{StaticResource NavToolBtn}" Click="BtnUpdate_Click"
-                            ToolTip="检查更新、更新通道与模块回退">
+                            ToolTip="检查更新与更新通道">
                         <StackPanel Orientation="Horizontal">
                             <Path Style="{StaticResource IconPath}"
                                   Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"
@@ -528,61 +528,47 @@
                             ToolTip="挂机经过物品页时按下列选择自动购买（消耗联赛积分）；每项每次至多一次，赛后核验，道具耗尽会自动补购">
                         <StackPanel>
                             <TextBlock Text="我的联赛道具（自动购买）" Style="{StaticResource CardTitle}"/>
-                            <Grid Margin="0,8,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
-                                    <StackPanel Orientation="Horizontal">
-                                        <CheckBox x:Name="ChkBuyExpBoost" Content="购买经验值加成" VerticalAlignment="Center"/>
-                                        <ComboBox x:Name="CmbExpBoostLevel" Width="78" Margin="12,0,0,0" SelectedIndex="0">
-                                            <ComboBoxItem Content="2x"/>
-                                            <ComboBoxItem Content="3x"/>
-                                            <ComboBoxItem Content="4x"/>
-                                        </ComboBox>
-                                    </StackPanel>
-                                    <CheckBox x:Name="ChkBuyCoachBoost" Content="购买教练强化" Margin="0,7,0,0"/>
-                                </StackPanel>
-                                <StackPanel Grid.Column="1">
-                                    <StackPanel Orientation="Horizontal">
-                                        <CheckBox x:Name="ChkBuyConditionBoost" Content="购买状态加成" VerticalAlignment="Center"/>
-                                        <ComboBox x:Name="CmbConditionLevel" Width="78" Margin="12,0,0,0" SelectedIndex="0">
-                                            <ComboBoxItem Content="普通+"/>
-                                            <ComboBoxItem Content="好+"/>
-                                            <ComboBoxItem Content="杰出"/>
-                                        </ComboBox>
-                                    </StackPanel>
-                                </StackPanel>
-                            </Grid>
-                            <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
-                            <Grid>
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <CheckBox x:Name="ChkMaxLevelNotify" Content="球员满级提示" VerticalAlignment="Center"/>
-                                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="24,0,0,0">
-                                    <!-- ★重要：开启时弹确认窗（路径验证要求/替补不参与），见 SwapGuideWindow -->
-                                    <CheckBox x:Name="ChkAutoSwapMaxLevel" VerticalAlignment="Center"
-                                              Checked="ChkAutoSwapMaxLevel_Checked"
-                                              ToolTip="每 N 场比赛结束后自动打开比赛计划巡检首发 11 人：满级（等级 x/x）球员自动分配能力点（已用完则跳过），并从后备球员换入最低等级球员；替补球员不参与">
-                                        <StackPanel Orientation="Horizontal">
-                                            <TextBlock Text="★ " Foreground="{DynamicResource Warning}" FontWeight="Bold" VerticalAlignment="Center"/>
-                                            <TextBlock Text="满级自动换人" VerticalAlignment="Center"/>
-                                        </StackPanel>
-                                    </CheckBox>
-                                    <ComboBox x:Name="CmbAutoSwapEvery" Width="86" Margin="12,0,0,0" SelectedIndex="3"
-                                              VerticalAlignment="Center"
-                                              ToolTip="每 N 场比赛结束后触发一次满级巡检换人">
-                                        <ComboBoxItem Content="每1场"/>
-                                        <ComboBoxItem Content="每2场"/>
-                                        <ComboBoxItem Content="每3场"/>
-                                        <ComboBoxItem Content="每5场"/>
-                                        <ComboBoxItem Content="每10场"/>
+                            <!-- WrapPanel：窄窗时三项自动换行，避免第二列被右缘裁掉 -->
+                            <WrapPanel Margin="0,8,0,0">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,24,7">
+                                    <CheckBox x:Name="ChkBuyExpBoost" Content="购买经验值加成" VerticalAlignment="Center"/>
+                                    <ComboBox x:Name="CmbExpBoostLevel" Width="78" Margin="12,0,0,0" SelectedIndex="0">
+                                        <ComboBoxItem Content="2x"/>
+                                        <ComboBoxItem Content="3x"/>
+                                        <ComboBoxItem Content="4x"/>
                                     </ComboBox>
                                 </StackPanel>
-                            </Grid>
+                                <CheckBox x:Name="ChkBuyCoachBoost" Content="购买教练强化" Margin="0,0,24,7" VerticalAlignment="Center"/>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,7">
+                                    <CheckBox x:Name="ChkBuyConditionBoost" Content="购买状态加成" VerticalAlignment="Center"/>
+                                    <ComboBox x:Name="CmbConditionLevel" Width="78" Margin="12,0,0,0" SelectedIndex="0">
+                                        <ComboBoxItem Content="普通+"/>
+                                        <ComboBoxItem Content="好+"/>
+                                        <ComboBoxItem Content="杰出"/>
+                                    </ComboBox>
+                                </StackPanel>
+                            </WrapPanel>
+                            <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
+                            <StackPanel Orientation="Horizontal">
+                                <!-- ★重要：开启时弹确认窗（路径验证要求/替补不参与），见 SwapGuideWindow -->
+                                <CheckBox x:Name="ChkAutoSwapMaxLevel" VerticalAlignment="Center"
+                                          Checked="ChkAutoSwapMaxLevel_Checked"
+                                          ToolTip="每 N 场比赛结束后自动打开比赛计划巡检首发 11 人：满级（等级 x/x）球员自动分配能力点（已用完则跳过），并从后备球员换入最低等级球员；替补球员不参与">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="★ " Foreground="{DynamicResource Warning}" FontWeight="Bold" VerticalAlignment="Center"/>
+                                        <TextBlock Text="满级自动换人" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </CheckBox>
+                                <ComboBox x:Name="CmbAutoSwapEvery" Width="86" Margin="12,0,0,0" SelectedIndex="3"
+                                          VerticalAlignment="Center"
+                                          ToolTip="每 N 场比赛结束后触发一次满级巡检换人">
+                                    <ComboBoxItem Content="每1场"/>
+                                    <ComboBoxItem Content="每2场"/>
+                                    <ComboBoxItem Content="每3场"/>
+                                    <ComboBoxItem Content="每5场"/>
+                                    <ComboBoxItem Content="每10场"/>
+                                </ComboBox>
+                            </StackPanel>
                             <!-- 一键测试：无需先开始挂机，直接启动一次巡检（跑完自动停）；运行中变「一键结束」。
                                  独立一行：避免与开关挤同列被面板右缘截断（5.0.1 布局统一整改） -->
                             <Button x:Name="BtnTestSwap" Content="一键测试换人" Style="{StaticResource GhostBtn}"
@@ -1347,8 +1333,6 @@
                                         <ComboBoxItem Content="杰出"/>
                                     </ComboBox>
                                 </StackPanel>
-                                <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
-                                <CheckBox x:Name="ChkCnMlMaxLevelNotify" Content="球员满级提示"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -1433,6 +1417,22 @@
                                 </Grid.RowDefinitions>
                             <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
                             <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="按键时长/间隔"/><Run Text="按真人节奏随机化"/><Run Text="，并随机插入「犹豫」停顿，消除恒定节奏这一机器签名"/></TextBlock>
+                            </Grid>
+                            <CheckBox x:Name="ChkVirtualDisplay" FontWeight="SemiBold" Margin="0,9,0,0"
+                                      Content="虚拟显示器后台（测试版专用）：游戏停靠到一块看不见的屏幕"/>
+                                                        <Grid Margin="28,4,0,0" MaxWidth="520">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                            <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="游戏跑在"/><Run Text="控制台会话" Foreground="{DynamicResource Warning}"/><Run Text="（非远程登录，游戏不拒绝），渲染/捕获/手柄全部正常，物理屏幕完全看不到"/></TextBlock>
+                            <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="仅测试版构建生效，正式版忽略本项；首次使用需安装 WHQL 签名的虚拟显示器驱动（自动静默安装）"/></TextBlock>
                             </Grid>
                             <CheckBox x:Name="ChkScheduleEnabled" FontWeight="SemiBold" Margin="0,9,0,0"
                                       Content="作息调度：每日活跃时段与时长上限"/>
@@ -1780,7 +1780,7 @@
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
                                 <TextBlock Text="通知与远程监控" Style="{StaticResource H2}"/>
                             </StackPanel>
-                            <TextBlock Text="挂机结束或异常时推一条消息到你自己的服务（Bark / 飞书 / 钉钉 / ntfy 等）。URL 里含 msg 占位符（花括号包住 msg）时改发 GET；否则 POST JSON。留空 = 不发送。"
+                            <TextBlock Text="挂机事件（结束/异常/比赛完成/球员满级/警告与错误/运行摘要）实时推一条消息到你自己的服务，手机微信装个「Server酱」或「PushPlus」公众号即可收。URL 三种形态：含 msg 占位符（花括号包住）发 GET 整条；含 title/body/instance 分字段占位发 GET（Server酱：https://sctapi.ftqq.com/KEY.send?title={title}&amp;desp={body}）；都不含则 POST JSON（飞书/钉钉/企微）。地址含 qyapi.weixin.qq.com（企业微信群机器人）时自动转企微格式——免费、限频 20 条/分钟，消息在「企业微信」App 里收（不是个人微信）。留空 = 不发送。免费渠道有条数限制（Server酱免费版 5 条/天），下方合并窗口与每日上限帮你控量。改动在下次开始挂机时生效。"
                                        TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" FontSize="11.5" Margin="0,0,0,8"/>
                             <Grid>
                                 <Grid.ColumnDefinitions>
@@ -1790,7 +1790,7 @@
                                 <StackPanel Grid.Column="0" Margin="0,0,12,0">
                                     <TextBlock Text="Webhook URL" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"/>
                                     <TextBox x:Name="TxtWebhookUrl" VerticalAlignment="Center"
-                                             ToolTip="含 msg 占位符则发 GET，否则 POST JSON；留空 = 不发送"/>
+                                             ToolTip="含 msg 或 title/body 占位符则发 GET，否则 POST JSON；留空 = 不发送"/>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Width="132">
                                     <TextBlock Text="实例名" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"/>
@@ -1800,6 +1800,30 @@
                             <StackPanel Orientation="Horizontal" Margin="0,7,0,0">
                                 <CheckBox x:Name="ChkNotifyStop" Content="正常停止时通知" IsChecked="True"/>
                                 <CheckBox x:Name="ChkNotifyError" Content="异常停止时通知" IsChecked="True" Margin="18,0,0,0"/>
+                            </StackPanel>
+                            <!-- WrapPanel：窄窗时自动换行，避免第四个勾选被面板右缘裁掉 -->
+                            <WrapPanel Orientation="Horizontal" Margin="0,7,0,0">
+                                <CheckBox x:Name="ChkNotifyMatch" Content="比赛完成推送" IsChecked="True" Margin="0,0,18,0"/>
+                                <CheckBox x:Name="ChkNotifyMaxed" Content="球员满级推送" IsChecked="True" Margin="0,0,18,0"/>
+                                <CheckBox x:Name="ChkNotifyWarn" Content="警告/错误日志推送" IsChecked="True" Margin="0,0,18,0"/>
+                                <CheckBox x:Name="ChkNotifySummary" Content="运行中定时摘要" IsChecked="False"/>
+                            </WrapPanel>
+                            <StackPanel Orientation="Horizontal" Margin="28,8,0,0">
+                                <TextBlock Text="合并分钟" Style="{StaticResource FieldLabel}" VerticalAlignment="Center"/>
+                                <TextBox x:Name="TxtNotifyMerge" Width="50" Margin="6,0,0,0" Text="5" VerticalAlignment="Center"
+                                         ToolTip="同类事件在此间隔内只推一条并合并计数，防刷爆免费渠道条数"/>
+                                <TextBlock Text="每日上限" Style="{StaticResource FieldLabel}" Margin="14,0,0,0" VerticalAlignment="Center"/>
+                                <TextBox x:Name="TxtNotifyDaily" Width="50" Margin="6,0,0,0" Text="50" VerticalAlignment="Center"
+                                         ToolTip="全部事件每日推送总条数上限，0 = 不限制"/>
+                                <TextBlock Text="摘要间隔分钟" Style="{StaticResource FieldLabel}" Margin="14,0,0,0" VerticalAlignment="Center"/>
+                                <TextBox x:Name="TxtNotifySummaryMin" Width="50" Margin="6,0,0,0" Text="60" VerticalAlignment="Center"
+                                         ToolTip="运行中摘要推送间隔（5~1440）"/>
+                            </StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <Button x:Name="BtnNotifyTest" Content="测试发送" Style="{StaticResource GhostBtn}"
+                                        Click="BtnNotifyTest_Click"/>
+                                <TextBlock x:Name="TxtNotifyTestResult" VerticalAlignment="Center" Margin="10,0,0,0"
+                                           Foreground="{DynamicResource TextMuted}" FontSize="11.5"/>
                             </StackPanel>
                             <CheckBox x:Name="ChkMonitor" Content="开启局域网监控页" IsChecked="False" Margin="0,10,0,0"/>
                             <Grid Margin="28,8,0,0">
@@ -1817,7 +1841,7 @@
                                 <TextBox Grid.Column="3" x:Name="TxtMonitorToken" Width="150" Margin="8,0,0,0"
                                          HorizontalAlignment="Left" VerticalAlignment="Center"/>
                             </Grid>
-                            <TextBlock Text="监控页：手机连同一 WiFi，打开 http://本机IP:端口/?t=token 即可看状态、暂停/继续/单步。默认关闭；只监听本机网卡，不上传任何数据。"
+                            <TextBlock Text="监控页：手机连同一 WiFi，用微信内置浏览器打开 http://本机IP:端口/?t=token —— 看状态、实时滚动日志、比赛/满级动态，并可暂停/继续/单步。默认关闭；只监听本机网卡，不上传任何数据。不在家（跨网络）想看实时日志需自行配 frp 等内网穿透，微信推送不受此限制。"
                                        TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}" FontSize="11.5" Margin="0,6,0,0"/>
                             <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                 <CheckBox x:Name="ChkDryRun" Content="影子模式（不实际按键，只记录「本来会按什么」）" IsChecked="False"/>
@@ -2120,34 +2144,6 @@
                             <ProgressBar x:Name="PbGitHub" Margin="0,10,0,0" Visibility="Collapsed"/>
                             <TextBlock x:Name="TxtGitHubStatus" Text="" Foreground="{DynamicResource TextSecondary}"
                                        FontSize="11.5" Margin="0,6,0,0" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- ===== 模块回退（新版实现的手动退路） ===== -->
-                    <Border Style="{StaticResource Card}">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Style="{StaticResource H2}">
-                                    <Run Text="★ " Foreground="{DynamicResource Warning}"/>模块回退
-                                </TextBlock>
-                            </StackPanel>
-                                                        <Grid Margin="0,5,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                            <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="各功能默认用新版实现；表现异常时可单独"/><Run Text="勾选退回旧版"/><Run Text="，"/><Run Text="更改下次开始挂机时生效" Foreground="{DynamicResource Warning}"/></TextBlock>
-                            </Grid>
-                            <CheckBox x:Name="ChkFbSharpDxCapture" Content="画面捕获用旧版引擎（出现黑屏 / 黑画面时勾选）" Margin="0,10,0,0"/>
-                            <CheckBox x:Name="ChkFbFp32Ocr" Content="文字识别退回原版精度模式（提速版出现读错 / 漏字时勾选）" Margin="0,3,0,0"/>
-                            <CheckBox x:Name="ChkFbNoOcrDownscale" Content="文字识别关闭高分辨率压缩（高分屏识别变差时勾选）" Margin="0,3,0,0"/>
-                            <CheckBox x:Name="ChkFbNoMouseTrajectory" Content="鼠标点击关闭拟人移动（直接跳到目标位置）" Margin="0,3,0,0"/>
-                            <CheckBox x:Name="ChkFbNoFailureDumps" Content="异常停止时不保存画面截图留档" Margin="0,3,0,0"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>

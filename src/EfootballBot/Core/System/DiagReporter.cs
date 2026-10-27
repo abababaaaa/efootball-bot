@@ -143,6 +143,13 @@ foreach ($hive in 'HKCU:','HKLM:') {
         report.AppendLine(await RunPsAsync(@"Add-Type -AssemblyName System.Windows.Forms; [System.Windows.Forms.Screen]::AllScreens | ForEach-Object { '{0} | Primary={1} | Bounds={2} | WorkArea={3}' -f $_.DeviceName, $_.Primary, $_.Bounds, $_.WorkingArea }"));
         report.AppendLine("[system DPI (96 = 100 percent)]");
         report.AppendLine(await RunPsAsync(@"(Get-ItemProperty 'HKCU:\Control Panel\Desktop\WindowMetrics').AppliedDPI"));
+        report.AppendLine("[hdr (advanced color) per-output; HDR frames over-expose our color probes]");
+        var hdrOuts = HdrStatus.QueryHdrOutputs();
+        report.AppendLine(hdrOuts is null
+            ? "hdr=detect-failed (DXGI enumeration failed)"
+            : hdrOuts.Count == 0
+                ? "hdr=off (all outputs SDR)"
+                : $"hdr=ON: {string.Join(", ", hdrOuts)}");
 
         Head("SECTION 8 - POWER PLAN");
         report.AppendLine(await RunNativeAsync("powercfg", "/getactivescheme", 20, ct));

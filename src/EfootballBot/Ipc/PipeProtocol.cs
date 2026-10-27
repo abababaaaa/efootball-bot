@@ -40,6 +40,7 @@ public static class PipeProtocol
         public int PlayersMaxed { get; set; }  /// 满级提示次数（弃权场次已移除）
         public string? StartedAt { get; set; }    // stats ISO
         public string? LastError { get; set; }
+        public int Pid { get; set; }              // pid：Worker 进程号（跨会话跟踪用）
     }
 
     // ---------------- 构造辅助 ----------------
@@ -60,6 +61,8 @@ public static class PipeProtocol
         => new() { Ev = "screen", Screen = screen, Score = score, Evidence = evidence };
     public static Msg EvPreview(string pngBase64) => new() { Ev = "preview", Png = pngBase64 };
     public static Msg EvPong() => new() { Ev = "pong" };
+    /// <summary>Worker 进程号：子会话模式下 GUI 无法用 Process.Start 拿句柄，靠它反查进程。</summary>
+    public static Msg EvPid(int pid) => new() { Ev = "pid", Pid = pid };
     public static Msg EvExited(string reason) => new() { Ev = "exited", Text = reason };
     /// <summary>stop 命令的确认事件：引擎已完全停止。GUI 收到即回收 Worker，不再固定等 5s。</summary>
     public static Msg EvStopped() => new() { Ev = "stopped" };

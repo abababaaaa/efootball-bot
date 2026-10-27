@@ -12,7 +12,7 @@ public class CaptureInteropTests
     {
         // 2026-10-11 回归：GetDesc 曾错用 adapter vtbl 槽 7（EnumOutputs），
         // 所有适配器"读不出"描述 → 显式 GPU 绑定永远落空。修好后真机至少枚举出 1 块硬件 GPU。
-        var names = CaptureInterop.GetHardwareAdapterNames();
+        var names = CaptureInteropVortice.GetHardwareAdapterNames();
         // CI 虚拟机没有硬件 GPU（只剩 WARP 软件适配器、被下方 Basic 过滤排除）→ 合法空集跳过；
         // 本地真机空集仍是回归故障信号，照常失败
         if (names.Count == 0 && Environment.GetEnvironmentVariable("GITHUB_ACTIONS") == "true")
