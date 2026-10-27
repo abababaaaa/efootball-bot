@@ -233,6 +233,23 @@ public partial class MainWindow
         BtnUpdate.Tag = isUpdate ? "Active" : null;
         BtnLogViewer.Tag = isLog ? "Active" : null;
         BtnAbout.Tag = isAbout ? "Active" : null;
+
+        // 模块胶囊同一套 Tag=Active 门控：只有正在看游戏模块时才亮，否则会和工具按钮同时亮
+        // （ModuleRadio 模板要求 IsChecked && Tag==Active，见 App.xaml）
+        RbCn.Tag = isGame && IsCnSelected ? "Active" : null;
+        RbIntl.Tag = isGame && !IsCnSelected ? "Active" : null;
+    }
+
+    /// <summary>
+    /// 点击模块胶囊：已选中的那一项再点一次也能回到游戏模块页。
+    /// 必须用 Click 而不是 Checked——点已选中的 RadioButton 时 IsChecked 不变，Checked 不触发，
+    /// 旧实现下从设置页想回国际服只能先点国服再点回来（用户 2026-10-28 反馈）。
+    /// 切换服务器时 Checked 先跑（已是目标面板），这里因 _currentNav 已是 Game 而跳过。
+    /// </summary>
+    private void RbModule_Click(object sender, RoutedEventArgs e)
+    {
+        if (_currentNav != NavMode.Game)
+            NavigateTo(NavMode.Game);
     }
 
     private void BtnSettings_Click(object sender, RoutedEventArgs e)

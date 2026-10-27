@@ -85,6 +85,9 @@ public partial class MainWindow : Window
             // 从未保存过主题选择 → 显示选择界面
             if (!System.IO.File.Exists(AppConfig.ConfigPath))
                 ShowThemeOverlay(_cfg.Theme);
+            // 左栏初始选中态：模块胶囊高亮由 Tag=Active 门控（见 App.xaml ModuleRadio），
+            // 构造期走不到 NavigateTo，必须在这里补一次，否则启动后国际服胶囊不高亮
+            NavigateTo(_currentNav);
             // 上代异常退出遗留的 Worker 先清理（它会占着玩家 1，导致开始挂机抢不到手柄）
             WorkerHost.KillOrphanedWorkers((lv, msg) =>
                 AppendLog(msg, Enum.TryParse<LogLevel>(lv, out var l) ? l : LogLevel.Info));

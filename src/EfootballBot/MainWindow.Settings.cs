@@ -258,6 +258,7 @@ public partial class MainWindow
         ChkCheckOnStartup.IsChecked = _cfg.Update.CheckOnStartup;
         ChkIncludePrerelease.IsChecked = _cfg.Update.IncludePrerelease;
         ChkAutoDownloadInstall.IsChecked = _cfg.Update.AutoDownloadInstall;
+        InitChangelogHistory();
 
         // 手柄接管（赋值会触发 Changed：加载期间必须屏蔽）
         _loadingConfig = true;
@@ -666,6 +667,73 @@ public partial class MainWindow
         if (string.IsNullOrWhiteSpace(body)) return;
         TxtChangelog.Text = body.Trim();
         ChangelogBox.Visibility = Visibility.Visible;
+    }
+
+    // ================= 更新日志（内置全部历史版本） =================
+
+    /// <summary>初始化期间屏蔽下拉框 SelectionChanged，避免填充过程中反复刷新文本。</summary>
+    private bool _loadingChangelogHistory;
+
+    /// <summary>
+    /// 用程序集内嵌的 CHANGELOG.md 填充「更新日志」模块：下拉框列出全部历史版本，
+    /// 默认选中当前运行版本（没有对应段落时选最新一条）。
+    /// </summary>
+    private void InitChangelogHistory()
+    {
+        var entries = ChangelogDoc.Entries;
+        _loadingChangelogHistory = true;
+        try
+        {
+            CmbChangelogVersion.Items.Clear();
+            if (entries.Count == 0)
+            {
+                CmbChangelogVersion.IsEnabled = false;
+                TxtChangelogHistory.Text = "当前构建未内置更新日志。";
+                return;
+            }
+            CmbChangelogVersion.IsEnabled = true;
+
+            // 当前版本可能写成三段（## v5.1）也可能四段（## v5.0.8.1），统一交给 FindCurrent 匹配
+            string? currentVersion = ChangelogDoc.FindCurrent()?.Version;
+            int selected = 0;
+            for (int i = 0; i < entries.Count; i++)
+            {
+                bool isCurrent = currentVersion is not null &&
+                    string.Equals(entries[i].Version, currentVersion, StringComparison.OrdinalIgnoreCase);
+                if (isCurrent) selected = i;
+                CmbChangelogVersion.Items.Add(new ComboBoxItem
+                {
+                    Content = isCurrent ? $"v{entries[i].Version}（当前版本）" : $"v{entries[i].Version}",
+                });
+            }
+            CmbChangelogVersion.SelectedIndex = selected;
+        }
+        finally
+        {
+            _loadingChangelogHistory = false;
+        }
+        ShowChangelogHistory(CmbChangelogVersion.SelectedIndex);
+    }
+
+    private void CmbChangelogVersion_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingChangelogHistory) return;
+        ShowChangelogHistory(CmbChangelogVersion.SelectedIndex);
+    }
+
+    private void ShowChangelogHistory(int index)
+    {
+        var entries = ChangelogDoc.Entries;
+        if (index < 0 || index >= entries.Count)
+        {
+            TxtChangelogHistory.Text = "";
+            return;
+        }
+        var entry = entries[index];
+        TxtChangelogHistory.Text = string.IsNullOrWhiteSpace(entry.Body)
+            ? $"v{entry.Version}\n\n（该版本未填写更新说明）"
+            : $"v{entry.Version}\n\n{entry.Body}";
+        TxtChangelogHistory.ScrollToHome();
     }
 
     private void TxtUpdateRepo_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)

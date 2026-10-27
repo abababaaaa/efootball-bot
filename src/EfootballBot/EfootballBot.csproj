@@ -21,9 +21,9 @@
     <RootNamespace>EfootballBot</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <!-- 测试版版本号按 4 段测试版约定（未发版，仅本地构建）；正式版保持 5.0.8.1 -->
-    <Version Condition="'$(ChildSessionBeta)' != 'true'">5.0.8.1</Version>
-    <Version Condition="'$(ChildSessionBeta)' == 'true'">5.0.8.2</Version>
+    <!-- 测试版版本号按 4 段测试版约定（未发版，仅本地构建）；正式版保持 5.1.0 -->
+    <Version Condition="'$(ChildSessionBeta)' != 'true'">5.1.0.0</Version>
+    <Version Condition="'$(ChildSessionBeta)' == 'true'">5.1.0.1</Version>
     <DefineConstants Condition="'$(ChildSessionBeta)' == 'true'">$(DefineConstants);CHILD_SESSION_BETA</DefineConstants>
     <Product>eFootball 挂机助手</Product>
     <Company>EfootballBot</Company>
@@ -83,6 +83,13 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="EfootballBot.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- 更新日志（仓库根 CHANGELOG.md）内嵌进程序集：更新页的「更新日志」模块要能离线翻看
+         全部历史版本，不能依赖联网拉 GitHub（国内常被墙）。发版流程本就要求先写 CHANGELOG，
+         所以这份内容与 Release 正文同源。 -->
+    <EmbeddedResource Include="..\..\CHANGELOG.md" LogicalName="CHANGELOG.md" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(ChildSessionBeta)' == 'true'">

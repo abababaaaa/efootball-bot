@@ -202,11 +202,19 @@
                             <ContentPresenter Margin="13,0,8,0" VerticalAlignment="Center"/>
                         </Grid>
                         <ControlTemplate.Triggers>
-                            <Trigger Property="IsChecked" Value="True">
+                            <!-- 选中高亮必须「已选中 + 当前正在看游戏模块（Tag=Active）」双条件：
+                                 切到设置/更新/日志/关于时模块 RadioButton 仍保持 IsChecked（服务器选择
+                                 语义要留着），只看 IsChecked 会让左栏同时亮起两项，而且再点该项因为
+                                 IsChecked 没变化不再触发 Checked，回不到模块页（用户 2026-10-28 反馈） -->
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsChecked" Value="True"/>
+                                    <Condition Property="Tag" Value="Active"/>
+                                </MultiTrigger.Conditions>
                                 <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentLight}"/>
                                 <Setter TargetName="bar" Property="Visibility" Value="Visible"/>
                                 <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
-                            </Trigger>
+                            </MultiTrigger>
                             <MultiTrigger>
                                 <MultiTrigger.Conditions>
                                     <Condition Property="IsMouseOver" Value="True"/>
