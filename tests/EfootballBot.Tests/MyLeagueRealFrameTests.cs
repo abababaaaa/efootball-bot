@@ -73,4 +73,32 @@ public class MyLeagueRealFrameTests
         var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, 0);
         Assert.Equal(MlActionKind.PadConfirm, action.Kind);
     }
+
+    [Fact]
+    public void MatchHistoryFrame_ClassifiesMatchHistory_NotHasConfirm()
+    {
+        // 2026-10-26 反馈包实机帧（国际服万圣节活动，误点开比赛历史后卡死）：底栏「B 返回」
+        // 蓝框被 YOLO 判 btn_confirm 0.63 —— 共享分类必须判 MatchHistory（B 退回主页），
+        // 不得落 HasConfirm 盲按 A
+        string png = Path.Combine(AppContext.BaseDirectory, "..", "..", "..",
+            "TestData", "weekly", "weekly_match_history.png");
+        if (!File.Exists(png)) return;
+        using var mat = Cv2.ImRead(png, ImreadModes.Color);
+        Assert.False(mat.Empty(), $"图片加载失败: {png}");
+        using var bgra = new Mat();
+        Cv2.CvtColor(mat, bgra, ColorConversionCodes.BGR2BGRA);
+        var data = new byte[(int)(bgra.Total() * bgra.ElemSize())];
+        System.Runtime.InteropServices.Marshal.Copy(bgra.Data, data, 0, data.Length);
+        var frame = new FrameData(data, mat.Width, mat.Height, 0);
+
+        using var det = CreateDetector();
+        using var ocr = new OcrRecognizer();
+        var dets = det.Detect(frame);
+        var ocrRes = TestOcr.Run(ocr, frame);
+
+        Assert.Contains(dets, d => d.ClassName == "btn_confirm" && d.Score >= MyLeagueBrain.MinScore);
+        Assert.Equal(MlScreen.MatchHistory, MyLeagueBrain.Classify(dets, ocrRes));
+        Assert.Equal(MlActionKind.GamepadBack,
+            MyLeagueBrain.Decide(MlScreen.MatchHistory, OcrResult.Empty, 1).Kind);
+    }
 }

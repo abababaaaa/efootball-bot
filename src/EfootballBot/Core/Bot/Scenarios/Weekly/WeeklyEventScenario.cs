@@ -60,6 +60,13 @@ public sealed class WeeklyEventScenario : IScenario
     private readonly HashSet<int> _doneSlots = new();
     /// <summary>赛事等级改选尝试次数（超 2 次放弃改选，继续用游戏当前值）。</summary>
     private int _levelAttempts;
+    /// <summary>误入比赛历史页后 B 退出的累计次数（仅用于日志升级，动作恒为 B——历史页无危险项）。</summary>
+    private int _historyBacks;
+    /// <summary>开赛前的焦点归位档位：0=直接 A（焦点默认在前往比赛）；1=上×1；2=左×2+上×2；
+    /// 3=饱和左×4+上×6。只在实测「A 落到比赛历史页」后递增——游戏记忆了主页焦点位置
+    /// （实机 2026-10-26 万圣节活动：光标停在左列「比赛历史」面板，直接 A 永远开不了赛）。
+    /// 开赛成功即清零：赛后回主页焦点通常已回前往比赛，无需继续上移。</summary>
+    private int _launchNudge;
 
     // ---- 挑战活动子流程（挑战清单弹窗出现时激活；退回活动列表时复位） ----
     /// <summary>当前活动是挑战活动（以「挑战清单」弹窗或卡详情页「完成的条件」识别）。</summary>
@@ -152,7 +159,10 @@ public sealed class WeeklyEventScenario : IScenario
             sawKeyMatchHint: ml == MlScreen.KeyMatchDialog || obs.Ocr.ContainsJoined("关键比赛"),
             isHome: false);
         if (!wasActive && _matchSession.Active)
+        {
+            _launchNudge = 0; // 开赛成功：焦点归位档位不再需要（赛后回主页焦点通常回前往比赛）
             _log("[周活动] 比赛开始：挂机等待比赛结束（按节奏随机点击）", LogLevel.Info);
+        }
         if (matchEnded)
         {
             _engine.Stats.MatchesDone++;
@@ -274,6 +284,22 @@ public sealed class WeeklyEventScenario : IScenario
     /// <summary>返回正数/0=本轮已处理（下一轮延时）；null=未接管（走共享决策）。</summary>
     private async Task<int?> HandleWeeklyAsync(WkScreen wk, MlScreen ml, Observation obs)
     {
+        // 比赛历史页：任何阶段误入都先 B 退回活动主页（该页无可推进项，交给共享决策会被
+        // 误检的 btn_confirm 拖成「盲按 A 三十轮再 B 逃生」的死循环，实机 2026-10-26 反馈包）。
+        // 真正把焦点修好的动作在 LaunchReady 的归位里——退出历史页后游戏把焦点还给
+        // 「比赛历史」面板，不回位下一次 A 还会再点开它。
+        if (wk == WkScreen.MatchHistory)
+        {
+            // 开赛阶段进历史页 = 刚才那记 A 按在「比赛历史」面板上（焦点不在前往比赛），
+            // 记一次实证让 LaunchReady 回升归位档位，下次 A 前先把焦点挪回前往比赛
+            if (_phase == WkPhase.LaunchReady && _launchNudge < 3) _launchNudge++;
+            if (++_historyBacks > 4)
+                _log("[周活动] 反复落在比赛历史页，B 退回活动主页后重新归位（若一直出现请回报日志）", LogLevel.Warn);
+            _log($"[周活动] 误入比赛历史页，B 退回活动主页（焦点归位档位 {_launchNudge}）", LogLevel.Info);
+            await _engine.Pad.Back();
+            return 2200;
+        }
+
         switch (_phase)
         {
             case WkPhase.Flow:
@@ -452,12 +478,38 @@ public sealed class WeeklyEventScenario : IScenario
                 {
                     if (++_attempts > 4)
                     {
+                        // 退回列表重进后光标回默认位：归位档位清零，重进后先按直接 A 试
+                        _launchNudge = 0;
                         _log("[周活动] 前往比赛多次未生效，B 退回列表重新走流程", LogLevel.Warn);
                         SetPhase(WkPhase.Flow);
                         await _engine.Pad.Back();
                         return 2200;
                     }
-                    _log("[周活动] 手柄 A：前往比赛", LogLevel.Info);
+                    // 焦点归位（实机 2026-10-26 反馈包：活动主页的焦点被游戏记忆，光标停在左列
+                    // 「比赛历史」面板上时直接 A 只会反复点开比赛历史，永远进不了比赛）。
+                    // 档位由「A 落到比赛历史页」这一实证递增，绝不无条件饱和上移——主页顶栏
+                    // 右上是「任务/LS」胶囊，盲目 Up×6 可能把焦点送上去按开任务页。
+                    switch (_launchNudge)
+                    {
+                        case 1:
+                            _log("[周活动] 焦点不在前往比赛（已落到比赛历史）：上×1 归位后 A", LogLevel.Info);
+                            await _engine.Pad.Dpad(PadDir.Up);
+                            break;
+                        case 2:
+                            _log("[周活动] 焦点不在前往比赛：左×2+上×2 归位后 A", LogLevel.Info);
+                            await _engine.Pad.DpadRepeat(PadDir.Left, 2);
+                            await _engine.Pad.DpadRepeat(PadDir.Up, 2);
+                            break;
+                        case > 2:
+                            // 前两档都无效才用饱和配方（我的联赛/AI天梯主页同款：到头多按无害）
+                            _log("[周活动] 焦点不在前往比赛：饱和归位（左×4+上×6）后 A", LogLevel.Info);
+                            await _engine.Pad.DpadRepeat(PadDir.Left, 4);
+                            await _engine.Pad.DpadRepeat(PadDir.Up, 6);
+                            break;
+                        default:
+                            _log("[周活动] 手柄 A：前往比赛", LogLevel.Info);
+                            break;
+                    }
                     await _engine.Pad.Confirm();
                     return 3000;
                 }
@@ -514,6 +566,7 @@ public sealed class WeeklyEventScenario : IScenario
     {
         _hubStep = 0;
         _hubRound = 0;
+        _launchNudge = 0; // 重新从列表进入活动：游戏焦点回默认位（前往比赛），归位档位清零
         await _engine.Pad.Dpad(PadDir.Down);          // 页签行→卡行（已在卡行则到头无害）
         await _engine.Pad.DpadRepeat(PadDir.Left, 6); // 饱和到最左第 1 卡（到头多按无害）
 

@@ -61,6 +61,11 @@ public enum MlScreen
     /// <summary>登录后公告白页（实机 2026-10-21：整幅白底 +「eFootball™积分官方网站问题」+
     /// 右上角「B 关闭」）。底下就是主菜单，无 A 推进键——必须 B 关闭，否则主菜单导航盲走。</summary>
     AnnouncementPage,
+    /// <summary>「比赛历史」页（联赛/活动主页左列「比赛历史」面板点开）：页首标题「比赛历史」+
+    /// 赛事行 + 底栏「返回」。处置见 Decide：B 退回主页。★必须先于通用 btn_confirm——
+    /// 底栏「B 返回」蓝框会被 YOLO 判 btn_confirm（实机 2026-10-26 反馈包 0.63 @y0.93），
+    /// 误判 HasConfirm 会在没有推进键的列表页上盲按 A 三十轮才逃生。</summary>
+    MatchHistory,
     /// <summary>New Playing Style 活动奖励网格页（登录后弹窗链可出现，实机 2026-10-19/21）：
     /// 大字标题「New Playing Style Campaign」+ 奖励磁贴网格（全部已领时也同型）+ 底部
     /// 「继续」默认焦点。按 A 直接推进；判定用标题词、不依赖重登窗口（见 Classify）。</summary>
@@ -320,6 +325,14 @@ public static class MyLeagueBrain
         if (Count("btn_confirm") >= 1 && HasDifficultyList(ocr))
             return MlScreen.DifficultyPage;
 
+        // 比赛历史页（联赛/活动主页左列「比赛历史」面板误点开）：页首标题「比赛历史」+ 底栏
+        // 「返回」，无前往比赛。★必须先于通用 btn_confirm 兜底——底栏「B 返回」蓝框会被 YOLO
+        // 判 btn_confirm（实机 2026-10-26 反馈包 0.63 @y0.93），误判 HasConfirm 会在该页
+        // 盲按 A 三十轮（该页没有任何 A 推进键）才 B 逃生，期间完全不开赛
+        if (!ocr.ContainsJoined("前往比赛") && ocr.ContainsJoined("返回") &&
+            ocr.Words.Any(w => w.CenterY < 0.22 && w.NormText.Contains("比赛历史")))
+            return MlScreen.MatchHistory;
+
         // 确认按钮优先于比赛判定：比赛结算/中场页面若同时出现时钟与确定键，按 A 推进
         if (Count("btn_confirm") >= 1) return MlScreen.HasConfirm;
 
@@ -544,6 +557,14 @@ public static class MyLeagueBrain
                 // 防界面切换的白屏过渡帧误判后误按 B 退出联赛。
                 if (screenStreak < 1) return MlAction.Wait(1200);
                 return new MlAction(MlActionKind.GamepadBack, 2500, "说明页→B 返回主页");
+            }
+
+            case MlScreen.MatchHistory:
+            {
+                // 误入比赛历史页：B 回主页（主页焦点随之回到「比赛历史」面板，主流程会再按 A
+                // 开赛；周活动模块另有焦点归位档位处理）。连测 1 轮再退，防过渡帧误判。
+                if (screenStreak < 1) return MlAction.Wait(1200);
+                return new MlAction(MlActionKind.GamepadBack, 2500, "比赛历史页→B 返回主页");
             }
 
             case MlScreen.PurchaseDialog:

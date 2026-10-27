@@ -241,6 +241,34 @@ public class MyLeagueBrainTests
     }
 
     [Fact]
+    public void Classify_MatchHistory_NotHasConfirm()
+    {
+        // 实机 2026-10-26 反馈包：比赛历史页底栏「B 返回」蓝框被 YOLO 判 btn_confirm 0.63，
+        // 该页没有任何 A 推进键——若判 HasConfirm 会盲按 A 三十轮才逃生
+        var dets = new[] { Det("btn_confirm", 0.63f) };
+        var ocr = Ocr(("比赛历史", 0.15, 0.15), ("2026/10/26 12:44", 0.50, 0.25),
+            ("Manchester United", 0.65, 0.29), ("返回", 0.10, 0.93));
+        Assert.Equal(MlScreen.MatchHistory, MyLeagueBrain.Classify(dets, ocr));
+    }
+
+    [Fact]
+    public void Classify_LeagueHome_HistoryPanelLabel_StaysLeaguePage()
+    {
+        // 联赛主页自身也有「比赛历史」面板标签（不在页首）+ 前往比赛：不得判成历史页
+        var dets = new[] { Det("btn_back", 0.67f) };
+        var ocr = Ocr(("前往比赛", 0.13, 0.24), ("比赛历史", 0.18, 0.38), ("返回", 0.10, 0.93));
+        Assert.Equal(MlScreen.LeaguePage, MyLeagueBrain.Classify(dets, ocr));
+    }
+
+    [Fact]
+    public void Decide_MatchHistory_WaitsThenBacks()
+    {
+        Assert.Equal(MlActionKind.Wait, MyLeagueBrain.Decide(MlScreen.MatchHistory, OcrResult.Empty, 0).Kind);
+        var back = MyLeagueBrain.Decide(MlScreen.MatchHistory, OcrResult.Empty, 1);
+        Assert.Equal(MlActionKind.GamepadBack, back.Kind);
+    }
+
+    [Fact]
     public void Classify_InMatch_BeatsBackButton()
     {
         var dets = new[] { Det("btn_back", 0.9f) };

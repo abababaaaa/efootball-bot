@@ -18,6 +18,9 @@ public enum WkScreen
     EntryPopup,
     /// <summary>活动主页（左上「前往比赛」+ 右栏活动积分/主要奖励进度）。</summary>
     EventHome,
+    /// <summary>活动主页左列「比赛历史」面板点开的赛事列表页（标题「比赛历史」在页首，
+    /// 列表 + 底栏「B 返回」）。开赛前如果没有把焦点归位到「前往比赛」，A 会点开该页。</summary>
+    MatchHistory,
     /// <summary>活动设置浮层（按 X 呼出，右半屏：赛事等级/自动控制/弹性自动控制）。</summary>
     EventSettings,
     /// <summary>挑战活动「挑战清单」弹窗（进入挑战活动后出现，01/02… 编号卡纵排，
@@ -59,6 +62,17 @@ public static class WeeklyBrain
         // btn_back，无可推进词 → 死等/瞎退）。标题词漏读时卡号特征防僵局。
         if (ocr.ContainsJoined("挑战清单") || HasChallengeListCardNumbers(ocr))
             return WkScreen.ChallengeList;
+
+        // 比赛历史页（活动主页左列「比赛历史」面板点开后）：页首大标题「比赛历史」+ 底栏「返回」。
+        // ★必须在任何弹窗/主页判定之前——该页只有列表行与返回，没有推进词，落到共享分类会
+        // 被 YOLO 误检的 btn_confirm（实机 2026-10-26 反馈包：0.63 @列表行）判成 HasConfirm，
+        // 共享决策在不可推进的列表页上盲按 A 三十轮才 B 逃生 → 回主页又按 A 再进历史，死循环。
+        // 活动主页的「比赛历史」是左列面板标签（y≈0.38），不在页首区，用 y&lt;0.22 区分；
+        // 再用「无前往比赛」硬否决——主页恒有左上「前往比赛」，历史页没有，
+        // 防活动改版把历史面板标签挪高后把主页误判成历史页（那会 B 退回列表死循环）。
+        if (!ocr.ContainsJoined("前往比赛") && ocr.ContainsJoined("返回") &&
+            ocr.Words.Any(w => w.CenterY < 0.22 && w.NormText.Contains("比赛历史")))
+            return WkScreen.MatchHistory;
 
         // 盖层弹窗探测（赛后结算/奖励领取等多步弹窗，用户 2026-10-12 实机教训）：
         // 主页词透过暗化背景仍会被 OCR 读到，误判 EventHome 后按 X/前往比赛全部无效

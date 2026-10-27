@@ -46,6 +46,7 @@ public class WeeklyRealFrameTests
         "weekly_event_home_popup.png",
         "weekly_event_home.png",
         "weekly_event_settings.png",
+        "weekly_match_history.png",
     };
 
     [Fact]
@@ -96,6 +97,10 @@ public class WeeklyRealFrameTests
             ("weekly_event_home_popup.png", WkScreen.EntryPopup),
             ("weekly_event_home.png", WkScreen.EventHome),
             ("weekly_event_settings.png", WkScreen.EventSettings),
+            // 2026-10-26 反馈包实机帧（国际服万圣节活动）：活动主页焦点停在「比赛历史」
+            // 面板上，A 点开历史页后旧逻辑被 YOLO 误检 btn_confirm 判成 HasConfirm，
+            // 盲按 A 三十轮才 B 逃生 → 回主页再点开，永远进不了比赛
+            ("weekly_match_history.png", WkScreen.MatchHistory),
         };
 
         foreach (var (name, want) in expected)

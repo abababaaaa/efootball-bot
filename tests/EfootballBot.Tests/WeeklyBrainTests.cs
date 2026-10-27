@@ -132,6 +132,28 @@ public class WeeklyBrainTests
         Assert.Equal(WkScreen.None, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
 
+    [Fact]
+    public void Classify_MatchHistory_BeatsFalseConfirmButton()
+    {
+        // 实机 2026-10-26 反馈包：活动主页焦点停在左列「比赛历史」面板时 A 会点开历史页，
+        // 该页被 YOLO 误检 btn_confirm（0.63 @列表行）→ 旧逻辑落 HasConfirm 盲按 A 三十轮。
+        // 帧取自反馈包：页首标题「比赛历史」+ 赛事行 + 底栏「返回」，无前往比赛。
+        var ocr = Ocr(W("比赛历史", 0.12, 0.11), W("2026/10/26 12:44", 0.50, 0.24),
+            W("Manchester United", 0.61, 0.33), W("返回", 0.10, 0.93));
+        var dets = new[] { Det("btn_confirm", 0.63f) };
+        Assert.Equal(WkScreen.MatchHistory, WeeklyBrain.Classify(dets, ocr));
+    }
+
+    [Fact]
+    public void Classify_EventHome_HistoryPanelLabel_IsNotMatchHistory()
+    {
+        // 活动主页自身也有「比赛历史」面板标签（y≈0.38，不在页首）：不得判成历史页，
+        // 否则每次到主页都会 B 退回列表，永远开不了赛
+        var ocr = Ocr(W("前往比赛", 0.13, 0.24), W("总活动积分", 0.39, 0.21),
+            W("比赛历史", 0.18, 0.38), W("返回", 0.10, 0.93));
+        Assert.Equal(WkScreen.EventHome, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
     // ---------------- 活动设置解析 ----------------
 
     [Fact]
