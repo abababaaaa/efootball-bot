@@ -40,8 +40,9 @@ public sealed class SwapGuideWindow : Window
         root.Children.Add(new TextBlock
         {
             Text = "开启后，每 N 场比赛结束回到我的联赛主页时，会自动打开比赛计划逐个检查首发 11 人：\n" +
-                   "· 满级（等级 x/x）球员：能力点没用完先自动分配，再从后备换入当前等级最低的球员；能力点已用完直接换。\n" +
-                   "· 替补球员不参与自动换人流程（只换首发 11 人）。",
+                   "· 满级（等级 x/x）球员：能力点没用完先自动分配，再从后备换入整体评价最低的球员；能力点已用完直接换。\n" +
+                   "· 替补球员不参与自动换人流程（只换首发 11 人）。\n" +
+                   "· 现阶段只能自动更换色卡，普卡无法自动培养，请切换手动模式。",
             TextWrapping = TextWrapping.Wrap,
             FontSize = 12.5,
             LineHeight = 20,

@@ -18,7 +18,7 @@ public enum SwapScreen
     Alloc,
     /// <summary>后备球员列表页（左下「剩余球员数」）。</summary>
     Bench,
-    /// <summary>「排序」弹窗（球员姓名…当前等级 + 取消/顺序，右上方向箭头）。</summary>
+    /// <summary>「排序」弹窗（球员姓名/位置/整体评价/… + 取消/顺序，右上方向箭头）。</summary>
     Sort,
     /// <summary>「筛选」页（俱乐部球队/…/卡片类型/比赛风格 + 完成）。</summary>
     Filter,
@@ -42,7 +42,7 @@ public sealed record PlayerStatus(int Level, int LevelMax, int Points)
 /// 流程依据用户 2026-10-24 实机配方：联赛主页 Y 开比赛计划 → 光标默认门将，
 /// 沿 ↑←↑→→→→→↓← 依次巡检 11 人；满级（等级 x/x）一律换人——能力点未用完先 X 球员动作
 /// 分配能力点、已用完直接换（用户 2026-10-24 修正），再 A 选中 → 侧栏后备球员 →
-/// 排序（当前等级·升序）→ 筛选（勾高阶卡类型）→ A 换入等级最低的后备球员。
+/// 排序（整体评价·升序）→ 筛选（勾高阶卡类型）→ A 换入整体评价最低的后备球员。
 /// </summary>
 public static partial class MaxLevelSwapBrain
 {
@@ -81,9 +81,10 @@ public static partial class MaxLevelSwapBrain
         (ocr.ContainsJoined("后备球员") && !ocr.ContainsJoined("替补球员") &&
          !ocr.ContainsJoined("自动配置球员"));
 
-    /// <summary>排序弹窗：「当前等级」列表项 + 「取消」。先于筛选（弹窗盖在列表上，底层词可能漏读进来）。</summary>
+    /// <summary>排序弹窗：列表项（「整体评价」，OCR 漏读时退回「当前等级」）+ 「取消」。
+    /// 先于筛选（弹窗盖在列表上，底层词可能漏读进来）。</summary>
     public static bool IsSort(OcrResult ocr) =>
-        ocr.ContainsJoined("当前等级") && ocr.ContainsJoined("取消");
+        (ocr.ContainsJoined("整体评价") || ocr.ContainsJoined("当前等级")) && ocr.ContainsJoined("取消");
 
     /// <summary>卡片类型子页：单选列表「状态火热 / 不可用的球员」为该页独有，先于筛选页判定
     /// （筛选页也印「卡片类型」行）。</summary>
@@ -509,14 +510,18 @@ public static partial class MaxLevelSwapBrain
     // ---------------- 排序/筛选「已设置」探针（中断续跑不重复勾选） ----------------
 
     /// <summary>
-    /// 排序弹窗「当前等级」行是否已有蓝勾（勾 = 该排序键已生效）。实机 2026-10-24
+    /// 排序弹窗「整体评价」行是否已有蓝勾（勾 = 该排序键已生效）。实机 2026-10-24
     /// （1280×720 用户截图）：勾在行右端 x≈0.94~0.97，亮蓝 ≈RGB(33,155,243)；
     /// 行文字也是蓝色但都在 x&lt;0.7，探针只看右端不误伤。勾在时配合箭头判断即可
     /// 直接 B 返回（配合 <see cref="IsSortArrowUp"/>）。
+    /// ★2026-10-27 用户要求：排序键由「当前等级」改为「整体评价」（更贴合选人目标）。
     /// </summary>
-    public static bool IsCurrentLevelChecked(OcrResult ocr, FrameData f)
+    public static bool IsOverallRatingChecked(OcrResult ocr, FrameData f)
     {
-        var head = ocr.Words.FirstOrDefault(w => w.NormText.Contains("当前等级"));
+        // 排序行标签整词；OCR 偶尔把「整体评价」拆成「整体」「评价」两个词，
+        // 退回到含「整体」的词（限弹窗列 x<0.8，避开右侧球员卡的「整体实力」）
+        var head = ocr.Words.FirstOrDefault(w => w.NormText.Contains("整体评价"))
+                   ?? ocr.Words.FirstOrDefault(w => w.NormText.Contains("整体") && w.CenterX < 0.8);
         if (head is null || f.Width < 200 || f.Height < 120 || f.Bgra.Length < f.Width * f.Height * 4)
             return false;
         int x0 = (int)(f.Width * 0.93), x1 = (int)(f.Width * 0.985);
@@ -555,7 +560,7 @@ public static partial class MaxLevelSwapBrain
     // ---------------- 排序弹窗方向箭头（像素探针） ----------------
 
     /// <summary>
-    /// 排序弹窗右上角方向箭头：↑ = 当前等级升序（列表首位为最低等级，换人目标）。
+    /// 排序弹窗右上角方向箭头：↑ = 整体评价升序（列表首位为最低评价，换人目标）。
     /// 实机 2026-10-24（1280×720 用户截图）：箭头为「菱形头 + 细杆」emoji 形态，
     /// 菱形最宽行恰好跨在探针区域中线上——按固定中线分割上下半恒近对称（实机 ↓ 140/154）。
     /// 正确做法：先框出亮像素包围盒，再按包围盒中线分——↑ 的宽行在上半（约 2.4:1），

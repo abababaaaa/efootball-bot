@@ -36,10 +36,10 @@ internal sealed class EngineSwapPad(Pad pad) : ISwapPad
 /// ★满级判定不用 OCR 数字，用弹窗首项：白字「等级训练完成」=满级（灰字「等级训练」=未满级，
 /// 用户 2026-10-25 实机对比图）——大字「7」被读成 17、橙色圈「2」被读成 21 等误读全部规避。
 /// 满级：↓+A 能力点分配 → Y 推荐分配一次归零 → B → 详情 B → 站位页 A 选中 → ←×8 进侧栏
-/// → 上×5 下×3 落「后备球员」→ A → ←+A 开排序 → 上×6 下×5 落「当前等级」→ 右上箭头
+/// → 上×5 下×3 落「后备球员」→ A → ←+A 开排序 → 上×6 下×2 落「整体评价」→ 右上箭头
 /// 为下则 Y 改升序 → A；回列表 ← ↓ A 开筛选 → ↓×4 A 进卡片类型 → 上×9 ↓↓ + 6×(A ↓)
 /// 勾高阶卡 → B；↓×4 ↓ A 应用筛选（★排序+筛选本轮挂机只做一次，之后换人直奔选卡）→
-/// 在后备列表选第一张未压暗的卡按 A 换入（当前等级最低；用户 2026-10-25：选到亮卡
+/// 在后备列表选第一张未压暗的卡按 A 换入（整体评价最低；用户 2026-10-25：选到亮卡
 /// A 一定成功，★不做任何被挡判定）。A 后 B 返回站位页（侧栏光标停在「后备球员」、
 /// 右侧预览后备名单——这个页面同屏有侧栏词，按站位页判）+ → 进阵（光标回到刚换人的
 /// 球员）→ 继续巡检下一位，不退出比赛计划。11 人完成 B（完成）→ 确认窗 上移+A → 主页。
@@ -72,7 +72,7 @@ public sealed class MaxLevelSwapController
         SidebarNav,
         /// <summary>后备列表：←+A 开排序弹窗。</summary>
         BenchWait,
-        /// <summary>排序弹窗：上×6 下×5 落「当前等级」+ 箭头核验 + A。</summary>
+        /// <summary>排序弹窗：上×6 下×2 落「整体评价」+ 箭头核验 + A。</summary>
         SortWait,
         /// <summary>排序已应用：回列表 ← ↓ A 开筛选。</summary>
         SortApplied,
@@ -580,37 +580,37 @@ public sealed class MaxLevelSwapController
                 if (screen == SwapScreen.Sort)
                 {
                     _stall = 0;
-                    // 先识别是否已设置（中断续跑/重复进入）：当前等级已勾 + 箭头为上 = 正确，
+                    // 先识别是否已设置（中断续跑/重复进入）：整体评价已勾 + 箭头为上 = 正确，
                     // 直接 B 返回走筛选。★按 Y 翻方向至多一次：实机探针在运行帧上可能把 ↑ 误判
                     // 为 ↓（用户 2026-10-24：明明是 ↑ 还来回翻）——翻过后下一轮无条件 B，
-                    // 方向真错了大不了换上高等级球员，绝不来回翻死循环。
-                    if (MaxLevelSwapBrain.IsCurrentLevelChecked(ocr, frame))
+                    // 方向真错了大不了换上低评价球员，绝不来回翻死循环。
+                    if (MaxLevelSwapBrain.IsOverallRatingChecked(ocr, frame))
                     {
                         if (!_sortFlipDone && MaxLevelSwapBrain.IsSortArrowUp(frame) is false)
                         {
                             _sortFlipDone = true;
                             await pad.Y();
-                            log("[我的联赛] 当前等级已勾选、箭头读数为下：按一次 Y 翻方向（下轮直接返回）", LogLevel.Info);
+                            log("[我的联赛] 整体评价已勾选、箭头读数为下：按一次 Y 翻方向（下轮直接返回）", LogLevel.Info);
                             return 1100;
                         }
-                        log("[我的联赛] 排序键已是「当前等级」：B 返回，继续筛选", LogLevel.Info);
+                        log("[我的联赛] 排序键已是「整体评价」：B 返回，继续筛选", LogLevel.Info);
                         await pad.Back();
                         _phase = Phase.SortApplied;
                         return 1100;
                     }
                     await pad.DpadRepeat(PadDir.Up, 6);    // 饱和到「球员姓名」
-                    await pad.DpadRepeat(PadDir.Down, 5);  // → 当前等级
+                    await pad.DpadRepeat(PadDir.Down, 2);  // 球员姓名→位置→整体评价
                     var up = MaxLevelSwapBrain.IsSortArrowUp(frame);
                     if (up is false)
                     {
-                        await pad.Y(); // 降序 → 改升序（列表首位=当前等级最低）
+                        await pad.Y(); // 降序 → 改升序（列表首位=整体评价最低）
                         log("[我的联赛] 排序箭头为下，按 Y 切为升序", LogLevel.Info);
                     }
                     else if (up is null)
                     {
                         log("[我的联赛] 排序箭头方向读不出，按升序继续", LogLevel.Warn);
                     }
-                    await pad.Confirm(); // 应用「当前等级」排序
+                    await pad.Confirm(); // 应用「整体评价」排序
                     _phase = Phase.SortApplied;
                     return 1500;
                 }
@@ -741,7 +741,7 @@ public sealed class MaxLevelSwapController
                         await pad.DpadRepeat(PadDir.Right, darkSkip);
                     }
                     _swapped++;
-                    log($"[我的联赛] 换人：第 {darkSkip + 1} 张后备球员（当前等级最低）换入第 {_swapPos + 1} 位，B 完成退出", LogLevel.Success);
+                    log($"[我的联赛] 换人：第 {darkSkip + 1} 张后备球员（整体评价最低）换入第 {_swapPos + 1} 位，B 完成退出", LogLevel.Success);
                     await pad.Confirm(); // A 交换
                     _phase = Phase.SwapExit;
                     _verifyRounds = 0;

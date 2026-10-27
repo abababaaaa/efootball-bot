@@ -553,7 +553,7 @@
                                 <!-- ★重要：开启时弹确认窗（路径验证要求/替补不参与），见 SwapGuideWindow -->
                                 <CheckBox x:Name="ChkAutoSwapMaxLevel" VerticalAlignment="Center"
                                           Checked="ChkAutoSwapMaxLevel_Checked"
-                                          ToolTip="每 N 场比赛结束后自动打开比赛计划巡检首发 11 人：满级（等级 x/x）球员自动分配能力点（已用完则跳过），并从后备球员换入最低等级球员；替补球员不参与">
+                                          ToolTip="每 N 场比赛结束后自动打开比赛计划巡检首发 11 人：满级（等级 x/x）球员自动分配能力点（已用完则跳过），并从后备球员换入整体评价最低的色卡球员；替补球员不参与">
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="★ " Foreground="{DynamicResource Warning}" FontWeight="Bold" VerticalAlignment="Center"/>
                                         <TextBlock Text="满级自动换人" VerticalAlignment="Center"/>
@@ -569,6 +569,9 @@
                                     <ComboBoxItem Content="每10场"/>
                                 </ComboBox>
                             </StackPanel>
+                            <TextBlock Text="现阶段只能自动更换色卡，普卡无法自动培养，请切换手动模式"
+                                       Foreground="{DynamicResource Warning}" FontSize="11.5"
+                                       TextWrapping="Wrap" Margin="0,6,0,0"/>
                             <!-- 一键测试：无需先开始挂机，直接启动一次巡检（跑完自动停）；运行中变「一键结束」。
                                  独立一行：避免与开关挤同列被面板右缘截断（5.0.1 布局统一整改） -->
                             <Button x:Name="BtnTestSwap" Content="一键测试换人" Style="{StaticResource GhostBtn}"

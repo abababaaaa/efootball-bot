@@ -77,7 +77,8 @@ public class MaxLevelSwapTests
         W("剩余球员数:828", 0.88, 0.86));
 
     private static OcrResult SortOcr() => Ocr(
-        W("排序", 0.57, 0.09), W("球员姓名", 0.72, 0.19), W("当前等级", 0.72, 0.50),
+        W("排序", 0.57, 0.09), W("球员姓名", 0.72, 0.19), W("位置", 0.72, 0.28),
+        W("整体评价", 0.72, 0.35), W("当前等级", 0.72, 0.56),
         W("取消", 0.57, 0.93), W("顺序", 0.74, 0.93));
 
     private static OcrResult FilterOcr() => Ocr(
@@ -318,17 +319,22 @@ public class MaxLevelSwapTests
     }
 
     [Fact]
-    public void RealSortPopup_CurrentLevelChecked_Probe()
+    public void RealSortPopup_OverallRatingChecked_Probe()
     {
-        // p1 实机帧（2026-10-24）：当前等级已勾 + 箭头向上 → 已设置探针 true、方向 true
-        var ocr = TestOcr.Run(RealOcr(), LoadFrame("sort_checked_up.png"));
-        var frame = LoadFrame("sort_checked_up.png");
-        Assert.True(MaxLevelSwapBrain.IsCurrentLevelChecked(ocr, frame));
-        Assert.True(MaxLevelSwapBrain.IsSortArrowUp(frame));
+        // 2026-10-27 用户实机帧：勾在「整体评价」行 + 箭头向上 → 已设置探针 true
+        var f = LoadFrame("sort_overall_checked.png");
+        var ocr = TestOcr.Run(RealOcr(), f);
+        Assert.True(MaxLevelSwapBrain.IsOverallRatingChecked(ocr, f));
+        Assert.True(MaxLevelSwapBrain.IsSortArrowUp(f));
+        Assert.Equal(SwapScreen.Sort, MaxLevelSwapBrain.Classify(ocr));
 
-        // 旧帧：勾在「整体评价」行 → 当前等级未勾
-        var ocr2 = TestOcr.Run(RealOcr(), LoadFrame("sort_arrow_up.png"));
-        Assert.False(MaxLevelSwapBrain.IsCurrentLevelChecked(ocr2, LoadFrame("sort_arrow_up.png")));
+        // 旧帧（2026-10-24）：勾在「当前等级」行 → 整体评价未勾，必须重新设置
+        var old = LoadFrame("sort_checked_up.png");
+        Assert.False(MaxLevelSwapBrain.IsOverallRatingChecked(TestOcr.Run(RealOcr(), old), old));
+
+        // sort_arrow_up.png：勾在「整体评价」行（历史帧，同一判据）
+        var up = LoadFrame("sort_arrow_up.png");
+        Assert.True(MaxLevelSwapBrain.IsOverallRatingChecked(TestOcr.Run(RealOcr(), up), up));
     }
 
     [Fact]
@@ -401,14 +407,14 @@ public class MaxLevelSwapTests
     [Fact]
     public async Task SortAlreadyChecked_BReturnsImmediately()
     {
-        // 排序弹窗已勾「当前等级」+ 箭头为上：不导航不按 A，直接 B 返回继续筛选
+        // 排序弹窗已勾「整体评价」+ 箭头为上：不导航不按 A，直接 B 返回继续筛选
         var c = new MaxLevelSwapController();
         var pad = new FakePad();
         var reader = new ScriptReader();
         var lineup = Ocr(LineupOcr());
         reader.Enqueue(new PlayerStatus(40, 40, 0)); // 满级 0 点 → 直接换人路径
-        var checkedSortOcr = TestOcr.Run(RealOcr(), LoadFrame("sort_checked_up.png"));
-        var checkedFrame = LoadFrame("sort_checked_up.png");
+        var checkedSortOcr = TestOcr.Run(RealOcr(), LoadFrame("sort_overall_checked.png"));
+        var checkedFrame = LoadFrame("sort_overall_checked.png");
 
         await c.StartCore(pad, SilentLog);
         await c.StepCore(lineup, BlackFrame(), pad, reader.Read, SilentLog, null, null, CT);
@@ -508,7 +514,7 @@ public class MaxLevelSwapTests
         int before = pad.Log.Count;
         await c.StepCore(SortOcr(), ArrowFrame(up: false), pad,
             new ScriptReader().Read, SilentLog, null, null, CT);
-        Assert.Equal(new[] { "Upx6", "Downx5", "Y", "A" }, pad.Log.Skip(before).ToArray());
+        Assert.Equal(new[] { "Upx6", "Downx2", "Y", "A" }, pad.Log.Skip(before).ToArray());
     }
 
     [Fact]
@@ -520,7 +526,7 @@ public class MaxLevelSwapTests
         int before = pad.Log.Count;
         await c.StepCore(SortOcr(), ArrowFrame(up: true), pad,
             new ScriptReader().Read, SilentLog, null, null, CT);
-        Assert.Equal(new[] { "Upx6", "Downx5", "A" }, pad.Log.Skip(before).ToArray());
+        Assert.Equal(new[] { "Upx6", "Downx2", "A" }, pad.Log.Skip(before).ToArray());
     }
 
     [Fact]
@@ -582,7 +588,7 @@ public class MaxLevelSwapTests
         Assert.Equal("A", log[i++]);                                // 选中球员
         Assert.Equal(new[] { "Leftx8", "Upx5", "Downx3", "A" }, log[i..(i += 4)]); // 侧栏 → 后备球员
         Assert.Equal(new[] { "Left", "A" }, log[i..(i += 2)]);      // 开排序
-        Assert.Equal(new[] { "Upx6", "Downx5", "A" }, log[i..(i += 3)]); // 当前等级（箭头朝上不翻）
+        Assert.Equal(new[] { "Upx6", "Downx2", "A" }, log[i..(i += 3)]); // 整体评价（箭头朝上不翻）
         Assert.Equal(new[] { "Left", "Down", "A" }, log[i..(i += 3)]);   // 开筛选
         Assert.Equal(new[] { "Upx9", "Downx4", "A" }, log[i..(i += 3)]); // → 卡片类型
         Assert.Equal(new[] { "Upx9", "Downx2" }, log[i..(i += 2)]);
@@ -958,7 +964,7 @@ public class MaxLevelSwapTests
         exp.AddRange(new[] { "Y", "X", "B", "B", "A" });        // 第 11 位：X → 弹窗 B → 详情 B → 选中
         exp.AddRange(new[] { "Leftx8", "Upx5", "Downx3", "A" }); // 侧栏 → 后备球员
         exp.AddRange(new[] { "Left", "A" });                     // 开排序
-        exp.AddRange(new[] { "Upx6", "Downx5", "A" });           // 当前等级
+        exp.AddRange(new[] { "Upx6", "Downx2", "A" });           // 整体评价
         exp.AddRange(new[] { "Left", "Down", "A" });             // 开筛选
         exp.AddRange(new[] { "Upx9", "Downx4", "A" });           // 卡片类型
         exp.AddRange(new[] { "Upx9", "Downx2" });
