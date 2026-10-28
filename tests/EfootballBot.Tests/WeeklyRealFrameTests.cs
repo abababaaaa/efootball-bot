@@ -47,6 +47,7 @@ public class WeeklyRealFrameTests
         "weekly_event_home.png",
         "weekly_event_settings.png",
         "weekly_match_history.png",
+        "weekly_advice_panel.png",
     };
 
     [Fact]
@@ -101,6 +102,9 @@ public class WeeklyRealFrameTests
             // 面板上，A 点开历史页后旧逻辑被 YOLO 误检 btn_confirm 判成 HasConfirm，
             // 盲按 A 三十轮才 B 逃生 → 回主页再点开，永远进不了比赛
             ("weekly_match_history.png", WkScreen.MatchHistory),
+            // 2026-10-28 反馈包实机帧（v5.1.0 国际服周赛）：活动主页左列「建议」被 A 点开，
+            // 建议面板盖在主页上但主页词仍可读 → 旧逻辑判 EventHome，A/X 全打空、卡死
+            ("weekly_advice_panel.png", WkScreen.AdvicePanel),
         };
 
         foreach (var (name, want) in expected)

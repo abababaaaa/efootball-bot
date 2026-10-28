@@ -45,6 +45,52 @@ public class WeeklyBrainTests
     }
 
     [Fact]
+    public void Classify_AdviceList_BeatsEventHome()
+    {
+        // 实机 2026-10-28 反馈包（v5.1.0 国际服周赛卡死）：活动主页左列「建议」被 A 点开，
+        // 浅色建议面板盖住主页中部，但左列「前往比赛/比赛历史」、右栏「胜场积分」仍被 OCR
+        // 读到 → 旧逻辑判 EventHome，随后 A（面板吃掉/打开一条建议）与 X（无活动设置）全部无效
+        var ocr = Ocr(
+            W("建议列表", 0.45, 0.07), W("关闭", 0.86, 0.07),
+            W("显示最近5场比赛的建议", 0.48, 0.12),
+            W("前往比赛", 0.13, 0.24), W("胜场积分", 0.87, 0.21),
+            W("建议", 0.13, 0.80), W("有未读建议", 0.17, 0.85), W("返回", 0.13, 0.93));
+        Assert.Equal(WkScreen.AdvicePanel, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_AdviceDetail_WithCloseHeader()
+    {
+        // 详情视图（点开一条建议）：标题「建议列表」不再显示，只剩右上角「B 关闭」+ 分析师署名。
+        // 建议正文/日期/球员名是可变内容，一律不作判定点
+        var ocr = Ocr(
+            W("关闭", 0.86, 0.07), W("分析师", 0.30, 0.21),
+            W("前往比赛", 0.13, 0.24), W("胜场积分", 0.87, 0.21),
+            W("球员状态", 0.24, 0.24), W("建议", 0.13, 0.80));
+        Assert.Equal(WkScreen.AdvicePanel, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_AdvicePanel_BeatsConfirmButton()
+    {
+        // 面板右上角「B 关闭」蓝色按钮会被 YOLO 判成 btn_confirm：不得落到盖层弹窗门控
+        // 变 EntryPopup（那会继续盲按 A，A 在面板里=打开一条建议，永远退不出来）
+        var ocr = Ocr(W("建议列表", 0.45, 0.07), W("关闭", 0.86, 0.07),
+            W("前往比赛", 0.13, 0.24), W("总活动积分", 0.39, 0.21));
+        var dets = new[] { DetAt("btn_confirm", 0.9f, 0.86, 0.07) };
+        Assert.Equal(WkScreen.AdvicePanel, WeeklyBrain.Classify(dets, ocr));
+    }
+
+    [Fact]
+    public void Classify_EventHome_AdviceTile_IsNotAdvicePanel()
+    {
+        // 主页左列本就有「建议 有未读建议」，但顶部没有「关闭」标题 → 不得误判建议面板
+        var ocr = Ocr(W("前往比赛", 0.13, 0.24), W("总活动积分", 0.39, 0.21),
+            W("建议", 0.13, 0.80), W("有未读建议", 0.17, 0.85), W("返回", 0.13, 0.93));
+        Assert.Equal(WkScreen.EventHome, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
     public void Classify_EntryPopup_BeatsEventHome()
     {
         // 入场弹窗（设置专用比赛计划 + OK）盖在活动主页上：必须先于 EventHome 判定

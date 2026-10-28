@@ -62,11 +62,18 @@ public sealed class WeeklyEventScenario : IScenario
     private int _levelAttempts;
     /// <summary>误入比赛历史页后 B 退出的累计次数（仅用于日志升级，动作恒为 B——历史页无危险项）。</summary>
     private int _historyBacks;
+    /// <summary>「建议」面板被打开（A 落在左列「建议」上）的累计次数；开赛成功清零。</summary>
+    private int _adviceBacks;
+    /// <summary>当前是否已经在建议面板里（连续多帧只按一次实证计数）。</summary>
+    private bool _adviceOpen;
     /// <summary>开赛前的焦点归位档位：0=直接 A（焦点默认在前往比赛）；1=上×1；2=左×2+上×2；
     /// 3=饱和左×4+上×6。只在实测「A 落到比赛历史页」后递增——游戏记忆了主页焦点位置
     /// （实机 2026-10-26 万圣节活动：光标停在左列「比赛历史」面板，直接 A 永远开不了赛）。
     /// 开赛成功即清零：赛后回主页焦点通常已回前往比赛，无需继续上移。</summary>
     private int _launchNudge;
+    /// <summary>最近一次焦点实证是「A 落在建议上」（建议面板被点开）：归位第一档改用上×2，
+    /// 而不是历史页验证过的上×1（建议在左列最下，上×1 只到比赛历史面板）。</summary>
+    private bool _focusMissAtAdvice;
 
     // ---- 挑战活动子流程（挑战清单弹窗出现时激活；退回活动列表时复位） ----
     /// <summary>当前活动是挑战活动（以「挑战清单」弹窗或卡详情页「完成的条件」识别）。</summary>
@@ -161,6 +168,8 @@ public sealed class WeeklyEventScenario : IScenario
         if (!wasActive && _matchSession.Active)
         {
             _launchNudge = 0; // 开赛成功：焦点归位档位不再需要（赛后回主页焦点通常回前往比赛）
+            _adviceBacks = 0;
+            _focusMissAtAdvice = false;
             _log("[周活动] 比赛开始：挂机等待比赛结束（按节奏随机点击）", LogLevel.Info);
         }
         if (matchEnded)
@@ -284,6 +293,32 @@ public sealed class WeeklyEventScenario : IScenario
     /// <summary>返回正数/0=本轮已处理（下一轮延时）；null=未接管（走共享决策）。</summary>
     private async Task<int?> HandleWeeklyAsync(WkScreen wk, MlScreen ml, Observation obs)
     {
+        // 建议面板：任何阶段命中都先关掉（面板是纯展示层，盖在主页上会让主页探针全部失效）。
+        // B 每次只退一级：详情视图 → 列表视图 → 活动主页，所以每观测到面板就按一次 B，
+        // 由下一轮继续判（实机 2026-10-28 反馈包：旧逻辑被抢判 EventHome，A/X 全打空，
+        // 「多次未生效」的 B 只把详情退成列表，退不回主页 → 三十轮原地打转）。
+        // 开赛阶段打开建议面板 = 那记 A 落在左列「建议」上（焦点不在前往比赛）——记一次实证
+        // 让 LaunchReady 回升焦点归位档位，下次 A 前先把焦点往上挪。
+        // 一次误按会连出两帧（详情 + 列表），只在「刚进面板」那一帧记实证，避免档位跳级。
+        if (wk == WkScreen.AdvicePanel)
+        {
+            if (!_adviceOpen)
+            {
+                _adviceOpen = true;
+                if (_phase == WkPhase.LaunchReady)
+                {
+                    if (_launchNudge < 3) _launchNudge++;
+                    _focusMissAtAdvice = true;
+                }
+                _adviceBacks++;
+                var lvl = _adviceBacks > 3 ? LogLevel.Warn : LogLevel.Info;
+                _log($"[周活动] 建议面板盖在主页上（A 按在「建议」上，第 {_adviceBacks} 次），B 关闭（焦点归位档位 {_launchNudge}）", lvl);
+            }
+            await _engine.Pad.Back();
+            return 1600;
+        }
+        _adviceOpen = false;
+
         // 比赛历史页：任何阶段误入都先 B 退回活动主页（该页无可推进项，交给共享决策会被
         // 误检的 btn_confirm 拖成「盲按 A 三十轮再 B 逃生」的死循环，实机 2026-10-26 反馈包）。
         // 真正把焦点修好的动作在 LaunchReady 的归位里——退出历史页后游戏把焦点还给
@@ -492,8 +527,16 @@ public sealed class WeeklyEventScenario : IScenario
                     switch (_launchNudge)
                     {
                         case 1:
-                            _log("[周活动] 焦点不在前往比赛（已落到比赛历史）：上×1 归位后 A", LogLevel.Info);
-                            await _engine.Pad.Dpad(PadDir.Up);
+                            if (_focusMissAtAdvice)
+                            {
+                                _log("[周活动] 焦点不在前往比赛（落在左列「建议」上）：上×2 归位后 A", LogLevel.Info);
+                                await _engine.Pad.DpadRepeat(PadDir.Up, 2);
+                            }
+                            else
+                            {
+                                _log("[周活动] 焦点不在前往比赛（已落到比赛历史）：上×1 归位后 A", LogLevel.Info);
+                                await _engine.Pad.Dpad(PadDir.Up);
+                            }
                             break;
                         case 2:
                             _log("[周活动] 焦点不在前往比赛：左×2+上×2 归位后 A", LogLevel.Info);
@@ -567,6 +610,7 @@ public sealed class WeeklyEventScenario : IScenario
         _hubStep = 0;
         _hubRound = 0;
         _launchNudge = 0; // 重新从列表进入活动：游戏焦点回默认位（前往比赛），归位档位清零
+        _focusMissAtAdvice = false;
         await _engine.Pad.Dpad(PadDir.Down);          // 页签行→卡行（已在卡行则到头无害）
         await _engine.Pad.DpadRepeat(PadDir.Left, 6); // 饱和到最左第 1 卡（到头多按无害）
 

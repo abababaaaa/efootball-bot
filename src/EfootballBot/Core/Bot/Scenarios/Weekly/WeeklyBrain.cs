@@ -23,6 +23,9 @@ public enum WkScreen
     MatchHistory,
     /// <summary>活动设置浮层（按 X 呼出，右半屏：赛事等级/自动控制/弹性自动控制）。</summary>
     EventSettings,
+    /// <summary>左列「建议」被 A 点开后的建议面板（浅色大卡盖住主页中部，右上角「B 关闭」）。
+    /// 列表视图标题「建议列表」；点开一条后是详情视图（只剩关闭标题 + 分析师署名）。</summary>
+    AdvicePanel,
     /// <summary>挑战活动「挑战清单」弹窗（进入挑战活动后出现，01/02… 编号卡纵排，
     /// 已完成卡右上有勾、未解锁卡右下有锁）。挑战子流程的菜单侧。</summary>
     ChallengeList,
@@ -51,7 +54,8 @@ public static class WeeklyBrain
     /// <summary>
     /// 周活动界面分类。先于 MyLeagueBrain.Classify 执行——活动主页也含「前往比赛」，
     /// 不先判会被误归 LeaguePage（与关键比赛弹窗被 MatchHub 兜底抢判同一坑）。
-    /// 判定顺序：盖层弹窗 → 活动设置 → 入场弹窗 → 活动主页 → 活动列表 → 活动介绍。
+    /// 判定顺序：挑战清单 → 建议面板 → 比赛历史 → 盖层弹窗 → 活动设置 → 入场弹窗 →
+    /// 活动主页 → 活动列表 → 活动介绍。
     /// </summary>
     public static WkScreen Classify(IReadOnlyList<YoloDetection> dets, OcrResult ocr,
         bool topRightHasContent = false, bool matchContext = false, bool mostlyLightPage = false)
@@ -62,6 +66,16 @@ public static class WeeklyBrain
         // btn_back，无可推进词 → 死等/瞎退）。标题词漏读时卡号特征防僵局。
         if (ocr.ContainsJoined("挑战清单") || HasChallengeListCardNumbers(ocr))
             return WkScreen.ChallengeList;
+
+        // 建议面板（活动主页左列「建议」被 A 点开，实机 2026-10-28 反馈包）：浅色大卡盖住
+        // 主页中部，但左列「前往比赛/比赛历史」「建议 有未读建议」与右栏「胜场积分」全部
+        // 仍然可见 → 旧逻辑一直被 eventHomeBody 抢判成 EventHome，随后按 A（面板吃掉，或
+        // 打开一条建议详情）和按 X（无活动设置）全部无效；「多次未生效」的 B 逃生也只把
+        // 详情退成列表、退不回主页 → 三十轮原地打转、永远进不了比赛。
+        // ★必须先于「盖层弹窗」——面板右上角「B 关闭」蓝色按钮会被 YOLO 判成 btn_confirm，
+        // 落到弹窗门控会变 EntryPopup 继续盲按 A。
+        if (IsAdvicePanel(ocr))
+            return WkScreen.AdvicePanel;
 
         // 比赛历史页（活动主页左列「比赛历史」面板点开后）：页首大标题「比赛历史」+ 底栏「返回」。
         // ★必须在任何弹窗/主页判定之前——该页只有列表行与返回，没有推进词，落到共享分类会
@@ -126,6 +140,18 @@ public static class WeeklyBrain
             return WkScreen.EventIntro;
 
         return WkScreen.None;
+    }
+
+    /// <summary>
+    /// 「建议」面板是否盖在活动主页上。只用固定 UI 文案，建议正文/日期/球员名是可变内容，不作判定点：
+    /// 列表视图＝标题「建议列表」或副标题「显示最近5场比赛的建议。」；
+    /// 详情视图＝右上角「关闭」标题（y&lt;0.16，主页没有该词）+ 左列「建议」/分析师署名。
+    /// </summary>
+    public static bool IsAdvicePanel(OcrResult ocr)
+    {
+        if (ocr.ContainsJoined("建议列表") || ocr.ContainsJoined("场比赛的建议")) return true;
+        bool closeHeader = ocr.Words.Any(w => w.CenterY < 0.16 && w.NormText.Contains("关闭"));
+        return closeHeader && (ocr.ContainsJoined("分析师") || ocr.ContainsJoined("建议"));
     }
 
     /// <summary>
