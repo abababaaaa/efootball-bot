@@ -252,12 +252,14 @@ public sealed class OcrRecognizer : IDisposable
     /// 0 = 关闭。4K 级画面降采样到 1080p 后 det 像素量约为原来 1/4，UI 文字在 720p 实测帧即可读全；
     /// 词块坐标按归一化输出，降采样不影响 0~1 坐标契约。</param>
     /// <param name="preferInt8">true = small 识别模型优先加载 int8 量化版（缺失自动回退 fp32）。</param>
+    /// <param name="tuning">难读文本调优（美术字/碎词化）。null = <see cref="OcrTuning.Off"/>，历史行为不变。</param>
     public OcrRecognizer(OcrEngineKind engine, string? preferredTag = null,
         int downscaleLongSide = DefaultDownscaleLongSide, bool preferInt8 = true,
-        EfootballBot.Core.Config.UnlimitedOcrConfig? unlimitedOcr = null)
+        EfootballBot.Core.Config.UnlimitedOcrConfig? unlimitedOcr = null, OcrTuning? tuning = null)
     {
         EngineKind = engine;
         _downscaleLongSide = downscaleLongSide;
+        _tuning = tuning ?? OcrTuning.Off;
         switch (engine)
         {
             case OcrEngineKind.UnlimitedOcr:
@@ -271,7 +273,7 @@ public sealed class OcrRecognizer : IDisposable
                     FallbackNote = $"Unlimited-OCR 加载失败已回退 SimdPaddle：{ex.Message}";
                     try
                     {
-                        _backend = new SimdPaddleOcrBackend();
+                        _backend = new SimdPaddleOcrBackend(_tuning);
                     }
                     catch (Exception ex2)
                     {
@@ -284,7 +286,7 @@ public sealed class OcrRecognizer : IDisposable
             case OcrEngineKind.Windows: // 旧配置迁移：Windows 引擎已删除，一律落 SimdPaddle
                 try
                 {
-                    _backend = new SimdPaddleOcrBackend();
+                    _backend = new SimdPaddleOcrBackend(_tuning);
                 }
                 catch (Exception ex)
                 {
@@ -303,11 +305,25 @@ public sealed class OcrRecognizer : IDisposable
     public const int DefaultDownscaleLongSide = 1920;
 
     private readonly int _downscaleLongSide;
+    private readonly OcrTuning _tuning;
 
-    public Task<OcrResult> RecognizeAsync(FrameData frame, CancellationToken ct = default)
+    /// <summary>最近一帧的行级重读统计（诊断用；未开启行级重读时恒为 default）。</summary>
+    public LineReread.Stats LastRereadStats { get; private set; }
+
+    public async Task<OcrResult> RecognizeAsync(FrameData frame, CancellationToken ct = default)
     {
         var scaled = ImageScaling.DownscaleBilinear(frame, _downscaleLongSide);
-        return _backend.RecognizeAsync(scaled, ct);
+        var result = await _backend.RecognizeAsync(scaled, ct).ConfigureAwait(false);
+        if (!_tuning.LineReread || result.Words.Count == 0)
+        {
+            LastRereadStats = default;
+            return result;
+        }
+        // 降采样后再重读：坐标口径始终是 scaled 帧，归一化结果与整帧一致
+        var (merged, stats) = await LineReread.ApplyAsync(result, scaled, _backend.RecognizeAsync, _tuning, ct)
+            .ConfigureAwait(false);
+        LastRereadStats = stats;
+        return merged;
     }
 
     public void Dispose() => _backend.Dispose();
@@ -446,7 +462,7 @@ internal sealed class SimdPaddleOcrBackend : IOcrBackend
 
     public string Label { get; }
 
-    public SimdPaddleOcrBackend()
+    public SimdPaddleOcrBackend(OcrTuning? tuning = null)
     {
         string det = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v6", "PP-OCRv6_det_small.onnx")
             ?? throw ModelFileMissing("models/v6/PP-OCRv6_det_small.onnx");
@@ -457,10 +473,24 @@ internal sealed class SimdPaddleOcrBackend : IOcrBackend
         string cls = EfootballBot.Core.System.AppPaths.FindBundledFile("models", "v5", "ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx")
             ?? throw ModelFileMissing("models/v5/ch_PP-LCNet_x0_25_textline_ori_cls_mobile.onnx");
 
+        var t = tuning ?? OcrTuning.Off;
+        // 选项属性是 init-only：先取一个默认实例读出 Sdcb 的默认值，null 时原样写回，
+        // 保证未调优（生产默认）时与历史行为逐字段一致
+        var dflt = new Sdcb.SimdPaddleOCR.PaddleOcrDetectorOptions();
+        var detOpt = new Sdcb.SimdPaddleOCR.PaddleOcrDetectorOptions
+        {
+            Backend = Sdcb.SimdPaddleOCR.OcrBackend.Cpu,
+            BitmapThreshold = t.DetBitmapThreshold ?? dflt.BitmapThreshold,
+            BoxThreshold = t.DetBoxThreshold ?? dflt.BoxThreshold,
+            UnclipRatio = t.DetUnclipRatio ?? dflt.UnclipRatio,
+            LimitSideLength = t.DetLimitSideLength ?? dflt.LimitSideLength,
+            UseDilation = t.DetUseDilation ?? dflt.UseDilation,
+        };
+
         _ocr = Sdcb.SimdPaddleOCR.PaddleOcrAll.Load(det, cls, rec, keys, new Sdcb.SimdPaddleOCR.PaddleOcrOptions
         {
             UseDirectionClassification = false,
-            Detector = new() { Backend = Sdcb.SimdPaddleOCR.OcrBackend.Cpu },
+            Detector = detOpt,
             Classifier = new() { Backend = Sdcb.SimdPaddleOCR.OcrBackend.Cpu },
             Recognizer = new() { Backend = Sdcb.SimdPaddleOCR.OcrBackend.Cpu },
         });

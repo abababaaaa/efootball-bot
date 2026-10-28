@@ -43,7 +43,16 @@ public static class ImageScaling
     /// 「C'」而丢掉数字，裁切放大后稳定读出「©1」。越界坐标自动钳制。
     /// </summary>
     public static FrameData CropUpscale(FrameData src, double x0, double x1, double y0, double y1, int scale)
+        => CropUpscale(src, x0, x1, y0, y1, scale, out _, out _, out _, out _);
+
+    /// <summary>
+    /// 同上，并回吐裁切矩形（源图像素坐标与放大后尺寸）。行级重读需要把裁切图上的
+    /// 归一化词坐标映回整帧，必须知道真实裁切原点（越界已被钳制，不能按入参自己算）。
+    /// </summary>
+    public static FrameData CropUpscale(FrameData src, double x0, double x1, double y0, double y1, int scale,
+        out int offsetX, out int offsetY, out int cropW, out int cropH)
     {
+        offsetX = offsetY = cropW = cropH = 0;
         if (src.Width <= 0 || src.Height <= 0 || src.Bgra.Length == 0 || scale < 1)
             return src;
         int sx0 = Math.Clamp((int)(x0 * src.Width), 0, src.Width - 1);
@@ -65,6 +74,10 @@ public static class ImageScaling
                 dst[di + 3] = 255;
             }
         }
+        offsetX = sx0;
+        offsetY = sy0;
+        cropW = cw;
+        cropH = ch;
         return new FrameData(dst, cw, ch, src.TimestampMs);
     }
 
