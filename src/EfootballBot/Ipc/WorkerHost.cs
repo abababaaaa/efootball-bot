@@ -218,6 +218,7 @@ public sealed class WorkerHost : IDisposable
                         _lastStats.MatchesDone = msg.Matches;
                         _lastStats.KeyMatches = msg.KeyMatches;
                         _lastStats.PlayersMaxed = msg.PlayersMaxed;
+                        _lastStats.SkippedMatches = msg.Skipped;
                         _lastStats.StartedAt = string.IsNullOrEmpty(msg.StartedAt)
                             ? null : DateTime.Parse(msg.StartedAt);
                         _lastStats.LastError = msg.LastError ?? "";

@@ -33,6 +33,35 @@ public sealed class GdiWindowCapture : ICaptureProvider
     public nint Hwnd => _hwnd;
     public DateTime LastFrameAt => _lastFrameAt;
 
+    /// <summary>
+    /// 最近一次抓帧失败的原因（null=成功）。此前抓帧失败是 `catch { ok = false; }` + Sleep 无限
+    /// 重试、一行日志都没有，导致"GDI 报已就绪却始终无帧"无法归因（2026-10-29 实机故障现场）。
+    /// </summary>
+    public string? LastError { get; private set; }
+
+    /// <summary>累计成功帧数（首帧验证与"报就绪但从未出帧"的诊断用）。</summary>
+    public long FrameCount => Interlocked.Read(ref _frameCount);
+    private long _frameCount;
+
+    /// <summary>
+    /// 启动并等待首帧（最多 timeoutMs）。返回 true=已出帧，可对外宣称"GDI 就绪"；
+    /// false=启动后仍拿不到画面，LastError 说明原因。
+    /// 存在的意义：旧代码 `Start()` 一返回就打"GDI 兜底捕获已就绪"，于是日志里出现
+    /// 「21:28:14 已就绪」紧接「21:28:16 迟迟没有产出画面」的自相矛盾，并让下次启动
+    /// 基于这个未经验证的判定直连 GDI。
+    /// </summary>
+    public bool StartAndWaitFirstFrame(nint hwnd, int clientW, int clientH, int timeoutMs = 2000)
+    {
+        Start(hwnd, clientW, clientH);
+        var sw = global::System.Diagnostics.Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            if (TryGetLatest() is not null) return true;
+            Thread.Sleep(50);
+        }
+        return TryGetLatest() is not null;
+    }
+
     public void Start(nint hwnd, int clientW, int clientH)
     {
         lock (_gate)
@@ -41,6 +70,7 @@ public sealed class GdiWindowCapture : ICaptureProvider
             _hwnd = hwnd;
             _stopRequested = false;
             _running = true;
+            LastError = null;
             _thread = new Thread(CaptureLoop)
             {
                 IsBackground = true,
@@ -79,12 +109,18 @@ public sealed class GdiWindowCapture : ICaptureProvider
                 {
                     ok = CaptureOne(hdcMem, ref hBmp, ref hBmpOld, ref bits, ref bmpW, ref bmpH);
                 }
-                catch { ok = false; }
+                catch (Exception ex)
+                {
+                    ok = false;
+                    LastError = $"抓帧异常：{ex.GetType().Name}: {ex.Message}";
+                }
 
                 if (ok)
                 {
                     _lastProduceTick = Environment.TickCount64;
                     _lastFrameAt = DateTime.Now;
+                    LastError = null;
+                    Interlocked.Increment(ref _frameCount);
                 }
                 else
                 {
@@ -101,12 +137,22 @@ public sealed class GdiWindowCapture : ICaptureProvider
         }
     }
 
-    /// <summary>抓一帧：按窗口 rect 尺寸准备 DIB → PrintWindow → 拷出 BGRA → 降采样 ≤720。</summary>
+    /// <summary>抓一帧：按窗口 rect 尺寸准备 DIB → PrintWindow → 拷出 BGRA → 降采样 ≤720。
+    /// 每个失败分支都写 LastError——这条链路静默失败过一次（2026-10-29 实机：三层兜底全无帧
+    /// 但日志空白），归因信息比"失败"本身更重要。</summary>
     private bool CaptureOne(nint hdcMem, ref nint hBmp, ref nint hBmpOld, ref nint bits, ref int bmpW, ref int bmpH)
     {
-        if (!GetWindowRect(_hwnd, out var rc)) return false;
+        if (!GetWindowRect(_hwnd, out var rc))
+        {
+            LastError = "GetWindowRect 失败（窗口句柄可能已失效）";
+            return false;
+        }
         int w = rc.Right - rc.Left, h = rc.Bottom - rc.Top;
-        if (w <= 0 || h <= 0 || w > 8192 || h > 8192) return false;
+        if (w <= 0 || h <= 0 || w > 8192 || h > 8192)
+        {
+            LastError = $"窗口尺寸异常 {w}×{h}";
+            return false;
+        }
 
         // 窗口尺寸变化（含首次）：重建 DIB。biHeight 取负 = top-down，与 WGC 输出行序一致
         if (w != bmpW || h != bmpH)
@@ -123,7 +169,12 @@ public sealed class GdiWindowCapture : ICaptureProvider
                 biCompression = 0, // BI_RGB
             };
             hBmp = CreateDIBSection(hdcMem, in bi, DIB_RGB_COLORS, out bits, nint.Zero, 0);
-            if (hBmp == nint.Zero || bits == nint.Zero) { hBmp = nint.Zero; return false; }
+            if (hBmp == nint.Zero || bits == nint.Zero)
+            {
+                hBmp = nint.Zero;
+                LastError = $"CreateDIBSection 失败（{w}×{h}）";
+                return false;
+            }
             hBmpOld = SelectObject(hdcMem, hBmp);
             bmpW = w;
             bmpH = h;
@@ -136,7 +187,12 @@ public sealed class GdiWindowCapture : ICaptureProvider
             var wdc = GetWindowDC(_hwnd);
             try
             {
-                if (!BitBlt(hdcMem, 0, 0, w, h, wdc, 0, 0, SRCCOPY)) return false;
+                if (!BitBlt(hdcMem, 0, 0, w, h, wdc, 0, 0, SRCCOPY))
+                {
+                    LastError = "PrintWindow 与 BitBlt 均失败" +
+                        (EfootballBot.Core.System.GameWindow.IsResponding(_hwnd) ? "（窗口有响应）" : "（窗口无响应，疑似游戏卡死）");
+                    return false;
+                }
             }
             finally { ReleaseDC(_hwnd, wdc); }
         }

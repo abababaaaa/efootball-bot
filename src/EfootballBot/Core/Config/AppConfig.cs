@@ -327,6 +327,18 @@ public sealed class MyLeagueConfig
 
     /// <summary>完成关键比赛场次后自动停止（本次挂机累计）。0 = 无限跑。</summary>
     public int StopAfterKeyMatches { get; set; } = 0;
+
+    /// <summary>
+    /// 只打关键比赛：开赛后确认这一场不是关键比赛就杀进程重启游戏，把普通比赛快速跳过。
+    /// 国际服没有「放弃比赛」菜单项（与国服不同），唯一可行路径就是终止进程——游戏重进后
+    /// 会弹「上一场比赛被放弃」并推进一步赛程，随后由既有登录/接管链路自动回到联赛主页。
+    /// 默认关闭（每次跳过都要重启游戏），仅国际服我的联赛生效（国服子类恒为 false）。
+    /// </summary>
+    public bool OnlyKeyMatches { get; set; } = false;
+
+    /// <summary>判定为普通比赛后，等比赛时钟走满该秒数再重启游戏：服务端要先登记这一场，
+    /// 刚跳进比赛画面就杀进程等于白重启一次（赛程不推进）。</summary>
+    public int SkipNormalMatchDelaySeconds { get; set; } = 15;
 }
 
 /// <summary>游戏路径记忆（赛前快捷设置）：各服 Settings.exe 上次定位结果。

@@ -43,6 +43,10 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
     /// <summary>赛后活动任务页仅国际服独享：国服不识别不接管。</summary>
     protected override bool SupportsPostMatchActivity => false;
 
+    /// <summary>只打关键比赛（杀进程跳过普通比赛）仅国际服：国服比赛内有「跳过比赛」菜单项，
+    /// 不需要重启游戏。</summary>
+    protected override bool SupportsSkipNormalMatch => false;
+
     /// <summary>国服独立配置段：与国际服我的联赛设置互不影响。</summary>
     protected override MyLeagueConfig LeagueConfig => _engine.Config.CnMyLeague;
 

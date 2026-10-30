@@ -59,10 +59,33 @@ public static class GameWindow
                 cr.Right - cr.Left, cr.Bottom - cr.Top);
     }
 
+    /// <summary>
+    /// 窗口是否响应窗口消息（WM_NULL 探测，500ms 超时）。
+    /// 「窗口还在」与「窗口还活着」是两件事：游戏卡死（渲染线程挂起）时窗口句柄仍有效、
+    /// 进程仍在跑，但 PrintWindow 会阻塞在窗口消息里迟迟返回不了——这是捕获"无帧且无日志"
+    /// 最常见的成因之一，必须能与"显卡/环境问题"区分开（2026-10-29 实机：游戏先卡成空画面，
+    /// 之后三层捕获全部无帧，最终报错却甩给显卡）。
+    /// </summary>
+    public static bool IsResponding(nint hwnd)
+    {
+        if (hwnd == nint.Zero) return false;
+        try
+        {
+            nint ok = SendMessageTimeout(hwnd, WM_NULL, nint.Zero, nint.Zero, SMTO_ABORTIFHUNG, 500, out _);
+            return ok != nint.Zero;
+        }
+        catch { return false; }
+    }
+
     [DllImport("user32.dll")] private static extern bool IsWindowVisible(nint h);
     [DllImport("user32.dll")] private static extern bool GetClientRect(nint h, out RECT rc);
     [DllImport("user32.dll")] private static extern bool GetWindowRect(nint h, out RECT rc);
     [DllImport("user32.dll")] private static extern bool ClientToScreen(nint h, ref POINT pt);
+    [DllImport("user32.dll", SetLastError = true)] private static extern nint SendMessageTimeout(
+        nint hWnd, uint msg, nint wParam, nint lParam, uint flags, uint timeout, out nint result);
+
+    private const uint WM_NULL = 0x0000;
+    private const uint SMTO_ABORTIFHUNG = 0x0002;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RECT { public int Left, Top, Right, Bottom; }

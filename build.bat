@@ -39,7 +39,15 @@ if errorlevel 1 (
 )
 
 :deployed
-if defined OLDBAK echo Old exe kept as publish\%OLDBAK% if it was running; delete it after the bot exits.
+rem Prune old backups: keep only the single newest EfootballBot.old-*.exe.
+rem Each backup is ~120-140MB, and rename-aside leaves one per build while the
+rem bot is running; without this the folder grows by >100MB on every build.
+rem Pure ASCII; dir /o-d sorts newest first, so skip=1 = "all but the newest".
+rem (No delayed expansion needed, so no setlocal/enabledelayedexpansion change.)
+for /f "skip=1 delims=" %%F in ('dir /b /o-d "%~dp0publish\EfootballBot.old-*.exe" 2^>nul') do (
+    del /f /q "%~dp0publish\%%F" >nul 2>&1
+)
+if defined OLDBAK echo Old build kept as publish\%OLDBAK% (only the newest backup is retained).
 echo [3/3] Done. publish\EfootballBot.exe is now the new build.
 echo.
 pause

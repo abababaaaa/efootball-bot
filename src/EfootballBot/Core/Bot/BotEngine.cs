@@ -24,6 +24,8 @@ public sealed class BotStats
 {
     public int MatchesDone;
     public int KeyMatches;
+    /// <summary>跳过（重启游戏放弃）的普通比赛场次：只打关键比赛模式专用，不计入 MatchesDone。</summary>
+    public int SkippedMatches;
     /// <summary>球员满级提示次数（比赛中"满级"通知检测；统计接口，GUI 可展示）。</summary>
     public int PlayersMaxed;
     public DateTime? StartedAt;
@@ -127,6 +129,15 @@ public sealed class BotEngine : IDisposable
     /// <summary>请求一次满级换人巡检（GUI「一键测试换人」按钮入口）。</summary>
     public void RequestSwapInspection() => SwapTestRequested = true;
 
+    /// <summary>
+    /// 「只打关键比赛」请求：场景判定当前这场是普通比赛后置位，由引擎在场景返回后执行
+    /// 杀进程重启游戏（场景自身不改捕获/停靠/窗口，全部由引擎集中处理）。
+    /// </summary>
+    public volatile bool RestartGameRequested;
+
+    /// <summary>请求重启游戏以跳过当前这场普通比赛（只打关键比赛模式）。</summary>
+    public void RequestGameRestart() => RestartGameRequested = true;
+
     // ---------------- 微信实时动态（WeChatFeed 接线） ----------------
 
     /// <summary>写会话摘要期间的日志不再转发推送（摘要本身以 Stop/Error 种类推送，避免双发）。</summary>
@@ -161,6 +172,9 @@ public sealed class BotEngine : IDisposable
     private long _lastOcrDumpTick;
     private long _lastFrameDumpTick;
     private GameWindowInfo? _window;
+
+    /// <summary>本次会话的停靠目标（虚拟显示器矩形；null = 屏外停靠）。重启游戏后据此重新停靠。</summary>
+    private ParkRect? _parkTarget;
 
     public event Action<string, LogLevel>? Log;
     public event Action<BotStats>? StatsChanged;
@@ -283,6 +297,7 @@ public sealed class BotEngine : IDisposable
                 }
             }
 #endif
+            _parkTarget = parkTarget; // 重启游戏后按同一目标重新停靠（虚拟屏矩形不随进程变化）
             _parker ??= new BackgroundParker(LogInternal, _cfg.BackgroundParking.WatchdogIntervalMs);
             _parker.Start(parkWin.Handle, parkTarget);
         }
@@ -395,6 +410,24 @@ public sealed class BotEngine : IDisposable
                         int delayMs = 300;
                         if (Scenario is not null)
                             delayMs = await Scenario.RunOnceAsync(token);
+
+                        // 只打关键比赛：场景判定当前场次是普通比赛后置位，这里集中执行重启
+                        // （捕获/停靠/窗口状态全部由引擎自己管，场景侧只管判定与统计）。
+                        // 重启本身耗时长（启动+登录+回联赛约 1~2 分钟），不计入 failStreak。
+                        if (RestartGameRequested)
+                        {
+                            RestartGameRequested = false;
+                            bool restarted = await RestartGameAsync(token);
+                            // 无论成败都要复位场景状态：成功=清旧记忆按冷启动续接；
+                            // 失败=清本场的一次性请求标记，否则这一场再也不会尝试（也不会重打）
+                            (Scenario as MyLeagueScenario)?.OnGameRestarted(restarted);
+                            if (!restarted)
+                            {
+                                // 重启失败：场景已复位，当前比赛按正常流程打完（有熔断，不会循环重启）
+                                LogInternal("游戏重启失败：本次不再尝试跳过，当前比赛按正常流程打完", LogLevel.Warn);
+                            }
+                        }
+
                         await Task.Delay(delayMs, token);
 
                         if (failStreak > 0)
@@ -416,13 +449,14 @@ public sealed class BotEngine : IDisposable
                         {
                             _gdiFallbackTried = true;
                             LogInternal($"捕获链路熔断，自动降级 GDI 捕获继续挂机：{ex.Message}", LogLevel.Error);
-                            // 立即落盘本机判定：下次启动直连 GDI，不再重撞探测链
-                            // （若 GDI 随后启动失败，下次启动的直连分支会自动回退完整探测链）
-                            CaptureBackendMemory.Save(CaptureBackendKind.Gdi, "WGC/DXGI 捕获熔断降级");
                             var (gw, gh) = _window is { } wwin ? GameWindow.GetClientSize(wwin.Handle) : (1280, 720);
                             if (gw <= 0 || gh <= 0) (gw, gh) = (1280, 720);
                             if (await TryStartGdiCaptureAsync(gw, gh))
                             {
+                                // 只有 GDI 首帧验证通过后才落盘本机判定：下次启动直连 GDI、不再重撞探测链。
+                                // （旧实现在 GDI 尚未验证时就写 Gdi，导致下次启动基于未经验证的判定直连；
+                                //  ObservationService 出帧后还会再写一次，这里的写入只为把原因记准。）
+                                CaptureBackendMemory.Save(CaptureBackendKind.Gdi, "WGC/DXGI 捕获熔断降级（GDI 首帧已验证）");
                                 Observation.ResetCaptureHealth();
                                 Observation.ApplyCaptureThrottle(300);
                                 Stats.LastError = "捕获反复中断，已降级 GDI PrintWindow 捕获";
@@ -456,6 +490,9 @@ public sealed class BotEngine : IDisposable
                     {
                         // 系统级瞬时故障（如 DWM 崩溃重启导致捕获会话失效、设备丢失）：
                         // 指数退避重试而非终止任务，黑屏恢复后挂机自动继续
+                        // 重启请求在异常路径上必须丢弃：置位后若场景抛异常，留着这个标志会让
+                        // 之后每一轮都触发一次重启（无限重启游戏）
+                        RestartGameRequested = false;
                         failStreak = Math.Min(failStreak + 1, 10);
                         int backoffMs = Math.Min(1000 << (failStreak - 1), 8000);
                         Stats.LastError = ex.Message;
@@ -741,6 +778,188 @@ public sealed class BotEngine : IDisposable
     }
 
     /// <summary>
+    /// 杀进程重启游戏（只打关键比赛：国际服没有「放弃比赛」菜单项，这是跳过普通比赛的唯一路径）。
+    /// 游戏重进后会弹「上一场比赛被放弃」并推进一步赛程，随后由既有登录/接管链路自动回到联赛。
+    /// 顺序要点：
+    /// ① 先停捕获（捕获句柄绑死在旧 hwnd 上，进程一死就会抛「游戏窗口已关闭」）；
+    /// ② 停靠不调 <c>_parker.Stop()</c> 还原——旧窗口已死，还原毫无意义，直接让看门狗随旧 hwnd 失效退出；
+    /// ③ 杀进程用整棵进程树（eFootball 有反作弊/启动器子进程）；
+    /// ④ 拉起优先 Steam 正式链路（与「快速打开游戏」一致），无 Steam 时回退定位 exe 直启；
+    /// ⑤ 等新窗口出现后重绑 Observation.Window 与捕获，再按本次会话的停靠目标重新停靠。
+    /// 虚拟手柄不用重连：ViGEm 是系统级常驻设备，游戏重启自己会重新枚举到它。
+    /// 返回 false = 重启失败（调用方退回正常比赛流程，绝不无限重启）。
+    /// </summary>
+    /// <returns>true = 新窗口已就绪且捕获/停靠已恢复。</returns>
+    public async Task<bool> RestartGameAsync(CancellationToken ct)
+    {
+        string procName = _cnSession ? CnProcessName : GameWindow.GlobalProcessName;
+        LogInternal($"[跳过普通比赛] 正在重启游戏（{procName}）…", LogLevel.Warn);
+
+        // ① 停捕获（旧 hwnd 即将失效）
+        try { Capture.Stop(); } catch { }
+        try { _dxgi?.Stop(); } catch { }
+        try { _gdi?.Stop(); } catch { }
+        // ② 停靠看门狗：不还原窗口（旧窗口已死），只停任务
+        try { _parker?.StopWatchdogOnly(); } catch { }
+
+        // ③ 杀进程（整棵进程树，等它真的退出）
+        try
+        {
+            var procs = global::System.Diagnostics.Process.GetProcessesByName(procName);
+            foreach (var p in procs)
+            {
+                using (p)
+                {
+                    try { p.Kill(entireProcessTree: true); } catch { /* 已退出/无权限 */ }
+                }
+            }
+            if (procs.Length > 0)
+            {
+                var deadline = DateTime.Now.AddSeconds(15);
+                while (DateTime.Now < deadline && GameWindow.FindFirst(procName) is not null)
+                    await Task.Delay(300, ct);
+            }
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            LogInternal($"[跳过普通比赛] 结束游戏进程失败：{ex.Message}", LogLevel.Error);
+            return false;
+        }
+
+        // 进程没退干净 → 不拉起新的（会两个实例抢窗口/抢手柄）
+        if (GameWindow.FindFirst(procName) is not null)
+        {
+            bool elevated = false;
+            try { elevated = Elevation.IsCurrentProcessElevated(); } catch { }
+            LogInternal("[跳过普通比赛] 游戏进程 15s 内未退出，放弃本次跳过" +
+                (elevated ? "。" : "——游戏可能以管理员权限运行，而本程序未提权（UIPI 拒绝结束提权进程），" +
+                    "请右键本程序选「以管理员身份运行」"), LogLevel.Error);
+            return false;
+        }
+
+        // ④ 拉起游戏
+        if (!TryLaunchGame(procName, out string launchError))
+        {
+            LogInternal($"[跳过普通比赛] 启动游戏失败：{launchError}——游戏已被关闭且无法拉起，停止挂机", LogLevel.Error);
+            StopWithError("跳过普通比赛时游戏无法重新启动：" + launchError);
+            return false;
+        }
+
+        // ⑤ 等新窗口（启动器 + 引擎初始化，实测 20~60s，给 120s 余量）
+        var winDeadline = DateTime.Now.AddSeconds(120);
+        GameWindowInfo? win = null;
+        while (DateTime.Now < winDeadline)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (GameWindow.FindFirst(procName) is { } found)
+            {
+                // 还需要客户区有尺寸：窗口刚创建时可能是 0×0
+                var (cw, ch) = GameWindow.GetClientSize(found.Handle);
+                if (cw > 100 && ch > 100) { win = found; break; }
+            }
+            await Task.Delay(500, ct);
+        }
+        if (win is null)
+        {
+            LogInternal("[跳过普通比赛] 等待游戏窗口超时（120s）——游戏已被关闭且未恢复，停止挂机", LogLevel.Error);
+            StopWithError("跳过普通比赛后游戏窗口 120s 内未出现，请检查 Steam/游戏启动");
+            return false;
+        }
+        LogInternal($"[跳过普通比赛] 游戏已重启（窗口 {win.Title}），恢复捕获与停靠…", LogLevel.Success);
+
+        // 重绑窗口与捕获；Observation 切到新窗口后，登录/标题页/弹窗链全部走既有恢复链路
+        _window = win;
+        Observation.Window = win;
+        try
+        {
+            var (w, h) = GameWindow.GetClientSize(win.Handle);
+            if (w <= 0 || h <= 0) (w, h) = (1280, 720);
+            await StartCaptureAsync(w, h);
+            Observation.ResetCaptureHealth();
+            Observation.ApplyCaptureThrottle(300);
+        }
+        catch (Exception ex)
+        {
+            // 捕获恢复失败 = 后面全瞎，交回主循环退避（下一轮观察会自己重建捕获）
+            LogInternal($"[跳过普通比赛] 新窗口捕获启动失败：{ex.Message}", LogLevel.Warn);
+            return false;
+        }
+
+        // 重新停靠到本次会话的同一目标（虚拟屏矩形不变；屏外停靠按新窗口原位重算）。
+        // 停靠失败不影响挂机（窗口留在屏幕上），但要让用户知道，否则他会看到游戏突然出现在桌面。
+        if (_cfg.BackgroundParking.Enabled && _parker is not null)
+        {
+            try
+            {
+                _parker.Start(win.Handle, _parkTarget);
+                if (!_parker.IsParked)
+                    LogInternal("[跳过普通比赛] 游戏已重启，但后台停靠未生效——窗口会留在屏幕上" +
+                        "（独占全屏模式下无法移出，请在游戏内改为无边框窗口）", LogLevel.Warn);
+            }
+            catch (Exception ex)
+            {
+                LogInternal($"[跳过普通比赛] 重新停靠失败（不影响挂机）：{ex.Message}", LogLevel.Warn);
+            }
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// 拉起游戏：国际服优先 Steam 正式链路（steam://rungameid/1665460，等效库内快捷方式，
+    /// Steam 未启动会自动带起且不依赖安装位置），无 Steam 时回退定位到的 exe 直启；
+    /// 国服只走 exe 直启（与 Steam 严格隔离）。
+    /// </summary>
+    private bool TryLaunchGame(string procName, out string error)
+    {
+        error = "";
+        bool intl = !procName.Equals(CnProcessName, StringComparison.OrdinalIgnoreCase);
+        if (intl)
+        {
+            try
+            {
+                global::System.Diagnostics.Process.Start(new global::System.Diagnostics.ProcessStartInfo
+                {
+                    FileName = $"steam://rungameid/{GameSettingsLocator.IntlSteamAppId}",
+                    UseShellExecute = true,
+                });
+                return true;
+            }
+            catch (Exception ex)
+            {
+                // URI 协议未注册（没装 Steam）→ 回退定位 exe
+                error = $"Steam 链路不可用（{ex.Message}），尝试直接启动游戏本体";
+                LogInternal($"[跳过普通比赛] {error}", LogLevel.Warn);
+            }
+        }
+
+        var settingsPath = intl ? _cfg.GamePaths.IntlSettingsTool : _cfg.GamePaths.CnSettingsTool;
+        string? exe = GameSettingsLocator.LocateGameExe(intl, global::System.IO.Path.GetDirectoryName(settingsPath));
+        if (exe is null)
+        {
+            error = intl
+                ? "未定位到国际服游戏本体（eFootball.exe），且 Steam 链路不可用"
+                : "未定位到国服游戏本体（eFootballOnline.exe）";
+            return false;
+        }
+        try
+        {
+            global::System.Diagnostics.Process.Start(new global::System.Diagnostics.ProcessStartInfo
+            {
+                FileName = exe,
+                UseShellExecute = true,
+                WorkingDirectory = global::System.IO.Path.GetDirectoryName(exe),
+            });
+            return true;
+        }
+        catch (Exception ex)
+        {
+            error = $"启动 {exe} 失败：{ex.Message}";
+            return false;
+        }
+    }
+
+    /// <summary>
     /// 运行期手柄级自愈：断开→重建控制器→（Connect 内部）重新探测槽位。
     /// 提交失败多为 ViGEm 客户端与总线驱动通信失效（设备掉线/服务重启），
     /// 重建实例可跳过损坏的控制器对象。失败不抛——交回主循环退避，
@@ -898,24 +1117,53 @@ public sealed class BotEngine : IDisposable
 
     /// <summary>启动/切换到 GDI PrintWindow 捕获（无 D3D 依赖的最终兜底）。
     /// 启动降级链与运行期熔断降级共用：GDI 不创建 D3D 设备、不参与 DWM，
-    /// WGC/DXGI 因显卡环境系统性失效（矿卡/无头卡/远程会话/驱动挂起）时仍能出图。</summary>
+    /// WGC/DXGI 因显卡环境系统性失效（矿卡/无头卡/远程会话/驱动挂起）时仍能出图。
+    ///
+    /// 2026-10-29 实机故障修正：旧实现 `Start()` 一返回就打"已就绪"，于是日志出现
+    /// 「21:28:14 已就绪」紧接「21:28:16 迟迟没有产出画面」的自相矛盾，并让下次启动
+    /// 基于未经验证的判定直连 GDI。现在改为**等首帧（最多 2s）**才宣称就绪；
+    /// 拿不到就把 GDI 自己的失败原因（PrintWindow/BitBlt/窗口是否响应）如实报出来。</summary>
     private async Task<bool> TryStartGdiCaptureAsync(int w, int h, ICollection<string>? failures = null)
     {
         try
         {
             _gdi ??= new GdiWindowCapture();
+            bool firstFrame;
             if (!_gdi.IsRunning)
             {
                 LogInternal("开始捕获游戏窗口（GDI PrintWindow 兜底，无 D3D 依赖，后台可捕获）", LogLevel.Warn);
-                await Task.Run(() => _gdi.Start(_window!.Handle, w, h));
+                firstFrame = await Task.Run(() => _gdi.StartAndWaitFirstFrame(_window!.Handle, w, h));
             }
+            else
+            {
+                // 已在运行却来"重建"：旧实现这里是空操作（Start 里 `if (_running) return`），
+                // 但观察层照常计一次无帧重建、烧掉熔断预算 → 12 秒内三次"重建"全自动判死。
+                // 现在改成真正的重启（停旧线程 + 重建 DIB），让这次重建名副其实。
+                LogInternal("GDI 捕获重建（重启抓帧线程）", LogLevel.Debug);
+                _gdi.Stop();
+                await Task.Delay(150);
+                firstFrame = await Task.Run(() => _gdi.StartAndWaitFirstFrame(_window!.Handle, w, h));
+            }
+
+            if (!firstFrame)
+            {
+                string reason = _gdi.LastError ?? "启动后 2 秒内未产出任何画面";
+                string hang = GameWindow.IsResponding(_window!.Handle)
+                    ? "窗口有响应"
+                    : "★窗口无响应（游戏已卡死，重启游戏才能恢复）";
+                LogInternal($"GDI 捕获启动后没有取到画面：{reason}；{hang}", LogLevel.Error);
+                try { _gdi.Stop(); } catch { }
+                failures?.Add($"GDI：{reason}（{hang}）");
+                return false;
+            }
+
             if (Observation.Provider != _gdi)
             {
                 try { Capture.Stop(); } catch { }
                 try { _dxgi?.Stop(); } catch { }
                 Observation.AttachProvider(_gdi);
             }
-            LogInternal("GDI 兜底捕获已就绪", LogLevel.Success);
+            LogInternal($"GDI 兜底捕获已就绪（首帧已验证，{_gdi.FrameCount} 帧）", LogLevel.Success);
             return true;
         }
         catch (Exception ex)

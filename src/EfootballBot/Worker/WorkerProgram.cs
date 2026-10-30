@@ -138,7 +138,8 @@ public static class WorkerProgram
                 _ = SendAsync(PipeProtocol.EvLog(lv.ToString(), msg));
             };
             e.StatsChanged += s =>
-                _ = SendAsync(PipeProtocol.EvStats(s.MatchesDone, s.KeyMatches, s.PlayersMaxed, s.StartedAt, s.LastError));
+                _ = SendAsync(PipeProtocol.EvStats(s.MatchesDone, s.KeyMatches, s.PlayersMaxed, s.StartedAt, s.LastError,
+                    s.SkippedMatches));
             // 感知摘要事件（Screen 已是摘要文本："OCR N 词 / 检测 N 框"）
             e.ScreenChanged += s =>
                 _ = SendAsync(PipeProtocol.EvScreen(s.Screen, s.Score,

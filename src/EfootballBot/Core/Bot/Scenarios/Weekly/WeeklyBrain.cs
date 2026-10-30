@@ -106,9 +106,8 @@ public static class WeeklyBrain
         bool eventHomeBody = ocr.ContainsJoined("前往比赛") &&
             (ocr.ContainsJoined("总活动积分") || ocr.ContainsJoined("胜场积分") ||
              ocr.ContainsJoined("球员加分") || ocr.ContainsJoined("主要奖励"));
-        bool eventsListTabs = ocr.ContainsJoined("对阵AI") || ocr.ContainsJoined("对阵玩家");
-        bool introMark = ocr.ContainsJoined("巡回活动") ||
-            (ocr.ContainsJoined("进入") && ocr.ContainsJoined("详情"));
+        bool eventsListTabs = HasMatchTabRow(ocr);
+        bool introMark = ocr.ContainsJoined("进入") && ocr.ContainsJoined("详情");
         // 介绍页不参与弹窗门控：其白色「进入」按钮本身会被 YOLO 判 btn_confirm，
         // 而介绍页无论有无弹窗按 A 都是正确动作（光标默认在进入）
         if (popupOnTop && (settingsTitle || eventHomeBody || eventsListTabs))
@@ -131,16 +130,32 @@ public static class WeeklyBrain
             return WkScreen.EventHome;
 
         // 活动列表页：顶部「对阵AI / 对阵玩家」页签（进入比赛 hub 的活动板块后默认页签为对阵AI）
+        // ★页签词必须限定在顶部页签行（实机 y≈0.08）：介绍页正文写着「这是一个对阵AI活动…」
+        // （实机 2026-10-29 反馈视频，y≈0.26），不限位置会让介绍页被判成列表页 → 场景层每轮
+        // 「进入槽位 → ↓ 把焦点从进入挪到详情 → ←×6 → A」打开详情面板，活动永远进不去。
         if (eventsListTabs)
             return WkScreen.EventsList;
 
-        // 活动介绍页（巡回活动大图）：「巡回活动」标签，或「进入」+「详情」按钮同屏
-        //（列表卡只有「进入」条，无「详情」，不冲突）
+        // 活动介绍页（巡回活动大图 / 挑战活动大图）：「进入」+「详情」两枚按钮同屏。
+        // ★只用「进入」+「详情」做判据，不用「巡回活动」——列表卡上也印着「巡回活动」标签
+        //（实机列表帧 y≈0.23 三张卡各一枚），单靠该词会把列表页误判成介绍页。
         if (introMark)
             return WkScreen.EventIntro;
 
         return WkScreen.None;
     }
+
+    /// <summary>
+    /// 顶部页签行是否有「对阵AI / 对阵玩家」（活动列表页的页签）。
+    /// ★必须限定 y&lt;0.16：介绍页正文写着「这是一个对阵AI活动…」（实机 2026-10-29 反馈视频
+    /// 帧 y≈0.26），全局子串匹配会把介绍页误判成活动列表，场景层随后每轮 ↓ 把焦点从「进入」
+    /// 挪到「详情」并反复 A 打开详情面板，活动永远进不去（日志「进入槽位 0」连刷二十余次）。
+    /// 实机列表帧页签在 y≈0.08；页签词可能被逐字拆开，故用词级各自匹配而非整句拼接。
+    /// </summary>
+    private static bool HasMatchTabRow(OcrResult ocr)
+        => ocr.Words.Any(w => w.CenterY < 0.16 &&
+               (w.NormText.Contains("对阵AI", StringComparison.OrdinalIgnoreCase) ||
+                w.NormText.Contains("对阵玩家")));
 
     /// <summary>
     /// 「建议」面板是否盖在活动主页上。只用固定 UI 文案，建议正文/日期/球员名是可变内容，不作判定点：

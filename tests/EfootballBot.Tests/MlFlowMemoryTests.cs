@@ -88,6 +88,65 @@ public class MlFlowMemoryTests
         Assert.True(t.Observe(MlScreen.LeaguePage, T0.AddSeconds(30), isHome: true));
     }
 
+    // ---------------- 只打关键比赛：Abort / StartedAt ----------------
+
+    [Fact]
+    public void MatchSession_StartedAt_TracksFirstInMatch()
+    {
+        // 只打关键比赛用它算「时钟走了多久」：首帧 InMatch 记时间，后续 InMatch 不刷新
+        var t = new MatchSessionTracker();
+        Assert.Null(t.StartedAt);
+        t.Observe(MlScreen.InMatch, T0);
+        Assert.Equal(T0, t.StartedAt);
+        t.Observe(MlScreen.InMatch, T0.AddSeconds(20));
+        Assert.Equal(T0, t.StartedAt);              // 不刷新
+        t.Observe(MlScreen.Unknown, T0.AddSeconds(21));
+        Assert.Equal(T0, t.StartedAt);              // 重播帧不关场也不清
+    }
+
+    [Fact]
+    public void MatchSession_Abort_ForgetsCurrentMatch()
+    {
+        // 杀进程跳过普通比赛后：作废当前场——否则重启回联赛主页会被误算成「一场结束」
+        var t = new MatchSessionTracker();
+        t.Observe(MlScreen.KeyMatchDialog, T0, sawKeyMatchHint: true);
+        t.Observe(MlScreen.InMatch, T0.AddMinutes(1));
+        Assert.True(t.Active);
+
+        t.Abort();
+        Assert.False(t.Active);
+        Assert.Null(t.StartedAt);
+        Assert.False(t.WasKeyMatch);
+
+        // 作废后，回到联赛主页不应再触发「一场结束」
+        Assert.False(t.Observe(MlScreen.LeaguePage, T0.AddMinutes(2), isHome: true));
+    }
+
+    [Fact]
+    public void MatchSession_Abort_ClearsKeyMatchFlagForNextMatch()
+    {
+        // 跳过的这场是普通比赛，Abort 后下一场不得继承关键比赛标记
+        var t = new MatchSessionTracker();
+        t.Observe(MlScreen.InMatch, T0);
+        t.Abort();
+        t.Observe(MlScreen.InMatch, T0.AddMinutes(5));
+        Assert.True(t.Observe(MlScreen.FullTime, T0.AddMinutes(25)));
+        Assert.False(t.WasKeyMatch);
+    }
+
+    [Fact]
+    public void FlowMemory_Clear_ResetsEverything()
+    {
+        // 重启游戏后清记忆：否则旧会话的 InMatch 记忆会让 TitleGrace 把真标题页
+        // 当成「开赛加载画面」而一直不按 X（重启后永远回不到游戏）
+        var m = new MlFlowMemory();
+        m.Record(MlScreen.InMatch, T0);
+        m.Record(MlScreen.FullTime, T0.AddSeconds(1));
+        m.Clear();
+        Assert.False(m.SawWithin(MlScreen.InMatch, TimeSpan.FromHours(1), T0.AddSeconds(2)));
+        Assert.False(m.SawWithin(MlScreen.FullTime, TimeSpan.FromHours(1), T0.AddSeconds(2)));
+    }
+
     [Fact]
     public void Decide_LeaguePage_NoKeywords_StuckBacks()
     {

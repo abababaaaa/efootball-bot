@@ -29,6 +29,13 @@ internal sealed class MlFlowMemory
     /// <summary>窗口内是否出现过该界面。</summary>
     internal bool SawWithin(MlScreen screen, TimeSpan window, DateTime now)
         => _items.Any(it => it.Screen == screen && now - it.At <= window);
+
+    /// <summary>
+    /// 清空全部记录（重启游戏后调用）：旧会话的 InMatch/MatchStartPage 记忆会让
+    /// <see cref="ScenarioShared.TitleGrace"/> 把重进后的真标题页当成「开赛加载画面」而
+    /// 一直不按 X——重启后必须从零开始判断。
+    /// </summary>
+    internal void Clear() => _items.Clear();
 }
 
 /// <summary>
@@ -43,6 +50,8 @@ internal sealed class MatchSessionTracker
     private bool _sawKeyMatch;
 
     internal bool Active => _active;
+    /// <summary>本场首次被判为 InMatch 的时间（null = 未开赛）。只打关键比赛用它算时钟走了多久。</summary>
+    internal DateTime? StartedAt { get; private set; }
     /// <summary>刚结束的这场是否关键比赛（会话期间见过 KeyMatchDialog/关键比赛字样）。</summary>
     internal bool WasKeyMatch { get; private set; }
 
@@ -55,6 +64,7 @@ internal sealed class MatchSessionTracker
         if (sawKeyMatchHint) _sawKeyMatch = true;
         if (screen == MlScreen.InMatch)
         {
+            if (!_active) StartedAt = now;
             _lastInMatchAt = now;
             _active = true;
             return false;
@@ -70,9 +80,29 @@ internal sealed class MatchSessionTracker
         {
             _active = false;
             WasKeyMatch = _sawKeyMatch;
-            _sawKeyMatch = false;
+            Finish();
             return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// 主动作废当前场次（重启游戏跳过普通比赛后调用）：清掉在场状态与关键比赛标记，
+    /// 让下一场从干净状态重新计数——否则重启后回到联赛主页会被误判成「一场比赛结束」，
+    /// 凭空多算一场完成场次。
+    /// </summary>
+    internal void Abort()
+    {
+        _active = false;
+        StartedAt = null;
+        _lastInMatchAt = DateTime.MinValue;
+        _sawKeyMatch = false;
+        WasKeyMatch = false;
+    }
+
+    private void Finish()
+    {
+        StartedAt = null;
+        _sawKeyMatch = false;
     }
 }

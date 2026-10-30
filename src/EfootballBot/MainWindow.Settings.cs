@@ -173,6 +173,7 @@ public partial class MainWindow
         CmbDifficulty.SelectedIndex = diffIdx >= 0 ? diffIdx : 0;
         ChkAutoSwapMaxLevel.IsChecked = _cfg.MyLeague.AutoSwapMaxLevel;
         CmbAutoSwapEvery.SelectedIndex = AutoSwapEveryIndex(_cfg.MyLeague.AutoSwapEveryMatches);
+        ChkOnlyKeyMatches.IsChecked = _cfg.MyLeague.OnlyKeyMatches;
         _loadingConfig = false;
 
         // 场次计数停止（0=无限；预设 1/3/5/10/20，其他值进自定义输入框）
@@ -355,6 +356,7 @@ public partial class MainWindow
             _cfg.MyLeague.Difficulty = MyLeagueDifficulties[CmbDifficulty.SelectedIndex];
         _cfg.MyLeague.AutoSwapMaxLevel = ChkAutoSwapMaxLevel.IsChecked == true;
         _cfg.MyLeague.AutoSwapEveryMatches = AutoSwapEveryValue(CmbAutoSwapEvery.SelectedIndex);
+        _cfg.MyLeague.OnlyKeyMatches = ChkOnlyKeyMatches.IsChecked == true;
         _cfg.MyLeague.StopAfterMatches = SaveStopAfterUi(CmbStopAfterMatches, TxtStopAfterMatches);
         _cfg.MyLeague.StopAfterKeyMatches = SaveStopAfterUi(CmbStopAfterKeyMatches, TxtStopAfterKeyMatches);
 

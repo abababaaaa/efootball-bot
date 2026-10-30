@@ -163,6 +163,36 @@ public class WeeklyBrainTests
     }
 
     [Fact]
+    public void Classify_IntroBodyMentionsVsAI_IsNotEventsList()
+    {
+        // 实机 2026-10-29 反馈视频：挑战活动介绍页正文写着「这是一个对阵AI活动…」，
+        // 旧逻辑 ContainsJoined("对阵AI") 不限位置命中 → 判成 EventsList，场景层随后
+        // 每轮 ↓ 把焦点从「进入」挪到「详情」并反复 A 打开详情面板，活动永远进不去
+        //（日志「活动列表：进入槽位 0」连刷二十余次、一张卡都没进）。
+        // 页签词必须限定在顶部页签行（实机列表帧 y≈0.08）。
+        var ocr = Ocr(
+            W("挑战活动", 0.08, 0.06), W("关闭", 0.90, 0.08),
+            W("Flexible: Borussia Dortmund", 0.27, 0.11),
+            W("这是一个对阵AI活动，你可以根据自己的技术水平设置赛事等级。完成", 0.25, 0.26),
+            W("随机位置代币×1", 0.12, 0.56),
+            W("进入", 0.26, 0.75), W("详情", 0.26, 0.85));
+        Assert.Equal(WkScreen.EventIntro, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_EventsList_EnterOnlyCards_NotIntro()
+    {
+        // 活动列表卡上印着「巡回活动」标签 + 每张卡一条「进入」（y≈0.80），但没有「详情」。
+        // 旧 introMark 含「巡回活动」裸词会把列表页判成介绍页，故只认「进入」+「详情」同屏。
+        var ocr = Ocr(
+            W("对阵AI", 0.39, 0.08), W("对阵玩家", 0.60, 0.08),
+            W("挑战活动", 0.10, 0.22), W("巡回活动", 0.40, 0.23), W("巡回活动", 0.70, 0.23),
+            W("进入", 0.20, 0.81), W("进入", 0.50, 0.80), W("进入", 0.80, 0.80),
+            W("返回", 0.10, 0.93));
+        Assert.Equal(WkScreen.EventsList, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
     public void Classify_EnterWithoutDetails_IsNotIntro()
     {
         // 列表页也有「进入」条：无「详情」不得判介绍页（OCR 漏读对阵AI 时宁可 None 交给共享分类）

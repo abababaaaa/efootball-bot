@@ -139,6 +139,26 @@ public sealed class BackgroundParker
         catch { /* 还原失败不影响停止流程 */ }
     }
 
+    /// <summary>
+    /// 只停看门狗、不还原窗口（游戏进程即将被终止时用）：旧 hwnd 已死，还原是无意义的
+    /// SetWindowPos 失败调用；且此刻把 <c>_hadOriginal</c> 留着会让随后的 <see cref="Start"/>
+    /// 误把旧矩形当新窗口原位置。这里把停靠状态整体复位，交给 <see cref="Start"/> 重建。
+    /// </summary>
+    public void StopWatchdogOnly()
+    {
+        if (_cts is not null)
+        {
+            try { _cts.Cancel(); } catch { }
+            _cts.Dispose();
+            _cts = null;
+        }
+        IsParked = false;
+        _hwnd = nint.Zero;
+        _hadOriginal = false;
+        _target = null;
+        DeleteParkRecord();
+    }
+
     /// <summary>停靠（不改变 Z 序、不抢激活）：目标矩形非 null 时移到该矩形（含尺寸），
     /// 否则移出屏幕（保留窗口尺寸）。
     /// 失败原因经 win32 错误码归类：err=5(拒绝访问)=游戏提权而本程序未提权，UIPI 禁止移动其窗口

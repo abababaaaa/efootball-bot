@@ -105,6 +105,12 @@ public class WeeklyRealFrameTests
             // 2026-10-28 反馈包实机帧（v5.1.0 国际服周赛）：活动主页左列「建议」被 A 点开，
             // 建议面板盖在主页上但主页词仍可读 → 旧逻辑判 EventHome，A/X 全打空、卡死
             ("weekly_advice_panel.png", WkScreen.AdvicePanel),
+            // 2026-10-29 反馈视频实机帧（国际服万圣节活动）：挑战活动介绍页正文写着
+            // 「这是一个对阵AI活动…」，旧逻辑 ContainsJoined("对阵AI") 不限位置命中 →
+            // 判成 EventsList，场景层每轮 ↓ 把焦点从「进入」挪到「详情」再 A 打开详情面板，
+            // 活动永远进不去（日志「进入槽位 0」连刷二十余次）。页签词必须限定顶部页签行。
+            ("weekly_intro_vsai_body.png", WkScreen.EventIntro),
+            ("weekly_events_list_1029.png", WkScreen.EventsList),
         };
 
         foreach (var (name, want) in expected)

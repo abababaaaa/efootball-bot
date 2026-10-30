@@ -33,6 +33,12 @@ public class MyLeagueScenario : IScenario
     /// <summary>是否处理赛后活动任务页。国服子类覆盖为 false（该功能仅国际服独享）。</summary>
     protected virtual bool SupportsPostMatchActivity => true;
 
+    /// <summary>
+    /// 是否支持「只打关键比赛」（杀进程跳过普通比赛）。仅国际服：国服比赛中有
+    /// 「跳过比赛」菜单项，不需要重启游戏；且国服进程重启会连带启动器行为差异较大。
+    /// </summary>
+    protected virtual bool SupportsSkipNormalMatch => true;
+
     /// <summary>比赛中挂机点击的随机数（挂机节奏区间内取值）。</summary>
     private readonly Random _rnd = new();
     /// <summary>比赛中点击日志节流：每分钟至多一条，防刷屏/日志膨胀。</summary>
@@ -282,6 +288,11 @@ public class MyLeagueScenario : IScenario
         bool inMatchRecently =
             _memory.SawWithin(MlScreen.InMatch, TimeSpan.FromSeconds(60), now) ||
             _memory.SawWithin(MlScreen.MatchStartPage, TimeSpan.FromSeconds(90), now);
+
+        // ---- 只打关键比赛：普通比赛杀进程跳过 ----
+        int? skipWait = HandleSkipNormalMatch(screen, obs, now);
+        if (skipWait is not null) return skipWait.Value;
+
         // ---- 满级自动换人状态机（先于国服拦截/共享决策/购买状态机：巡检期间独占流程）----
         int? swapWait = await HandleMaxLevelSwapAsync(screen, obs, ct);
         if (swapWait is not null) return swapWait.Value;
@@ -432,6 +443,138 @@ public class MyLeagueScenario : IScenario
                 break;
         }
         return action.WaitMs;
+    }
+
+    // ---------------- 只打关键比赛（普通比赛杀进程跳过） ----------------
+
+    /// <summary>本次运行最多跳过几场普通比赛后自动停用该功能（防一次识别错误导致整晚重启）。</summary>
+    private const int MaxSkipRetriesPerRun = 30;
+    /// <summary>本次运行累计跳过场次（用于日志与熔断）。</summary>
+    private int _skipCount;
+    /// <summary>连续重启失败次数：≥3 次即本次运行停用跳过功能，退回正常打完。</summary>
+    private int _skipFailStreak;
+    /// <summary>已对本场请求过重启（重启到新窗口需要时间，期间不能重复请求）。</summary>
+    private bool _skipRequestedForThisMatch;
+
+    /// <summary>
+    /// 只打关键比赛（国服子类不支持——国服有「跳过比赛」菜单项，走自己的路径）：
+    /// 开赛后确认这一场不是关键比赛 → 请求引擎杀进程重启游戏，把普通比赛快速跳过。
+    ///
+    /// 判定规则（代价不对称，宁可多打一场关键比赛也不许误弃）：
+    /// 只有当「没有任何关键比赛证据」且「确实在了比赛中足够久」才跳过。
+    /// 任何一项正向证据（关键比赛弹窗/主页预告/受限难度页/关键比赛字样）出现即视为关键比赛。
+    /// </summary>
+    /// <returns>非 null = 本轮已处理（值为下一轮延时）。</returns>
+    private int? HandleSkipNormalMatch(MlScreen screen, Observation obs, DateTime now)
+    {
+        if (!SupportsSkipNormalMatch) return null;
+        var cfg = LeagueConfig;
+        if (!cfg.OnlyKeyMatches) return null;
+
+        // 场次结束 / 回到菜单 / 离开比赛流程：复位本场的一次性状态，下一场重新判定
+        if (screen is not (MlScreen.InMatch or MlScreen.HasConfirm))
+        {
+            if (screen is MlScreen.LeaguePage or MlScreen.MatchHub
+                or MlScreen.MainMenu or MlScreen.DifficultyPage or MlScreen.MatchStartPage)
+            {
+                _skipRequestedForThisMatch = false;
+                _skipCountdownLogged = false;
+            }
+            return null;
+        }
+
+        // 只在真正进入比赛画面后动作（HasConfirm 可能是赛中暂停/回放弹窗，不在此列）
+        if (screen != MlScreen.InMatch) return null;
+        if (_skipRequestedForThisMatch) return null;   // 已请求，等引擎重启
+        if (!IsNormalMatchForSkip(_nextMatchIsKey, obs.Ocr)) return null;
+
+        // 时钟必须真的走起来：刚跳进比赛画面的第一帧服务端可能还没登记这一场，
+        // 此时杀进程等于白重启（赛程不推进，回来还是同一场）。
+        int delaySec = Math.Clamp(cfg.SkipNormalMatchDelaySeconds, 0, 300);
+        if (_matchSession.StartedAt is not { } started) return null;
+        if ((now - started).TotalSeconds < delaySec)
+        {
+            if (!_skipCountdownLogged)
+            {
+                _skipCountdownLogged = true;
+                _log($"[我的联赛] 只打关键比赛：本场不是关键比赛，{delaySec}s 后重启游戏跳过", LogLevel.Info);
+            }
+            return null;
+        }
+
+        // 熔断：连续失败/超出本次运行上限 → 停用，退回正常打完（绝不让一次故障变成重启循环）
+        if (_skipFailStreak >= 3)
+        {
+            _log("[我的联赛] 只打关键比赛：连续 3 次重启失败，本次运行停用跳过功能，改为正常打完", LogLevel.Error);
+            return null;
+        }
+        if (_skipCount >= MaxSkipRetriesPerRun)
+        {
+            _log($"[我的联赛] 只打关键比赛：本次运行已跳过 {_skipCount} 场，达到上限后停用", LogLevel.Warn);
+            return null;
+        }
+
+        _skipRequestedForThisMatch = true;
+        _skipCountdownLogged = false;
+        _skipCount++;
+        _engine.Stats.SkippedMatches++;
+        _engine.RequestGameRestart();
+        _log($"[我的联赛] 只打关键比赛：跳过第 {_skipCount} 场普通比赛（重启游戏）", LogLevel.Success);
+        return 1500;
+    }
+
+    /// <summary>本场的倒计时日志是否已输出（每场只输出一次，防刷屏）。</summary>
+    private bool _skipCountdownLogged;
+
+    /// <summary>
+    /// 本场是否「可以确定是普通比赛」（纯函数，可单测）：只打关键比赛模式的核心判定。
+    /// 代价不对称——把关键比赛误弃掉（丢额外积分/经验、可能影响赛程奖励）远比多打一场
+    /// 普通比赛严重，所以任何一项关键比赛证据都否决跳过：
+    /// ① 上一场关键比赛弹窗/主页预告置位的 <paramref name="nextMatchIsKey"/>；
+    /// ② 当前帧 OCR 出现「关键比赛」/「重要比赛」（弹窗文案、限制难度页副标题都会带）。
+    /// </summary>
+    internal static bool IsNormalMatchForSkip(bool nextMatchIsKey, OcrResult ocr) =>
+        !nextMatchIsKey
+        && !ocr.ContainsJoined("关键比赛")
+        && !ocr.ContainsJoined("重要比赛");
+
+    /// <summary>
+    /// 重启游戏成功后由引擎侧复位下来的场景状态（引擎在执行 <see cref="BotEngine.RestartGameAsync"/>
+    /// 后回调）：清掉旧会话的比赛/界面记忆，让新窗口的标题页与登录链路按冷启动判断，
+    /// 同时作废当前场次——否则重启后回到联赛主页会被误算成「一场比赛结束」。
+    /// </summary>
+    internal void OnGameRestarted(bool success)
+    {
+        _memory.Clear();
+        _matchSession.Abort();
+        _skipRequestedForThisMatch = false;
+        _skipCountdownLogged = false;
+        _lastScreen = MlScreen.Unknown;
+        _streak = 0;
+        _titleSince = null;
+        _goMatchAttempts = 0;
+        _goMatchOcrDumped = false;
+        _difficultyPageRounds = 0;
+        _difficultyConfirmRound = 0;
+        // 关键比赛标记必须清：被跳过的是普通比赛，旧会话遗留的「下一场是关键」
+        // 会让下一场（可能真是关键场）判据错位；新窗口回到联赛主页会重新预告。
+        _nextMatchIsKey = false;
+        _keyMatchAnnounced = false;
+        // 道具核验/购买状态机复位：新会话回联赛主页要重新核验加成是否耗尽
+        _bought.Clear();
+        _verifyRetries = 0;
+        _purchaseSatisfied = false;
+        _phase = PurchasePhase.Idle;
+        _navAttempts = 0;
+        if (!success)
+        {
+            _skipFailStreak++;
+            _log($"[我的联赛] 重启游戏失败（连续第 {_skipFailStreak} 次），本场按正常流程打完", LogLevel.Warn);
+        }
+        else
+        {
+            _skipFailStreak = 0;
+        }
     }
 
     // ---------------- 满级自动换人 ----------------

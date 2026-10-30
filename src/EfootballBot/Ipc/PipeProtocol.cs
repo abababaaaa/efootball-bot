@@ -38,6 +38,8 @@ public static class PipeProtocol
         public int Matches { get; set; }          // stats
         public int KeyMatches { get; set; }
         public int PlayersMaxed { get; set; }  /// 满级提示次数（弃权场次已移除）
+        /// <summary>跳过（重启游戏放弃）的普通比赛场次：只打关键比赛模式专用，不计入 Matches。</summary>
+        public int Skipped { get; set; }
         public string? StartedAt { get; set; }    // stats ISO
         public string? LastError { get; set; }
         public int Pid { get; set; }              // pid：Worker 进程号（跨会话跟踪用）
@@ -66,13 +68,15 @@ public static class PipeProtocol
     public static Msg EvExited(string reason) => new() { Ev = "exited", Text = reason };
     /// <summary>stop 命令的确认事件：引擎已完全停止。GUI 收到即回收 Worker，不再固定等 5s。</summary>
     public static Msg EvStopped() => new() { Ev = "stopped" };
-    public static Msg EvStats(int matches, int keyMatches, int playersMaxed, DateTime? startedAt, string? lastError)
+    public static Msg EvStats(int matches, int keyMatches, int playersMaxed, DateTime? startedAt, string? lastError,
+        int skipped = 0)
         => new()
         {
             Ev = "stats",
             Matches = matches,
             KeyMatches = keyMatches,
             PlayersMaxed = playersMaxed,
+            Skipped = skipped,
             StartedAt = startedAt?.ToString("o"),
             LastError = lastError,
         };

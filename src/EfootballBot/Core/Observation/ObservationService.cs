@@ -204,6 +204,36 @@ public sealed class ObservationService : IDisposable
             ? "捕获已建立但迟迟没有产出画面"
             : $"最后画面距今 {(DateTime.Now - _lastFreshFrameAt).TotalSeconds:F0}s";
 
+    /// <summary>
+    /// 熔断终停时的成因说明。先探窗口是否响应——「窗口还在」与「窗口还活着」是两件事：
+    /// 游戏卡死（渲染线程挂起）时进程与句柄都还在，但捕获永远拿不到帧。
+    /// 旧实现一律甩给「无显示输出的显卡/虚拟显示器/远程会话」，
+    /// 2026-10-29 实机就是把一次游戏卡死误报成显卡问题（当时那台机器是正常独显直连）。
+    /// </summary>
+    private string DescribeZeroFrameCause()
+        => BuildZeroFrameCause(Window?.Handle ?? nint.Zero, _provider.GetType().Name);
+
+    /// <summary>纯函数版本（可单测）：按窗口句柄的响应状态给出归因。</summary>
+    internal static string BuildZeroFrameCause(nint hwnd, string backendName)
+    {
+        string extra;
+        try
+        {
+            if (hwnd == nint.Zero)
+                extra = "（未绑定游戏窗口句柄）";
+            else if (GameWindow.IsResponding(hwnd))
+                extra = "（游戏窗口有响应：更可能是捕获环境问题——无显示输出的显卡、虚拟显示器、远程会话，或 DWM/驱动异常）";
+            else
+                extra = "★（游戏窗口无响应：游戏已卡死/未响应，请重启游戏；此时捕获任何后端都拿不到画面）";
+        }
+        catch
+        {
+            extra = "（窗口响应探测失败，无法进一步归因）";
+        }
+
+        return $"当前后端 {backendName}{extra}。";
+    }
+
     /// <summary>整套停止并重建捕获（同窗口、按当前客户区尺寸）。两条熔断路径：
     /// ① 从未出帧（无帧快路径）：重建要么立刻出帧、要么永远不出，不等 10s 间隔、
     ///    第 1 次重建直接切 WARP，第 3 次仍无帧即熔断（全程约 8s，正常机器首帧 <1s 不受影响）；
@@ -234,8 +264,7 @@ public sealed class ObservationService : IDisposable
             {
                 ResetBreakerCounters();
                 throw new CaptureUnrecoverableException(
-                    "画面捕获会话多次建立但始终无帧，已停止重建。" +
-                    "常见原因：捕获绑定了无显示输出的显卡、虚拟显示器或远程会话环境。");
+                    "画面捕获会话多次建立但始终无帧，已停止重建。" + DescribeZeroFrameCause());
             }
             if (_provider is WindowCapture wc && !wc.ForceWarpDevice)
             {

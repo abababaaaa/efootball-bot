@@ -522,7 +522,25 @@
                             </StackPanel>
                         </StackPanel>
                     </Grid>
-                    <!-- 模块选项：我的联赛道具（挂机经过物品页时自动购买） -->
+                    <!-- 只打关键比赛：国际服没有「放弃比赛」菜单项，普通比赛只能在开赛后杀进程跳过 -->
+                    <Border Style="{StaticResource Inset}" Padding="14,10" Margin="0,10,0,0"
+                            ToolTip="开启后：开赛后发现这一场不是关键比赛，就重启游戏把它跳过（国际服比赛内没有「放弃」选项，只能这样跳）；关键比赛照常打完。跳过不消耗场次，也不会改动其他程序">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal">
+                                <CheckBox x:Name="ChkOnlyKeyMatches" VerticalAlignment="Center">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="★ " Foreground="{DynamicResource Warning}" FontWeight="Bold" VerticalAlignment="Center"/>
+                                        <TextBlock Text="只打关键比赛" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </CheckBox>
+                                <TextBlock Text="普通比赛重启游戏跳过" Foreground="{DynamicResource TextMuted}"
+                                           FontSize="11.5" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                            </StackPanel>
+                            <TextBlock FontSize="11.5" TextWrapping="Wrap" Margin="0,6,0,0"
+                                       Foreground="{DynamicResource TextMuted}"
+                                       Text="每跳过一场需要重启并重新登录游戏（约 1~2 分钟）。关键比赛照常打完；连续 3 次重启失败会自动停用本功能。国际服专用。"/>
+                        </StackPanel>
+                    </Border>
                     <TextBlock Text="模块选项" Style="{StaticResource GroupLabel}" Margin="0,11,0,0"/>
                     <Border Style="{StaticResource Inset}" Padding="14,10"
                             ToolTip="挂机经过物品页时按下列选择自动购买（消耗联赛积分）；每项每次至多一次，赛后核验，道具耗尽会自动补购">
