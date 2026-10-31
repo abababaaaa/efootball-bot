@@ -354,6 +354,30 @@ public static class CnWeeklyBrain
         => CountGreen(frame, 0.935, 0.985, 0.470, 0.545) >= 30;
 
     /// <summary>
+    /// 挑战卡详情页积分/进度未达标（用户 2026-10-31 实机反馈：卡 03「以4分或以上为目标」
+    /// 积分 3/4，被「已打满 2 局按通关处理」兜底误判通关，主要奖励漏拿）。扫描页面上
+    /// "a/b" 形式的独立比值词（原始 Text 保留斜杠，实机帧 0/1、3/4 均为独立词），
+    /// 任一 a&lt;b 即视为未达标。限一位数（max≤9）：挑战卡比赛次数上限 3、单局积分 ≤3，
+    /// 目标必在个位；两位数比值（日期 10/31 等）不取，防误拦。
+    /// ★只作否定护栏：挡「打满 2 局」兜底误判，不反向申报通关（页面上可能同时有
+    /// 积分 4/4 与进度 1/3 两种比值，标签错位无法区分谁是目标——达标申报仍由奖励勾
+    /// 像素探针与胜场读满负责）。目标已达成而勾探针漏读时本护栏会多拖两局，由
+    /// 「反复进入无比赛开始」兜底收尾，无死循环。
+    /// </summary>
+    public static bool ChallengeScoreBehind(OcrResult ocr)
+    {
+        foreach (var w in ocr.Words)
+        {
+            var m = global::System.Text.RegularExpressions.Regex.Match(
+                w.Text.Trim(), @"^(\d{1,2})\s*/\s*(\d{1,2})$");
+            if (!m.Success) continue;
+            int cur = int.Parse(m.Groups[1].Value), max = int.Parse(m.Groups[2].Value);
+            if (max is >= 1 and <= 9 && cur < max) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
     /// 国服挑战卡详情页识别补充（2026-10-17 第二周实机 绿茵传奇挑战赛）：卡页词为
     /// 「完成挑战可获得对应的奖励!」「完成挑战N」，没有国际服卡页的「完成的条件」——
     /// 半途启动（未经挑战清单）直接落在卡页时靠它激活挑战子流程。只在场景层已分类

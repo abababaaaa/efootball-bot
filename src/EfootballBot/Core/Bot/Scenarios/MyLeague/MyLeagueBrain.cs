@@ -440,9 +440,12 @@ public static class MyLeagueBrain
     /// （最近刚见过比赛特征）：为 true 时无特征界面按比赛过场处理，延长 B 逃生耐心。
     /// <paramref name="frame"/> 用于「跳过比赛✅」横幅的绿勾像素核验（同位置还有无勾的
     /// 目标提示 toast，见 InMatch 分支），调用方尽量传入。
+    /// <paramref name="allowMatchSkip"/> 为 false 时禁用「跳过比赛」全链路（横幅不按暂停、
+    /// 暂停菜单不点对局获胜）——挑战赛等积分制对局跳过不计积分（用户 2026-10-31 实机：
+    /// 卡 03 跳过一局胜后积分仍 3/4），只有胜负制对局才可跳。
     /// </summary>
     public static MlAction Decide(MlScreen screen, OcrResult ocr, int screenStreak,
-        bool inMatchRecently = false, FrameData? frame = null)
+        bool inMatchRecently = false, FrameData? frame = null, bool allowMatchSkip = true)
     {
         switch (screen)
         {
@@ -595,7 +598,7 @@ public static class MyLeagueBrain
                 // ★同位置还会弹「跳过比赛 / 累计进球N/3个或以上」挑战目标提示 toast（用户
                 //   2026-10-17 实机）——那只是目标提醒、不可跳，横幅与 toast 的区别是右端
                 //   绿勾，必须绿勾像素核验通过（+排除 累计进球 词）才按暂停，否则空开菜单
-                if (ocr.ContainsJoined("跳过比赛") && !ocr.ContainsJoined("累计进球") &&
+                if (allowMatchSkip && ocr.ContainsJoined("跳过比赛") && !ocr.ContainsJoined("累计进球") &&
                     SkipBannerHasCheck(frame))
                     return new MlAction(MlActionKind.PadStartPress, 3000, "跳过比赛✅→暂停菜单");
                 // 比赛中挂机：按 A + 用户设定的随机间隔（设置→挂机节奏），
@@ -609,10 +612,12 @@ public static class MyLeagueBrain
                 // 对局获胜判定——弹窗文案「以当前比分跳过，对局获胜」也含对局获胜，盲按 A
                 // 会按在关闭上永远进不去。上移光标点「确认跳过」
                 if (ocr.ContainsJoined("确认跳过"))
-                    return new MlAction(MlActionKind.PadUpConfirm, 2600, "跳过比赛→确认跳过");
+                    return allowMatchSkip
+                        ? new MlAction(MlActionKind.PadUpConfirm, 2600, "跳过比赛→确认跳过")
+                        : new MlAction(MlActionKind.GamepadBack, 2600, "积分制禁跳，B 关确认弹窗返回比赛");
                 // 暂停菜单：默认光标就在「跳过比赛」上，仅当其下有绿色小字「对局获胜」才可跳
                 // （用户 2026-10-17 实机规则：不是这几个字就返回比赛并继续挂机）
-                if (ocr.ContainsJoined("对局获胜"))
+                if (allowMatchSkip && ocr.ContainsJoined("对局获胜"))
                     return new MlAction(MlActionKind.PadConfirm, 2600, "跳过比赛（对局获胜）");
                 return new MlAction(MlActionKind.GamepadBack, 2600, "不可跳过，B 返回比赛继续");
             }

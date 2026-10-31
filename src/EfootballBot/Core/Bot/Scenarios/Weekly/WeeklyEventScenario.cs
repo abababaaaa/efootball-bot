@@ -74,6 +74,11 @@ public sealed class WeeklyEventScenario : IScenario
     /// <summary>最近一次焦点实证是「A 落在建议上」（建议面板被点开）：归位第一档改用上×2，
     /// 而不是历史页验证过的上×1（建议在左列最下，上×1 只到比赛历史面板）。</summary>
     private bool _focusMissAtAdvice;
+    /// <summary>单场周活动「选择赛事等级」页导航累计动作数（超限按当前焦点 A 兜底继续，
+    /// 绝不停在难度页干等——issue #1 实机：旧逻辑在此页零动作原地卡死）。</summary>
+    private int _diffAttempts;
+    /// <summary>已拉黑槽位仍停在介绍页的 B 退出次数（超 3 强制顺延槽位，防退出受阻死循环）。</summary>
+    private int _blacklistEscape;
 
     // ---- 挑战活动子流程（挑战清单弹窗出现时激活；退回活动列表时复位） ----
     /// <summary>当前活动是挑战活动（以「挑战清单」弹窗或卡详情页「完成的条件」识别）。</summary>
@@ -335,6 +340,14 @@ public sealed class WeeklyEventScenario : IScenario
             return 2200;
         }
 
+        // 单场周活动「选择赛事等级」页（2026-10-30 用户截图 + issue #1）：任何阶段命中都接管，
+        // 旧逻辑该页 wk=None/ml=DifficultyPage 无人处理 → 原地干等。半途启动/标题被遮挡
+        //（issue #1 手机照：GUI 覆盖层盖住左列）时本判定只剩 ml=DifficultyPage 一个信号，
+        // 一并接管；LevelDropdown 阶段的 ml=DifficultyPage 是设置浮层下拉样式，交给原逻辑。
+        if (wk == WkScreen.EventDifficulty ||
+            (_phase != WkPhase.LevelDropdown && ml == MlScreen.DifficultyPage))
+            return await HandleEventDifficultyAsync(obs);
+
         switch (_phase)
         {
             case WkPhase.Flow:
@@ -345,6 +358,25 @@ public sealed class WeeklyEventScenario : IScenario
                         return await EnterNextEventAsync(obs);
                     case WkScreen.EventIntro:
                     case WkScreen.EntryPopup:
+                        // 已拉黑槽位（挑战全完成/已放弃）绝不再按 A 重进：B 退出为主，
+                        // 多次仍在介绍页（退出受阻，issue #1 实机）就强制顺延槽位，
+                        // 回到列表后由 EnterNextEventAsync 的拉黑跳过正常换下一个。
+                        if (_doneSlots.Contains(_slotIndex))
+                        {
+                            if (++_blacklistEscape > 3)
+                            {
+                                _blacklistEscape = 0;
+                                _challengeMode = false;
+                                _slotIndex++;
+                                _log($"[周活动] 已拉黑槽位 {_slotIndex - 1} 仍停在介绍页，强制顺延改刷槽位 {_slotIndex}", LogLevel.Warn);
+                            }
+                            else
+                            {
+                                _log($"[周活动] 已拉黑槽位 {_slotIndex} 的介绍页，B 退出不重进", LogLevel.Warn);
+                            }
+                            await _engine.Pad.Back();
+                            return 2200;
+                        }
                         _hubStep = 0; // 已进入活动链：比赛页扫描结束（防赛后误触发扫描分支）
                         _hubRound = 0;
                         SetPhase(WkPhase.IntroPopups);
@@ -609,6 +641,7 @@ public sealed class WeeklyEventScenario : IScenario
     {
         _hubStep = 0;
         _hubRound = 0;
+        _blacklistEscape = 0;
         _launchNudge = 0; // 重新从列表进入活动：游戏焦点回默认位（前往比赛），归位档位清零
         _focusMissAtAdvice = false;
         await _engine.Pad.Dpad(PadDir.Down);          // 页签行→卡行（已在卡行则到头无害）
@@ -812,6 +845,76 @@ public sealed class WeeklyEventScenario : IScenario
         return 3500;
     }
 
+    /// <summary>
+    /// 单场周活动「选择赛事等级」整页导航（2026-10-30 用户三张实机帧校准）：
+    /// 页面 = 左列难度行（每屏 6 行、行距≈0.11，传奇需下滚）+ 右栏奖励，底部只有 B 返回；
+    /// 进入时先弹「请选择赛事等级 / 查看提供的奖励并选择赛事等级。/ OK」说明弹窗。
+    /// 决策每轮最多一个动作，屏幕驱动：① 屏中部 OK 弹窗 → A；② 目标行（配置的赛事等级）
+    /// 不在屏 → 下×1 滚动查找；③ 焦点行（白底高亮探针 DetectFocusedDifficulty）≠ 目标 →
+    /// 按行距差值上/下移；④ 焦点=目标 → A 确认。多轮未收敛按当前焦点 A 兜底继续开赛。
+    /// </summary>
+    private async Task<int> HandleEventDifficultyAsync(Observation obs)
+    {
+        var ocr = obs.Ocr;
+        string wanted = _engine.Config.Weekly.EventLevel;
+
+        // ① 入场说明弹窗（OK 在屏中部；底栏 B 返回的蓝框会被 YOLO 判 btn_confirm @y≈0.93，
+        //    限定 y<0.85 与弹窗门控同款防误吃）
+        var ok = ocr.FindButton("OK");
+        if (ok is not null && ok.CenterY < 0.85)
+            return await PressConfirmAsync("选择赛事等级·说明弹窗 OK");
+
+        // ①' 最终确认弹窗（「是否要选择传奇？」+ 进入/取消，★默认焦点在取消）：
+        //     直接 A 会取消回列表，必须 ↑ 移到「进入」再 A（用户 2026-10-30 实机反馈）
+        if (WeeklyBrain.IsDifficultyConfirmPopup(ocr))
+        {
+            _diffAttempts = 0;
+            _log("[周活动] 难度最终确认弹窗（默认焦点在取消）：上×1 → A 进入", LogLevel.Info);
+            await _engine.Pad.Dpad(PadDir.Up);
+            await _engine.Pad.Confirm();
+            return 2600;
+        }
+
+        string? focus = WeeklyBrain.DetectFocusedDifficulty(obs.Frame, ocr);
+        var target = ocr.Words.FirstOrDefault(w =>
+            w.CenterX < 0.25 && w.Text.Replace(" ", "").Contains(wanted));
+
+        // ④ 焦点已在目标行：A 确认（A 落在高亮行=选定该等级，后续弹窗/开赛由屏幕分类接管）
+        if (focus == wanted && target is not null)
+        {
+            _diffAttempts = 0;
+            _log($"[周活动] 赛事等级已选「{wanted}」，A 确认", LogLevel.Success);
+            await _engine.Pad.Confirm();
+            return 2400;
+        }
+
+        if (++_diffAttempts > 12)
+        {
+            _diffAttempts = 0;
+            _log($"[周活动] 选择赛事等级多轮未收敛（焦点「{focus ?? "未检出"}」/目标「{wanted}」），按当前焦点 A 兜底继续", LogLevel.Warn);
+            await _engine.Pad.Confirm();
+            return 2400;
+        }
+
+        // ② 目标不在屏（传奇在列表底，需滚动）或焦点探针失效（弹窗遮挡/OCR 退化）：下×1 试探
+        if (target is null || focus is null)
+        {
+            _log($"[周活动] 选择赛事等级：目标「{wanted}」{(target is null ? "不在屏，下×1 滚动查找" : "在屏")}，焦点「{focus ?? "未检出"}」下×1", LogLevel.Info);
+            await _engine.Pad.Dpad(PadDir.Down);
+            return 1200;
+        }
+
+        // ③ 焦点与目标都在屏：按行距差值（0.11/行，实机帧校准）一次移到位
+        var focusWord = ocr.Words.First(w =>
+            w.CenterX < 0.25 && w.Text.Replace(" ", "").Contains(focus));
+        int steps = Math.Clamp((int)Math.Round(Math.Abs(target.CenterY - focusWord.CenterY) / 0.11), 1, 6);
+        var dir = target.CenterY > focusWord.CenterY ? PadDir.Down : PadDir.Up;
+        string dirName = dir == PadDir.Down ? "下" : "上";
+        _log($"[周活动] 选择赛事等级：{focus} → {wanted}（{dirName}×{steps}）", LogLevel.Info);
+        await _engine.Pad.DpadRepeat(dir, steps);
+        return 1400;
+    }
+
     // ---------------- 挑战活动子流程 ----------------
 
     /// <summary>进入挑战子流程：激活挑战模式并切到清单扫描阶段（下一轮先饱和左移归位）。
@@ -904,7 +1007,11 @@ public sealed class WeeklyEventScenario : IScenario
                 case WeeklyBrain.ChVanishDecision.WaitFrame:
                     return 1000; // 翻页/进入动画丢帧，两帧确认
                 case WeeklyBrain.ChVanishDecision.ConfirmTail:
-                    _log($"[周活动·挑战] 卡 {_chScan:00} 之后没有更多卡（重扫确证）：全部挑战已完成，B 退出挑战活动", LogLevel.Success);
+                    // 全部挑战已完成 → 拉黑槽位当场生效（issue #1 实机 2026-10-30：不拉黑时
+                    // 退出受阻回 Flow，介绍页又按 A 重进同一活动 → 完成→退出→重进无限循环）
+                    _doneSlots.Add(_slotIndex);
+                    _chStuckBouts = 0;
+                    _log($"[周活动·挑战] 卡 {_chScan:00} 之后没有更多卡（重扫确证）：全部挑战已完成，拉黑槽位 {_slotIndex}，B 退出挑战活动", LogLevel.Success);
                     _chRetreatReenter = false;
                     _chRetreatBlacklist = false;
                     SetPhase(WkPhase.ChallengeRetreat);

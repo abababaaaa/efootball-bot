@@ -229,7 +229,8 @@ public sealed class CnWeeklyScenario : IScenario
         if (cnWait is not null) return 1500;
         // cw==None 且阶段已交回共享流程：走共用决策（比赛中/终场/弹窗/逃生）
 
-        var action = MyLeagueBrain.Decide(ml, obs.Ocr, _streak, matchContext, obs.Frame);
+        var action = MyLeagueBrain.Decide(ml, obs.Ocr, _streak, matchContext, obs.Frame,
+            allowMatchSkip: !_challengeMode); // 挑战赛积分制对局禁跳（跳过不计积分）
 
         // 标题画面宽限（同国际服周活动场景）：比赛上下文中的「eFootball™+X」帧多为加载画面。
         // 国服赛后品牌过场帧会连续出现 30s 以上，宽限拉长到 90s
@@ -1009,6 +1010,16 @@ public sealed class CnWeeklyScenario : IScenario
             return 2200;
         }
         bool progressDone = WeeklyBrain.ChallengeProgressDone(obs.Ocr);
+        // ★积分/进度可读且未达标（积分 3/4 等）：绝不定通关——「已打满 2 局」兜底在
+        // 积分制卡上会漏拿主要奖励（用户 2026-10-31 实机卡 03 积分 3/4 被误判通关）。
+        // 护栏压过胜场读满：页面上若出现 3/4 类比值说明目标还没到，胜场探针读满可能是
+        // 别处数字误命中
+        if (CnWeeklyBrain.ChallengeScoreBehind(obs.Ocr))
+        {
+            if (_chCurPlays >= 2)
+                _log($"[国服周活动·挑战] 卡 {_chCurrentCard:00} 已打 {_chCurPlays} 局但积分/进度未达标，继续打（不按兜底判通关）", LogLevel.Info);
+            return null;
+        }
         if (!progressDone && _chCurPlays < 2) return null;
 
         bool repeat = _chCurrentCard > 0 && _chLocalDone.Contains(_chCurrentCard);

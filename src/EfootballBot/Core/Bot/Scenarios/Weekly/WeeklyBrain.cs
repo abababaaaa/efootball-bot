@@ -29,6 +29,10 @@ public enum WkScreen
     /// <summary>挑战活动「挑战清单」弹窗（进入挑战活动后出现，01/02… 编号卡纵排，
     /// 已完成卡右上有勾、未解锁卡右下有锁）。挑战子流程的菜单侧。</summary>
     ChallengeList,
+    /// <summary>单场周活动「选择赛事等级」整页（2026-10-30 用户截图 + issue #1）：页首大标题
+    /// + 左列难度行（新手~传奇，每屏 6 行需下滚）+ 右栏该等级奖励（主要奖励/等级奖励）。
+    /// 进入活动卡后先弹「请选择赛事等级」说明弹窗（OK），再在本页选等级开赛。</summary>
+    EventDifficulty,
 }
 
 /// <summary>挑战清单里一张可见卡的解析结果。Index 为卡上大字编号（1 起）；
@@ -87,6 +91,15 @@ public static class WeeklyBrain
         if (!ocr.ContainsJoined("前往比赛") && ocr.ContainsJoined("返回") &&
             ocr.Words.Any(w => w.CenterY < 0.22 && w.NormText.Contains("比赛历史")))
             return WkScreen.MatchHistory;
+
+        // 单场周活动「选择赛事等级」整页（2026-10-30 用户三张截图 + GitHub issue #1 手机照：
+        // 该页 wk=None、ml=DifficultyPage，周活动状态机无人接管 → 日志只刷「界面：DifficultyPage」
+        // 原地干等，选不了难度）。★先于盖层弹窗门控——入场说明弹窗（请选择赛事等级+OK）盖在
+        // 页上时标题与左列难度词仍然可读，落 popupOnTop 门控会因缺主页词判 None；
+        // ★左列难度词必须限定 x&lt;0.25：活动设置浮层的赛事等级下拉（居中对话框）标题同名，
+        // 靠 x 区分避免抢 LevelDropdown 阶段的下拉样式。
+        if (IsEventDifficultyPage(ocr))
+            return WkScreen.EventDifficulty;
 
         // 盖层弹窗探测（赛后结算/奖励领取等多步弹窗，用户 2026-10-12 实机教训）：
         // 主页词透过暗化背景仍会被 OCR 读到，误判 EventHome 后按 X/前往比赛全部无效
@@ -168,6 +181,65 @@ public static class WeeklyBrain
         bool closeHeader = ocr.Words.Any(w => w.CenterY < 0.16 && w.NormText.Contains("关闭"));
         return closeHeader && (ocr.ContainsJoined("分析师") || ocr.ContainsJoined("建议"));
     }
+
+    /// <summary>
+    /// 单场周活动「选择赛事等级」整页判定：页首（y&lt;0.18）大标题「选择赛事等级」+
+    /// 左列（x&lt;0.25）至少 2 个难度名。右栏同句「请选择赛事等级」在 y≈0.31、弹窗版在
+    /// y≈0.40，都不入 y&lt;0.18 标题带，不冲突（实机三帧校准：标题 @(0.18,0.11)）。
+    /// 标题被 OCR 漏读/遮挡（issue #1 手机照：GUI 覆盖层盖住列表）时本判定落空，
+    /// 由共享分类兜成 MlScreen.DifficultyPage——场景层对两个信号都接管。
+    /// </summary>
+    public static bool IsEventDifficultyPage(OcrResult ocr) =>
+        ocr.Words.Any(w => w.CenterY < 0.18 && w.Text.Replace(" ", "").Contains("选择赛事等级")) &&
+        MyLeagueBrain.Difficulties.Count(d => ocr.Words.Any(w =>
+            w.CenterX < 0.25 && w.Text.Replace(" ", "").Contains(d))) >= 2;
+
+    /// <summary>
+    /// 检测难度列表当前聚焦行（光标）：左列难度词行带（词左 -0.28 ~ 词右 +0.06、y±0.035）
+    /// 的亮像素（lum&gt;200）计数——白底高亮行 ≈1283/1285，未聚焦行 29~81，说明弹窗盖着时
+    /// 全 0（实机 2026-10-30 三帧校准，阈值 400）。返回 null = 未检出（弹窗遮挡/探针失效）。
+    /// </summary>
+    public static string? DetectFocusedDifficulty(FrameData frame, OcrResult ocr)
+    {
+        var (w, h, bgra) = (frame.Width, frame.Height, frame.Bgra);
+        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return null;
+
+        string? best = null;
+        int bestBright = 0;
+        foreach (var diff in MyLeagueBrain.Difficulties)
+        {
+            var word = ocr.Words.FirstOrDefault(x =>
+                x.CenterX < 0.25 && x.Text.Replace(" ", "").Contains(diff));
+            if (word is null) continue;
+            int bright = 0;
+            double x0 = Math.Max(0, word.CenterX - word.W / 2 - 0.28);
+            double x1 = Math.Min(1, word.CenterX + word.W / 2 + 0.06);
+            for (int y = (int)((word.CenterY - 0.035) * h); y < (int)((word.CenterY + 0.035) * h); y += 2)
+            {
+                if (y < 0 || y >= h) continue;
+                for (int x = (int)(x0 * w); x < (int)(x1 * w); x += 2)
+                {
+                    int i = (y * w + x) * 4;
+                    if (((bgra[i + 2] + bgra[i + 1] + bgra[i]) / 3) > 200) bright++;
+                }
+            }
+            if (bright > bestBright) { bestBright = bright; best = diff; }
+        }
+        return bestBright >= 400 ? best : null;
+    }
+
+    /// <summary>
+    /// 难度页的最终确认弹窗：「是否要选择&lt;难度名&gt;？」+ 纵排按钮 进入(上)/取消(下)，
+    /// ★默认焦点在「取消」——直接按 A 会取消回列表（用户 2026-10-30 实机）。必须 ↑ 后再 A。
+    /// 判定：说明句「是否要选择」；或屏中部纵排「进入」+「取消」双词（x 0.4~0.6）兜底，
+    /// 防难度名被 OCR 拼进行（实机帧读成「标准是否要选择传奇奖励」整行）时漏判。
+    /// </summary>
+    public static bool IsDifficultyConfirmPopup(OcrResult ocr) =>
+        ocr.ContainsJoined("是否要选择") ||
+        (ocr.Words.Any(w => w.CenterX is > 0.4 and < 0.6 && w.CenterY is > 0.45 and < 0.75 &&
+                            w.NormText.Contains("取消")) &&
+         ocr.Words.Any(w => w.CenterX is > 0.4 and < 0.6 && w.CenterY is > 0.45 and < 0.62 &&
+                            w.NormText.Contains("进入")));
 
     /// <summary>
     /// 挑战清单兜底特征：卡号带（y 0.15~0.40、x&lt;0.72）里左右两卡位各有一枚

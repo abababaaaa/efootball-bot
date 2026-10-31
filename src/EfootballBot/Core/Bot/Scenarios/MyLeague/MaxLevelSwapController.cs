@@ -113,10 +113,12 @@ public sealed class MaxLevelSwapController
     private int _rounds;
     private int _swapped;
     private int _maxed;
-    /// <summary>本次排序弹窗已按过一次 Y 翻方向（至多一次，防探针误判来回翻死循环）。</summary>
-    private bool _sortFlipDone;
-    /// <summary>★本轮挂机已完成过一次排序+筛选（用户 2026-10-25：之后换人不再重复进出
-    /// 排序/筛选页，直奔选卡）。挂机重启（场景重建）自然回归 false；不随 <see cref="Reset"/> 清零。</summary>
+    /// <summary>本次排序弹窗已按过几次 Y 翻方向（至多 2 次：第 1 次可能没被游戏吃掉——
+    /// 2026-10-31 实机按完不核验直接 B 返回，列表停在降序、整晚把最高评价后备换进首发）。</summary>
+    private int _sortFlips;
+    /// <summary>★本轮巡检已完成过一次排序+筛选（用户 2026-10-25：同一轮里多次换人不再重复
+    /// 进出排序/筛选页，直奔选卡）。每轮巡检开始（Reset）清零重新设置——2026-10-31 实机：
+    /// 会话级标志把一次失败的方向/筛选状态放大成整晚选错人，逐轮重设把损失封顶在一轮。</summary>
     private bool _sortFilterDone;
     /// <summary>当前位详情页读到的「有剩余能力点」（橙圈徽标像素判定）。</summary>
     private bool _hasPoints;
@@ -139,7 +141,8 @@ public sealed class MaxLevelSwapController
     {
         _phase = Phase.Idle;
         _pos = _swapPos = _stall = _readTries = _escapes = _rounds = _swapped = _maxed = 0;
-        _sortFlipDone = false;
+        _sortFlips = 0;
+        _sortFilterDone = false;
         _verifyRounds = 0;
         _rewindWalk = false;
         _skipInspectMove = false;
@@ -147,7 +150,6 @@ public sealed class MaxLevelSwapController
         _darkProbeTries = 0;
         _exitUsedA = false;
         _errorDumped = false;
-        // _sortFilterDone 有意保留：挂机会话级状态
     }
 
     /// <summary>在联赛主页（无弹窗）触发：按 Y 打开比赛计划。返回下一轮延时。</summary>
@@ -557,8 +559,8 @@ public sealed class MaxLevelSwapController
                     _stall = 0;
                     if (_sortFilterDone)
                     {
-                        // 本轮挂机已设置过排序+筛选（设置会持久）：不再重复进出两个页面，直奔选卡
-                        log("[我的联赛] 排序/筛选本轮已设置：直接选卡换人", LogLevel.Info);
+                        // 本轮巡检已设置过排序+筛选（设置会持久）：不再重复进出两个页面，直奔选卡
+                        log("[我的联赛] 排序/筛选本轮巡检已设置：直接选卡换人", LogLevel.Info);
                         _phase = Phase.BenchSwap;
                         return 300;
                     }
@@ -581,18 +583,21 @@ public sealed class MaxLevelSwapController
                 {
                     _stall = 0;
                     // 先识别是否已设置（中断续跑/重复进入）：整体评价已勾 + 箭头为上 = 正确，
-                    // 直接 B 返回走筛选。★按 Y 翻方向至多一次：实机探针在运行帧上可能把 ↑ 误判
-                    // 为 ↓（用户 2026-10-24：明明是 ↑ 还来回翻）——翻过后下一轮无条件 B，
-                    // 方向真错了大不了换上低评价球员，绝不来回翻死循环。
+                    // 直接 B 返回走筛选。★按 Y 翻方向至多 2 次：翻过之后下一帧重新读箭头——
+                    // 2026-10-31 实机：按完不核验就 B 返回，Y 没被游戏吃掉时列表停在降序，
+                    // 整晚把最高评价的后备换进首发。至多 2 次也防探针误判来回翻死循环。
                     if (MaxLevelSwapBrain.IsOverallRatingChecked(ocr, frame))
                     {
-                        if (!_sortFlipDone && MaxLevelSwapBrain.IsSortArrowUp(frame) is false)
+                        if (MaxLevelSwapBrain.IsSortArrowUp(frame) is false && _sortFlips < 2)
                         {
-                            _sortFlipDone = true;
+                            _sortFlips++;
+                            var (top, bot, tot) = MaxLevelSwapBrain.DiagSortArrow(frame);
                             await pad.Y();
-                            log("[我的联赛] 整体评价已勾选、箭头读数为下：按一次 Y 翻方向（下轮直接返回）", LogLevel.Info);
+                            log($"[我的联赛] 整体评价已勾选、箭头读数为下（{top}/{bot}/{tot}）：按 Y 翻方向（第 {_sortFlips} 次）", LogLevel.Info);
                             return 1100;
                         }
+                        if (MaxLevelSwapBrain.IsSortArrowUp(frame) is false)
+                            log("[我的联赛] 翻方向两次后箭头仍读为下：按升序继续（探针读数见上条日志）", LogLevel.Warn);
                         log("[我的联赛] 排序键已是「整体评价」：B 返回，继续筛选", LogLevel.Info);
                         await pad.Back();
                         _phase = Phase.SortApplied;
@@ -628,7 +633,7 @@ public sealed class MaxLevelSwapController
                 if (screen == SwapScreen.Bench)
                 {
                     _stall = 0;
-                    _sortFlipDone = false; // 排序弹窗已关闭，下次换人重新识别
+                    _sortFlips = 0; // 排序弹窗已关闭，下次重新识别方向
                     await pad.Dpad(PadDir.Left);  // 列表 → 排序图标
                     await pad.Dpad(PadDir.Down);  // → 筛选图标
                     await pad.Confirm();
@@ -653,7 +658,7 @@ public sealed class MaxLevelSwapController
                     if (MaxLevelSwapBrain.IsCardTypeFilterSet(ocr))
                     {
                         // 已设置过（中断续跑/游戏本来就设置好）：归顶 ↓×9 直达「完成」应用，
-                        // 不进子页重复勾选。★同样置会话标志——否则快速路径下每次换人都
+                        // 不进子页重复勾选。★同样置本轮标志——否则同轮多次换人都
                         // 重新开排序/筛选页（用户 2026-10-25 实机反馈）
                         log("[我的联赛] 卡片类型筛选已设置：直接完成应用", LogLevel.Info);
                         await pad.DpadRepeat(PadDir.Down, 9);
@@ -741,7 +746,7 @@ public sealed class MaxLevelSwapController
                         await pad.DpadRepeat(PadDir.Right, darkSkip);
                     }
                     _swapped++;
-                    log($"[我的联赛] 换人：第 {darkSkip + 1} 张后备球员（整体评价最低）换入第 {_swapPos + 1} 位，B 完成退出", LogLevel.Success);
+                    log($"[我的联赛] 换人：后备列表第 {darkSkip + 1} 张亮卡换入第 {_swapPos + 1} 位，B 完成退出", LogLevel.Success);
                     await pad.Confirm(); // A 交换
                     _phase = Phase.SwapExit;
                     _verifyRounds = 0;

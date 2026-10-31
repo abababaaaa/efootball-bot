@@ -86,10 +86,12 @@ public static partial class MaxLevelSwapBrain
     public static bool IsSort(OcrResult ocr) =>
         (ocr.ContainsJoined("整体评价") || ocr.ContainsJoined("当前等级")) && ocr.ContainsJoined("取消");
 
-    /// <summary>卡片类型子页：单选列表「状态火热 / 不可用的球员」为该页独有，先于筛选页判定
-    /// （筛选页也印「卡片类型」行）。</summary>
+    /// <summary>卡片类型子页：末行「不可用的球员」为该页独有，先于筛选页判定。
+    /// ★不能再看「状态火热」：筛选页光标停在「卡片类型」行时，右侧已选值
+    /// 「状态火热/精选/高光/高光-ShowTime」会被 OCR 整串读进来（2026-10-30 用户实机），
+    /// 误判成子页 → 筛选页识别不到 → 巡检 B×3 逃生弃权。</summary>
     public static bool IsCardType(OcrResult ocr) =>
-        ocr.ContainsJoined("状态火热") || ocr.ContainsJoined("不可用的球员");
+        ocr.ContainsJoined("不可用的球员");
 
     /// <summary>筛选页：行首「俱乐部球队」为主判据；标题「筛选」+ 行尾「比赛风格」兜底。</summary>
     public static bool IsFilter(OcrResult ocr) =>
