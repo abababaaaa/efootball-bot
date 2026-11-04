@@ -535,6 +535,25 @@ public class CnWeeklyBrainTests
     }
 
     [Fact]
+    public void FindBestCoachCardWord_ReturnsMaxRatingWithClickAnchor()
+    {
+        // 2026-11-05 实机：教练选择页只能鼠标点，点击点由评价字坐标 + Y 偏移得出
+        var ocr = Ocr(RatingW("80", 0.30, 0.40), RatingW("81", 0.65, 0.42));
+        var hit = CnWeeklyBrain.FindBestCoachCardWord(ocr);
+        Assert.NotNull(hit);
+        Assert.Equal(81, hit!.Value.Rating);
+        Assert.Equal(0.65, hit.Value.CenterX, 3);
+        Assert.Equal(0.42, hit.Value.CenterY, 3);
+    }
+
+    [Fact]
+    public void FindBestCoachCardWord_NullWhenNoRating()
+    {
+        var ocr = Ocr(W("请选择您的教练", 0.18, 0.12));
+        Assert.Null(CnWeeklyBrain.FindBestCoachCardWord(ocr));
+    }
+
+    [Fact]
     public void Classify_CoachDetail_ConfirmSelectBar()
     {
         // 实机 cn_coach_detail.png：球队风格熟练度表 + 底栏「RT 确认选择」（y≈0.93）

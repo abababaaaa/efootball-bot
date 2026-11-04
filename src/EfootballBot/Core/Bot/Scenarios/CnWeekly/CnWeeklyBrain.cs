@@ -468,6 +468,23 @@ public static class CnWeeklyBrain
     }
 
     /// <summary>
+    /// 鼠标点击用（2026-11-05 实机：教练选择页只认鼠标，手柄 Dpad+A 按了没反应）：
+    /// 找评价数字最大的那张卡上「评价字」的归一化中心，返回 (Rating, CenterX, CenterY)；
+    /// 读不出返回 null。调用方在 Y 上再往下偏一点（评价字在卡头，卡面在下方）。
+    /// </summary>
+    public static (int Rating, double CenterX, double CenterY)? FindBestCoachCardWord(OcrResult ocr)
+    {
+        (int Rating, double CenterX, double CenterY)? best = null;
+        foreach (var w in ocr.Words)
+        {
+            if (!IsCoachRatingWord(w, out int rating)) continue;
+            if (best is null || rating > best.Value.Rating)
+                best = (rating, w.CenterX, w.CenterY);
+        }
+        return best;
+    }
+
+    /// <summary>
     /// 签下确认弹窗（「签下确认」+ 确认/取消，默认焦点在确认，2026-11-04 实机）：
     /// 只要标题词命中即可——弹窗盖在教练资料页上，资料页底栏「RT 确认选择」仍可读，
     /// 靠标题词与资料页区分。处置由场景层按 A（不生效再上移纠正焦点）。

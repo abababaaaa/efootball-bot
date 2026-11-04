@@ -58,6 +58,8 @@ public sealed class CnWeeklyScenario : IScenario
     private readonly BotEngine _engine;
     private readonly Action<string, LogLevel> _log;
     private readonly Random _rnd = new();
+    /// <summary>后台鼠标（教练选择页只认鼠标点击，2026-11-05 实机）。</summary>
+    private readonly BackgroundMouse _mouse = new();
 
     private CwPhase _phase = CwPhase.Flow;
     /// <summary>当前阶段累计行动次数（SetPhase 清零；超限 B 逃生防死循环）。</summary>
@@ -858,38 +860,64 @@ public sealed class CnWeeklyScenario : IScenario
     // ---------------- 教练签下链（2026-11-04 实机 晋级挑战） ----------------
 
     /// <summary>
-    /// 教练选择页（用户 2026-11-04 实机：卡上评价 80 / 81，选数字更大的那位）：
-    /// 评价数字按 x 排序定位到屏上第几张卡——★光标位置不可信（可能停在任意卡上），
-    /// 一律 左×3 饱和归位第一张 → 右×Slot 到目标卡 → A 进资料页。评价读不出（OCR 漏读）
-    /// 时按当前焦点直接 A，不盲导航（宁可选错也不卡死）。
+    /// 教练选择页（2026-11-04 实机：卡上评价 80 / 81，选数字更大的那位）。
+    /// ★2026-11-05 实机：这一页只认**鼠标点击**——手柄 Dpad 左右 + A 完全没反应
+    /// （日志里连续三拍「左归位→右×1→A」都停在原页）。改为鼠标点评价最大的那张卡：
+    /// 点评价字下方一点（评价字在卡头，下方仍是同一张卡的卡面）；
+    /// 第一次点 y+0.09，重试再往下到 +0.18，都不通就转手柄兜底（防鼠标通道被拦）。
     /// </summary>
     private async Task<int> HandleCoachSelectAsync(Observation obs)
     {
         if (_streak < 1) return 800; // 卡片淡入/评价数字渲染防抖
-        if (++_attempts > 4)
+        if (++_attempts > 5)
         {
-            _log("[国服周活动] 教练选择页多次未进入教练资料，B 返回重走流程", LogLevel.Warn);
+            _log("[国服周活动] 教练选择页多次点击未进入教练资料，B 返回重走流程", LogLevel.Warn);
             SetPhase(CwPhase.Flow);
             await _engine.Pad.Back();
             return 2400;
         }
 
         var cards = CnWeeklyBrain.ScanCoachCards(obs.Ocr);
-        if (cards.Count == 0)
+        var best = CnWeeklyBrain.FindBestCoachCardWord(obs.Ocr);
+        if (best is not { } h)
         {
-            _log("[国服周活动] 教练选择：未读出教练评价数字，按当前焦点 A 进入", LogLevel.Warn);
-            await _engine.Pad.Confirm();
+            _log("[国服周活动] 教练选择：未读出评价数字，鼠标点屏幕中部兜底", LogLevel.Warn);
+            await ClickAtAsync(0.5, 0.35);
             return 2800;
         }
 
-        var best = cards.OrderByDescending(c => c.Rating).ThenBy(c => c.Slot).First();
+        // 第 3 拍起改用键盘/手柄兜底（鼠标可能被游戏吞掉）
+        if (_attempts >= 3)
+        {
+            int slot = Math.Max(0, cards.FindIndex(c => c.Rating == h.Rating));
+            _log($"[国服周活动] 教练选择：鼠标点两次未生效，转手柄：左归位 → 右×{slot} → A", LogLevel.Warn);
+            await _engine.Pad.DpadRepeat(PadDir.Left, 3);
+            if (slot > 0) await _engine.Pad.DpadRepeat(PadDir.Right, slot);
+            await _engine.Pad.Confirm();
+            return 3000;
+        }
+
+        double dy = _attempts <= 1 ? 0.09 : 0.18;
         string all = string.Join(" / ", cards.Select(c => $"{c.Rating}"));
-        _log($"[国服周活动] 教练选择：读到 {cards.Count} 位教练评价（{all}），选最大 {best.Rating}（第 {best.Slot + 1} 张）→ 左归位 → 右×{best.Slot} → A",
-            LogLevel.Info);
-        await _engine.Pad.DpadRepeat(PadDir.Left, 3); // 饱和归位最左一张（卡数不固定，到头多按无害）
-        if (best.Slot > 0) await _engine.Pad.DpadRepeat(PadDir.Right, best.Slot);
-        await _engine.Pad.Confirm();
+        _log($"[国服周活动] 教练选择：读到 {cards.Count} 位教练评价（{all}），选最大 {h.Rating}，" +
+             $"鼠标点击评价字下方（{h.CenterX:F3},{Math.Min(0.95, h.CenterY + dy):F3}）", LogLevel.Info);
+        await ClickAtAsync(h.CenterX, h.CenterY + dy);
         return 3000;
+    }
+
+    /// <summary>后台鼠标点击（国服须本程序提权后 PostMessage 才被游戏处理，与天梯点教练卡同款）。</summary>
+    private async Task ClickAtAsync(double nx, double ny)
+    {
+        var win = _engine.Window;
+        if (win is null)
+        {
+            _log("[国服周活动] 游戏窗口句柄缺失，鼠标点击无法执行", LogLevel.Error);
+            return;
+        }
+        var (w, h) = EfootballBot.Core.System.GameWindow.GetClientSize(win.Handle);
+        if (w <= 0 || h <= 0) (w, h) = (1280, 720);
+        await _engine.Pad.HumanWait(150, 320, CancellationToken.None);  // 拟人预停顿
+        await _mouse.ClickNormalizedAsync(win.Handle, nx, ny, w, h, downHoldMs: 70);
     }
 
     /// <summary>教练资料页（用户 2026-11-04 实机）：A 下一步 → 弹签下确认。底栏写
