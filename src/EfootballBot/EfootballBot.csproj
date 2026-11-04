@@ -90,6 +90,9 @@
          全部历史版本，不能依赖联网拉 GitHub（国内常被墙）。发版流程本就要求先写 CHANGELOG，
          所以这份内容与 Release 正文同源。 -->
     <EmbeddedResource Include="..\..\CHANGELOG.md" LogicalName="CHANGELOG.md" />
+    <!-- eFootball 服务器种子表（155 条：游戏服 5735 / 更新服 CloudFront 443 / 候选服），
+         来源=ETK 工具本机实测清单；网络页首次运行导入为默认目标 -->
+    <EmbeddedResource Include="Core\System\efootball-servers.json" LogicalName="EfootballBot.efootball-servers.json" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(ChildSessionBeta)' == 'true'">

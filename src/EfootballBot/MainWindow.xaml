@@ -2148,7 +2148,7 @@
                                 <TextBlock Style="{StaticResource H2}">服务器延迟测试</TextBlock>
                             </StackPanel>
                             <TextBlock FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
-                                       Text="对下表目标并行做 TCP/443 建连测速（域名目标每次测量前实时解析），取该行最优 IP 的延迟。内置 GitHub 直连验证域与 eFootball 官方域；测游戏服可把服务器 IP 手动添加进来。"/>
+                                       Text="内置 eFootball 服务器清单（游戏服 5735 走 ICMP、更新服/候选服走 TCP，与 ETK 工具同源）；测量全部=并行探测取最优，也可手动添加 IP / 域名。"/>
                             <WrapPanel Margin="0,10,0,0">
                                 <Button x:Name="BtnMeasureAll" Content="测量全部" Style="{StaticResource GhostBtn}"
                                         Padding="14,7" Click="BtnMeasureAll_Click"/>
@@ -2184,10 +2184,10 @@
                                       SelectionChanged="LvServers_SelectionChanged">
                                 <ListView.View>
                                     <GridView>
-                                        <GridViewColumn Header="名称" Width="180" DisplayMemberBinding="{Binding Label}"/>
-                                        <GridViewColumn Header="IP" Width="118" DisplayMemberBinding="{Binding Ip}"/>
-                                        <GridViewColumn Header="服务商" Width="62" DisplayMemberBinding="{Binding Provider}"/>
-                                        <GridViewColumn Header="延迟" Width="72">
+                                        <GridViewColumn Header="名称" Width="168" DisplayMemberBinding="{Binding Label}"/>
+                                        <GridViewColumn Header="IP" Width="112" DisplayMemberBinding="{Binding Ip}"/>
+                                        <GridViewColumn Header="类型" Width="58" DisplayMemberBinding="{Binding Kind}"/>
+                                        <GridViewColumn Header="延迟" Width="70">
                                             <GridViewColumn.CellTemplate>
                                                 <DataTemplate>
                                                     <StackPanel Orientation="Horizontal">
@@ -2198,7 +2198,7 @@
                                                 </DataTemplate>
                                             </GridViewColumn.CellTemplate>
                                         </GridViewColumn>
-                                        <GridViewColumn Header="监控" Width="48">
+                                        <GridViewColumn Header="监控" Width="46">
                                             <GridViewColumn.CellTemplate>
                                                 <DataTemplate>
                                                     <CheckBox IsChecked="{Binding Monitor, Mode=TwoWay}"

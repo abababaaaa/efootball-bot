@@ -14,14 +14,19 @@ namespace EfootballBot.Core.System;
 public sealed class ProbeTarget
 {
     public int Id { get; set; }
-    /// <summary>显示名（域名目标的域名 / 手工添加的备注）。</summary>
+    /// <summary>显示名（种子条目=国家/城市；域名目标=域名；手工添加=输入原文）。</summary>
     public string Label { get; set; } = "";
+    /// <summary>类型：game / update / candidate / domain（GitHub 验证域）。</summary>
+    public string Kind { get; set; } = "game";
     /// <summary>域名（非空 = 每次测量前 DNS 解析展开成 IP；空 = 直接测 Ip）。</summary>
     public string? Domain { get; set; }
     /// <summary>最近一次解析/填写的 IP。</summary>
     public string Ip { get; set; } = "";
-    public string Provider { get; set; } = "";
-    /// <summary>是否纳入实时监控（每秒 tcping）。</summary>
+    /// <summary>端口（game=5735 走 ICMP 不通端口；update=443 走 TCP）。</summary>
+    public int Port { get; set; } = 443;
+    /// <summary>true = ICMP 回显（游戏服 UDP 端口 TCP 建连不通，与 ETK 一致用 ping）。</summary>
+    public bool UseIcmp { get; set; }
+    /// <summary>是否纳入实时监控（每秒探测）。</summary>
     public bool Monitor { get; set; }
 }
 
@@ -49,30 +54,86 @@ public sealed class NetworkProbe
     public NetworkProbe()
     {
         Load();
-        if (_targets.Count == 0) Seed();
+        Migrate();
+        // 旧存档（只有几个域名种子）升级：把内嵌 eFootball 服务器表合并进来（按 IP+端口去重）
+        if (_targets.Count < 10) Seed();
+        Save();
+    }
+
+    /// <summary>旧格式迁移：Port 缺省补 443、Kind 缺省按有无域名推断；游戏服 5735 补 ICMP 标记。</summary>
+    private void Migrate()
+    {
+        bool touched = false;
+        foreach (var t in _targets)
+        {
+            if (t.Port <= 0) { t.Port = t.Kind == "game" ? 5735 : 443; touched = true; }
+            if (string.IsNullOrEmpty(t.Kind))
+            { t.Kind = t.Domain is not null ? "domain" : "manual"; touched = true; }
+            if (!t.UseIcmp && t.Port is not (443 or 80) && t.Domain is null)
+            { t.UseIcmp = true; touched = true; }
+        }
+        if (touched) Save();
     }
 
     private void Seed()
     {
+        // ① eFootball 服务器种子表（内嵌，来源=ETK 本机实测清单）：游戏服走 ICMP、
+        //    更新服/候选服按记录的方法或端口推断 TCP。
+        try
+        {
+            using var s = typeof(NetworkProbe).Assembly.GetManifestResourceStream("EfootballBot.efootball-servers.json");
+            if (s is not null)
+            {
+                var rows = JsonSerializer.Deserialize<List<SeedRow>>(s, JsonOpts) ?? new();
+                foreach (var r in rows)
+                {
+                    if (string.IsNullOrWhiteSpace(r.ip)) continue;
+                    int port = r.port <= 0 ? 443 : r.port;
+                    if (_targets.Any(t => t.Ip == r.ip && t.Port == port)) continue; // 已有不重复
+                    string kind = r.type switch
+                    {
+                        "update" => "update",
+                        "game-candidate" => "candidate",
+                        _ => "game",
+                    };
+                    bool tcp = (r.method ?? "").StartsWith("tcp:", StringComparison.OrdinalIgnoreCase)
+                               || r.port is 443 or 80;
+                    string label = string.IsNullOrEmpty(r.region) ? r.country : $"{r.country} · {r.region}";
+                    _targets.Add(new ProbeTarget
+                    {
+                        Id = _nextId++,
+                        Label = string.IsNullOrEmpty(label) ? r.ip : label,
+                        Kind = kind,
+                        Ip = r.ip,
+                        Port = port,
+                        UseIcmp = !tcp,
+                        Monitor = false,
+                    });
+                }
+            }
+        }
+        catch { /* 种子表损坏：退回仅域名种子 */ }
+
+        // ② GitHub 直连验证域（配合「更新/加速」排查）
         foreach (var d in SeedDomains)
+        {
+            if (_targets.Any(t => t.Domain == d)) continue;
             _targets.Add(new ProbeTarget
             {
                 Id = _nextId++,
                 Label = d,
+                Kind = "domain",
                 Domain = d,
                 Ip = "",
-                Provider = GuessProvider(d),
+                Port = 443,
+                UseIcmp = false,
                 Monitor = false,
             });
+        }
         Save();
     }
 
-    private static string GuessProvider(string s)
-    {
-        if (s.Contains("github")) return "GitHub";
-        if (s.Contains("konami")) return "Konami";
-        return "-";
-    }
+    private sealed record SeedRow(string ip, int port, string type, string country, string region, string method);
 
     // ---------------- 目标表 ----------------
 
@@ -84,9 +145,11 @@ public sealed class NetworkProbe
         {
             Id = _nextId++,
             Label = input,
+            Kind = isDomain ? "domain" : "manual",
             Domain = isDomain ? input : null,
             Ip = isDomain ? "" : input,
-            Provider = isDomain ? GuessProvider(input) : "-",
+            Port = 443,
+            UseIcmp = false,
             Monitor = monitor,
         };
         _targets.Add(t);
@@ -117,6 +180,10 @@ public sealed class NetworkProbe
             var doc = JsonSerializer.Deserialize<Store>(File.ReadAllBytes(StorePath).AsSpan(), JsonOpts);
             if (doc?.Targets is null) return;
             _targets = doc.Targets;
+            // v1 存档（只有域名种子、缺 Kind/Port/ICMP 字段）：丢旧域名种子、保留用户手填 IP，
+            // 随后 Seed() 重新导入内嵌服务器表 + 域名种子
+            if (doc.Version < 2)
+                _targets = _targets.Where(t => !string.IsNullOrEmpty(t.Ip)).ToList();
             _nextId = _targets.Count == 0 ? 1 : _targets.Max(t => t.Id) + 1;
         }
         catch { _targets = new(); }
@@ -127,12 +194,12 @@ public sealed class NetworkProbe
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(StorePath)!);
-            File.WriteAllBytes(StorePath, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new Store(_targets, _nextId), JsonOpts)));
+            File.WriteAllBytes(StorePath, Encoding.UTF8.GetBytes(JsonSerializer.Serialize(new Store(_targets, _nextId, 2), JsonOpts)));
         }
         catch { }
     }
 
-    private sealed record Store(List<ProbeTarget> Targets, int NextId);
+    private sealed record Store(List<ProbeTarget> Targets, int NextId, int Version = 0);
 
     // ---------------- TCP 测速 ----------------
 
@@ -169,6 +236,47 @@ public sealed class NetworkProbe
         return list;
     }
 
+    /// <summary>统一探测：ICMP 目标走回显、TCP 目标走端口建连；返回毫秒，失败 -1。</summary>
+    public static int Measure(string ip, bool useIcmp, int port, int timeoutMs = 1500)
+        => useIcmp ? IcmpPing(ip, timeoutMs) : TcpLatency(ip, port, timeoutMs);
+
+    // ---------------- ICMP（iphlpapi，无需管理员） ----------------
+
+    [global::System.Runtime.InteropServices.DllImport("iphlpapi.dll", SetLastError = true)]
+    private static extern IntPtr IcmpCreateFile();
+
+    [global::System.Runtime.InteropServices.DllImport("iphlpapi.dll", SetLastError = true)]
+    private static extern uint IcmpSendEcho(IntPtr handle, uint destIp, byte[] data, ushort dataSize,
+        IntPtr options, byte[] reply, uint replySize, uint timeout);
+
+    [global::System.Runtime.InteropServices.DllImport("iphlpapi.dll")]
+    private static extern bool IcmpCloseHandle(IntPtr handle);
+
+    /// <summary>ICMP 回显延迟（毫秒）；失败/超时返回 -1。游戏服 5735 是 UDP 端口，只能靠 ping 判活。</summary>
+    public static int IcmpPing(string ip, int timeoutMs = 1500)
+    {
+        if (!IPAddress.TryParse(ip, out var addr)) return -1;
+        IntPtr h = IntPtr.Zero;
+        try
+        {
+            h = IcmpCreateFile();
+            if (h == IntPtr.Zero || h == new IntPtr(-1)) return -1;
+            var payload = new byte[32];
+            var reply = new byte[128];
+            uint n = IcmpSendEcho(h, BitConverter.ToUInt32(addr.GetAddressBytes(), 0), payload,
+                (ushort)payload.Length, IntPtr.Zero, reply, (uint)reply.Length, (uint)timeoutMs);
+            if (n == 0) return -1;
+            // ICMP_ECHO_REPLY(64 位)：Address(0-3) + Status(4-7) + RoundTripTime(8-11) + ...
+            if (BitConverter.ToUInt32(reply, 4) != 0) return -1;
+            return (int)BitConverter.ToUInt32(reply, 8);
+        }
+        catch { return -1; }
+        finally
+        {
+            if (h != IntPtr.Zero) { try { IcmpCloseHandle(h); } catch { } }
+        }
+    }
+
     /// <summary>
     /// 测量全部目标（并行，DNS 域名目标先解析展开，逐 IP 测，目标取最优值并回填 IP）。
     /// onResult 在工作线程回调；返回 false 表示被取消。
@@ -190,7 +298,7 @@ public sealed class NetworkProbe
                 foreach (var ip in ips)
                 {
                     ct.ThrowIfCancellationRequested();
-                    int ms = await Task.Run(() => TcpLatency(ip, 443), CancellationToken.None);
+                    int ms = await Task.Run(() => Measure(ip, t.UseIcmp, t.Port), CancellationToken.None);
                     if (ms >= 0 && (best < 0 || ms < best)) { best = ms; bestIp = ip; }
                 }
                 if (best >= 0) t.Ip = bestIp;
@@ -276,7 +384,7 @@ public sealed class NetworkProbe
                 int ms = -1;
                 foreach (var ip in ips)
                 {
-                    ms = TcpLatency(ip, 443, 1500);
+                    ms = Measure(ip, t.UseIcmp, t.Port);
                     if (ms >= 0) { if (t.Ip != ip) t.Ip = ip; break; }
                 }
                 Record(t, ms);

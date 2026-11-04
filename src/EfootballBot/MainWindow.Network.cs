@@ -28,7 +28,7 @@ public partial class MainWindow
     {
         public int Id { get; init; }
         public string Label { get; init; } = "";
-        public string Provider { get; init; } = "";
+        public string Kind { get; init; } = "";
 
         private string _ip = "";
         public string Ip { get => _ip; set { _ip = value; Raise(nameof(Ip)); } }
@@ -70,6 +70,16 @@ public partial class MainWindow
 
     private NetworkProbe Probe => _probe ??= new NetworkProbe();
 
+    /// <summary>目标类型显示名（种子表的 game/update/candidate + 域名/手填）。</summary>
+    private static string KindText(string kind) => kind switch
+    {
+        "game" => "游戏服",
+        "update" => "更新服",
+        "candidate" => "候选服",
+        "domain" => "域名",
+        _ => "手填",
+    };
+
     // ---------------- 进入页面 ----------------
 
     private void InitNetworkPage()
@@ -78,7 +88,7 @@ public partial class MainWindow
         {
             foreach (var t in Probe.Targets)
                 _serverRows.Add(new ServerRowVm
-                { Id = t.Id, Label = t.Label, Ip = t.Ip, Provider = t.Provider, Monitor = t.Monitor });
+                { Id = t.Id, Label = t.Label, Ip = t.Ip, Kind = KindText(t.Kind), Monitor = t.Monitor });
             LvServers.ItemsSource = _serverRows;
             var view = (System.ComponentModel.ICollectionView)LvServers.Items;
             view.Filter = o =>
@@ -238,7 +248,7 @@ public partial class MainWindow
         }
         var t = Probe.Add(s);
         _serverRows.Add(new ServerRowVm
-        { Id = t.Id, Label = t.Label, Ip = t.Ip, Provider = t.Provider, Monitor = t.Monitor });
+        { Id = t.Id, Label = t.Label, Ip = t.Ip, Kind = KindText(t.Kind), Monitor = t.Monitor });
         TxtAddTarget.Text = "";
         UpdateServerSummary();
         AppendLog($"已添加服务器目标：{s}（域名将每次测量前解析）", LogLevel.Info);
