@@ -51,6 +51,7 @@
 
   <ItemGroup>
     <!-- DXGI 桌面复制捕获 + D3D 设备（Vortice 唯一家族）：Vortice.Direct3D11 会传递引入 Vortice.DXGI / SharpGen.Runtime -->
+    <PackageReference Include="SharpPcap" Version="6.3.1" />
     <PackageReference Include="Vortice.Direct3D11" Version="3.8.3" />
     <!-- PP-OCRv6 本地离线 OCR（ONNX Runtime，包自带 v5 检测/方向分类模型） -->
     <PackageReference Include="RapidOcrNet" Version="4.2.0" />
@@ -112,8 +113,7 @@
        默认（内嵌模型）：单文件发布删除这份松散副本，保证输出目录只有一个 exe。
        瘦身发布（-p:ExternalModels=true）：保留 models\ 目录，与 88MB 的 exe 一起分发
        （模型不随 exe 更新，日常升级只需下 exe）。 -->
-  <Target Name="RemoveDuplicateV5ModelsFromSingleFile" AfterTargets="CopyModelsPublish"
-          Condition="'$(PublishSingleFile)' == 'true' and '$(ExternalModels)' != 'true'">
+  <Target Name="RemoveDuplicateV5ModelsFromSingleFile" AfterTargets="CopyModelsPublish" Condition="'$(PublishSingleFile)' == 'true' and '$(ExternalModels)' != 'true'">
     <RemoveDir Directories="$(PublishDir)models" Condition="Exists('$(PublishDir)models')" />
   </Target>
 

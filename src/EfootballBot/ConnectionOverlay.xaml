@@ -1,0 +1,38 @@
+<Window x:Class="EfootballBot.ConnectionOverlay"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        WindowStyle="None" AllowsTransparency="True" Background="Transparent"
+        Topmost="True" ShowInTaskbar="False" ShowActivated="False"
+        ResizeMode="NoResize" SizeToContent="Height" Width="286"
+        FontFamily="Microsoft YaHei UI" Foreground="#FFE6E9EF">
+    <Border Background="#E6111720" CornerRadius="12" BorderBrush="#33FFFFFF" BorderThickness="1"
+            Padding="14,11" Cursor="SizeAll"
+            MouseLeftButtonDown="OnDrag" MouseRightButtonUp="OnClose">
+        <StackPanel>
+            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
+                <Ellipse x:Name="Dot" Width="7" Height="7" Fill="#FF7B8696" VerticalAlignment="Center"/>
+                <TextBlock x:Name="TxtState" Text="未启动" FontSize="11" Margin="6,0,0,0"
+                           Foreground="#FF9AA4B2" VerticalAlignment="Center"/>
+                <TextBlock Text="拖我挪位置 · 双击复位 · 右键关闭" FontSize="9.5" Margin="10,0,0,0"
+                           Foreground="#FF6C7686" VerticalAlignment="Center"/>
+            </StackPanel>
+            <StackPanel Orientation="Horizontal">
+                <StackPanel Width="96">
+                    <TextBlock Text="延迟" FontSize="10" Foreground="#FF6C7686"/>
+                    <TextBlock x:Name="TxtDelay" Text="—" FontSize="22" FontWeight="Bold" Foreground="#FF3DDC84"/>
+                </StackPanel>
+                <StackPanel Width="80" Margin="6,0,0,0">
+                    <TextBlock Text="丢包" FontSize="10" Foreground="#FF6C7686"/>
+                    <TextBlock x:Name="TxtLoss" Text="—" FontSize="22" FontWeight="Bold" Foreground="#FFE6E9EF"/>
+                </StackPanel>
+                <StackPanel Margin="4,0,0,0">
+                    <TextBlock Text="区域" FontSize="10" Foreground="#FF6C7686"/>
+                    <TextBlock x:Name="TxtRegion" Text="—" FontSize="12" FontWeight="SemiBold"
+                               Foreground="#FFDCE3EC" TextWrapping="Wrap" MaxWidth="90"/>
+                </StackPanel>
+            </StackPanel>
+            <TextBlock x:Name="TxtRemote" Text="远端 —" FontSize="10.5" Foreground="#FF9AA4B2" Margin="0,6,0,0"/>
+            <Canvas x:Name="CvSpark" Height="30" Margin="0,6,0,0" ClipToBounds="True"/>
+        </StackPanel>
+    </Border>
+</Window>

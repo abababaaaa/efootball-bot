@@ -196,6 +196,29 @@ public partial class MainWindow
 
     // ---------------- 左栏导航切换 ----------------
 
+    /// <summary>收起/展开右栏：收起时右栏列宽归零、中栏自动铺满，右侧留一条 26px 折叠条。</summary>
+    private void SetRightPanelCollapsed(bool collapsed)
+    {
+        RightPanel.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        RightRail.Visibility = collapsed ? Visibility.Visible : Visibility.Collapsed;
+        RightCol.MinWidth = collapsed ? 0 : 380;
+        RightCol.MaxWidth = collapsed ? 0 : 520;
+        RightCol.Width = collapsed ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+    }
+
+
+    private void BtnRightCollapse_Click(object sender, RoutedEventArgs e)
+    {
+
+        SetRightPanelCollapsed(true);
+    }
+
+    private void BtnRightExpand_Click(object sender, RoutedEventArgs e)
+    {
+
+        SetRightPanelCollapsed(false);
+    }
+
     private void NavigateTo(NavMode mode)
     {
         _currentNav = mode;

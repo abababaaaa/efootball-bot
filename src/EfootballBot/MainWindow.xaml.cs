@@ -683,8 +683,9 @@ public partial class MainWindow : Window
         _hotkey.Dispose();
         try { _monitor?.Dispose(); } catch { }
         _monitor = null;
-        // 网络页：停实时监控 + 停 GitPort 内核（内核退出自愈逻辑负责还原系统代理）
-        _ = StopNetworkMonitorAsync();
+        // 网络页：停游戏内连接监控 + 关闭悬浮窗 + 停 GitPort 内核（内核退出自愈逻辑负责还原系统代理）
+        try { _inGame?.Stop(); } catch { }
+        try { _overlay?.Close(); } catch { }
         EfootballBot.Core.System.GitPortManager.Stop();
         // 先杀 Worker（虚拟手柄随引擎停止断开），再走停靠还原——
         // ★必须先于停靠还原：Worker 里的停靠看门狗存活期间会把刚还原的窗口再移出屏幕，
