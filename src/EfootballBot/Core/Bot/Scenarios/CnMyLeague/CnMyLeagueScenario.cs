@@ -26,8 +26,11 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
     /// <summary>残留页 B 逃生预算：连续多轮未退出 → 暂停 8s 后重来。</summary>
     private int _escapeAttempts;
 
-    /// <summary>难度页确认预算：连续多轮未离开难度页 → B 退出重走「前往比赛」（页面重开光标归位）。</summary>
+    /// <summary>难度页确认预算（旧式列表页）：连续多轮未离开难度页 → B 退出重走「前往比赛」（页面重开光标归位）。</summary>
     private int _diffAttempts;
+
+    /// <summary>新式难度页确认轮次（国际服同款 UI）：见 <see cref="DifficultyLegPlan"/>，第 4/7 轮 B 逃生。</summary>
+    private int _diffRound;
 
     /// <summary>最近一轮国服界面判定（ClassifyScreen 产出，InterceptAsync 消费；单线程无竞争）。</summary>
     private PlScreen _pl = PlScreen.None;
@@ -162,11 +165,9 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
             return 3400;
         }
 
-        // ---- 国服「选择比赛等级」难度页全量接管（2026-10-18 实机）：布局与国际服页不同——
-        //      没有「底行 取消/确认」结构，光标在 7 行难度列表内游走，A=勾选光标行、RT=确定。
-        //      国际服基类按「默认光标在底行确认」导航（上×k A 下×k 右×1 A），落点全在列表里，
-        //      把勾反复打在 业余 行——实机日志证据：首轮读 当前=新手，此后永远 业余（上一轮
-        //      计划的末次 A 按在了业余行）。此处接管后基类难度页处理对国服不可达 ----
+        // ---- 国服「选择赛事等级」难度页接管。旧版页面（2026-10-18 实机）无「底行 取消/确认」
+        //      结构、A=勾选、RT=确定；2026-11-04 实机改版为国际服同款 UI（底行 取消/确认，
+        //      确认钮=A 焦点），RT 在该页无绑定。HandleCnDifficultyAsync 按底行结构分派两种配方 ----
         if (screen == MlScreen.DifficultyPage)
             return await HandleCnDifficultyAsync(obs, streak);
         _diffAttempts = 0;
@@ -195,18 +196,24 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
     }
 
     /// <summary>
-    /// 国服难度页处置（守则同基类：读当前选中与配置比对，读不到/已一致绝不乱按方向）：
-    /// 需改选/需落位 → <see cref="PlanCnDifficulty"/> 规划（上×7 饱和归位首行 → 下×(k-1)
-    /// 按难度表行号精确落位 → A 勾选 → RT 确定）；关键比赛不改选，直接 RT。
-    /// 连续 6 轮仍未离开难度页 → B 返回主页重走「前往比赛」（页面重开后光标归位）。
+    /// 国服难度页处置。2026-11-04 实机：国服难度页已改版为国际服同款 UI——大标题
+    /// 「选择赛事等级」+ 底行「取消 | 确认」（确认钮蓝框 = A 键焦点），旧「列表游走 +
+    /// RT 确定」配方在该页 RT 无绑定，永远开不了赛。检测到底行取消/确认结构 → 走
+    /// <see cref="HandleCnModernDifficultyAsync"/>（国际服多轮配方）；检测不到 → 保留
+    /// 旧配方兜底（防 OCR 漏读底行词回退到 2026-10-18 行为）。
     /// </summary>
     private async Task<int> HandleCnDifficultyAsync(Observation obs, int streak)
     {
         if (streak < 1)
         {
             _diffAttempts = 0; // 页面刚出现（或重开后）：预算清零
+            _diffRound = 0;
             return 800;        // 淡入防抖，等下一轮再读勾
         }
+
+        if (HasBottomConfirmRow(obs.Ocr))
+            return await HandleCnModernDifficultyAsync(obs);
+
         if (++_diffAttempts > 6)
         {
             _log("[我的联赛] 难度页多次确认未生效，B 返回主页重走「前往比赛」", LogLevel.Warn);
@@ -241,6 +248,60 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
         await _engine.Pad.DpadRepeat(PadDir.Down, plan.DownStrokes);
         if (plan.CheckFirst) await _engine.Pad.Confirm(); // A 勾选光标行（该页 A=勾选，实机 2026-10-18 日志证据）
         await _engine.Pad.RT();                            // 国服确认键
+        return 3500;
+    }
+
+    /// <summary>
+    /// 新式难度页底行证据：「取消」「确认」两词同在页面底部（y &gt; 0.85）且页内读出难度名。
+    /// 难度词证据防止兑换积分弹窗/购买弹窗（同样含取消+确认）误判；购买弹窗另有结构词
+    /// 分类器前置拦截，这里是双保险。
+    /// </summary>
+    public static bool HasBottomConfirmRow(OcrResult ocr)
+    {
+        if (!ocr.ContainsJoined("取消") || !ocr.ContainsJoined("确认")) return false;
+        bool bottom = ocr.Words.Any(w =>
+            (w.NormText.Contains("取消") || w.NormText.Contains("确认")) && w.CenterY > 0.85);
+        return bottom && MyLeagueBrain.DetectDifficultyOptions(ocr).Count > 0;
+    }
+
+    /// <summary>
+    /// 新式难度页（国际服同款 UI）处置：配方与国际服 <see cref="MyLeagueBrain.DifficultyLegPlan"/>
+    /// 一致——第 1 轮纯 A（吃定「确认已聚焦」的常见情形；列表行上 A 是空操作无副作用），
+    /// 第 2 轮起 上×9 饱和回顶 → 下×10 饱和落底行 → 右×N（取消→确认）→ A，偶数轮 右×2 防吞键；
+    /// 第 4/7 轮 B 关对话框回主页重进，第 9 轮后停止挂机。蓝勾检测只做告警不改导航
+    /// （难度在建库时已定档，页面内列表 A 不改选——国服改版后与国际服同守则）。
+    /// </summary>
+    private async Task<int> HandleCnModernDifficultyAsync(Observation obs)
+    {
+        string wanted = LeagueConfig.Difficulty;
+        var checkedDiff = MyLeagueBrain.DetectCheckedDifficulty(obs.Frame, obs.Ocr);
+        if (checkedDiff is not null && checkedDiff != wanted)
+            _log($"[我的联赛] 注意：蓝勾在「{checkedDiff}」而配置要「{wanted}」——新式难度页列表按 A 不改选，按当前勾选确认", LogLevel.Warn);
+
+        int round = ++_diffRound;
+        if (round > 9)
+        {
+            _log("[我的联赛] 新式难度页连续 9 轮确认无效（疑似有识别不到的弹窗遮挡），停止挂机", LogLevel.Error);
+            _engine.StopWithError("难度页反复确认无效，请手动查看游戏画面是否有弹窗");
+            return 3500;
+        }
+        var leg = MyLeagueBrain.DifficultyLegPlan(round);
+        if (leg is null) // 第 4/7 轮：B 关对话框回联赛主页，正常流程会重新前往比赛重进
+        {
+            _log($"[我的联赛] 新式难度页第 {round} 轮仍未确认：B 退出对话框重进（光标复位）", LogLevel.Warn);
+            await _engine.Pad.Back();
+            return 3500;
+        }
+
+        string desc = leg.Value is { Downs: 0, Rights: 0 }
+            ? "只按 A（确认钮可能已聚焦）"
+            : $"{(leg.Value.UpFirst ? "上×9 " : "")}下×{leg.Value.Downs} 右×{leg.Value.Rights} A";
+        _log($"[我的联赛] 新式难度页第 {round} 轮确认（蓝勾={checkedDiff ?? "未检出"}）：{desc}", LogLevel.Info);
+        if (leg.Value.UpFirst)
+            await _engine.Pad.DpadRepeat(PadDir.Up, 9);
+        await _engine.Pad.DpadRepeat(PadDir.Down, leg.Value.Downs);
+        await _engine.Pad.DpadRepeat(PadDir.Right, leg.Value.Rights);
+        await _engine.Pad.Confirm();
         return 3500;
     }
 

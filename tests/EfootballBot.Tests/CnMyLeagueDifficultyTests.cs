@@ -1,5 +1,6 @@
 using EfootballBot.Core.Bot.Scenarios.CnMyLeague;
 using EfootballBot.Core.Bot.Scenarios.MyLeague;
+using EfootballBot.Core.Vision;
 using Xunit;
 
 namespace EfootballBot.Tests;
@@ -55,5 +56,50 @@ public class CnMyLeagueDifficultyTests
         Assert.Equal(7, MyLeagueBrain.Difficulties.Length);
         Assert.Equal("新手", MyLeagueBrain.Difficulties[0]);
         Assert.Equal("传奇", MyLeagueBrain.Difficulties[^1]);
+    }
+
+    // ---------------- 新式难度页（2026-11-04 实机改版：国际服同款 UI） ----------------
+    // 底行「取消 | 确认」结构出现 → RT 配方作废（RT 无绑定，永远开不了赛），切换
+    // 国际服 DifficultyLegPlan 多轮配方。检测契约：取消+确认同在 y>0.85 且页内有难度名；
+    // 无底行词（OCR 漏读）→ 回退旧列表游走配方。
+
+    private static OcrWord W(string text, double cx, double cy)
+        => new(text, cx - 0.05, cy - 0.015, 0.1, 0.03);
+
+    private static OcrResult Ocr(params OcrWord[] words) => new(words, 1280, 720);
+
+    private static OcrResult ModernDifficultyPage() => new(new[]
+    {
+        W("选择赛事等级", 0.40, 0.11),
+        W("新手", 0.30, 0.35), W("业余", 0.30, 0.40), W("标准", 0.30, 0.45),
+        W("职业", 0.30, 0.50), W("顶级球员", 0.30, 0.55), W("超级球星", 0.30, 0.60),
+        W("传奇", 0.30, 0.66),
+        W("取消", 0.38, 0.94), W("确认", 0.66, 0.94),
+    }, 1280, 720);
+
+    [Fact]
+    public void ModernPage_HasBottomConfirmRow()
+    {
+        // 实机截图（2026-11-04）：底行 取消/确认 在 y≈0.94，列表 7 行难度名齐全
+        Assert.True(CnMyLeagueScenario.HasBottomConfirmRow(ModernDifficultyPage()));
+    }
+
+    [Fact]
+    public void OldStylePage_NoBottomRow_FallsBackToLegacyPlan()
+    {
+        // 旧式页：只有难度列表，无底行取消/确认（2026-10-18 页面形态）
+        var old = Ocr(W("选择赛事等级", 0.4, 0.1), W("新手", 0.3, 0.3), W("传奇", 0.3, 0.66));
+        Assert.False(CnMyLeagueScenario.HasBottomConfirmRow(old));
+        // 旧配方对旧页仍然成立：RT 确定开赛
+        Assert.NotNull(CnMyLeagueScenario.PlanCnDifficulty(null, "传奇"));
+    }
+
+    [Fact]
+    public void ModernLegPlan_ReusesIntlRecipe()
+    {
+        // 新式页轮次配方直接复用国际服 DifficultyLegPlan：第 1 轮纯 A（确认可能已聚焦）、
+        // 第 4 轮 null = B 逃生重进；落底/右拨细目由国际服自身测试锁定，此处不重复
+        Assert.Equal((false, 0, 0), MyLeagueBrain.DifficultyLegPlan(1)!.Value);
+        Assert.Null(MyLeagueBrain.DifficultyLegPlan(4));
     }
 }
