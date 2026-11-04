@@ -21,8 +21,8 @@ namespace EfootballBot;
 
 public partial class MainWindow
 {
-    // 左栏导航模式：游戏模块 / 设置 / 更新 / 日志历史 / 关于
-    private enum NavMode { Game, Settings, Update, LogViewer, About }
+    // 左栏导航模式：游戏模块 / 设置 / 更新 / 网络 / 日志历史 / 反馈 / 关于
+    private enum NavMode { Game, Settings, Update, Network, LogViewer, Feedback, About }
     private NavMode _currentNav = NavMode.Game;
 
     private void RbModule_Checked(object sender, RoutedEventArgs e)
@@ -203,7 +203,9 @@ public partial class MainWindow
         bool isGame = mode == NavMode.Game;
         bool isSettings = mode == NavMode.Settings;
         bool isUpdate = mode == NavMode.Update;
+        bool isNetwork = mode == NavMode.Network;
         bool isLog = mode == NavMode.LogViewer;
+        bool isFeedback = mode == NavMode.Feedback;
         bool isAbout = mode == NavMode.About;
 
         // 游戏模块面板
@@ -216,8 +218,14 @@ public partial class MainWindow
         // 更新面板
         UpdatePanel.Visibility = isUpdate ? Visibility.Visible : Visibility.Collapsed;
 
+        // 网络面板：进入时刷新 GitPort 状态与目标表
+        NetworkPanel.Visibility = isNetwork ? Visibility.Visible : Visibility.Collapsed;
+
         // 日志查看器
         LogViewerPanel.Visibility = isLog ? Visibility.Visible : Visibility.Collapsed;
+
+        // 反馈面板
+        FeedbackPanel.Visibility = isFeedback ? Visibility.Visible : Visibility.Collapsed;
 
         // 关于面板
         AboutPanel.Visibility = isAbout ? Visibility.Visible : Visibility.Collapsed;
@@ -227,11 +235,14 @@ public partial class MainWindow
 
         // 切换到日志查看器时刷新文件列表
         if (isLog) RefreshLogFileList();
+        if (isNetwork) { InitNetworkPage(); RefreshGitPortState(); }
 
         // 左栏工具按钮激活高亮（NavToolBtn 样式识别 Tag=Active）
         BtnSettings.Tag = isSettings ? "Active" : null;
         BtnUpdate.Tag = isUpdate ? "Active" : null;
+        BtnNetwork.Tag = isNetwork ? "Active" : null;
         BtnLogViewer.Tag = isLog ? "Active" : null;
+        BtnFeedback.Tag = isFeedback ? "Active" : null;
         BtnAbout.Tag = isAbout ? "Active" : null;
 
         // 模块胶囊同一套 Tag=Active 门控：只有正在看游戏模块时才亮，否则会和工具按钮同时亮
@@ -267,6 +278,18 @@ public partial class MainWindow
     private void BtnLogViewer_Click(object sender, RoutedEventArgs e)
     {
         NavigateTo(NavMode.LogViewer);
+    }
+
+    private void BtnNetwork_Click(object sender, RoutedEventArgs e)
+    {
+        SaveUiToConfig();
+        NavigateTo(NavMode.Network);
+    }
+
+    private void BtnFeedback_Click(object sender, RoutedEventArgs e)
+    {
+        SaveUiToConfig();
+        NavigateTo(NavMode.Feedback);
     }
 
     private void BtnAbout_Click(object sender, RoutedEventArgs e)

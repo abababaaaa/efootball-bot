@@ -187,6 +187,15 @@
                             <TextBlock Text="更新" VerticalAlignment="Center" Margin="10,0,0,0"/>
                         </StackPanel>
                     </Button>
+                    <Button x:Name="BtnNetwork" Style="{StaticResource NavToolBtn}" Click="BtnNetwork_Click"
+                            ToolTip="GitHub 加速（GitPort）、游戏服务器延迟测试与实时网络监控">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Style="{StaticResource IconPath}"
+                                  Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"
+                                  Data="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z M3.4 9.4h17.2 M3.4 14.6h17.2 M12 3a15 15 0 0 1 0 18 M12 3a15 15 0 0 0 0 18"/>
+                            <TextBlock Text="网络" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                        </StackPanel>
+                    </Button>
                     <Button x:Name="BtnLogViewer" Style="{StaticResource NavToolBtn}" Click="BtnLogViewer_Click"
                             ToolTip="查看历史运行日志（按日期与级别筛选）">
                         <StackPanel Orientation="Horizontal">
@@ -196,18 +205,27 @@
                             <TextBlock Text="日志历史" VerticalAlignment="Center" Margin="10,0,0,0"/>
                         </StackPanel>
                     </Button>
+                    <Button x:Name="BtnFeedback" Style="{StaticResource NavToolBtn}" Click="BtnFeedback_Click"
+                            ToolTip="生成反馈包一键报问题（系统环境、日志与崩溃记录打包）">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Style="{StaticResource IconPath}"
+                                  Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"
+                                  Data="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-2.9-.35-4.1-1L4 20.2l1.2-4.3A8.5 8.5 0 1 1 21 11.5Z M8.8 9.6h6.4 M8.8 13h4.2"/>
+                            <TextBlock Text="反馈" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                            <TextBlock Text="★" Foreground="{DynamicResource Warning}" FontWeight="Bold"
+                                       VerticalAlignment="Center" Margin="6,0,0,0" FontSize="11.5"/>
+                        </StackPanel>
+                    </Button>
 
-                    <!-- 关于（独立分类：诊断报告 / 声明 / 反馈） -->
+                    <!-- 关于（独立分类：声明） -->
                     <TextBlock Text="关于" Style="{StaticResource SectionLabel}" Margin="4,16,0,8"/>
                     <Button x:Name="BtnAbout" Style="{StaticResource NavToolBtn}" Click="BtnAbout_Click"
-                            ToolTip="诊断报告、声明与反馈群">
+                            ToolTip="声明与版权信息">
                         <StackPanel Orientation="Horizontal">
                             <Path Style="{StaticResource IconPath}"
                                   Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"
                                   Data="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z M12 11.2v5 M12 7.4v.4"/>
-                            <TextBlock Text="关于与反馈" VerticalAlignment="Center" Margin="10,0,0,0"/>
-                            <TextBlock Text="★" Foreground="{DynamicResource Warning}" FontWeight="Bold"
-                                       VerticalAlignment="Center" Margin="6,0,0,0" FontSize="11.5"/>
+                            <TextBlock Text="关于" VerticalAlignment="Center" Margin="10,0,0,0"/>
                         </StackPanel>
                     </Button>
 
@@ -1958,30 +1976,30 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <!-- ===== 关于面板（左栏独立分类：诊断报告 / 声明 / 反馈） ===== -->
-            <ScrollViewer x:Name="AboutPanel" Grid.Row="2" Visibility="Collapsed"
+            <!-- ===== 反馈面板（诊断报告 + 反馈交流，独立页） ===== -->
+            <ScrollViewer x:Name="FeedbackPanel" Grid.Row="2" Visibility="Collapsed"
                           Style="{StaticResource PageScroll}">
-                <StackPanel Margin="0,0,12,0">
+                <StackPanel Margin="0,2,12,0">
                     <!-- ===== 诊断报告 ===== -->
-                    <Border Style="{StaticResource Card}" Margin="0,2,0,12">
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
                                 <TextBlock Style="{StaticResource H2}"><Run Text="★ " Foreground="{DynamicResource Warning}"/>诊断报告</TextBlock>
                             </StackPanel>
-                                                        <Grid Margin="0,6,0,0" MaxWidth="520">
+                            <Grid Margin="0,6,0,0" MaxWidth="520">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="Auto"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
-                            <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="出问题点这里：一键打包"/><Run Text="系统环境、程序日志与崩溃记录"/><Run Text="，"/><Run Text="发到群里即可远程排查"/></TextBlock>
-                            <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="全程只读"/><Run Text="，不改系统设置，生成约 1~2 分钟"/></TextBlock>
+                                <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="出问题点这里：一键打包"/><Run Text="系统环境、程序日志与崩溃记录"/><Run Text="，"/><Run Text="发到群里即可远程排查"/></TextBlock>
+                                <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="全程只读"/><Run Text="，不改系统设置，生成约 1~2 分钟"/></TextBlock>
                             </Grid>
                             <TextBlock FontSize="11.5" Foreground="{DynamicResource TextSecondary}" Margin="0,8,0,0"
                                        Text="补充说明（可选）：描述遇到的现象，比如卡在哪一步、点了什么没反应、什么时候开始的——会写进反馈包，帮我们更快定位。"/>
@@ -2000,6 +2018,33 @@
                         </StackPanel>
                     </Border>
 
+                    <!-- ===== 反馈交流 ===== -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,0">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Text="反馈交流" Style="{StaticResource H2}"/>
+                            </StackPanel>
+                            <Grid Margin="0,3,0,2" MaxWidth="520">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="问题反馈与交流请加 QQ 群："/><Run Text="1128646247"/></TextBlock>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ===== 关于面板（声明） ===== -->
+            <ScrollViewer x:Name="AboutPanel" Grid.Row="2" Visibility="Collapsed"
+                          Style="{StaticResource PageScroll}">
+                <StackPanel Margin="0,2,12,0">
                     <!-- ===== 声明 ===== -->
                     <Border Style="{StaticResource Card}" Margin="0,0,0,0">
                         <StackPanel>
@@ -2034,19 +2079,6 @@
                             <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="仅供学习交流与个人使用；使用自动化工具"/><Run Text="存在被官方封号的风险" Foreground="{DynamicResource Warning}"/><Run Text="，后果自负，与作者无关"/></TextBlock>
                             </Grid>
 
-                            <TextBlock Text="反馈交流" Style="{StaticResource SubHead}"/>
-                                                        <Grid Margin="0,3,0,11">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                            <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="问题反馈与交流请加 QQ 群："/><Run Text="1128646247"/></TextBlock>
-                            </Grid>
-
                             <TextBlock Text="版权与分发" Style="{StaticResource SubHead}"/>
                                                         <Grid Margin="0,3,0,2">
                                 <Grid.ColumnDefinitions>
@@ -2059,6 +2091,160 @@
                             <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
                             <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="本软件无偿免费，"/><Run Text="禁止二次售卖、付费分发" Foreground="{DynamicResource Warning}"/><Run Text="，禁止篡改或移除作者信息后重新发布；转载请注明作者 Dabao#1392"/></TextBlock>
                             </Grid>
+                        </StackPanel>
+                    </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ===== 网络面板（GitPort 加速 / 服务器延迟测试 / 实时监控） ===== -->
+            <ScrollViewer x:Name="NetworkPanel" Grid.Row="2" Visibility="Collapsed"
+                          Style="{StaticResource PageScroll}">
+                <StackPanel Margin="0,2,12,0">
+
+                    <!-- ===== GitPort GitHub 加速 ===== -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Style="{StaticResource H2}">GitPort GitHub 加速</TextBlock>
+                                <Ellipse x:Name="DotGitPort" Width="8" Height="8" Margin="12,0,6,0"
+                                         VerticalAlignment="Center" Fill="{DynamicResource EnvDotIdle}"/>
+                                <TextBlock x:Name="TxtGitPortState" Text="未运行" FontSize="12"
+                                           VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"/>
+                            </StackPanel>
+                            <Grid Margin="0,4,0,0" MaxWidth="560">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="本地代理接管 GitHub 全家（clone / push / Release / raw / 网页），"/><Run Text="内置真实 IP 表免疫 DNS 污染"/><Run Text="，其他网站流量不受影响"/></TextBlock>
+                                <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="内核来自开源项目 gitport-github（"/><Run Text="约 8 MB"/><Run Text="），首次使用需下载一次；分流/PAC/镜像链开关在其工作台页面配置"/></TextBlock>
+                                <Ellipse Grid.Row="2" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="停止或退出程序会结束内核；系统代理状态由内核退出时自动还原"/></TextBlock>
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <Button x:Name="BtnGitPortAction" Content="下载内核" Style="{StaticResource GhostBtn}"
+                                        Padding="14,7" Click="BtnGitPortAction_Click"/>
+                                <Button x:Name="BtnGitPortWorkbench" Content="打开工作台" Style="{StaticResource GhostBtn}"
+                                        Padding="14,7" Margin="10,0,0,0" Click="BtnGitPortWorkbench_Click"/>
+                            </StackPanel>
+                            <TextBlock x:Name="TxtGitPortStatus" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"
+                                       Margin="0,8,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== 服务器延迟测试 ===== -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Style="{StaticResource H2}">服务器延迟测试</TextBlock>
+                            </StackPanel>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
+                                       Text="对下表目标并行做 TCP/443 建连测速（域名目标每次测量前实时解析），取该行最优 IP 的延迟。内置 GitHub 直连验证域与 eFootball 官方域；测游戏服可把服务器 IP 手动添加进来。"/>
+                            <WrapPanel Margin="0,10,0,0">
+                                <Button x:Name="BtnMeasureAll" Content="测量全部" Style="{StaticResource GhostBtn}"
+                                        Padding="14,7" Click="BtnMeasureAll_Click"/>
+                                <Button x:Name="BtnMeasureCancel" Content="取消" Style="{StaticResource GhostBtn}"
+                                        Padding="14,7" Margin="10,0,0,0" Click="BtnMeasureCancel_Click" IsEnabled="False"/>
+                                <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"
+                                           Margin="16,0,6,0" Text="只看 ≤"/>
+                                <TextBox x:Name="TxtFilterMs" Width="52" Padding="4,3" FontSize="11.5" Text="150"
+                                         Background="{DynamicResource Surface2}" BorderBrush="#33FFFFFF"
+                                         TextChanged="TxtFilterMs_TextChanged"/>
+                                <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"
+                                           Margin="4,0,12,0" Text="ms"/>
+                                <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"
+                                           Margin="0,0,6,0" Text="筛选"/>
+                                <TextBox x:Name="TxtServerFilter" Width="150" Padding="4,3" FontSize="11.5"
+                                         Background="{DynamicResource Surface2}" BorderBrush="#33FFFFFF"
+                                         TextChanged="TxtServerFilter_TextChanged"/>
+                            </WrapPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,6">
+                                <Ellipse Width="7" Height="7" Fill="#FF3DDC84" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                <TextBlock Text="&lt;60" FontSize="11" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <Ellipse Width="7" Height="7" Fill="{DynamicResource Warning}" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                <TextBlock Text="&lt;150" FontSize="11" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <Ellipse Width="7" Height="7" Fill="{DynamicResource Danger}" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                <TextBlock Text="高" FontSize="11" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center" Margin="0,0,10,0"/>
+                                <Ellipse Width="7" Height="7" Fill="{DynamicResource EnvDotIdle}" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                <TextBlock Text="无响应" FontSize="11" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                            </StackPanel>
+                            <ListView x:Name="LvServers" Height="240" FontSize="12"
+                                      Background="Transparent" BorderThickness="0"
+                                      Foreground="{DynamicResource TextPrimary}"
+                                      SelectionMode="Single"
+                                      SelectionChanged="LvServers_SelectionChanged">
+                                <ListView.View>
+                                    <GridView>
+                                        <GridViewColumn Header="名称" Width="180" DisplayMemberBinding="{Binding Label}"/>
+                                        <GridViewColumn Header="IP" Width="118" DisplayMemberBinding="{Binding Ip}"/>
+                                        <GridViewColumn Header="服务商" Width="62" DisplayMemberBinding="{Binding Provider}"/>
+                                        <GridViewColumn Header="延迟" Width="72">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <StackPanel Orientation="Horizontal">
+                                                        <Ellipse Width="7" Height="7" VerticalAlignment="Center" Margin="0,0,5,0"
+                                                                 Fill="{Binding DotBrush}"/>
+                                                        <TextBlock Text="{Binding DelayText}" VerticalAlignment="Center"/>
+                                                    </StackPanel>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+                                        <GridViewColumn Header="监控" Width="48">
+                                            <GridViewColumn.CellTemplate>
+                                                <DataTemplate>
+                                                    <CheckBox IsChecked="{Binding Monitor, Mode=TwoWay}"
+                                                              Checked="ChkMonitorTarget_Checked" Unchecked="ChkMonitorTarget_Unchecked"/>
+                                                </DataTemplate>
+                                            </GridViewColumn.CellTemplate>
+                                        </GridViewColumn>
+                                    </GridView>
+                                </ListView.View>
+                            </ListView>
+                            <WrapPanel Margin="0,8,0,0">
+                                <TextBox x:Name="TxtAddTarget" Width="200" Padding="4,3" FontSize="11.5"
+                                         Background="{DynamicResource Surface2}" BorderBrush="#33FFFFFF"
+                                         KeyDown="TxtAddTarget_KeyDown"/>
+                                <Button x:Name="BtnAddTarget" Content="添加 IP / 域名" Style="{StaticResource GhostBtn}"
+                                        Padding="12,5" Margin="10,0,0,0" Click="BtnAddTarget_Click"/>
+                                <Button x:Name="BtnRemoveTarget" Content="移除选中" Style="{StaticResource GhostBtn}"
+                                        Padding="12,5" Margin="10,0,0,0" Click="BtnRemoveTarget_Click"/>
+                            </WrapPanel>
+                            <TextBlock x:Name="TxtServerSummary" FontSize="11.5" Foreground="{DynamicResource TextMuted}"
+                                       Margin="0,8,0,0" TextWrapping="Wrap"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== 实时监控 ===== -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,0">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Style="{StaticResource H2}">实时监控</TextBlock>
+                                <Ellipse x:Name="DotMonitor" Width="8" Height="8" Margin="12,0,6,0"
+                                         VerticalAlignment="Center" Fill="{DynamicResource EnvDotIdle}"/>
+                                <TextBlock x:Name="TxtMonitorState" Text="未监控" FontSize="12"
+                                           VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"/>
+                            </StackPanel>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
+                                       Text="对表格里勾了「监控」的目标每秒测一次延迟：实时看丢包率与延迟波动（min / 平均 / max），勾选多行可同时盯多个服务器。"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <Button x:Name="BtnMonitorRun" Content="开始监控" Style="{StaticResource GhostBtn}"
+                                        Padding="14,7" Click="BtnMonitorRun_Click"/>
+                                <CheckBox x:Name="ChkMonitorCsv" Content="同时记录 monitor.csv" FontSize="11.5"
+                                          VerticalAlignment="Center" Margin="16,0,0,0" IsChecked="True"/>
+                            </StackPanel>
+                            <Canvas x:Name="CvSpark" Height="64" Margin="0,10,0,4" ClipToBounds="True"/>
+                            <TextBlock x:Name="TxtMonDetail" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"
+                                       Margin="0,2,0,0" TextWrapping="Wrap" Text="选择表格中的一行查看它的实时曲线与丢包率。"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
