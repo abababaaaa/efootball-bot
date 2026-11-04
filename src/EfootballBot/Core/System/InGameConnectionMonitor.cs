@@ -16,7 +16,8 @@ public sealed record ConnSnapshot(
     int MinMs,
     int AvgMs,
     int MaxMs,
-    IReadOnlyList<int> Curve);
+    IReadOnlyList<int> Curve,
+    string Mode = "—");      // 对战模式：服务器 / P2P / 测速中（端口判定，与 ETK 一致）
 
 /// <summary>
 /// 游戏内连接监控：用 Npcap（SharpPcap）抓本机 UDP 流量，从所有流里认出击游戏服务器的那条
@@ -27,6 +28,14 @@ public sealed record ConnSnapshot(
 public sealed class InGameConnectionMonitor : IDisposable
 {
     private static readonly ushort[] GamePorts = { 5735, 50000, 5521, 3478, 3479, 5742 };
+
+    /// <summary>服务器模式端口（5735 为服务器 UDP 端口，5736 为 TCP 侧）；其余游戏端口=P2P。</summary>
+    private static readonly ushort[] ServerPorts = { 5735, 5736 };
+
+    /// <summary>匹配前的测速端口（xjbt forceP2P 屏蔽的同一组）；出现这些说明还在测速/匹配。</summary>
+    private static readonly ushort[] SpeedTestPorts = { 5521, 10000, 30000, 50000 };
+
+    private const int SessionIdleMs = 10_000; // 远端 10 秒无流量视为本场结束
 
     private ILiveDevice? _device;
     private CancellationTokenSource? _cts;
@@ -45,6 +54,17 @@ public sealed class InGameConnectionMonitor : IDisposable
     private readonly Queue<int> _curve = new();       // 最近 60 个 ping 值（-1=失败）
     private int _ok, fail;
     private int _min = -1, max, sum;
+
+    /// <summary>当前这一场的统计（远端切换/长时间空闲时收尾写 matchlog.csv）。</summary>
+    private sealed class MatchSession
+    {
+        public DateTime StartedAt = DateTime.Now;
+        public string Remote = "";
+        public string Mode = "—";
+        public long LastDataTicks;
+        public int Min = -1, Max, Sum, Ok, Fail;
+    }
+    private MatchSession? _session;
 
     public bool Running { get; private set; }
     public event Action<ConnSnapshot>? Updated;
@@ -117,6 +137,7 @@ public sealed class InGameConnectionMonitor : IDisposable
         Running = false;
         try { _cts?.Cancel(); } catch { }
         try { _loop?.Wait(1500); } catch { }
+        FinishSession();   // 停止时把最后一局也记进 matchlog
         try
         {
             if (_device is not null)
@@ -217,6 +238,26 @@ public sealed class InGameConnectionMonitor : IDisposable
         _remotePort = ushort.TryParse(key[(idx + 1)..], out var p) ? p : (ushort)0;
     }
 
+    /// <summary>按远端端口判断对战模式（与 ETK/forceP2P 的端口口径一致）。</summary>
+    private static string ModeFor(ushort port)
+        => port == 0 ? "—"
+         : ServerPorts.Contains(port) ? "服务器"
+         : SpeedTestPorts.Contains(port) ? "测速中"
+         : "P2P";
+
+    /// <summary>把当前场次写进 matchlog.csv 并清空（会话结束/停止监控时调用）。</summary>
+    private void FinishSession()
+    {
+        var s = _session;
+        _session = null;
+        if (s is null || s.Ok + s.Fail == 0) return;
+        int duration = (int)Math.Max(0, (DateTime.Now - s.StartedAt).TotalSeconds);
+        double loss = 100.0 * s.Fail / (s.Ok + s.Fail);
+        MatchLog.Append(s.StartedAt, s.Mode, s.Remote,
+            RegionLookup?.Invoke(s.Remote.Split(':')[0]) ?? "未知区域",
+            s.Min, s.Ok == 0 ? -1 : (int)((double)s.Sum / s.Ok), s.Max, loss, duration);
+    }
+
     // ---------------- 每秒测速 ----------------
 
     private async Task PingLoopAsync(CancellationToken ct)
@@ -228,6 +269,20 @@ public sealed class InGameConnectionMonitor : IDisposable
                 PickFlow();
                 int ms = _remoteIp.Length > 0 ? NetworkProbe.IcmpPing(_remoteIp, 1000) : -1;
                 bool alive = _remoteIp.Length > 0;
+                long now = Environment.TickCount64;
+                bool recent = _flows.Any(kv => now - kv.Value.LastTicks < 2000);
+                string mode = ModeFor(_remotePort);
+                string remoteKey = alive ? $"{_remoteIp}:{_remotePort}" : "";
+
+                // 场次切分：远端换成另一个，或本场 10 秒没流量 → 收尾写 matchlog
+                if (_session is not null)
+                {
+                    bool switched = remoteKey.Length > 0 && _session.Remote != remoteKey;
+                    bool idle = now - _session.LastDataTicks > SessionIdleMs;
+                    if (switched || idle) FinishSession();
+                }
+                if (_session is null && recent && remoteKey.Length > 0 && mode != "测速中")
+                    _session = new MatchSession { Remote = remoteKey, Mode = mode, LastDataTicks = now };
 
                 if (alive)
                 {
@@ -243,11 +298,23 @@ public sealed class InGameConnectionMonitor : IDisposable
                     else fail++;
                 }
 
-                long now = Environment.TickCount64;
-                bool recent = _flows.Any(kv => now - kv.Value.LastTicks < 3000);
+                if (_session is not null)
+                {
+                    _session.LastDataTicks = recent ? now : _session.LastDataTicks;
+                    if (ms >= 0)
+                    {
+                        _session.Ok++;
+                        _session.Sum += ms;
+                        _session.Min = _session.Min < 0 ? ms : Math.Min(_session.Min, ms);
+                        _session.Max = Math.Max(_session.Max, ms);
+                    }
+                    else _session.Fail++;
+                }
+
                 string state = !alive ? "等待比赛（未发现游戏 UDP 连接）"
                     : !recent ? "连接空闲（数据停止）"
-                    : "监控中";
+                    : mode == "测速中" ? "匹配前测速（未进比赛）"
+                    : "监控中 · " + mode;
 
                 double loss = _ok + fail == 0 ? 0 : 100.0 * fail / (_ok + fail);
                 var snap = new ConnSnapshot(
@@ -259,7 +326,8 @@ public sealed class InGameConnectionMonitor : IDisposable
                     _min < 0 ? -1 : _min,
                     _ok == 0 ? -1 : (int)((double)sum / _ok),
                     max,
-                    _curve.ToArray());
+                    _curve.ToArray(),
+                    mode);
                 Updated?.Invoke(snap);
             }
             catch { }

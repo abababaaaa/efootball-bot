@@ -23,6 +23,10 @@ namespace EfootballBot.Core.Bot.Scenarios.CnWeekly;
 ///   =选错卡）后 B 回清单换下一张；无可挑战的卡（全勾/全锁）重进清单刷新，重进仍无 =
 ///   全部完成自动停止。卡详情页（独立分类 ChallengeCardHome，词为「完成挑战…」）
 ///   ★绝不进 i 弹窗（合计进度无意义）；挑战模式跳过巡回赛的活动设置核验。
+/// ④教练签下链（2026-11-04 实机 晋级挑战）：介绍/「加入」进活动后可能先弹「请选择您的教练」
+///   ——按卡片上的评价数字选更大的一位（左×3 归位 → 右×Slot → A）→ 教练资料页 A（不生效改 RT
+///   底栏「确认选择」）→ 「签下确认」弹窗 A（默认焦点在确认；A 未生效再上移纠正）。签完继续
+///   既有开赛流程（阵容/设置/难度/前往比赛按活动形态自会接住）。
 /// 比赛中流程与我的联赛完全共用：InMatch 随机点击、终场、结算弹窗、满级检测、场次计数。
 /// 达到「完成场次停止」设定或主要奖励打完后由用户手动停止（完成态探针待校准）。
 /// 判定只用固定 UI 词（对阵电脑/教练入场/前往比赛/活动设置/球队阵容列表/活动加成…），
@@ -71,6 +75,12 @@ public sealed class CnWeeklyScenario : IScenario
     /// <summary>核验通过后活动设置面板又被打开的次数（≥2 = 主页焦点停在底栏「活动设置」上，
     /// A 前须先上移焦点到「前往比赛」，否则 A↔设置面板乒乓循环）。</summary>
     private int _tourPanelReopens;
+
+    // ---- 教练签下链（2026-11-04 实机 晋级挑战：进入活动先签教练再开赛） ----
+    /// <summary>本活动已签下教练（同一活动只签一次；换活动/重进活动时复位）。</summary>
+    private bool _coachSigned;
+    /// <summary>本次运行签下教练的累计次数（&gt;3 = 签下后仍反复回到选择页，停止挂机防死循环）。</summary>
+    private int _coachSigns;
 
     // ---- 挑战型活动子流程（挑战清单选卡页出现时激活；退出活动/停止时复位） ----
     /// <summary>当前活动是挑战型（以「挑战清单」选卡页或卡详情页「完成的条件」识别）。</summary>
@@ -536,6 +546,15 @@ public sealed class CnWeeklyScenario : IScenario
                     case CwScreen.RewardPopup:
                         return await HandleRewardPopupAsync(obs);
 
+                    case CwScreen.CoachSelect:
+                        return await HandleCoachSelectAsync(obs);
+
+                    case CwScreen.CoachDetail:
+                        return await HandleCoachDetailAsync();
+
+                    case CwScreen.SignConfirm:
+                        return await HandleSignConfirmAsync();
+
                     case CwScreen.Squad:
                     case CwScreen.SquadMenu:
                         if (_squadConfigured)
@@ -688,7 +707,8 @@ public sealed class CnWeeklyScenario : IScenario
                     CwScreen.HomeRecommended or CwScreen.HomeMatch or
                     CwScreen.EventHomeTour or CwScreen.ChallengeCardHome or
                     CwScreen.EventSettings or CwScreen.ChallengeList or
-                    CwScreen.Difficulty or CwScreen.RewardPopup)
+                    CwScreen.Difficulty or CwScreen.RewardPopup or
+                    CwScreen.CoachSelect or CwScreen.CoachDetail or CwScreen.SignConfirm)
                 {
                     SetPhase(CwPhase.Flow); // 被弹回导航链/巡回赛界面：回屏幕驱动重走
                     return 700;
@@ -835,6 +855,107 @@ public sealed class CnWeeklyScenario : IScenario
         }
     }
 
+    // ---------------- 教练签下链（2026-11-04 实机 晋级挑战） ----------------
+
+    /// <summary>
+    /// 教练选择页（用户 2026-11-04 实机：卡上评价 80 / 81，选数字更大的那位）：
+    /// 评价数字按 x 排序定位到屏上第几张卡——★光标位置不可信（可能停在任意卡上），
+    /// 一律 左×3 饱和归位第一张 → 右×Slot 到目标卡 → A 进资料页。评价读不出（OCR 漏读）
+    /// 时按当前焦点直接 A，不盲导航（宁可选错也不卡死）。
+    /// </summary>
+    private async Task<int> HandleCoachSelectAsync(Observation obs)
+    {
+        if (_streak < 1) return 800; // 卡片淡入/评价数字渲染防抖
+        if (++_attempts > 4)
+        {
+            _log("[国服周活动] 教练选择页多次未进入教练资料，B 返回重走流程", LogLevel.Warn);
+            SetPhase(CwPhase.Flow);
+            await _engine.Pad.Back();
+            return 2400;
+        }
+
+        var cards = CnWeeklyBrain.ScanCoachCards(obs.Ocr);
+        if (cards.Count == 0)
+        {
+            _log("[国服周活动] 教练选择：未读出教练评价数字，按当前焦点 A 进入", LogLevel.Warn);
+            await _engine.Pad.Confirm();
+            return 2800;
+        }
+
+        var best = cards.OrderByDescending(c => c.Rating).ThenBy(c => c.Slot).First();
+        string all = string.Join(" / ", cards.Select(c => $"{c.Rating}"));
+        _log($"[国服周活动] 教练选择：读到 {cards.Count} 位教练评价（{all}），选最大 {best.Rating}（第 {best.Slot + 1} 张）→ 左归位 → 右×{best.Slot} → A",
+            LogLevel.Info);
+        await _engine.Pad.DpadRepeat(PadDir.Left, 3); // 饱和归位最左一张（卡数不固定，到头多按无害）
+        if (best.Slot > 0) await _engine.Pad.DpadRepeat(PadDir.Right, best.Slot);
+        await _engine.Pad.Confirm();
+        return 3000;
+    }
+
+    /// <summary>教练资料页（用户 2026-11-04 实机）：A 下一步 → 弹签下确认。底栏写
+    /// 「RT 确认选择」，A 两次未生效换 RT（对阵表/难度页同款经验）。</summary>
+    private async Task<int> HandleCoachDetailAsync()
+    {
+        if (_streak < 1) return 800; // 资料页淡入防抖
+        if (++_attempts > 4)
+        {
+            _log("[国服周活动] 教练资料页确认多次未生效，B 返回重走流程", LogLevel.Warn);
+            SetPhase(CwPhase.Flow);
+            await _engine.Pad.Back();
+            return 2400;
+        }
+        if (_attempts >= 3)
+        {
+            _log("[国服周活动] 教练资料页：A 两次未生效，改按 RT 确认选择", LogLevel.Info);
+            await _engine.Pad.RT();
+        }
+        else
+        {
+            _log("[国服周活动] 教练资料页：A 确认选择（下一步）", LogLevel.Info);
+            await _engine.Pad.Confirm();
+        }
+        return 3200;
+    }
+
+    /// <summary>
+    /// 签下确认弹窗（用户 2026-11-04 实机：「签下确认」+ 确认/取消，蓝色高亮的「确认」是
+    /// 默认焦点）：直接 A。A 两次弹窗仍在 = 焦点掉到取消或其他位置，上移一次纠正后再 A。
+    /// </summary>
+    private async Task<int> HandleSignConfirmAsync()
+    {
+        if (_streak < 1) return 900; // 弹窗淡入防抖
+        _coachSigns++;
+        if (_coachSigns > 3)
+        {
+            _log("[国服周活动] 签下教练后仍反复回到签下确认页，停止挂机（请手动检查活动状态）", LogLevel.Error);
+            _engine.StopWithError("教练签下反复出现");
+            return 0;
+        }
+        if (++_attempts > 4)
+        {
+            _log("[国服周活动] 签下确认弹窗多次未关闭，B 关闭后重走流程", LogLevel.Warn);
+            SetPhase(CwPhase.Flow);
+            await _engine.Pad.Back();
+            return 2400;
+        }
+        if (_attempts >= 2)
+        {
+            _log("[国服周活动] 签下确认：A 未生效，上移纠正焦点 → A 确认", LogLevel.Info);
+            await _engine.Pad.Dpad(PadDir.Up);
+        }
+        else
+        {
+            _log("[国服周活动] 签下确认：A 确认（默认焦点在确认）", LogLevel.Info);
+        }
+        await _engine.Pad.Confirm();
+        if (!_coachSigned)
+        {
+            _coachSigned = true;
+            _log("[国服周活动] 教练签下完成，继续开赛流程", LogLevel.Success);
+        }
+        return 3200;
+    }
+
     // ---------------- 巡回赛主要奖励核验（主页勾 → i 信息弹窗 x/x） ----------------
 
     /// <summary>
@@ -937,12 +1058,14 @@ public sealed class CnWeeklyScenario : IScenario
             _squadConfigured = false;
             _menuApplied = false;
             _squadTries = 0;
+            _coachSigned = false; // 活动级状态：下一个活动可能是要重新签教练的另一张卡
             SetPhase(CwPhase.Flow);
             _log($"[国服周活动] 已退回活动列表，改刷槽位 {_slotIndex}", LogLevel.Success);
             return 800;
         }
         if (cw is CwScreen.EventHomeTour or CwScreen.ChallengeCardHome or CwScreen.EventHome or
-            CwScreen.EventIntro or CwScreen.EventSettings or CwScreen.RewardPopup)
+            CwScreen.EventIntro or CwScreen.EventSettings or CwScreen.RewardPopup or
+            CwScreen.CoachSelect or CwScreen.CoachDetail or CwScreen.SignConfirm)
         {
             if (++_attempts > 5) { SetPhase(CwPhase.Flow); return 700; }
             await _engine.Pad.Back();

@@ -51,6 +51,11 @@ public class CnWeeklyRealFrameTests
         ("cn_challenge_list.png", CwScreen.ChallengeList),
         ("cn_challenge_card_home.png", CwScreen.ChallengeCardHome),
         ("cn_tour_difficulty.png", CwScreen.Difficulty),
+        // 2026-11-04 实机：晋级挑战（加入 → 请选择您的教练 → 教练资料 → 签下确认）
+        ("cn_events_list_join.png", CwScreen.EventsList),
+        ("cn_coach_select.png", CwScreen.CoachSelect),
+        ("cn_coach_detail.png", CwScreen.CoachDetail),
+        ("cn_coach_sign_confirm.png", CwScreen.SignConfirm),
     };
 
     [Fact]
@@ -293,5 +298,60 @@ public class CnWeeklyRealFrameTests
         Assert.Equal(CwScreen.RewardPopup, screen);
         Assert.True(readable, "应读出主要奖励 x/x 进度词");
         Assert.False(allDone, "60/120 与 1/2 均未拿满");
+    }
+
+    // 实机 2026-11-04：晋级挑战「请选择您的教练」页（两张教练卡，评价 80 / 81）。
+    // 固化：分类 CoachSelect；评价数字扫描出 2 张卡（80@slot0、81@slot1）——场景层据此
+    // 左×3 归位 → 右×1 到第 2 张 → A（选评价更大的教练，用户 2026-11-04 要求）。
+    [Fact]
+    public async Task CoachSelect_Frame_ScanPicksHigherRating()
+    {
+        using var ocr = new OcrRecognizer();
+        string img = Path.Combine(CnDir, "cn_coach_select.png");
+        var data = LoadPngBgra(img, out int w, out int h);
+        var frame = new FrameData(data, w, h, 0);
+        var ocrRes = await ocr.RecognizeAsync(frame);
+
+        var screen = CnWeeklyBrain.Classify(
+            Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
+        var cards = CnWeeklyBrain.ScanCoachCards(ocrRes);
+
+        _out.WriteLine($"screen={screen} cards=[{string.Join(", ", cards.Select(c => $"{c.Rating}@slot{c.Slot}"))}]");
+        foreach (var wd in ocrRes.Words)
+            _out.WriteLine($"  W \"{wd.Text}\" @({wd.CenterX:F2},{wd.CenterY:F2}) wh=({wd.W:F3},{wd.H:F3})");
+
+        Assert.Equal(CwScreen.CoachSelect, screen);
+        Assert.Equal(2, cards.Count);
+        Assert.Equal((0, 80), cards[0]);
+        Assert.Equal((1, 81), cards[1]);
+        var best = cards.OrderByDescending(c => c.Rating).First();
+        Assert.Equal(81, best.Rating);
+        Assert.Equal(1, best.Slot); // 右×1 到第 2 张
+    }
+
+    // 实机 2026-11-04：教练资料页（签下前）+ 签下确认弹窗。
+    // 固化：资料页判 CoachDetail（底栏「RT 确认选择」）；弹窗判 SignConfirm（标题「签下确认」）
+    // 且先于资料页——弹窗盖在资料页上，资料页词仍可读。
+    [Fact]
+    public async Task CoachDetail_And_SignConfirm_Frames_Classify()
+    {
+        using var ocr = new OcrRecognizer();
+
+        async Task<(CwScreen Screen, OcrResult Ocr)> Run(string file)
+        {
+            var data = LoadPngBgra(Path.Combine(CnDir, file), out int w, out int h);
+            var res = await ocr.RecognizeAsync(new FrameData(data, w, h, 0));
+            var screen = CnWeeklyBrain.Classify(
+                Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), res);
+            _out.WriteLine($"{file} -> {screen} signConfirm={CnWeeklyBrain.IsSignConfirmPopup(res)}");
+            return (screen, res);
+        }
+
+        var (detail, _) = await Run("cn_coach_detail.png");
+        var (confirm, confirmOcr) = await Run("cn_coach_sign_confirm.png");
+
+        Assert.Equal(CwScreen.CoachDetail, detail);
+        Assert.True(CnWeeklyBrain.IsSignConfirmPopup(confirmOcr));
+        Assert.Equal(CwScreen.SignConfirm, confirm);
     }
 }

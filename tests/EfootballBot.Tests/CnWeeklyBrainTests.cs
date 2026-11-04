@@ -485,4 +485,76 @@ public class CnWeeklyBrainTests
         Assert.False(CnWeeklyBrain.IsCnChallengeCardHome(Ocr(
             W("进入", 0.26, 0.69), W("详情", 0.26, 0.78))));
     }
+
+    // ---------------- 教练签下链（2026-11-04 实机 晋级挑战） ----------------
+
+    /// <summary>教练卡评价大字数字（实机 1280×720 H≈0.047）。</summary>
+    private static OcrWord RatingW(string text, double cx, double cy)
+        => new(text, cx - 0.03, cy - 0.024, 0.06, 0.048);
+
+    [Fact]
+    public void Classify_CoachSelect_ByTitle()
+    {
+        // 实机 cn_coach_select.png：黄字标题「请选择您的教练」+ 两张教练卡 + 底栏 B 返回
+        var ocr = Ocr(W("请选择您的教练", 0.18, 0.12), W("埃尔曼诺·泰巴尔迪", 0.21, 0.25),
+            W("加斯帕尔·奥德里奥索拉", 0.54, 0.25), RatingW("80", 0.30, 0.40),
+            RatingW("81", 0.65, 0.40), W("进攻风格", 0.21, 0.50), W("进攻风格", 0.54, 0.50),
+            W("返回", 0.14, 0.93));
+        Assert.Equal(CwScreen.CoachSelect, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_CoachSelect_FallbackByRatingRow()
+    {
+        // 标题漏读：同行 ≥2 个评价数字 + 进攻风格 兜底
+        var ocr = Ocr(RatingW("80", 0.30, 0.40), RatingW("81", 0.65, 0.40),
+            W("进攻风格", 0.21, 0.50), W("返回", 0.14, 0.93));
+        Assert.Equal(CwScreen.CoachSelect, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void ScanCoachCards_ReadsRatingsAndSlots()
+    {
+        // 只按 x 排序给 Slot：调用方用 Rating 取最大、Slot 做左右定位
+        var ocr = Ocr(RatingW("80", 0.30, 0.40), RatingW("81", 0.65, 0.40));
+        var cards = CnWeeklyBrain.ScanCoachCards(ocr);
+        Assert.Equal(2, cards.Count);
+        Assert.Equal((0, 80), cards[0]);
+        Assert.Equal((1, 81), cards[1]);
+    }
+
+    [Fact]
+    public void ScanCoachCards_IgnoresSmallTextNumbers()
+    {
+        // 普通正文高度的数字（剩余时间 1天12小时 / 年龄 44）不是评价数字
+        var ocr = Ocr(W("剩余时间1天12小时", 0.2, 0.20), W("年龄", 0.52, 0.21),
+            W("44", 0.55, 0.21), RatingW("81", 0.65, 0.40));
+        var cards = CnWeeklyBrain.ScanCoachCards(ocr);
+        Assert.Single(cards);
+        Assert.Equal(81, cards[0].Rating);
+    }
+
+    [Fact]
+    public void Classify_CoachDetail_ConfirmSelectBar()
+    {
+        // 实机 cn_coach_detail.png：球队风格熟练度表 + 底栏「RT 确认选择」（y≈0.93）
+        var ocr = Ocr(W("加斯帕尔·奥德里奥索拉", 0.4, 0.15), W("年龄", 0.50, 0.21),
+            W("44", 0.53, 0.21), W("国家/地区", 0.10, 0.31), W("球队", 0.10, 0.42),
+            W("球队风格熟练度", 0.42, 0.31), W("控球游戏", 0.40, 0.38), W("41", 0.66, 0.38),
+            W("快速反攻", 0.40, 0.42), W("81", 0.66, 0.42), W("返回", 0.14, 0.93),
+            W("RT 确认选择", 0.90, 0.93));
+        Assert.Equal(CwScreen.CoachDetail, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_SignConfirm_BeatsCoachDetail()
+    {
+        // 签下确认弹窗盖在教练资料页上（资料页底栏词仍可读）：必须先判弹窗，
+        // 否则会落到资料页再按一次 A（弹窗取消）或被盖层门控成 None
+        var ocr = Ocr(W("加斯帕尔·奥德里奥索拉", 0.4, 0.15), W("球队风格熟练度", 0.42, 0.31),
+            W("返回", 0.14, 0.93), W("RT 确认选择", 0.90, 0.93),
+            W("签下确认", 0.50, 0.33), W("确认", 0.50, 0.57), W("取消", 0.50, 0.67));
+        Assert.True(CnWeeklyBrain.IsSignConfirmPopup(ocr));
+        Assert.Equal(CwScreen.SignConfirm, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
 }

@@ -52,6 +52,16 @@ public enum CwScreen
     /// 白底大面板，主要奖励 N/M 进度 + 活动时间/活动说明，右上 B 关闭）。主要奖励是否
     /// 拿满以此弹窗内 x/x 为准——主页勾只表示已有主要奖励可领，不代表拿满。</summary>
     RewardPopup,
+    /// <summary>教练选择页（2026-11-04 实机 晋级挑战：进入活动后先签教练）：标题
+    /// 「请选择您的教练」+ 教练卡横排（姓名/国旗/评价大字数字/进攻风格战术板），底栏 B 返回。
+    /// 处置：选评价数字更大的那张卡按 A 进详情（评价每周给的两个教练不同，只比数字）。</summary>
+    CoachSelect,
+    /// <summary>教练资料页（签下前）：黄字教练名 + 年龄/国家·地区/球队/类别 +
+    /// 球队风格熟练度表 + 底栏「RT 确认选择」。处置：A 下一步（不生效改 RT）。</summary>
+    CoachDetail,
+    /// <summary>签下确认弹窗（盖在教练资料页上）：「签下确认」标题 + 说明 +
+    /// 确认（默认焦点，蓝色高亮）/取消 两键。处置：A 确认。</summary>
+    SignConfirm,
 }
 
 /// <summary>
@@ -67,7 +77,8 @@ public static class CnWeeklyBrain
 
     /// <summary>
     /// 国服周活动界面分类。先于 MyLeagueBrain.Classify 执行。
-    /// 判定顺序：盖层弹窗门控 → i 信息弹窗 → 挑战清单 → 选择比赛难度 → RS 菜单
+    /// 判定顺序：签下确认弹窗 → 盖层弹窗门控 → i 信息弹窗 → 教练选择/教练资料 →
+    /// 挑战清单 → 选择比赛难度 → RS 菜单
     /// （盖在阵容页上）→ 阵容页 → 活动设置面板（盖在巡回赛主页右半）→ 巡回赛型活动主页
     /// → 杯赛型活动主页 → 对阵表 → 活动介绍 → 活动列表 → 主页（比赛页签 → 推荐页签）。
     /// </summary>
@@ -95,6 +106,17 @@ public static class CnWeeklyBrain
         // 获得的主要奖励 字样透底，但无 活动说明/活动时间，不冲突）
         bool rewardPopupBody = ocr.ContainsJoined("主要奖励") &&
             (ocr.ContainsJoined("活动说明") || ocr.ContainsJoined("活动时间"));
+        // 教练签下链（2026-11-04 实机 晋级挑战）：选择页标题 / 资料页底栏「RT 确认选择」 /
+        // 签下确认弹窗。资料页的「确认选择」是底栏按钮（y≈0.93），与弹窗推进词 确认 不吃词
+        bool signConfirmBody = ocr.ContainsJoined("签下确认");
+        bool coachSelectBody = ocr.ContainsJoined("请选择您的教练") || HasCoachRatingRow(ocr);
+        bool coachDetailBody = ocr.ContainsJoined("确认选择") || ocr.ContainsJoined("球队风格熟练度");
+
+        // 签下确认弹窗：盖在教练资料页上（资料页的「确认选择」底栏与球队风格熟练度仍可读），
+        // 且自带中部「确认/取消」推进词——必须先于盖层门控判定，否则会被门控成 None
+        // 交给共享流程，A 的落点（确认 vs 取消）不确定
+        if (signConfirmBody)
+            return CwScreen.SignConfirm;
 
         // 盖层弹窗门控（同国际服周活动实机教训）：主页词透过暗化背景仍会被 OCR 读到，
         // 误判回菜单页会把无效按键当"未生效"反复重按。弹窗自带推进词（下一步/确认/整词OK，
@@ -106,13 +128,20 @@ public static class CnWeeklyBrain
             dets.Any(d => d.ClassName == "btn_confirm" && d.Score >= MyLeagueBrain.MinScore && d.CenterY < 0.82);
         if (popupOnTop && (squadBody || eventHomeBody || tourHomeBody || settingsBody ||
                            bracketBody || listBody || introBody || challengeBody || difficultyBody ||
-                           challengeCardBody))
+                           challengeCardBody || coachSelectBody || coachDetailBody))
             return CwScreen.None;
 
         // i 信息弹窗：盖在巡回赛主页上的白底大面板，先于主页判定（主页左半被盖，
         // 前往比赛 不可见，但保险起见仍先判）
         if (rewardPopupBody)
             return CwScreen.RewardPopup;
+
+        // 教练签下链（先选择页后资料页；两页互斥，顺序仅表优先级）：
+        // 落 None 会被共享分类当 LeaguePage 盲按/瞎退，教练永远签不下来
+        if (coachSelectBody)
+            return CwScreen.CoachSelect;
+        if (coachDetailBody)
+            return CwScreen.CoachDetail;
 
         // 挑战清单选卡页：必须先于其余判定——页面只有底栏「返回」，落 None 会被共享分类
         // 盲等/瞎退（用户 2026-10-17 实机卡死同款）。标题词漏读时卡号特征防僵局
@@ -384,6 +413,66 @@ public static class CnWeeklyBrain
     /// EventHome/EventHomeTour 之后调用；清单/介绍页不含该词，不受干扰。
     /// </summary>
     public static bool IsCnChallengeCardHome(OcrResult ocr) => ocr.ContainsJoined("完成挑战");
+
+    // ---------------- 教练选择页（2026-11-04 实机 晋级挑战） ----------------
+    // 页面：标题「请选择您的教练」+ 教练卡横排（姓名 / 国旗 / 评价大字数字 / 进攻风格战术板），
+    // 底栏 B 返回。★只比较卡上的评价数字（80/81 这类固定 UI 数字），教练姓名/国籍/战术
+    // 风格每周轮换，一律不作判定点（可变内容禁令）。
+
+    /// <summary>
+    /// 教练评价数字词：H≥0.035（实机 1280×720 评价字高 ≈0.047，普通正文 ≈0.03）、
+    /// y 0.30~0.50（卡头姓名下方、进攻风格之上）、x&lt;0.95（出屏残卡碎片不取）的
+    /// 2~3 位纯数字。O→0 归一（防 "8O" 漏读）。
+    /// </summary>
+    private static bool IsCoachRatingWord(OcrWord w, out int rating)
+    {
+        rating = 0;
+        if (w.H < 0.035 || w.CenterY < 0.30 || w.CenterY > 0.50 || w.CenterX >= 0.95) return false;
+        var t = w.NormText.ToUpper().Replace("O", "0");
+        if (t.Length is < 2 or > 3 || !t.All(char.IsDigit)) return false;
+        rating = int.Parse(t);
+        return rating is >= 10 and <= 120;
+    }
+
+    /// <summary>
+    /// 教练选择页兜底特征：同一行 ≥2 个评价数字 + 「进攻风格」（标题漏读时）。单张卡
+    ///（残卡/过渡帧）不构成教练选择页。
+    /// </summary>
+    private static bool HasCoachRatingRow(OcrResult ocr)
+    {
+        if (!ocr.ContainsJoined("进攻风格")) return false;
+        int count = 0;
+        foreach (var w in ocr.Words)
+            if (IsCoachRatingWord(w, out _)) count++;
+        return count >= 2;
+    }
+
+    /// <summary>
+    /// 解析教练选择页的可见教练卡：评价数字按 x 排序给出屏上左右次序 Slot 与评价 Rating
+    ///（同一评价只取一次，防止同一张卡的数字被拆成两词重复计）。返回按 Slot 升序；空 = 未读出。
+    /// 调用方比较 Rating 取最大者，用 Slot 做「左饱和归位 → 右×Slot」定位（不依赖可信光标）。
+    /// </summary>
+    public static List<(int Slot, int Rating)> ScanCoachCards(OcrResult ocr)
+    {
+        var found = new List<(int Rating, double X)>();
+        foreach (var w in ocr.Words)
+        {
+            if (!IsCoachRatingWord(w, out int rating)) continue;
+            if (found.Any(f => f.Rating == rating)) continue;
+            found.Add((rating, w.CenterX));
+        }
+        var ordered = found.OrderBy(f => f.X).ToList();
+        var list = new List<(int Slot, int Rating)>(ordered.Count);
+        for (int i = 0; i < ordered.Count; i++) list.Add((i, ordered[i].Rating));
+        return list;
+    }
+
+    /// <summary>
+    /// 签下确认弹窗（「签下确认」+ 确认/取消，默认焦点在确认，2026-11-04 实机）：
+    /// 只要标题词命中即可——弹窗盖在教练资料页上，资料页底栏「RT 确认选择」仍可读，
+    /// 靠标题词与资料页区分。处置由场景层按 A（不生效再上移纠正焦点）。
+    /// </summary>
+    public static bool IsSignConfirmPopup(OcrResult ocr) => ocr.ContainsJoined("签下确认");
 
     // ---------------- 选择比赛难度页（2026-10-17 实机 cn_tour_difficulty.png） ----------------
 

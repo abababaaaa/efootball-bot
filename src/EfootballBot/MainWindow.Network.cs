@@ -117,6 +117,104 @@ public partial class MainWindow
         }
         RefreshGitPortState();
         UpdateServerSummary();
+        RefreshLineState();
+    }
+
+    // ---------------- 对战线路（强制 P2P / 更新服加速） ----------------
+
+    private bool _lineBusy;
+    private string _lineNotice = "";   // 上一次操作的结果（与状态摘要一起显示，避免被刷新覆盖）
+
+    /// <summary>实读状态（netsh 查规则 ~100ms，放后台）：规则是否存在、hosts 是否已改。</summary>
+    private void RefreshLineState()
+    {
+        if (_lineBusy) return;
+        _ = Task.Run(() => (P2P: ForcedP2P.IsEnabled, Tcp: ForcedP2P.TcpEnabled,
+                Hosts: UpdateHostsOptimizer.IsApplied, Ip: UpdateHostsOptimizer.CurrentIp))
+            .ContinueWith(t => Dispatcher.BeginInvoke(() =>
+            {
+                var r = t.Result;
+                BtnP2PToggle.Content = r.P2P ? "关闭强制 P2P" : "启用强制 P2P";
+                DotP2P.Fill = r.P2P ? BrushOk : BrushIdle;
+                if (r.P2P) ChkP2PTcp.IsChecked = r.Tcp;   // 规则已启用时回填实际状态
+                TxtP2PState.Text = r.P2P
+                    ? (r.Tcp ? "已启用（UDP + TCP）" : "已启用（仅 UDP）")
+                    : "未启用";
+                string status = r.Hosts
+                    ? $"更新服加速：hosts 已指向 {r.Ip ?? "—"}。"
+                    : "更新服加速：未应用。";
+                TxtLineDetail.Text = _lineNotice.Length == 0 ? status : _lineNotice + "\n" + status;
+            }));
+    }
+
+    private async void BtnP2PToggle_Click(object sender, RoutedEventArgs e)
+    {
+        if (_lineBusy) return;
+        _lineBusy = true;
+        BtnP2PToggle.IsEnabled = false;
+        try
+        {
+            bool on = await Task.Run(() => ForcedP2P.IsEnabled);
+            string? hint = global::System.IO.Path.GetDirectoryName(_cfg.GamePaths.IntlSettingsTool ?? "");
+            var (ok, msg) = await Task.Run(() =>
+            {
+                if (on) return ForcedP2P.Disable();
+                string? exe = ForcedP2P.ResolveGameExe(hint);
+                if (exe is null)
+                    return (false, "未定位到国际服游戏本体（eFootball.exe）：先启动一次游戏，或先点「打开设置工具」形成路径记忆。");
+                return ForcedP2P.Enable(exe, ChkP2PTcp.IsChecked == true);
+            });
+            _lineNotice = msg;
+            AppendLog(ok ? $"强制 P2P：{msg}" : $"强制 P2P 失败：{msg}",
+                ok ? LogLevel.Success : LogLevel.Warn);
+        }
+        finally
+        {
+            _lineBusy = false;
+            BtnP2PToggle.IsEnabled = true;
+            RefreshLineState();
+        }
+    }
+
+    private async void BtnUpdateHosts_Click(object sender, RoutedEventArgs e)
+    {
+        if (_lineBusy) return;
+        _lineBusy = true;
+        BtnUpdateHosts.IsEnabled = false;
+        try
+        {
+            TxtLineDetail.Text = "正在测速更新 CDN…";
+            string result = await Task.Run(UpdateHostsOptimizer.Apply);
+            _lineNotice = result.Replace('\n', ' ').Trim();
+            TxtLineDetail.Text = _lineNotice;
+            AppendLog("更新服加速：" + (result.Split('\n').LastOrDefault(l => l.Length > 0) ?? ""),
+                result.Contains("失败") || result.Contains("未修改") ? LogLevel.Warn : LogLevel.Success);
+        }
+        finally
+        {
+            _lineBusy = false;
+            BtnUpdateHosts.IsEnabled = true;
+            RefreshLineState();
+        }
+    }
+
+    private async void BtnUpdateHostsRestore_Click(object sender, RoutedEventArgs e)
+    {
+        if (_lineBusy) return;
+        _lineBusy = true;
+        BtnUpdateHostsRestore.IsEnabled = false;
+        try
+        {
+            var (ok, msg) = await Task.Run(UpdateHostsOptimizer.Restore);
+            _lineNotice = msg;
+            AppendLog(msg, ok ? LogLevel.Info : LogLevel.Warn);
+        }
+        finally
+        {
+            _lineBusy = false;
+            BtnUpdateHostsRestore.IsEnabled = true;
+            RefreshLineState();
+        }
     }
 
     private void RefreshGitPortState()

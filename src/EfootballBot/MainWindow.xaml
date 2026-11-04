@@ -2378,7 +2378,35 @@
                             </Grid>
                             <Canvas x:Name="CvIgSpark" Height="64" Margin="0,10,0,4" ClipToBounds="True"/>
                             <TextBlock x:Name="TxtIgDetail" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"
-                                       Margin="0,2,0,0" TextWrapping="Wrap" Text="点「启动监控」后，进比赛会自动认出服务器连接。"/>
+                                       Margin="0,2,0,0" TextWrapping="Wrap" Text="点「启动监控」后，进比赛会自动认出服务器连接；每场结束自动追加 data\network\matchlog.csv。"/>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- ===== 对战线路（强制 P2P / 更新服加速，均需管理员） ===== -->
+                    <Border Style="{StaticResource Card}" Margin="0,12,0,0">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Style="{StaticResource H2}">对战线路</TextBlock>
+                                <Ellipse x:Name="DotP2P" Width="8" Height="8" Margin="12,0,6,0"
+                                         VerticalAlignment="Center" Fill="{DynamicResource EnvDotIdle}"/>
+                                <TextBlock x:Name="TxtP2PState" Text="未启用" FontSize="12"
+                                           VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"/>
+                            </StackPanel>
+                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
+                                       Text="强制 P2P：屏蔽游戏到测速服务器的 UDP 端口（5521 / 10000 / 30000 / 50000），让匹配走点对点。匹配等待会明显变长，不想用随时关闭。规则写在 Windows 防火墙并绑定 eFootball.exe，删除即还原。更新服加速：给科乐美更新 CDN 选最快边缘 IP 写 hosts（可一键还原）。两项都需要以管理员身份运行本程序。"/>
+                            <WrapPanel Margin="0,10,0,0">
+                                <Button x:Name="BtnP2PToggle" Content="启用强制 P2P" Style="{StaticResource GhostBtn}"
+                                        Padding="14,7" Click="BtnP2PToggle_Click"/>
+                                <CheckBox x:Name="ChkP2PTcp" Content="同时屏蔽 TCP 服务器模式" VerticalAlignment="Center"
+                                          Margin="14,0,0,0" FontSize="11.5"/>
+                                <Button x:Name="BtnUpdateHosts" Content="更新服测速加速" Style="{StaticResource GhostBtn}"
+                                        Padding="14,7" Margin="18,0,0,0" Click="BtnUpdateHosts_Click"/>
+                                <Button x:Name="BtnUpdateHostsRestore" Content="还原 hosts" Style="{StaticResource GhostBtn}"
+                                        Padding="12,5" Margin="10,0,0,0" Click="BtnUpdateHostsRestore_Click"/>
+                            </WrapPanel>
+                            <TextBlock x:Name="TxtLineDetail" FontSize="11.5" Foreground="{DynamicResource TextMuted}"
+                                       Margin="0,8,0,0" TextWrapping="Wrap"/>
                         </StackPanel>
                     </Border>
                 </StackPanel>
