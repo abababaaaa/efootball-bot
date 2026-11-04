@@ -31,6 +31,11 @@ public partial class MainWindow
         public string Label { get; init; } = "";
         public string Kind { get; init; } = "";
 
+        // 排序键：IP 补零成定长字符串（按数值从大到小才对）、延迟把「未测/无响应」沉到最后
+        public string SortLabel => Label;
+        public string SortIp => string.Join(".", Ip.Split('.').Select(p => p.PadLeft(3, '0')));
+        public int SortMs => Ms == int.MinValue ? int.MaxValue : Ms < 0 ? int.MaxValue - 1 : Ms;
+
         private string _ip = "";
         public string Ip { get => _ip; set { _ip = value; Raise(nameof(Ip)); } }
 
@@ -95,6 +100,9 @@ public partial class MainWindow
             }
             LvGithub.ItemsSource = _githubRows;
             LvServers.ItemsSource = _serverRows;
+            // 点表头排序（名称/IP/类型/延迟，再点一次反向）
+            LvServers.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler(ColumnHeader_Click));
+            LvGithub.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler(ColumnHeader_Click));
             var view = (System.ComponentModel.ICollectionView)LvServers.Items;
             view.Filter = o =>
             {
@@ -115,12 +123,55 @@ public partial class MainWindow
     {
         if (_gitPortBusy) return;
         bool running = GitPortManager.IsRunning;
-        DotGitPort.Fill = GitPortManager.IsWorkbenchUp ? BrushOk : running ? (Brush)Application.Current.Resources["Warning"] : BrushIdle;
-        TxtGitPortState.Text = !GitPortManager.IsInstalled ? "内核未下载"
-            : GitPortManager.IsWorkbenchUp ? "运行中 · 工作台就绪"
-            : running ? "启动中…" : "未运行";
-        BtnGitPortAction.Content = !GitPortManager.IsInstalled ? "下载内核"
-            : running ? "停止加速" : "启动加速";
+        bool installed = GitPortManager.IsInstalled;
+        BtnGitPortAction.Content = !installed ? "下载内核" : running ? "停止加速" : "启动加速";
+        if (!installed) { DotGitPort.Fill = BrushIdle; TxtGitPortState.Text = "内核未下载"; return; }
+        if (!running) { DotGitPort.Fill = BrushIdle; TxtGitPortState.Text = "未运行"; return; }
+        // 工作台端口探测最长 400ms：放后台，避免切页时界面卡一下
+        DotGitPort.Fill = (Brush)Application.Current.Resources["Warning"];
+        TxtGitPortState.Text = "检测工作台…";
+        _ = Task.Run(() => GitPortManager.IsWorkbenchUp).ContinueWith(t => Dispatcher.BeginInvoke(() =>
+        {
+            bool up = t.Result;
+            DotGitPort.Fill = up ? BrushOk : (Brush)Application.Current.Resources["Warning"];
+            TxtGitPortState.Text = up ? "运行中 · 工作台就绪" : "启动中（工作台未就绪）";
+        }));
+    }
+
+    // 表头排序：两列映射到 VM 属性；延迟列把未测(-int.MinValue)排最后
+    private string _sortKey = "";
+    private bool _sortDesc;
+
+    private void ColumnHeader_Click(object sender, RoutedEventArgs e)
+    {
+        if (e.OriginalSource is not GridViewColumnHeader { Column: { } col } h) return;
+        // 表头带过 ▲/▼ 标记，映射前先剥掉
+        string header = (col.Header as string ?? "").TrimEnd('▲', '▼', ' ');
+        string? key = header switch
+        {
+            "名称" or "域名" => "SortLabel",
+            "IP" => "SortIp",
+            "类型" => "Kind",
+            "延迟" => "SortMs",
+            _ => null,
+        };
+        if (key is null) return;
+        var list = ReferenceEquals(sender, LvGithub) ? LvGithub : LvServers;
+        if (_sortKey == key) _sortDesc = !_sortDesc; else { _sortKey = key; _sortDesc = false; }
+        var view = System.Windows.Data.CollectionViewSource.GetDefaultView(list.ItemsSource);
+        view.SortDescriptions.Clear();
+        view.SortDescriptions.Add(new System.ComponentModel.SortDescription(key,
+            _sortDesc ? System.ComponentModel.ListSortDirection.Descending
+                      : System.ComponentModel.ListSortDirection.Ascending));
+        view.Refresh();
+
+        // 表头小箭头：当前排序列表头显示 ▲/▼
+        foreach (GridViewColumn c in ((GridView)list.View).Columns)
+        {
+            string baseText = (c.Header as string ?? "").TrimEnd('▲', '▼', ' ');
+            if (c == col) c.Header = baseText + (_sortDesc ? " ▼" : " ▲");
+            else c.Header = baseText;
+        }
     }
 
     // ---------------- GitPort ----------------
@@ -136,10 +187,12 @@ public partial class MainWindow
                 BtnGitPortAction.IsEnabled = false;
                 TxtGitPortStatus.Text = "正在下载 GitPort 内核（走镜像链，约 8 MB）…";
                 AppendLog("开始下载 GitPort GitHub 加速内核…", LogLevel.Info);
+                bool downloading = true;
                 await GitPortManager.DownloadAsync(
-                    s => Dispatcher.BeginInvoke(() => TxtGitPortStatus.Text = s),
+                    s => Dispatcher.BeginInvoke(() => { if (downloading) TxtGitPortStatus.Text = s; }),
                     System.Threading.CancellationToken.None);
-                TxtGitPortStatus.Text = "内核下载完成。";
+                downloading = false;
+                TxtGitPortStatus.Text = "内核下载完成，点「启动加速」即可。";
                 AppendLog($"GitPort 内核下载完成（{GitPortManager.Version}）", LogLevel.Success);
             }
             else if (GitPortManager.IsRunning)

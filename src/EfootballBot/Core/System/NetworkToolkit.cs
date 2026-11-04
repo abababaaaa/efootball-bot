@@ -553,18 +553,33 @@ public static class GitPortManager
                 using var resp = await http.GetAsync(u, HttpCompletionOption.ResponseHeadersRead, ct);
                 resp.EnsureSuccessStatusCode();
                 long total = resp.Content.Headers.ContentLength ?? 8_353_280;
-                await using var src = await resp.Content.ReadAsStreamAsync(ct);
-                await using var dst = new FileStream(tmp, FileMode.Create, FileAccess.Write);
-                var buf = new byte[81920];
-                long done = 0; int n;
-                while ((n = await src.ReadAsync(buf, ct)) > 0)
+
+                long done = 0;
+                // ★句柄必须先关再 Move：Windows 上拿着未释放的写句柄，File.Move 会直接 IOException，
+                //   表现为「进度到 8/8 MB 但状态还是未下载」（每个镜像都重下一遍）
+                await using (var src = await resp.Content.ReadAsStreamAsync(ct))
+                await using (var dst = new FileStream(tmp, FileMode.Create, FileAccess.Write, FileShare.None))
                 {
-                    await dst.WriteAsync(buf.AsMemory(0, n), ct);
-                    done += n;
-                    progress?.Invoke($"已下载 {done / 1048576.0:0.0} / {total / 1048576.0:0.0} MB");
+                    var buf = new byte[81920];
+                    int n;
+                    while ((n = await src.ReadAsync(buf, ct)) > 0)
+                    {
+                        await dst.WriteAsync(buf.AsMemory(0, n), ct);
+                        done += n;
+                        progress?.Invoke($"已下载 {done / 1048576.0:0.0} / {total / 1048576.0:0.0} MB");
+                    }
                 }
+
+                // 校验：够大 + 是 PE 文件（防镜像返回 HTML 错误页）
                 if (done < 1_000_000) throw new IOException($"文件不完整（{done} 字节）");
+                using (var fs = File.OpenRead(tmp))
+                {
+                    var head = new byte[2];
+                    if (fs.Read(head, 0, 2) < 2 || head[0] != 0x4D || head[1] != 0x5A)
+                        throw new IOException("下载内容不是可执行文件（镜像返回了错误页）");
+                }
                 File.Move(tmp, ExePath, true);
+                progress?.Invoke("内核已就绪");
                 return;
             }
             catch (OperationCanceledException) { try { File.Delete(tmp); } catch { } throw; }
