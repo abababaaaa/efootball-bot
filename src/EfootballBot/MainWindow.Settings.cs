@@ -807,62 +807,6 @@ public partial class MainWindow
         }
     }
 
-    private async void BtnOptimizeGitHub_Click(object sender, RoutedEventArgs e)
-    {
-        BtnOptimizeGitHub.IsEnabled = false;
-        PbGitHub.Visibility = Visibility.Visible;
-        PbGitHub.IsIndeterminate = true;
-        TxtGitHubStatus.Text = "正在优化 GitHub 直连（测速约 10~30 秒）…";
-
-        try
-        {
-            if (!GitHostsOptimizer.IsAdministrator())
-            {
-                // 非管理员：UAC 提权重新运行自身离线执行，结果写临时文件后读回
-                TxtGitHubStatus.Text = "需要管理员权限，请在弹出的授权窗口确认…";
-                string report = Path.Combine(AppPaths.TempDir, $"ghopt_{Guid.NewGuid():N}.txt");
-                Process.Start(new ProcessStartInfo
-                {
-                    FileName = Environment.ProcessPath!,
-                    Arguments = $"--optimize-github --report \"{report}\"",
-                    Verb = "runas",
-                    UseShellExecute = true,
-                });
-
-                var sw = Stopwatch.StartNew();
-                while (sw.Elapsed.TotalSeconds < 120 && !File.Exists(report))
-                    await Task.Delay(500);
-
-                if (File.Exists(report))
-                {
-                    TxtGitHubStatus.Text = File.ReadAllText(report);
-                    AppendLog("GitHub 直连优化完成（管理员进程）。", LogLevel.Success);
-                }
-                else
-                {
-                    TxtGitHubStatus.Text = "优化未完成：可能已取消授权或超时。";
-                }
-                try { File.Delete(report); } catch { }
-            }
-            else
-            {
-                string result = await Task.Run(GitHostsOptimizer.Optimize);
-                TxtGitHubStatus.Text = result;
-                AppendLog("GitHub 直连优化完成。", LogLevel.Success);
-            }
-        }
-        catch (Exception ex)
-        {
-            TxtGitHubStatus.Text = $"优化失败：{ex.Message}";
-        }
-        finally
-        {
-            PbGitHub.Visibility = Visibility.Collapsed;
-            PbGitHub.IsIndeterminate = false;
-            BtnOptimizeGitHub.IsEnabled = true;
-        }
-    }
-
     /// <summary>启动时自动检查（异步，不阻塞）。</summary>
     public async Task AutoCheckUpdateOnStartupAsync()
     {

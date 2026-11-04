@@ -2519,32 +2519,6 @@
                             </Border>
                         </StackPanel>
                     </Border>
-
-                    <!-- ===== 网络优化（GitHub 直连） ===== -->
-                    <Border Style="{StaticResource Card}">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                <Ellipse Width="9" Height="9" Fill="#FF4FA8E0" VerticalAlignment="Center" Margin="0,0,9,1"/>
-                                <TextBlock Text="网络优化" FontSize="14" FontWeight="Bold"/>
-                            </StackPanel>
-                                                        <Grid Margin="0,7,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                            <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="GitHub 无法直连时，可"/><Run Text="一键指向测速最快的 IP"/><Run Text="（修改 "/><Run Text="hosts" Foreground="{DynamicResource Warning}"/><Run Text="）"/></TextBlock>
-                            </Grid>
-                            <Button x:Name="BtnOptimizeGitHub" Content="一键优化 GitHub 直连" Style="{StaticResource PrimaryBtn}"
-                                    HorizontalAlignment="Left" Margin="0,10,0,0" Click="BtnOptimizeGitHub_Click"/>
-                            <ProgressBar x:Name="PbGitHub" Margin="0,10,0,0" Visibility="Collapsed"/>
-                            <TextBlock x:Name="TxtGitHubStatus" Text="" Foreground="{DynamicResource TextSecondary}"
-                                       FontSize="11.5" Margin="0,6,0,0" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </Border>
                 </StackPanel>
             </ScrollViewer>
 
