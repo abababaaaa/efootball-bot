@@ -21,8 +21,8 @@ namespace EfootballBot;
 
 public partial class MainWindow
 {
-    // 左栏导航模式：游戏模块 / 设置 / 更新 / 网络 / 日志历史 / 反馈 / 关于
-    private enum NavMode { Game, Settings, Update, Network, LogViewer, Feedback, About }
+    // 左栏导航模式：游戏模块 / 设置 / 更新 / GitHub / 网络监测 / 日志历史 / 反馈 / 关于
+    private enum NavMode { Game, Settings, Update, GitHub, Network, LogViewer, Feedback, About }
     private NavMode _currentNav = NavMode.Game;
 
     private void RbModule_Checked(object sender, RoutedEventArgs e)
@@ -226,6 +226,7 @@ public partial class MainWindow
         bool isGame = mode == NavMode.Game;
         bool isSettings = mode == NavMode.Settings;
         bool isUpdate = mode == NavMode.Update;
+        bool isGitHub = mode == NavMode.GitHub;
         bool isNetwork = mode == NavMode.Network;
         bool isLog = mode == NavMode.LogViewer;
         bool isFeedback = mode == NavMode.Feedback;
@@ -241,7 +242,10 @@ public partial class MainWindow
         // 更新面板
         UpdatePanel.Visibility = isUpdate ? Visibility.Visible : Visibility.Collapsed;
 
-        // 网络面板：进入时刷新 GitPort 状态与目标表
+        // GitHub 优化面板
+        GitHubPanel.Visibility = isGitHub ? Visibility.Visible : Visibility.Collapsed;
+
+        // 网络监测面板
         NetworkPanel.Visibility = isNetwork ? Visibility.Visible : Visibility.Collapsed;
 
         // 日志查看器
@@ -258,11 +262,12 @@ public partial class MainWindow
 
         // 切换到日志查看器时刷新文件列表
         if (isLog) RefreshLogFileList();
-        if (isNetwork) { InitNetworkPage(); RefreshGitPortState(); }
+        if (isGitHub || isNetwork) { InitNetworkPage(); RefreshGitPortState(); }
 
         // 左栏工具按钮激活高亮（NavToolBtn 样式识别 Tag=Active）
         BtnSettings.Tag = isSettings ? "Active" : null;
         BtnUpdate.Tag = isUpdate ? "Active" : null;
+        BtnGitHub.Tag = isGitHub ? "Active" : null;
         BtnNetwork.Tag = isNetwork ? "Active" : null;
         BtnLogViewer.Tag = isLog ? "Active" : null;
         BtnFeedback.Tag = isFeedback ? "Active" : null;
@@ -301,6 +306,12 @@ public partial class MainWindow
     private void BtnLogViewer_Click(object sender, RoutedEventArgs e)
     {
         NavigateTo(NavMode.LogViewer);
+    }
+
+    private void BtnGitHub_Click(object sender, RoutedEventArgs e)
+    {
+        SaveUiToConfig();
+        NavigateTo(NavMode.GitHub);
     }
 
     private void BtnNetwork_Click(object sender, RoutedEventArgs e)

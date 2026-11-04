@@ -238,13 +238,22 @@
                             <TextBlock Text="更新" VerticalAlignment="Center" Margin="10,0,0,0"/>
                         </StackPanel>
                     </Button>
+                    <Button x:Name="BtnGitHub" Style="{StaticResource NavToolBtn}" Click="BtnGitHub_Click"
+                            ToolTip="GitHub 加速（GitPort 内核）与 GitHub 域名延迟测速">
+                        <StackPanel Orientation="Horizontal">
+                            <Path Style="{StaticResource IconPath}"
+                                  Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"
+                                  Data="M6.5 3.5v9a3.5 3.5 0 0 0 3.5 3.5h6 M6.5 3.5a2 2 0 1 1 .01 0Z M17.5 5.5a2 2 0 1 1 .01 0Z M17.5 16a2 2 0 1 1 .01 0Z M17.5 5.5v9"/>
+                            <TextBlock Text="GitHub" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                        </StackPanel>
+                    </Button>
                     <Button x:Name="BtnNetwork" Style="{StaticResource NavToolBtn}" Click="BtnNetwork_Click"
-                            ToolTip="GitHub 加速（GitPort）、游戏服务器延迟测试与实时网络监控">
+                            ToolTip="国际服服务器延迟测试与游戏内连接监控（Npcap + 悬浮窗）">
                         <StackPanel Orientation="Horizontal">
                             <Path Style="{StaticResource IconPath}"
                                   Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"
                                   Data="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z M3.4 9.4h17.2 M3.4 14.6h17.2 M12 3a15 15 0 0 1 0 18 M12 3a15 15 0 0 0 0 18"/>
-                            <TextBlock Text="网络" VerticalAlignment="Center" Margin="10,0,0,0"/>
+                            <TextBlock Text="网络监测" VerticalAlignment="Center" Margin="10,0,0,0"/>
                         </StackPanel>
                     </Button>
                     <Button x:Name="BtnLogViewer" Style="{StaticResource NavToolBtn}" Click="BtnLogViewer_Click"
@@ -2147,8 +2156,8 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <!-- ===== 网络面板（GitPort 加速 / 服务器延迟测试 / 实时监控） ===== -->
-            <ScrollViewer x:Name="NetworkPanel" Grid.Row="2" Visibility="Collapsed"
+            <!-- ===== GitHub 优化面板（GitPort 内核 + GitHub 域名测速） ===== -->
+            <ScrollViewer x:Name="GitHubPanel" Grid.Row="2" Visibility="Collapsed"
                           Style="{StaticResource PageScroll}">
                 <StackPanel Margin="0,2,12,0">
 
@@ -2226,6 +2235,13 @@
                             </ListView>
                         </StackPanel>
                     </Border>
+                </StackPanel>
+            </ScrollViewer>
+
+            <!-- ===== 网络监测面板（国际服服务器延迟 + 游戏内连接监控） ===== -->
+            <ScrollViewer x:Name="NetworkPanel" Grid.Row="2" Visibility="Collapsed"
+                          Style="{StaticResource PageScroll}">
+                <StackPanel Margin="0,2,12,0">
 
                     <!-- ===== 国际服网络监测 ===== -->
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12">
