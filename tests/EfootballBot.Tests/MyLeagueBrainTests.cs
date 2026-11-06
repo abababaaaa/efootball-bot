@@ -339,6 +339,26 @@ public class MyLeagueBrainTests
     }
 
     [Fact]
+    public void Classify_SkipBannerGreenCheck_NotConfirmButton()
+    {
+        // 2026-11-06 国服实机：横幅右端绿勾被 YOLO 判成 btn_confirm（0.84~0.89）。
+        // 它落在右上角（中心 x>0.85 / y<0.15），必须从确认按钮计数里剔除——否则 HasConfirm
+        // 会抢先吃掉 InMatch 的跳过分支（按 A 而不是按暂停键），跳过永远不发生。
+        var ocr = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.86, 0.055));
+        var bannerHit = new[] { new YoloDetection("btn_confirm", 0, 0.89f, 0.93, 0.02, 0.06, 0.05) };
+        Assert.Equal(MlScreen.InMatch, MyLeagueBrain.Classify(bannerHit, ocr));
+    }
+
+    [Fact]
+    public void Classify_CenterConfirmButton_StillHasConfirm()
+    {
+        // 真正的确认按钮在画面中部：同屏即使有「跳过比赛」也不能被位置剔除逻辑吞掉
+        var ocr = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.86, 0.055));
+        var centerHit = new[] { new YoloDetection("btn_confirm", 0, 0.89f, 0.42, 0.42, 0.16, 0.08) };
+        Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(centerHit, ocr));
+    }
+
+    [Fact]
     public void Decide_InMatch_SkipBanner_PressesStart()
     {
         // 无帧（词判兜底路径）：横幅词即可触发

@@ -54,6 +54,31 @@ public class CnMatchSkipRealFrameTests
         Assert.Equal(MlActionKind.PadStartPress, action.Kind);
     }
 
+    // 2026-11-06 实机帧（国服周活动·挑战赛，MIL 7-0 MDC 87:13）：新 UI 横幅「☰ 跳过比赛 ✅」。
+    // 挑战赛自 2026-11-06 起也允许跳（用户决定），此帧必须仍判 InMatch 且允许时按暂停键。
+    // 同帧还验证了绿勾像素（105 ≥ 30）与「跳过比赛」词都还在——新 UI 没把它们改掉。
+    [Fact]
+    public async Task SkipBanner_NewUi20261106_Frame_TriggersStart_WhenAllowed()
+    {
+        using var ocr = new OcrRecognizer();
+        var data = LoadPngBgra(Path.Combine(CnDir, "cn_skip_banner_20261106.png"), out int w, out int h);
+        var frame = new FrameData(data, w, h, 0);
+        var ocrRes = await ocr.RecognizeAsync(frame);
+
+        var screen = MyLeagueBrain.Classify(Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
+        _out.WriteLine($"screen={screen} 跳过比赛={ocrRes.ContainsJoined("跳过比赛")} " +
+                       $"绿勾={RegionProbe.CountGreenRef(frame, 0.930, 0.990, 0.015, 0.095)}");
+
+        Assert.Equal(MlScreen.InMatch, screen);
+        Assert.True(ocrRes.ContainsJoined("跳过比赛"), "新 UI 横幅仍应读到「跳过比赛」");
+        Assert.True(MyLeagueBrain.SkipBannerHasCheck(frame), "横幅右端绿勾仍在（绿像素 ≥30）");
+        Assert.Equal(MlActionKind.PadStartPress,
+            MyLeagueBrain.Decide(screen, ocrRes, 2, frame: frame, allowMatchSkip: true).Kind);
+        // 挑战赛旧行为（禁跳）仍可复现：显式关闭时不按暂停键
+        Assert.Equal(MlActionKind.MatchIdleTap,
+            MyLeagueBrain.Decide(screen, ocrRes, 2, frame: frame, allowMatchSkip: false).Kind);
+    }
+
     // 实机干扰项：同位置「跳过比赛/累计进球0/3个或以上」目标提示 toast（无绿勾）——
     // 不是可跳横幅，仍判 InMatch 继续挂机，绝不空开暂停菜单
     [Fact]

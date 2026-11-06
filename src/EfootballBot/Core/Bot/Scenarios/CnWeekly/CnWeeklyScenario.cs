@@ -62,6 +62,14 @@ public sealed class CnWeeklyScenario : IScenario
     private readonly BackgroundMouse _mouse = new();
 
     private CwPhase _phase = CwPhase.Flow;
+
+    /// <summary>
+    /// 本场已放弃跳过（2026-11-06 起挑战赛也允许跳）：暂停菜单里没读到「对局获胜」时
+    /// 按 B 回比赛，并把本场标记为"不再尝试"——否则每一帧横幅都会开一次暂停菜单，
+    /// 比赛被反复暂停、永远打不完。新一场开始/本场结束时复位。
+    /// </summary>
+    private bool _skipBlockedThisMatch;
+
     /// <summary>当前阶段累计行动次数（SetPhase 清零；超限 B 逃生防死循环）。</summary>
     private int _attempts;
     /// <summary>阵容页已按 RS 呼出菜单并成功对「活动加成」按 A（阵容页→B 完成 阶段的门）。</summary>
@@ -192,10 +200,12 @@ public sealed class CnWeeklyScenario : IScenario
         if (!wasActive && _matchSession.Active)
         {
             _tourPanelReopens = 0; // 比赛开打：游戏会重置主页焦点，乒乓探测复位
+            _skipBlockedThisMatch = false; // 新一场：重新给一次跳过机会
             _log("[国服周活动] 比赛开始：挂机等待比赛结束（按节奏随机点击）", LogLevel.Info);
         }
         if (matchEnded)
         {
+            _skipBlockedThisMatch = false;
             _engine.Stats.MatchesDone++;
             if (_matchSession.WasKeyMatch) _engine.Stats.KeyMatches++;
             _log($"[国服周活动] 一场比赛结束（累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
@@ -256,8 +266,20 @@ public sealed class CnWeeklyScenario : IScenario
         if (cnWait is not null) return 1500;
         // cw==None 且阶段已交回共享流程：走共用决策（比赛中/终场/弹窗/逃生）
 
+        // 跳过比赛：2026-11-06 用户决定挑战赛也允许跳（旧版按「跳过不计积分」全网禁用）。
+        // 安全性由 MyLeagueBrain 的暂停菜单二次把关保证：只有菜单里出现「对局获胜」
+        // 才真的按跳过，否则 B 返回比赛；且本场只尝试一次（_skipBlockedThisMatch）。
         var action = MyLeagueBrain.Decide(ml, obs.Ocr, _streak, matchContext, obs.Frame,
-            allowMatchSkip: !_challengeMode); // 挑战赛积分制对局禁跳（跳过不计积分）
+            allowMatchSkip: !_skipBlockedThisMatch);
+
+        // 暂停菜单没读到可跳依据（Decide 给了 B 返回比赛）→ 本场不再尝试跳过。
+        // 失败一次就收手：新 UI 的跳过小字若不再是「对局获胜」，继续尝试只会让
+        // 暂停菜单每几秒开一次、比赛永远打不完。
+        if (ml == MlScreen.CnMatchPause && action.Kind == MlActionKind.GamepadBack && !_skipBlockedThisMatch)
+        {
+            _skipBlockedThisMatch = true;
+            _log("[国服周活动] 暂停菜单里没有「对局获胜」（当前不可跳或措辞已变），本场不再尝试跳过", LogLevel.Warn);
+        }
 
         // 标题画面宽限（同国际服周活动场景）：比赛上下文中的「eFootball™+X」帧多为加载画面。
         // 国服赛后品牌过场帧会连续出现 30s 以上，宽限拉长到 90s

@@ -333,8 +333,15 @@ public static class MyLeagueBrain
             ocr.Words.Any(w => w.CenterY < 0.22 && w.NormText.Contains("比赛历史")))
             return MlScreen.MatchHistory;
 
-        // 确认按钮优先于比赛判定：比赛结算/中场页面若同时出现时钟与确定键，按 A 推进
-        if (Count("btn_confirm") >= 1) return MlScreen.HasConfirm;
+        // 确认按钮优先于比赛判定：比赛结算/中场页面若同时出现时钟与确定键，按 A 推进。
+        // ★例外：「跳过比赛✅」横幅右端的绿勾会被 YOLO 判成 btn_confirm（2026-11-06 国服实机
+        //   0.84~0.89）。它固定在右上角（中心 x>0.85 / y<0.15），真正的确认按钮在画面中部/底部，
+        //   两个区域互不重叠。不剔掉这枚检测，HasConfirm 会抢先吃掉 InMatch 的跳过分支——bot 按 A
+        //   而不是按暂停键，跳过永远不发生（用户反馈「国服跳过检测失效」）。
+        //   只在同屏有「跳过比赛」时剔除，其余页面的判定逐字不变。
+        int confirmBtns = Count("btn_confirm");
+        if (ocr.ContainsJoined("跳过比赛")) confirmBtns -= BannerCornerConfirms(dets);
+        if (confirmBtns >= 1) return MlScreen.HasConfirm;
 
         // 赛中/赛后弹窗（2026-10-10 实机截图）：「今天的进球」「比赛回放」弹出即按 A 下一步，
         // 必须先于比赛判定——这两种弹窗背景仍是球场（角区有内容），否则被判 InMatch 干等
@@ -441,8 +448,9 @@ public static class MyLeagueBrain
     /// <paramref name="frame"/> 用于「跳过比赛✅」横幅的绿勾像素核验（同位置还有无勾的
     /// 目标提示 toast，见 InMatch 分支），调用方尽量传入。
     /// <paramref name="allowMatchSkip"/> 为 false 时禁用「跳过比赛」全链路（横幅不按暂停、
-    /// 暂停菜单不点对局获胜）——挑战赛等积分制对局跳过不计积分（用户 2026-10-31 实机：
-    /// 卡 03 跳过一局胜后积分仍 3/4），只有胜负制对局才可跳。
+    /// 暂停菜单不点对局获胜）。2026-10-31 曾按「跳过的对局不计积分」对挑战赛整体禁用；
+    /// 2026-11-06 用户决定挑战赛也放开，改由调用方按"本场已试过一次"动态关闭
+    /// （见 CnWeeklyScenario._skipBlockedThisMatch），保留这个开关作为最后的安全阀。
     /// </summary>
     public static MlAction Decide(MlScreen screen, OcrResult ocr, int screenStreak,
         bool inMatchRecently = false, FrameData? frame = null, bool allowMatchSkip = true)
@@ -704,6 +712,15 @@ public static class MyLeagueBrain
             }
         }
     }
+
+    /// <summary>
+    /// 落在右上角横幅区（中心 x&gt;0.85 / y&lt;0.15）的 btn_confirm 检测数。
+    /// 「跳过比赛✅」横幅右端的绿勾会被 YOLO 当成确认按钮（2026-11-06 实机 0.84~0.89），
+    /// 而真正的确认按钮永远在画面中部/底部——按位置剔除，避免它把整帧从 InMatch 抢成 HasConfirm。
+    /// </summary>
+    internal static int BannerCornerConfirms(IReadOnlyList<YoloDetection> dets)
+        => dets.Count(d => d.ClassName == "btn_confirm" && d.Score >= MinScore &&
+                           d.CenterX > 0.85 && d.CenterY < 0.15);
 
     /// <summary>
     /// 「跳过比赛」横幅右端绿勾核验（≈(0.95,0.05)，实机 2026-10-17 用户截图）：绿像素 ≥30。
