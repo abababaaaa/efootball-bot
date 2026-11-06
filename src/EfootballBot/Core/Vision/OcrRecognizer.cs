@@ -307,23 +307,39 @@ public sealed class OcrRecognizer : IDisposable
     private readonly int _downscaleLongSide;
     private readonly OcrTuning _tuning;
 
+    /// <summary>
+    /// 串行闸（P0-10）：引擎实例现在跨会话复用同一个 OCR 实例（EngineServices），
+    /// 而"停止挂机 → 立刻重新开始"存在极短的窗口——旧引擎可能还在一次推理里，新引擎已经在跑。
+    /// SimdPaddle/RapidOCR 的推理会话不是为并发调用设计的，这里用一把无争用成本的闸把它们排队，
+    /// 从根上消除这类只在快速重启时才出现的偶发异常。
+    /// </summary>
+    private readonly global::System.Threading.SemaphoreSlim _gate = new(1, 1);
+
     /// <summary>最近一帧的行级重读统计（诊断用；未开启行级重读时恒为 default）。</summary>
     public LineReread.Stats LastRereadStats { get; private set; }
 
     public async Task<OcrResult> RecognizeAsync(FrameData frame, CancellationToken ct = default)
     {
-        var scaled = ImageScaling.DownscaleBilinear(frame, _downscaleLongSide);
-        var result = await _backend.RecognizeAsync(scaled, ct).ConfigureAwait(false);
-        if (!_tuning.LineReread || result.Words.Count == 0)
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            LastRereadStats = default;
-            return result;
+            var scaled = ImageScaling.DownscaleBilinear(frame, _downscaleLongSide);
+            var result = await _backend.RecognizeAsync(scaled, ct).ConfigureAwait(false);
+            if (!_tuning.LineReread || result.Words.Count == 0)
+            {
+                LastRereadStats = default;
+                return result;
+            }
+            // 降采样后再重读：坐标口径始终是 scaled 帧，归一化结果与整帧一致
+            var (merged, stats) = await LineReread.ApplyAsync(result, scaled, _backend.RecognizeAsync, _tuning, ct)
+                .ConfigureAwait(false);
+            LastRereadStats = stats;
+            return merged;
         }
-        // 降采样后再重读：坐标口径始终是 scaled 帧，归一化结果与整帧一致
-        var (merged, stats) = await LineReread.ApplyAsync(result, scaled, _backend.RecognizeAsync, _tuning, ct)
-            .ConfigureAwait(false);
-        LastRereadStats = stats;
-        return merged;
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     public void Dispose() => _backend.Dispose();

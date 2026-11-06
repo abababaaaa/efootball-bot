@@ -134,6 +134,27 @@ public sealed class YoloConfig
     public double NmsIou { get; set; } = 0.45;
 }
 
+/// <summary>
+/// OCR 性能档（P0-9）：把已经存在、但此前只有测试工程在用的 OcrTuning 旋钮接到生产配置。
+/// 默认值 = 全关 = 历史行为逐字节一致；用户显式开启后才改变检测参数。
+/// </summary>
+public sealed class OcrPerfConfig
+{
+    /// <summary>
+    /// 检测阶段长边上限（像素）：0 = Sdcb 默认（960）。
+    /// 降到 640 时检测像素量约 -55%，720p 帧上的按钮/状态条文字实测仍可读；
+    /// 更小的美术字/描边字召回会下降，故默认关、由用户在「画面与性能」页自行开启。
+    /// </summary>
+    public int DetLimitSideLength { get; set; }
+
+    /// <summary>难读文本行级重读（碎词行裁切放大重识别）：更准但更慢，默认关。</summary>
+    public bool LineReread { get; set; }
+
+    /// <summary>是否有任何非默认项（UI 回显用；不落盘）。</summary>
+    [JsonIgnore]
+    public bool AnyEnabled => DetLimitSideLength > 0 || LineReread;
+}
+
 /// <summary>训练数据采集配置：把观察帧按间隔存为 JPG（captures\日期\），供 YOLO 标注训练用。</summary>
 public sealed class FrameDumpConfig
 {
@@ -468,6 +489,16 @@ public sealed class ScheduleConfig
 }
 
 /// <summary>
+/// 挂机时的声音策略：只静音游戏（Windows 音频会话级，等价于音量合成器里单独把游戏静音）。
+/// 不动系统音量、不静音其他软件；停止挂机自动恢复。开关挂在每个模块页的「本次运行」栏上。
+/// </summary>
+public sealed class AudioConfig
+{
+    /// <summary>挂机时静音游戏（默认开启；用户随时可在模块页点复选框开关）。</summary>
+    public bool MuteGame { get; set; } = true;
+}
+
+/// <summary>
 /// 完成/异常通知（Webhook）：POST 一段 JSON 到指定 URL。
 /// 兼容 Bark / 飞书 / 钉钉群机器人 / Telegram Bot / ntfy 等常见「一个 URL 搞定」的服务。
 /// 默认关闭且 URL 为空 —— 属于用户主动开启的外发行为，绝不自作主张联网。
@@ -552,6 +583,9 @@ public sealed class AppConfig
     public InferenceConfig Inference { get; set; } = new();
     public YoloConfig Yolo { get; set; } = new();
 
+    /// <summary>OCR 性能档（检测降采样 / 行级重读）：默认全关。</summary>
+    public OcrPerfConfig OcrPerf { get; set; } = new();
+
     // —— 训练数据采集 ——
     public FrameDumpConfig FrameDump { get; set; } = new();
 
@@ -621,6 +655,9 @@ public sealed class AppConfig
     // —— 完成/异常通知 与 局域网监控 ——
     public NotifyConfig Notify { get; set; } = new();
     public MonitorConfig Monitor { get; set; } = new();
+
+    // —— 声音：挂机时只把游戏静音（音频会话级，不动系统音量、不影响其他软件）——
+    public AudioConfig Audio { get; set; } = new();
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {

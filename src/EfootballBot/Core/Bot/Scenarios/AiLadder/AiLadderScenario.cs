@@ -62,6 +62,9 @@ public sealed class AiLadderScenario : IScenario
 
     public string Name => "AI天梯联赛";
 
+    /// <summary>比赛中（供引擎把手柄诊断挡在比赛之外）。</summary>
+    public bool InMatch => _matchSession.Active;
+
     public AiLadderScenario(BotEngine engine, Action<string, LogLevel> log)
     {
         _engine = engine;

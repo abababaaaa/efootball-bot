@@ -56,6 +56,7 @@ public partial class MainWindow : Window
         ThemeManager.ApplyTheme(_cfg.Theme);
 
         LoadConfigToUi();
+        InitGameMute(); // 六个模块页的「挂机时静音游戏」开关回填 + 巡检计时器
 
         // 初始化文件日志（早于 BotEngine 创建，否则第一条日志会丢失）
         FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles, _cfg.LogRetentionDays);
@@ -436,6 +437,7 @@ public partial class MainWindow : Window
                 RefreshRunButtons(); // 刷新三按钮：开始→一键结束，暂停/手动停止启用
                 _statsTimer.Start();
                 AutoOpenPreview(); // 自动开预览（非阻塞，帧看门狗负责重发直到引擎就绪出帧）
+                MuteGameOnScenarioStarted(); // 勾了「挂机时静音游戏」就立刻静音（只静游戏，不动系统音量）
 
                 // 引擎启动后注册全局热键（单热键：第一次暂停，第二次终止）
                 if (_cfg.Hotkey.Enabled)
@@ -647,11 +649,13 @@ public partial class MainWindow : Window
         StMaxed.Text = s.PlayersMaxed.ToString();
         StElapsed.Text = s.StartedAt is null ? "—" : (DateTime.Now - s.StartedAt.Value).ToString(@"hh\:mm\:ss");
         StError.Text = string.IsNullOrEmpty(s.LastError) ? "" : $"最近错误：{s.LastError}";
+        StPerf.Text = string.IsNullOrEmpty(s.PerfNote) ? "" : $"性能：{s.PerfNote}";
 
         // 场景自动结束（正常跑完 / 异常退出）：ScenarioRunning 变 false 后按钮需从"停止"恢复为"开始"
         if (_workerHost is { ScenarioRunning: false } && _statsTimer.IsEnabled)
         {
             _hotkey.Unregister();
+            MuteGameOnScenarioStopped(); // 声音一并恢复（静音只服务于挂机期间）
             AppendLog("场景已结束，自动停止。", LogLevel.Success);
             ResetButtons();
         }
@@ -680,6 +684,14 @@ public partial class MainWindow : Window
         SaveUiToConfig();
         _previewTimer.Stop();
         _statsTimer.Stop();
+        // 静音兜底：关程序时一定把游戏声音还回去（挂机中直接关窗也不会留下静音）
+        _muteTimer.Stop();
+        try
+        {
+            if (_muteApplied) EfootballBot.Core.System.GameAudioMute.Apply(false, out _);
+            _muteApplied = false;
+        }
+        catch { /* 关闭流程不允许被音频异常打断 */ }
         _hotkey.Dispose();
         try { _monitor?.Dispose(); } catch { }
         _monitor = null;

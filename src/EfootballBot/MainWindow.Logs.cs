@@ -190,6 +190,18 @@ public partial class MainWindow
                 AppendLogItem(msg, lv);
     }
 
+    /// <summary>
+    /// 「最近错误」点击（P2-20）：把右侧运行日志的过滤档切到「报错与提醒」。
+    /// 旧实现这行字只是死的文本，用户要自己找下拉、再翻——排障第一步就卡住。
+    /// 不跳页：运行日志就在右栏，切档后现场日志立刻只剩 Warn/Error。
+    /// </summary>
+    private void StError_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (string.IsNullOrWhiteSpace(StError.Text)) return;
+        // 2 = Warn（只显示 Warn+Error），与 CmbRuntimeLogFilter 的档位顺序一致
+        if (CmbRuntimeLogFilter.Items.Count > 2) CmbRuntimeLogFilter.SelectedIndex = 2;
+    }
+
     private void BtnClearLog_Click(object sender, RoutedEventArgs e)
     {
         _logBuffer.Clear();
@@ -321,25 +333,12 @@ public partial class MainWindow
             }
 
             // Debug 级 8 小时会话的日志文件可达数十万行，ReadToEnd 全量渲染会内存暴涨 +
-            // UI 冻结——恰是远程排障最需要打开的时刻。只取末尾一段（先数总行数再回读尾部）。
+            // UI 冻结——恰是远程排障最需要打开的时刻。只取末尾一段。
+            // P2-19：旧实现"先数总行数 → 再回读尾部"= 两遍全文件扫描；这里改成单遍流式读取，
+            // 用一个定长环形队列只保留最后 N 行（内存恒定，大文件也只扫一次）。
             const int MaxLoadedLines = 5000;
-            long totalLines = 0;
-            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-            using (var sr = new StreamReader(fs))
-            {
-                while (sr.ReadLine() is not null) totalLines++;
-            }
+            string[] lines = ReadLogTail(path, MaxLoadedLines, out long totalLines);
             long skip = Math.Max(0, totalLines - MaxLoadedLines);
-
-            var tail = new List<string>();
-            using (var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
-            using (var sr = new StreamReader(fs))
-            {
-                for (long i = 0; i < skip; i++) sr.ReadLine();
-                string? l;
-                while ((l = sr.ReadLine()) is not null) tail.Add(l);
-            }
-            string[] lines = tail.ToArray();
 
             int total = 0, shown = 0;
             foreach (var raw in lines)
@@ -398,6 +397,29 @@ public partial class MainWindow
         {
             LogFileStatus.Text = $"读取失败：{ex.Message}";
         }
+    }
+
+    /// <summary>
+    /// 单遍读日志尾部（P2-19）：流式逐行读，定长环形队列只保留最后 maxLines 行。
+    /// 相比旧实现（数一遍总行数 + 再读一遍）少扫一整个文件；几十万行的 Debug 日志从
+    /// 两次 O(n) 变成一次，且内存只与 maxLines 有关。
+    /// </summary>
+    internal static string[] ReadLogTail(string path, int maxLines, out long totalLines)
+    {
+        totalLines = 0;
+        int cap = Math.Max(1, maxLines);
+        var ring = new Queue<string>(cap + 1);
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+        using var sr = new StreamReader(fs, global::System.Text.Encoding.UTF8,
+            detectEncodingFromByteOrderMarks: true, bufferSize: 64 * 1024);
+        string? line;
+        while ((line = sr.ReadLine()) is not null)
+        {
+            totalLines++;
+            if (ring.Count == cap) ring.Dequeue();
+            ring.Enqueue(line);
+        }
+        return ring.ToArray();
     }
 
     private void BtnRefreshLogs_Click(object sender, RoutedEventArgs e)

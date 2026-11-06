@@ -96,7 +96,16 @@ public static class CnWeeklyBrain
         // 挑战卡详情页：巡回赛主页样/杯赛主页样 + 挑战专属词「完成挑战」（2026-10-17 第二周实机）
         bool challengeCardBody = (tourHomeBody || eventHomeBody) && ocr.ContainsJoined("完成挑战");
         bool bracketBody = ocr.ContainsJoined("重置") || ocr.ContainsJoined("冠军杯");
-        bool listBody = ocr.ContainsJoined("对阵电脑") && ocr.ContainsJoined("对阵玩家");
+        // 比赛活动列表：顶部「对阵电脑 / 对阵玩家」两枚页签。★必须限定在屏幕顶部（页签行
+        // y≈0.08）：比赛页的「我的联赛」卡面海报里也有「对阵电脑」四个字（实机 cn_home_match
+        // y≈0.19，回归测试抓到过），不限位置会把主页误判成活动列表。
+        // ★且只读到一枚页签也算（2026-11-05 新 UI 白药丸底页签常漏读一枚，两枚缺整页就落
+        // None → 共享流程当主菜单无限重放主页导航，永远到不了活动列表）；
+        // 再兜底「加入 + 返回 + 奖励」三词同屏（新 UI 卡按钮是 加入，介绍页是 进入+详情 无奖励
+        // 图标行，挑战清单无 加入，不冲突）。
+        bool listBody = HasTopTabWord(ocr, "对阵电脑") || HasTopTabWord(ocr, "对阵玩家") ||
+                        (ocr.ContainsJoined("加入") && ocr.ContainsJoined("返回") &&
+                         ocr.ContainsJoined("奖励"));
         bool introBody = ocr.ContainsJoined("详情") && ocr.ContainsJoined("进入");
         // 挑战清单选卡页：标题「挑战清单」强特征；标题漏读时大字卡号带+底栏返回兜底
         bool challengeBody = ocr.ContainsJoined("挑战清单") || HasChallengeListCardNumbers(ocr);
@@ -221,6 +230,34 @@ public static class CnWeeklyBrain
 
     /// <summary>顶部页签行通用特征（共享实现见 <see cref="RegionProbe.HasTopTabs"/>）。</summary>
     public static bool HasTopTabs(OcrResult ocr) => RegionProbe.HasTopTabs(ocr);
+
+    /// <summary>
+    /// 是否「国服主页样」页面（推荐/比赛两个页签的任一内容可由下面的词判定）。用于主页导航
+    /// 前的安全检查：只有确认是主页才允许按 上×2→下→左→A 的盲序列；识别不出的页面（过场、
+    /// 弹窗、进错模式）按这套按键会把焦点推到不可控的地方（2026-11-05 实机：未知页被当主菜单
+    /// 无限重放三拍导航）。页签行本身、首页磁贴、比赛页卡片词任一组命中即认。
+    /// </summary>
+    public static bool LooksLikeCnHome(OcrResult ocr) =>
+        HasTopTabs(ocr) ||
+        ocr.ContainsJoined("活动中心") || ocr.ContainsJoined("我的球队") ||
+        ocr.ContainsJoined("天梯巅峰赛") || ocr.ContainsJoined("比赛活动") ||
+        ocr.ContainsJoined("训练手册");
+
+    /// <summary>活动列表页顶部页签词（限定 y&lt;0.15 的页签行：比赛页「我的联赛」卡面海报里
+    /// 同样印着「对阵电脑」，不限位置会误判）。</summary>
+    private static bool HasTopTabWord(OcrResult ocr, string keyword)
+    {
+        foreach (var w in ocr.MergedWords)
+            if (w.CenterY < 0.15 &&
+                w.NormText.Contains(keyword, StringComparison.OrdinalIgnoreCase))
+                return true;
+        return false;
+    }
+
+    /// <summary>比赛活动列表页特征（同 <see cref="Classify"/> 的列表判定，供场景层单独查询）。</summary>
+    public static bool LooksLikeEventList(OcrResult ocr) =>
+        HasTopTabWord(ocr, "对阵电脑") || HasTopTabWord(ocr, "对阵玩家") ||
+        (ocr.ContainsJoined("加入") && ocr.ContainsJoined("返回") && ocr.ContainsJoined("奖励"));
 
     /// <summary>RS 菜单中「活动加成」选项行号（0 起，自上而下：无变更/重视能力值/重视能力值心有灵犀/活动加成）。
     /// 光标默认在第 1 项「无变更」（实机帧验证），按 Down×3 到「活动加成」。</summary>

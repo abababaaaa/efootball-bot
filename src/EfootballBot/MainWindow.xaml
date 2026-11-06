@@ -530,6 +530,11 @@
                                         HorizontalAlignment="Left" Margin="-4,8,0,0"
                                         Padding="8,4" IsEnabled="False" Click="BtnStep_Click"
                                         ToolTip="暂停时执行一轮「观察 + 决策」后继续暂停：看 Bot 对当前画面打算做什么，且只做一步"/>
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
+                                <!-- 静音开关：6 个模块页各一份，共用同一配置，点它随时开关游戏声音 -->
+                                <CheckBox x:Name="ChkMuteMyLeague" Content="挂机时静音游戏" Margin="2,0,0,0"
+                                          Checked="ChkMuteGame_Toggled" Unchecked="ChkMuteGame_Toggled"
+                                          ToolTip="开始挂机后只把游戏的声音静音（系统音量与其他软件不受影响）；点它随时开关游戏声音，停止挂机自动恢复"/>
                             </StackPanel>
                         </Border>
                     </Grid>
@@ -736,6 +741,10 @@
                                             Style="{StaticResource DangerOutlineBtn}" Height="30" Margin="0,6,0,0"
                                             IsEnabled="False" Click="BtnManualStop_Click"
                                             ToolTip="停止挂机并自动截取当前游戏画面，生成反馈包发给作者"/>
+                                    <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
+                                    <CheckBox x:Name="ChkMuteWeekly" Content="挂机时静音游戏" Margin="2,0,0,0"
+                                              Checked="ChkMuteGame_Toggled" Unchecked="ChkMuteGame_Toggled"
+                                              ToolTip="开始挂机后只把游戏的声音静音（系统音量与其他软件不受影响）；点它随时开关游戏声音，停止挂机自动恢复"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -866,6 +875,10 @@
                                             Style="{StaticResource DangerOutlineBtn}" Height="30" Margin="0,6,0,0"
                                             IsEnabled="False" Click="BtnManualStop_Click"
                                             ToolTip="停止挂机并自动截取当前游戏画面，生成反馈包发给作者"/>
+                                    <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
+                                    <CheckBox x:Name="ChkMuteAiLadder" Content="挂机时静音游戏" Margin="2,0,0,0"
+                                              Checked="ChkMuteGame_Toggled" Unchecked="ChkMuteGame_Toggled"
+                                              ToolTip="开始挂机后只把游戏的声音静音（系统音量与其他软件不受影响）；点它随时开关游戏声音，停止挂机自动恢复"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -1091,6 +1104,10 @@
                                             Style="{StaticResource DangerOutlineBtn}" Height="30" Margin="0,6,0,0"
                                             IsEnabled="False" Click="BtnManualStop_Click"
                                             ToolTip="停止挂机并自动截取当前游戏画面，生成反馈包发给作者"/>
+                                    <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
+                                    <CheckBox x:Name="ChkMuteCn" Content="挂机时静音游戏" Margin="2,0,0,0"
+                                              Checked="ChkMuteGame_Toggled" Unchecked="ChkMuteGame_Toggled"
+                                              ToolTip="开始挂机后只把游戏的声音静音（系统音量与其他软件不受影响）；点它随时开关游戏声音，停止挂机自动恢复"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -1185,6 +1202,10 @@
                                             Style="{StaticResource DangerOutlineBtn}" Height="30" Margin="0,6,0,0"
                                             IsEnabled="False" Click="BtnManualStop_Click"
                                             ToolTip="停止挂机并自动截取当前游戏画面，生成反馈包发给作者"/>
+                                    <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
+                                    <CheckBox x:Name="ChkMuteCnWeekly" Content="挂机时静音游戏" Margin="2,0,0,0"
+                                              Checked="ChkMuteGame_Toggled" Unchecked="ChkMuteGame_Toggled"
+                                              ToolTip="开始挂机后只把游戏的声音静音（系统音量与其他软件不受影响）；点它随时开关游戏声音，停止挂机自动恢复"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -1317,6 +1338,10 @@
                                             Style="{StaticResource DangerOutlineBtn}" Height="30" Margin="0,6,0,0"
                                             IsEnabled="False" Click="BtnManualStop_Click"
                                             ToolTip="停止挂机并自动截取当前游戏画面，生成反馈包发给作者"/>
+                                    <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
+                                    <CheckBox x:Name="ChkMuteCnMyLeague" Content="挂机时静音游戏" Margin="2,0,0,0"
+                                              Checked="ChkMuteGame_Toggled" Unchecked="ChkMuteGame_Toggled"
+                                              ToolTip="开始挂机后只把游戏的声音静音（系统音量与其他软件不受影响）；点它随时开关游戏声音，停止挂机自动恢复"/>
                                 </StackPanel>
                             </Border>
                         </Grid>
@@ -1772,9 +1797,34 @@
                                 <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
                             <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="识别频率为"/><Run Text="最短间隔"/><Run Text="，实际节奏 = 设定值与引擎单帧耗时取大者（SimdPaddle ≈1.1s，RapidOCR ≈1.8s），换引擎自动跟随"/></TextBlock>
+                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="识别频率为"/><Run Text="最短间隔"/><Run Text="，实际节奏 = 设定值与引擎单帧耗时取大者（具体耗时见右栏「性能」行，随机器差异很大），换引擎自动跟随"/></TextBlock>
                             <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
                             <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="比赛画面文字为零时自动放宽 3 倍（封顶 5s），弹窗一出现立即恢复"/></TextBlock>
+                            </Grid>
+                            <!-- OCR 性能档（P0-9）：把 DetLimitSideLength 这个原本只有测试工程在用的旋钮接到界面，
+                                 默认关 = 历史行为；开启后检测阶段长边上限 960→640，检测像素量约 -55%。
+                                 生效点：引擎启动时读取配置并构造 OcrRecognizer，所以"下次开始挂机"才生效。 -->
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <TextBlock Text="OCR 性能档" Style="{StaticResource FieldLabel}" Width="104" VerticalAlignment="Center"/>
+                                <ComboBox x:Name="CmbOcrPerf" Width="230" Margin="10,0,0,0" SelectedIndex="0"
+                                          ToolTip="提速档把检测阶段长边上限从 960 降到 640。实机帧 A/B：单帧快约 35%（259→174ms / 352→241ms），代价是密集页面的小字召回下降（约少 15~25% 词）。按钮/标题这类大字仍稳定可读，建议只在识别偶发超时时试用。下次开始挂机生效。">
+                                    <ComboBoxItem Content="默认（精度优先）"/>
+                                    <ComboBoxItem Content="提速（检测 640，快约 1/3）"/>
+                                </ComboBox>
+                            </StackPanel>
+                            <Grid Margin="0,6,0,0">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                            <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="提速档只改"/><Run Text="检测"/><Run Text="阶段分辨率，识别模型与判定逻辑完全不变；遇到漏读可一键切回默认"/></TextBlock>
+                            <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
+                            <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="侧栏会显示每轮分段耗时（取帧/OCR/YOLO/动作），改完可直接对比"/></TextBlock>
                             </Grid>
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                                 <TextBlock Text="预览刷新间隔" Style="{StaticResource FieldLabel}" Width="104" VerticalAlignment="Center"/>
@@ -2720,8 +2770,14 @@
                             </StackPanel>
                         </Border>
                     </Grid>
+                    <!-- P2-20：最近错误可点击 → 切到运行日志的报错档，省掉用户自己找 -->
                     <TextBlock x:Name="StError" Foreground="{DynamicResource Danger}" FontSize="11.5"
-                               TextWrapping="Wrap" Margin="2,7,0,0"/>
+                               TextWrapping="Wrap" Margin="2,7,0,0" Cursor="Hand"
+                               ToolTip="点击查看报错日志"
+                               MouseLeftButtonUp="StError_Click"/>
+                    <!-- 分段耗时（P1-14）：帧/OCR/YOLO/动作，1 分钟刷新一次；空串时不留空行 -->
+                    <TextBlock x:Name="StPerf" Foreground="{DynamicResource TextMuted}" FontSize="10.5"
+                               TextWrapping="Wrap" Margin="2,5,0,0" Text=""/>
                 </StackPanel>
 
                 <!-- 运行日志（占满剩余高度） -->

@@ -36,6 +36,9 @@ public sealed class VigemPad : IVirtualPad
     /// </summary>
     public const short IdentityCode = -31000;
 
+    /// <summary>slot0 被占用时的宽限（毫秒）：等系统把上一个设备/进程占的槽位真正释放。</summary>
+    public const int SlotZeroGraceMs = 3000;
+
     /// <summary>把身份微码打到左摇杆上（之后须用 <see cref="ClearIdentityCode"/> 打回中位）。</summary>
     public void StampIdentityCode() => SetLeftStick(IdentityCode, IdentityCode);
 
@@ -84,9 +87,23 @@ public sealed class VigemPad : IVirtualPad
         if (!IsDriverInstalled())
             throw new InvalidOperationException("未检测到 ViGEmBus 驱动，开始挂机会自动安装（需管理员授权，首次约 10-30 秒）。");
 
-        // slot 0 被占用时虚拟手柄必然分到 slot 1+，游戏不响应 → 直接阻断
-        if (!allowSlot0Occupied && SlotZeroOccupiedMessage(PadBackendProbe.IsSlot0Occupied()) is { } blockMsg)
-            throw new InvalidOperationException(blockMsg);
+        // slot 0 被占用时虚拟手柄必然分到 slot 1+，游戏不响应 → 阻断。
+        // 但要给槽位释放留宽限：上一个 Worker 刚被杀 / 手柄刚拔，「XInput 仍报占用」还会持续
+        // 1~2 秒，立刻抛会让「开始挂机」随机失败一次（用户只看到"虚拟手柄连接失败"）。
+        // 2026-10-24 反馈包（无真实手柄却一直连不上）就是踩在这个窗口上。
+        if (!allowSlot0Occupied)
+        {
+            long started = Environment.TickCount64;
+            while (SlotZeroOccupiedMessage(PadBackendProbe.IsSlot0Occupied()) is { } blockMsg)
+            {
+                if (Environment.TickCount64 - started >= SlotZeroGraceMs)
+                    throw new InvalidOperationException(
+                        blockMsg + Environment.NewLine +
+                        $"（已等待 {SlotZeroGraceMs / 1000} 秒仍未释放）" + Environment.NewLine +
+                        PadDiagnostics.DescribeSlots());
+                Thread.Sleep(150);
+            }
+        }
 
         // 连接前快照已占用槽位，连接后用 XInput 轮询找到新设备，即虚拟手柄真实 slot
         var before = new HashSet<int>();

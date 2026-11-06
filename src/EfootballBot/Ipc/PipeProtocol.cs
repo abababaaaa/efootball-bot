@@ -42,6 +42,8 @@ public static class PipeProtocol
         public int Skipped { get; set; }
         public string? StartedAt { get; set; }    // stats ISO
         public string? LastError { get; set; }
+        /// <summary>分段耗时摘要（stats.perf：引擎 1 分钟刷新一次，GUI 侧栏直显）。</summary>
+        public string? Perf { get; set; }
         public int Pid { get; set; }              // pid：Worker 进程号（跨会话跟踪用）
     }
 
@@ -69,7 +71,7 @@ public static class PipeProtocol
     /// <summary>stop 命令的确认事件：引擎已完全停止。GUI 收到即回收 Worker，不再固定等 5s。</summary>
     public static Msg EvStopped() => new() { Ev = "stopped" };
     public static Msg EvStats(int matches, int keyMatches, int playersMaxed, DateTime? startedAt, string? lastError,
-        int skipped = 0)
+        int skipped = 0, string? perf = null)
         => new()
         {
             Ev = "stats",
@@ -79,6 +81,7 @@ public static class PipeProtocol
             Skipped = skipped,
             StartedAt = startedAt?.ToString("o"),
             LastError = lastError,
+            Perf = perf,
         };
 
     // ---------------- JSON Lines 读写 ----------------

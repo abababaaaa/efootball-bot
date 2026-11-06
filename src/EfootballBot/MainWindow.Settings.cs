@@ -127,6 +127,9 @@ public partial class MainWindow
         // 全权接管（挂机禁用真实手柄）：开关见「手柄接管」卡
         ChkPadTakeover.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
 
+        // OCR 性能档（0=默认 / 1=提速：检测长边 640）
+        CmbOcrPerf.SelectedIndex = _cfg.OcrPerf.DetLimitSideLength > 0 ? 1 : 0;
+
         // OCR 频率
         int[] ocrMsValues = { 500, 900, 1500, 2500, 5000 };
         for (int i = 0; i < ocrMsValues.Length; i++)
@@ -326,6 +329,8 @@ public partial class MainWindow
             int[] ocrMs = { 500, 900, 1500, 2500, 5000 };
             _cfg.Timing.OcrIntervalMs = ocrMs[CmbOcrInterval.SelectedIndex];
         }
+        // OCR 性能档：0=默认（0 = 用 Sdcb 默认 960）/ 1=提速（检测长边 640）
+        _cfg.OcrPerf.DetLimitSideLength = CmbOcrPerf.SelectedIndex == 1 ? 640 : 0;
         if (CmbPreviewInterval.SelectedIndex >= 0)
         {
             int[] pvMs = { 150, 300, 500, 1000, 2000 };
@@ -343,6 +348,8 @@ public partial class MainWindow
         _cfg.Schedule.Enabled = ChkScheduleEnabled.IsChecked == true;
         ApplySchedule(persist: false);
         _cfg.PostMatchActivity.AutoAdvanceWeeklyTasks = ChkPmAutoAdvance.IsChecked == true;
+        // 挂机时静音游戏（六个模块页共用一份；复选框改动时已即时保存，这里兜住"改完直接关窗"）
+        if (ChkMuteMyLeague.IsChecked is bool mutePref) _cfg.Audio.MuteGame = mutePref;
 
         // 我的联赛道具
         _cfg.MyLeague.BuyExpBoost = ChkBuyExpBoost.IsChecked == true;

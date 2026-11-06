@@ -388,7 +388,7 @@ public sealed class WindowCapture : ICaptureProvider
                 // 3s 超时按帧处理失败上报，交给引擎重建/升级捕获设备。
                 var copyTask = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface, BitmapAlphaMode.Premultiplied).AsTask();
                 using var bitmap = copyTask.WaitAsync(TimeSpan.FromSeconds(3)).GetAwaiter().GetResult();
-                var full = ToBgraArray(bitmap, out int w, out int h);
+                var full = ToBgraArrayFast(bitmap, out int w, out int h);
                 // CPU 侧降采样（高≤720）：下游 OCR/ROI 只接触小图，全尺寸数组随本次 GC 释放
                 data = DownscaleIfNeeded(full, w, h, out ow, out oh);
             }
@@ -413,7 +413,59 @@ public sealed class WindowCapture : ICaptureProvider
         }
     }
 
-    /// <summary>把 SoftwareBitmap 像素拷贝成紧密排列的 BGRA 字节数组。</summary>
+    /// <summary>
+    /// SoftwareBitmap → 紧密 BGRA 字节数组（P1-12 快速路径）。
+    ///
+    /// 旧路径 = <c>new Buffer(size)</c> + <c>CopyToBuffer</c> + <c>ToArray</c>：一次 3.5MB 中转
+    /// 分配 + 两次整帧拷贝。这里 LockBuffer 直接拿到原生指针，按行 Marshal.Copy 进目标数组
+    /// （一次分配、一次拷贝）。WinRT 投影对象 QI 到 [ComImport] 接口走 Marshal.GetObjectForIUnknown，
+    /// 与 GpuVideoScalerVortice 取帧纹理同一套路。
+    /// 任何一步失败（接口不可用/容量不符/权限）都回退旧实现——出帧路径绝不能因为优化而变脆。
+    /// </summary>
+    internal static byte[] ToBgraArrayFast(SoftwareBitmap bitmap, out int width, out int height)
+    {
+        width = bitmap.PixelWidth;
+        height = bitmap.PixelHeight;
+        if (bitmap.BitmapPixelFormat != BitmapPixelFormat.Bgra8)
+            throw new InvalidOperationException("仅支持 BGRA8 格式");
+        int rowBytes = width * 4;
+        if (rowBytes <= 0 || height <= 0) return ToBgraArray(bitmap, out width, out height);
+
+        try
+        {
+            var dst = new byte[rowBytes * height];
+            using var buffer = bitmap.LockBuffer(BitmapBufferAccessMode.Read);
+            var plane = buffer.GetPlaneDescription(0);
+            using var reference = buffer.CreateReference();
+            nint punk = Marshal.GetIUnknownForObject(reference);
+            try
+            {
+                var access = (IMemoryBufferByteAccess)Marshal.GetObjectForIUnknown(punk);
+                access.GetBuffer(out nint src, out uint capacity);
+                long need = (long)plane.StartIndex + (long)plane.Stride * height;
+                if (src == nint.Zero || capacity < need)
+                    throw new InvalidOperationException("像素缓冲区不可用");
+
+                for (int y = 0; y < height; y++)
+                {
+                    nint row = IntPtr.Add(src, plane.StartIndex + y * plane.Stride);
+                    Marshal.Copy(row, dst, y * rowBytes, rowBytes);
+                }
+            }
+            finally
+            {
+                Marshal.Release(punk);
+            }
+            return dst;
+        }
+        catch
+        {
+            // 兜底：WinRT 接口细节在不同 Windows 版本上有差异，失败就回到纯托管老路径
+            return ToBgraArray(bitmap, out width, out height);
+        }
+    }
+
+    /// <summary>把 SoftwareBitmap 像素拷贝成紧密排列的 BGRA 字节数组（兼容兜底路径）。</summary>
     internal static byte[] ToBgraArray(SoftwareBitmap bitmap, out int width, out int height)
     {
         if (bitmap.BitmapPixelFormat != BitmapPixelFormat.Bgra8)

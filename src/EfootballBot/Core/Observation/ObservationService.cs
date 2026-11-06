@@ -343,45 +343,73 @@ public sealed class ObservationService : IDisposable
     /// <summary>
     /// 获取一帧新鲜画面并执行 OCR。若距上次 OCR 不足 ocrIntervalMs 且有缓存，则返回缓存结果。
     /// 不含画面分类——由 BotEngine 调用 ProbeEngine 完成。
+    /// 返回值带分段耗时（取帧 / 指纹 / OCR），供引擎做性能埋点（P1-14）。
     /// </summary>
-    public async Task<(FrameData Frame, OcrResult Ocr)> ObserveAsync(CancellationToken ct, int ocrIntervalMs)
+    public async Task<ObserveResult> ObserveAsync(CancellationToken ct, int ocrIntervalMs)
     {
+        long tFrame0 = Environment.TickCount64;
         var f = await WaitForFreshFrameAsync(ct);
+        long frameWaitMs = Environment.TickCount64 - tFrame0;
 
         long now = Environment.TickCount64;
 
         if (now - _lastOcrTick < ocrIntervalMs && _lastOcrFrame is not null)
-            return (_lastOcrFrame, _lastOcr);
+            return new ObserveResult(_lastOcrFrame, _lastOcr, frameWaitMs, 0, 0);
 
-        // 静帧去重：画面与上次 OCR 帧逐字节相同（等待页/静止菜单的常态）→ 识别结果必然
+        // 静帧去重：画面与上次 OCR 帧相同（等待页/静止菜单的常态）→ 识别结果必然
         // 相同，跳过全帧 OCR——PP-OCR CPU 全帧一次几百 ms，是观察循环最大单项 CPU。
         // 命中时返回【新帧】+ 缓存识别，YOLO 仍按新帧节奏跑，不被 OCR 绑死。
-        if (_lastOcrHash is { } lastHash && HashBgra(f.Bgra) == lastHash)
+        // 指纹只算【一次】：旧实现判断时一次、存缓存时又一次，同一帧 3.7MB 白扫两遍。
+        long tHash0 = Environment.TickCount64;
+        ulong hash = HashBgra(f);
+        long hashMs = Environment.TickCount64 - tHash0;
+
+        if (_lastOcrHash is { } lastHash && hash == lastHash)
         {
             _lastOcrTick = now; // 视同一次 OCR 周期，维持节流节奏
-            return (f, _lastOcr);
+            return new ObserveResult(f, _lastOcr, frameWaitMs, hashMs, 0);
         }
 
         await Task.Yield();
+        long tOcr0 = Environment.TickCount64;
         var ocr = await _ocr.RecognizeAsync(f, ct);
+        long ocrMs = Environment.TickCount64 - tOcr0;
         _lastOcrFrame = f;
         _lastOcr = ocr;
-        _lastOcrHash = HashBgra(f.Bgra);
+        _lastOcrHash = hash;
         _lastOcrTick = now;
-        return (f, ocr);
+        return new ObserveResult(f, ocr, frameWaitMs, hashMs, ocrMs);
     }
 
-    /// <summary>帧内容指纹（FNV-1a 64，全字节）。仅用于同帧去重：极小概率的碰撞只是
-    /// 多跑/少跑一次 OCR，不同帧误判同帧的概率 ~2^-64，无正确性风险。</summary>
-    private static ulong HashBgra(byte[] bgra)
+    /// <summary>
+    /// 帧内容指纹（FNV-1a 64，按像素 32 位读取）。
+    /// 仅用于同帧去重：极小概率的碰撞只是多跑/少跑一次 OCR，不同帧误判同帧的概率 ~2^-64，无正确性风险。
+    /// 采样策略：整行读取、隔行取样（1280×720 约 92 万字节 → 约 46 万次异或，实测 &lt;1ms）。
+    /// 只隔行不隔列——横向保留全部像素，1px 宽的闪烁光标也不会漏判；纵向只跳过单行变化
+    /// （文字/按钮/弹窗的像素变化必然跨多行），代价可忽略。
+    /// </summary>
+    internal static ulong HashBgra(FrameData f)
     {
         const ulong offset = 14695981039346656037;
         const ulong prime = 1099511628211;
-        ulong hash = offset;
-        foreach (byte b in bgra)
+        var bgra = f.Bgra;
+        // 帧长必须能被 4 整除才是像素数组（防御：异常帧回落到长度指纹）
+        if (bgra.Length < 8 || (bgra.Length & 3) != 0)
+            return offset ^ (ulong)bgra.Length;
+
+        var px = global::System.Runtime.InteropServices.MemoryMarshal.Cast<byte, uint>(bgra.AsSpan());
+        int w = Math.Max(1, f.Width);
+        int rows = Math.Min(Math.Max(1, f.Height), px.Length / w);
+        ulong hash = offset ^ (ulong)bgra.Length;
+        const int RowStep = 2;
+        for (int y = 0; y < rows; y += RowStep)
         {
-            hash ^= b;
-            hash *= prime;
+            int rowBase = y * w;
+            for (int x = 0; x < w; x++)
+            {
+                hash ^= px[rowBase + x];
+                hash *= prime;
+            }
         }
         return hash;
     }
@@ -404,3 +432,12 @@ public sealed class ObservationService : IDisposable
         GC.SuppressFinalize(this);
     }
 }
+
+
+/// <summary>
+/// 一次观察的产物 + 分段耗时（毫秒）：<see cref="FrameWaitMs"/> 等新鲜帧、
+/// <see cref="HashMs"/> 静态帧指纹、<see cref="OcrMs"/> OCR 推理（0 = 命中缓存未跑）。
+/// 供引擎做性能埋点，不参与任何判定。
+/// </summary>
+public readonly record struct ObserveResult(
+    FrameData Frame, OcrResult Ocr, long FrameWaitMs, long HashMs, long OcrMs);

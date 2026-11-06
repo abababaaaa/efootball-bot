@@ -63,6 +63,39 @@ public class CnWeeklyBrainTests
     }
 
     [Fact]
+    public void Classify_EventsList_SingleTabOnly()
+    {
+        // 2026-11-05 实机（新版 UI 白药丸页签）：另一枚页签漏读时仍须认成活动列表，
+        // 否则整页落 None → 共享流程当主菜单无限重放主页导航，永远到不了活动列表
+        var ocr = Ocr(W("对阵电脑", 0.39, 0.077),
+            W("实况足球 晋级挑战", 0.2, 0.27), W("加入", 0.2, 0.79), W("返回", 0.1, 0.93));
+        Assert.Equal(CwScreen.EventsList, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.True(CnWeeklyBrain.LooksLikeEventList(ocr));
+    }
+
+    [Fact]
+    public void Classify_EventsList_BothTabsMissed_JoinButtonFallback()
+    {
+        // 两枚页签都漏读：卡按钮「加入 + 返回 + 奖励」三词同屏兜底（介绍页/挑战清单无此组合）
+        var ocr = Ocr(W("实况足球 晋级挑战", 0.2, 0.27), W("结束倒数：13小时22分钟", 0.2, 0.22),
+            W("奖励", 0.1, 0.47), W("加入", 0.2, 0.79), W("返回", 0.1, 0.93),
+            W("11.0.0.1.122820.123508", 0.19, 0.965));
+        Assert.Equal(CwScreen.EventsList, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void LooksLikeCnHome_TrueOnHomeFalseOnEventList()
+    {
+        Assert.True(CnWeeklyBrain.LooksLikeCnHome(Ocr(
+            W("推荐 比赛 签约 商店", 0.5, 0.075), W("活动中心", 0.34, 0.78))));
+        Assert.True(CnWeeklyBrain.LooksLikeCnHome(Ocr(
+            W("比赛活动", 0.2, 0.69), W("天梯巅峰赛", 0.5, 0.7))));
+        // 活动列表 / 未知过场不得被当主页，否则主页导航序列会把焦点乱推
+        Assert.False(CnWeeklyBrain.LooksLikeCnHome(Ocr(
+            W("实况足球 晋级挑战", 0.2, 0.27), W("加入", 0.2, 0.79), W("返回", 0.1, 0.93))));
+    }
+
+    [Fact]
     public void Classify_EventIntro_EnterAndDetails()
     {
         // 介绍页：进入+详情 按钮同屏（列表卡只有「进入」，不冲突）

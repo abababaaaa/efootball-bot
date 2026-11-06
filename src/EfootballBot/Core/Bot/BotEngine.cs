@@ -1,4 +1,4 @@
-﻿using System.IO;
+using System.IO;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Inference;
@@ -33,6 +33,8 @@ public sealed class BotStats
     public string LastScreen = "";
     public string LastScreenEvidence = "";
     public string LastError = "";
+    /// <summary>最近一次分段耗时摘要（1 分钟刷新一次，GUI 侧栏直接显示）。</summary>
+    public string PerfNote = "";
 }
 
 /// <summary>
@@ -43,6 +45,14 @@ public sealed class BotStats
 public interface IScenario
 {
     string Name { get; }
+
+    /// <summary>
+    /// 当前是否在比赛中。引擎用它把"手柄输入诊断"挡在比赛之外：
+    /// 比赛里方向键会真的操控球员、摇杆微码探测也会让球员跑偏，菜单里才是安全的诊断窗口。
+    /// 默认 false（观察模式/未来插件不实现也不会被误判成比赛）。
+    /// </summary>
+    bool InMatch => false;
+
     Task<int> RunOnceAsync(CancellationToken ct);
 }
 
@@ -171,6 +181,23 @@ public sealed class BotEngine : IDisposable
     private Observation? _lastObs;
     private long _lastOcrDumpTick;
     private long _lastFrameDumpTick;
+
+    // ---- 性能埋点（P1-14）：上一次观察的各段耗时（毫秒），由主循环汇总进 Perf ----
+    private long _lastFrameWaitMs, _lastHashMs, _lastOcrMs, _lastYoloMs;
+    private long _lastPerfLogTick;
+
+    // ---- 输入活性探针（P0-1）：同屏文字卡住判定 ----
+    private string _stuckText = "";
+    private long _stuckSinceTick;
+    private long _stuckActionBase;
+    private bool _livenessProbed;
+
+    // ---- 玩家 1 归属巡检（P0-2）：启动验证过一次，运行中每 5 分钟再确认 ----
+    private long _lastWitnessTick;
+    private bool _padOwnershipLostLogged;
+
+    /// <summary>观察循环分段耗时滚动统计（日志与侧栏共用；每次开始挂机重置）。</summary>
+    public readonly PerfTrace Perf = new();
     private GameWindowInfo? _window;
 
     /// <summary>本次会话的停靠目标（虚拟显示器矩形；null = 屏外停靠）。重启游戏后据此重新停靠。</summary>
@@ -204,10 +231,14 @@ public sealed class BotEngine : IDisposable
         Pad = new Pad(Pad360, cfg.Timing);
 
         // EP 降级工厂：OCR 与 YOLO 共享同一 SessionOptions（进程内仅一份 onnxruntime.dll）
-        _factory = new OnnxSessionFactory(cfg.Inference.PreferredProvider, LogInternal);
-        Ocr = new OcrRecognizer(cfg.OcrEngine, unlimitedOcr: cfg.UnlimitedOcr);
+        // 推理资源走进程级缓存（P0-10）：停止挂机后 Worker 保活，下次开始直接复用，
+        // 不再重新加载 30MB 级 OCR 模型（旧实现每次开始白花 1~3 秒）。
+        _factory = EngineServices.AcquireFactory(cfg, LogInternal);
+        Ocr = EngineServices.AcquireOcr(cfg, LogInternal, out bool ocrReused);
         if (Ocr.FallbackNote is { } fallbackNote)
             LogInternal($"OCR 引擎回退：{fallbackNote}（现用 {Ocr.LanguageTag}）", LogLevel.Warn);
+        else if (ocrReused)
+            LogInternal($"OCR 引擎：{Ocr.LanguageTag}（复用已加载实例，无需重新载入模型）", LogLevel.Info);
         else
             LogInternal($"OCR 引擎：{Ocr.LanguageTag}（{Ocr.EngineKind}）", LogLevel.Info);
 
@@ -255,8 +286,11 @@ public sealed class BotEngine : IDisposable
         // 全速 30fps 逐帧 SoftwareBitmap 拷贝 + CPU 降采样（LOH 高速churn）会打满 CPU 卡死系统
         Observation.ApplyCaptureThrottle(300);
 
-        // 感知管线（YOLO 模型缺失时仅 OCR，不阻塞启动）
-        _perception ??= PerceptionPipeline.Create(_cfg, _factory, LogInternal);
+        // 感知管线（YOLO 模型缺失时仅 OCR，不阻塞启动）；同样跨会话复用，
+        // 避免每次开始都重建 ONNX 会话（DirectML/CPU 会话初始化本身就是百毫秒级）
+        _perception = EngineServices.AcquirePerception(_cfg, _factory, LogInternal, out bool yoloReused);
+        if (yoloReused && _perception.YoloEnabled)
+            LogInternal($"目标检测：复用已加载会话（{_perception.YoloLabel}）", LogLevel.Info);
         // 场景体系：cndaily=国服天梯巅峰赛 / cnweekly=国服周活动 / cnmyleague=国服我的联赛 /
         // intl=国际服我的联赛 / intlweekly=国际服周活动 / intlladder=国际服AI天梯联赛
         Scenario = scenarioMode ? CreateScenario(mode) : null;
@@ -305,8 +339,23 @@ public sealed class BotEngine : IDisposable
         // 共存让步传感器已随 3.3.0 共存模式移除（全权接管：真实手柄挂机期间禁用让位）
 
         _gdiFallbackTried = false;
+        Perf.Reset();
+        _lastPerfLogTick = Environment.TickCount64;
+        Stats.PerfNote = Perf.Describe();
         _loop = Task.Run(async () =>
         {
+            // 每轮把分段耗时记进 PerfTrace；每 60s 打一条「[性能]」并同步侧栏。
+            // 只记"观察 + 决策"这一段，场景返回后引擎自己的 Task.Delay 是刻意等待，不计入。
+            void RecordPerf(long roundStartTick, long actionStartMs)
+            {
+                long now = Environment.TickCount64;
+                Perf.Record(_lastFrameWaitMs, _lastHashMs, _lastOcrMs, _lastYoloMs,
+                    Pad.BusyMs - actionStartMs, now - roundStartTick);
+                if (now - _lastPerfLogTick < 60_000) return;
+                _lastPerfLogTick = now;
+                Stats.PerfNote = Perf.Describe();
+                LogInternal($"[性能] {Stats.PerfNote}", LogLevel.Info);
+            }
             try
             {
                 int failStreak = 0;
@@ -373,7 +422,9 @@ public sealed class BotEngine : IDisposable
                             Observation.ApplyCaptureThrottle(300);
                         }
 
-                        await ObserveAsync(token);
+                        long roundStartTick = Environment.TickCount64;
+                        long actionStartMs = Pad.BusyMs;
+                        var obs = await ObserveAsync(token);
 
                         // GDI 兜底 + 后台停靠 = 黑帧（PrintWindow 取不到屏外 D3D 内容）：
                         // 停靠看门狗与还原会互相打架——整体停掉停靠（还原窗口 + 停看门狗），
@@ -403,6 +454,7 @@ public sealed class BotEngine : IDisposable
                                 LogInternal("捕获画面全黑：已暂停挂机操作（黑帧下不识别不按键），等待画面恢复…" +
                                     "若持续出现，请勿最小化游戏窗口，或到设置里切换捕获模式", LogLevel.Warn);
                             }
+                            RecordPerf(roundStartTick, actionStartMs);
                             await Task.Delay(1000, token);
                             continue;
                         }
@@ -410,6 +462,12 @@ public sealed class BotEngine : IDisposable
                         int delayMs = 300;
                         if (Scenario is not null)
                             delayMs = await Scenario.RunOnceAsync(token);
+                        RecordPerf(roundStartTick, actionStartMs);
+
+                        // 输入活性（P0-1）与玩家 1 归属（P0-2）：都是"游戏到底还收不收得到 bot 输入"
+                        // 这一件事的两面——前者看按键有没有效果，后者看槽位还是不是我们的。
+                        await CheckInputLivenessAsync(obs, token);
+                        await CheckPadOwnershipAsync(token);
 
                         // 只打关键比赛：场景判定当前场次是普通比赛后置位，这里集中执行重启
                         // （捕获/停靠/窗口状态全部由引擎自己管，场景侧只管判定与统计）。
@@ -468,6 +526,17 @@ public sealed class BotEngine : IDisposable
                         LogInternal(ex.Message, LogLevel.Error);
                         SaveFailureDump("捕获熔断终停");
                         EmitStats();
+                        return;
+                    }
+                    catch (InputNotRespondingException ex)
+                    {
+                        // 输入链路已死（Steam Input 卡死等）：继续盲按只会让用户以为程序坏了。
+                        // 文案由 InputLivenessProbe 提供，只有一句人话 + 处理办法，不带堆栈。
+                        Stats.LastError = "游戏未响应手柄输入";
+                        LogInternal(ex.Message, LogLevel.Error);
+                        SaveFailureDump("手柄输入无响应");
+                        EmitStats();
+                        Stop();
                         return;
                     }
                     catch (PadSubmitException ex)
@@ -714,14 +783,18 @@ public sealed class BotEngine : IDisposable
             // ① 真实手柄在虚拟手柄连上之后才被系统认作玩家 1（蓝牙重连/开机时序）；
             // ② 设备节点已禁用但 XInput 仍把它报为连接（有线手柄常见）。
             // 漏掉的表现就是用户看到的那一幕：bot 在跑但游戏对任何按键都没反应。
-            var (outcome, message) = PadSlotWitness.EnsureVirtualPadInSlot0(
+            var (outcome, message) = await PadSlotWitness.EnsureVirtualPadInSlot0Async(
                 () => Pad360, _cfg.HidHide.HidePhysicalGamepad, _cfg.DryRun, LogInternal);
             if (outcome == PadSlotWitness.YieldOutcome.AbortAskUser)
             {
                 // 玩家 1 抢不回来 = 游戏不会读 bot 的任何输入，继续挂机只会白跑并让用户以为程序坏了。
                 // 直接终止本次流程，错误码由 GUI 转成弹窗，明确请用户物理断开手柄。
+                // 附带结构化诊断（P1-3）：用户截图弹窗就能说清"到底是谁占着玩家 1"。
+                string diag = Input.PadDiagnostics.Collect(_cfg.HidHide.HidePhysicalGamepad, Pad360);
+                LogInternal("手柄接管失败诊断：" + Environment.NewLine + diag, LogLevel.Error);
                 try { Pad360.Disconnect(); } catch { }
-                throw new PadTakeoverBlockedException(PadTakeoverBlockedException.Code + " " + message);
+                throw new PadTakeoverBlockedException(
+                    PadTakeoverBlockedException.Code + " " + message + Environment.NewLine + diag);
             }
             if (outcome is PadSlotWitness.YieldOutcome.Ready or PadSlotWitness.YieldOutcome.Recovered)
                 LogInternal("玩家 1 归属已确认：虚拟手柄独占游戏输入", LogLevel.Success);
@@ -774,7 +847,11 @@ public sealed class BotEngine : IDisposable
                 LogInternal($"{PadBackendInfo.DisplayName(chain[i])} 连接失败：{ex.Message}", LogLevel.Warn);
             }
         }
-        throw new InvalidOperationException("虚拟手柄连接失败，请查看上方日志后重试。");
+        // 三个后端/重试全败：把结构化诊断一起抛出去（GUI 弹窗直接显示这一条，用户不用翻日志）
+        string diag = Input.PadDiagnostics.Collect(_cfg.HidHide.HidePhysicalGamepad, Pad360);
+        LogInternal("虚拟手柄连接失败诊断：" + Environment.NewLine + diag, LogLevel.Error);
+        throw new InvalidOperationException("虚拟手柄连接失败（详见上方日志与弹窗诊断）。" +
+            Environment.NewLine + diag);
     }
 
     /// <summary>
@@ -1342,29 +1419,179 @@ public sealed class BotEngine : IDisposable
         catch { }
     }
 
+    // ---------------- 输入活性 / 玩家 1 归属 ----------------
+
+    /// <summary>
+    /// 输入活性探针（P0-1）：同一屏文字连续 <see cref="InputLivenessProbe.StuckMs"/> 一字不差、
+    /// 期间又按过键 → 按 下/A/B 验证游戏是否真的收到了输入；三次都没反应就判死并抛出
+    /// <see cref="InputNotRespondingException"/>（主循环转成一句可操作提示后停止）。
+    ///
+    /// 为什么用「文字指纹」而不是像素差：菜单有背景动画，像素永远在变，像素口径会把
+    /// "动画在动、输入全死"误判成正常。文字指纹只有在页面内容变化时才变——真正卡住时
+    /// 它是一字不差的。比赛中的比分/计时每秒都在变，因此比赛绝不会误触发。
+    /// </summary>
+    private async Task CheckInputLivenessAsync(Observation obs, CancellationToken ct)
+    {
+        // 影子模式不操作游戏；未接管手柄说明本来就没在给游戏发输入
+        if (_cfg.DryRun || !_cfg.HidHide.HidePhysicalGamepad) return;
+        if (Pad360 is DryRunPad || !Pad360.IsConnected) return;
+        // 比赛里按键有游戏语义（会真的踢球/暂停），且比分与计时天然在变——
+        // 只在菜单类页面做输入诊断；比赛进行中直接清空计时。
+        if (Scenario is { InMatch: true } || RestartGameRequested)
+        {
+            _stuckText = "";
+            _livenessProbed = false;
+            return;
+        }
+
+        string sig = InputLivenessProbe.TextSignature(obs.Ocr);
+        if (!InputLivenessProbe.IsReadable(sig))
+        {
+            // 黑屏/加载页/比赛中（文字不足）：不参与判定，并清空计时
+            _stuckText = "";
+            _livenessProbed = false;
+            return;
+        }
+
+        long now = Environment.TickCount64;
+        if (sig != _stuckText)
+        {
+            _stuckText = sig;
+            _stuckSinceTick = now;
+            _stuckActionBase = Pad.ActionCount;
+            _livenessProbed = false;
+            return;
+        }
+
+        if (_livenessProbed) return;                       // 本轮卡住只探一次，避免反复按键
+        if (now - _stuckSinceTick < InputLivenessProbe.StuckMs) return;
+        if (Pad.ActionCount - _stuckActionBase < InputLivenessProbe.MinActionsDuringStuck) return;
+
+        _livenessProbed = true;
+        LogInternal($"[输入自检] 页面文字 {InputLivenessProbe.StuckMs / 1000}s 未变且期间按过键，" +
+            "开始探测游戏是否还收得到手柄输入…", LogLevel.Warn);
+        var r = await InputLivenessProbe.ProbeAsync(obs, o => ObserveAsync(o, forceOcr: true), Pad, null, ct);
+        if (r.Alive)
+        {
+            LogInternal($"[输入自检] 输入正常（{r.Detail}），继续挂机", LogLevel.Info);
+            _stuckText = "";
+            return;
+        }
+
+        // 给"刚好在加载/过场"留一条退路：等 2 秒看页面文字会不会自己更新（加载页的提示语、
+        // 对战双方信息都会变）。慢机器上 45 秒的加载画面不该被判成"手柄已死"。
+        await Task.Delay(2000, ct);
+        var after = await ObserveAsync(ct, forceOcr: true);
+        if (InputLivenessProbe.TextSignature(after.Ocr) != sig)
+        {
+            LogInternal("[输入自检] 页面自行更新（加载/过场），判定输入正常，继续挂机", LogLevel.Info);
+            _stuckText = "";
+            return;
+        }
+        // 第二轮确认：仍然三次按键都无反应才判死
+        var r2 = await InputLivenessProbe.ProbeAsync(after, o => ObserveAsync(o, forceOcr: true), Pad, null, ct);
+        if (r2.Alive)
+        {
+            LogInternal($"[输入自检] 输入正常（第二轮：{r2.Detail}），继续挂机", LogLevel.Info);
+            _stuckText = "";
+            return;
+        }
+
+        LogInternal($"[输入自检] 输入无响应（{r.Detail} / 二轮 {r2.Detail}）", LogLevel.Error);
+        throw new InputNotRespondingException(InputLivenessProbe.DeadMessage);
+    }
+
+    /// <summary>
+    /// 玩家 1 归属巡检（P0-2）：启动时用摇杆微码验证过一次，但真实手柄蓝牙重连、
+    /// 其他手柄软件启动、ViGEm 设备重枚举都会让 slot0 在中途易主——此后 bot 每个键都会被游戏忽略，
+    /// 而日志看起来一切正常。每 5 分钟零副作用探测一次（只写摇杆值，不按任何键）：
+    /// 连续两次读不到微码才认定归属漂移，然后重连一次抢回；仍抢不回就明确报错并写入"最近错误"，
+    /// 不再让用户对着"在跑但没反应"的界面猜。
+    /// </summary>
+    private async Task CheckPadOwnershipAsync(CancellationToken ct)
+    {
+        if (_cfg.DryRun || !_cfg.HidHide.HidePhysicalGamepad) return;
+        if (Pad360 is DryRunPad || !Pad360.IsConnected) return;
+        // 摇杆微码探测会把左摇杆打到 (-31000,-31000) 120ms：比赛里那是在操控球员，必须避开。
+        if (Scenario is { InMatch: true }) return;
+
+        long now = Environment.TickCount64;
+        if (now - _lastWitnessTick < 5 * 60_000) return;
+        _lastWitnessTick = now;
+
+        var r1 = PadSlotWitness.Probe(Pad360);
+        if (r1.VirtualInSlot0)
+        {
+            if (_padOwnershipLostLogged)
+            {
+                _padOwnershipLostLogged = false;
+                Stats.LastError = "";
+                LogInternal("玩家 1 归属已恢复：虚拟手柄重新独占游戏输入", LogLevel.Success);
+                EmitStats();
+            }
+            return;
+        }
+
+        // 单次读不到可能是 XInput 状态刷新的一拍抖动：连续两次复测（共 3 次读）都失败才动手。
+        // 重连会让游戏看到"手柄断开→重连"，代价不小，宁可多等 3 秒也不能误触发。
+        await Task.Delay(1500, ct);
+        if (PadSlotWitness.Probe(Pad360).VirtualInSlot0) return;
+        await Task.Delay(1500, ct);
+        if (PadSlotWitness.Probe(Pad360).VirtualInSlot0) return;
+
+        LogInternal("玩家 1 归属漂移：虚拟手柄已不在 slot0（游戏会无视 bot 的所有按键），正在重连抢回…",
+            LogLevel.Warn);
+        await ReconnectPadAsync();
+        await Task.Delay(800, ct);
+        if (PadSlotWitness.Probe(Pad360).VirtualInSlot0)
+        {
+            LogInternal("已抢回玩家 1：虚拟手柄重新独占游戏输入", LogLevel.Success);
+            return;
+        }
+
+        _padOwnershipLostLogged = true;
+        Stats.LastError = "虚拟手柄不在玩家 1，游戏收不到任何操作（真实手柄或其他手柄软件占用了 slot0）";
+        LogInternal("玩家 1 仍不属于本程序的虚拟手柄：游戏不会响应 bot 的任何按键。\n" +
+            "请关闭真实手柄电源，或退出 DS4Windows / reWASD / Steam Input 等手柄模拟软件后重新开始挂机。",
+            LogLevel.Error);
+        EmitStats();
+    }
+
     // ---------------- 感知观察 ----------------
 
     /// <summary>
     /// 获取一帧新鲜画面 → OCR（节流）→ YOLO 检测（仅新帧）→ 组装 Observation 并派发事件。
     /// 捕获自愈 + OCR 节流由 ObservationService 负责。
     /// </summary>
-    public async Task<Observation> ObserveAsync(CancellationToken ct)
+    /// <param name="forceOcr">true = 绕过 OCR 节流（输入活性探针按键后必须读到"按键之后"的画面，
+    /// 否则拿到的是按键前的缓存结果，探测必然误判为无变化）。静帧去重仍然生效——像素逐像素相同
+    /// 的帧本来就不需要重跑 OCR。</param>
+    public async Task<Observation> ObserveAsync(CancellationToken ct, bool forceOcr = false)
     {
         // 比赛画面（OCR 零词 + YOLO 零框）文字密度天然为零——全帧 OCR 是观察循环里最大
         // 单项 CPU，比赛中基本全浪费（比赛判定靠角区探针 + YOLO，见下方注释）。上一轮感知
         // 为全空时把 OCR 间隔放宽 3 倍（≤5s 封顶）：文字/按钮一出现（弹窗、终场、回菜单）
         // 下一轮立刻恢复常规节奏，最多慢一轮。
-        int ocrIntervalMs = _cfg.Timing.OcrIntervalMs;
-        if (_lastObs is { } prev && prev.Ocr.Words.Count == 0 && prev.Detections.Count == 0)
+        int ocrIntervalMs = forceOcr ? 0 : _cfg.Timing.OcrIntervalMs;
+        if (!forceOcr && _lastObs is { } prev && prev.Ocr.Words.Count == 0 && prev.Detections.Count == 0)
             ocrIntervalMs = Math.Min(ocrIntervalMs * 3, 5000);
 
-        var (f, ocr) = await Observation.ObserveAsync(ct, ocrIntervalMs);
+        var res = await Observation.ObserveAsync(ct, ocrIntervalMs);
+        var f = res.Frame;
+        var ocr = res.Ocr;
+        // 分段耗时留给主循环的 PerfTrace（P1-14）：命中缓存时为 0，如实反映"这轮没花 OCR 时间"
+        _lastFrameWaitMs = res.FrameWaitMs;
+        _lastHashMs = res.HashMs;
+        _lastOcrMs = res.OcrMs;
+        _lastYoloMs = 0;
 
         // 距上次 OCR 不足间隔时返回缓存帧，直接复用上一次感知结果
         if (_lastObs is not null && _lastObs.Frame == f && _lastObs.Ocr == ocr)
             return _lastObs;
 
+        long tYolo0 = Environment.TickCount64;
         var dets = await _perception!.DetectAsync(f, ct);
+        _lastYoloMs = Environment.TickCount64 - tYolo0;
         var obs = new Observation(f, ocr, dets);
         _lastObs = obs;
         DumpFrame(f);
@@ -1481,9 +1708,9 @@ public sealed class BotEngine : IDisposable
     public void Dispose()
     {
         Stop();
-        try { _perception?.Dispose(); } catch { }
+        // 推理资源（OCR/YOLO/ONNX）由 EngineServices 进程级持有，这里只回收引擎自己的
+        // 捕获/观察资源；下次开始挂机直接复用，不要再 Dispose（否则模型又得重载一遍）
         try { Observation.Dispose(); } catch { }
-        try { Ocr.Dispose(); } catch { }
         try { _dxgi?.Dispose(); } catch { }
         try { _gdi?.Dispose(); } catch { }
         try { Pad360.Dispose(); } catch { }

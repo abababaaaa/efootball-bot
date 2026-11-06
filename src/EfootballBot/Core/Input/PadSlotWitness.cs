@@ -102,7 +102,7 @@ public static class PadSlotWitness
     /// <param name="dryRun">影子模式：只看不做，绝不动真实设备。</param>
     /// <param name="log">日志输出。</param>
     /// <returns>结论 + 给用户的消息（<see cref="YieldOutcome.AbortAskUser"/> 时非空）。</returns>
-    public static (YieldOutcome Outcome, string Message) EnsureVirtualPadInSlot0(
+    public static async Task<(YieldOutcome Outcome, string Message)> EnsureVirtualPadInSlot0Async(
         Func<IVirtualPad> getPad, bool takeoverEnabled, bool dryRun, Action<string, LogLevel> log)
     {
         var pad = getPad();
@@ -122,9 +122,17 @@ public static class PadSlotWitness
         if (physicalPresent)
         {
             PhysicalPadControl.RequestPadHide();
+            // 退出条件按「目标达成」判：slot0 空闲就说明真实手柄已经让位。
+            // 旧实现每 500ms 全量枚举一次 HID 节点（SetupAPI + 祖先链，几十毫秒），
+            // 而且禁用升级走父设备时子节点状态不会消失——既慢又永远等满 20 秒。
+            // 现在先读 XInput 槽位（微秒级），只有槽位仍被占时才回头枚举节点。
             var deadline = DateTime.Now.AddSeconds(20);
-            while (HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0 && DateTime.Now < deadline)
-                Thread.Sleep(500);
+            while (DateTime.Now < deadline)
+            {
+                if (!PadBackendProbe.IsSlot0Occupied()) break;
+                if (HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count == 0) break;
+                await Task.Delay(250);
+            }
         }
 
         // 重进：先断开释放自己的槽位，再按"允许 slot0 被占"的宽松模式连回来
@@ -139,6 +147,8 @@ public static class PadSlotWitness
             log($"重新连接虚拟手柄失败：{ex.Message}", LogLevel.Error);
         }
 
+        // 重连后给系统一点时间把设备重新挂到槽位上（ViGEm 设备热插拔是异步的）
+        await Task.Delay(300);
         var r2 = WitnessPad(pad);
         log(DescribeWitness(r2, VigemPad.IdentityCode), LogLevel.Info);
         if (r2.VirtualInSlot0)
@@ -151,6 +161,13 @@ public static class PadSlotWitness
         var (_, message) = PhysicalPadYieldPolicy.AfterDisable(virtualInSlot0: false, physicalPadPresent: stillPhysical);
         return (YieldOutcome.AbortAskUser, message);
     }
+
+    /// <summary>
+    /// 只读探测（不重连、不禁用任何设备）：虚拟手柄当前是否仍占着玩家 1。
+    /// 运行期巡检用——"改正"动作一律留给调用方决定，绝不在游戏运行中擅自惊动设备
+    /// （手柄断开→重连会让 eFootball 把焦点挪到顶部的「手柄归属」图标，反而更糟）。
+    /// </summary>
+    public static WitnessResult Probe(IVirtualPad pad) => WitnessPad(pad);
 
     private static WitnessResult WitnessPad(IVirtualPad pad)
     {

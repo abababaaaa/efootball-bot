@@ -127,6 +127,9 @@ public sealed class WeeklyEventScenario : IScenario
 
     public string Name => "周活动";
 
+    /// <summary>比赛中（供引擎把手柄诊断挡在比赛之外）。</summary>
+    public bool InMatch => _matchSession.Active;
+
     public WeeklyEventScenario(BotEngine engine, Action<string, LogLevel> log)
     {
         _engine = engine;

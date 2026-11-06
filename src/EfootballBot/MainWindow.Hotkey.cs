@@ -60,6 +60,7 @@ public partial class MainWindow
         AppendLog("正在停止…", LogLevel.Info);
         ResetButtons();
         await host.StopAsync();
+        MuteGameOnScenarioStopped(); // 停挂机即恢复游戏声音（只静音了游戏，系统音量不受影响）
         AppendLog("已停止。", LogLevel.Info);
         if (allowAutoClose && _cfg.AutoCloseWhenDone)
         {

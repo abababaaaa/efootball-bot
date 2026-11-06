@@ -117,6 +117,9 @@ public class MyLeagueScenario : IScenario
 
     public virtual string Name => _swapTestOnly ? "满级换人测试" : "我的联赛";
 
+    /// <summary>比赛中（供引擎把手柄诊断挡在比赛之外）。</summary>
+    public bool InMatch => _matchSession.Active;
+
     /// <summary>难度/道具购买/停止场次等配置来源。国服子类换用 CnMyLeague 配置段，
     /// 与国际服互不影响（同款玩法、两服各自记设置）。</summary>
     protected virtual MyLeagueConfig LeagueConfig => _engine.Config.MyLeague;

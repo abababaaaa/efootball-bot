@@ -2,7 +2,7 @@
 
 > 为实况足球（eFootball）端游打造的自动化挂机工具 —— 国际服 / 国服双支持：自动比赛、自动领奖、自动换人、自动切活动，解放双手。
 
-![version](https://img.shields.io/badge/version-6.0.2-2ea44f)
+![version](https://img.shields.io/badge/version-6.1-2ea44f)
 ![platform](https://img.shields.io/badge/platform-Windows%2010%2F11%20x64-0078d4)
 ![runtime](https://img.shields.io/badge/.NET-10%20%E8%87%AA%E5%B8%A6%E8%BF%90%E8%A1%8C%E6%97%B6-512bd4)
 ![license](https://img.shields.io/badge/license-%E5%85%8D%E8%B4%B9%E4%B8%AA%E4%BA%BA%E4%BD%BF%E7%94%A8-lightgrey)

@@ -13,7 +13,7 @@
                 <Ellipse x:Name="Dot" Width="7" Height="7" Fill="#FF7B8696" VerticalAlignment="Center"/>
                 <TextBlock x:Name="TxtState" Text="未启动" FontSize="11" Margin="6,0,0,0"
                            Foreground="#FF9AA4B2" VerticalAlignment="Center"/>
-                <TextBlock Text="拖我挪位置 · 双击复位 · 右键关闭" FontSize="9.5" Margin="10,0,0,0"
+                <TextBlock Text="拖我挪位置 · 双击贴回游戏 · 右键关闭" FontSize="9.5" Margin="10,0,0,0"
                            Foreground="#FF6C7686" VerticalAlignment="Center"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal">

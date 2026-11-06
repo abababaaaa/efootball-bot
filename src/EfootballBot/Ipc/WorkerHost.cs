@@ -222,6 +222,7 @@ public sealed class WorkerHost : IDisposable
                         _lastStats.StartedAt = string.IsNullOrEmpty(msg.StartedAt)
                             ? null : DateTime.Parse(msg.StartedAt);
                         _lastStats.LastError = msg.LastError ?? "";
+                        _lastStats.PerfNote = msg.Perf ?? "";
                         StatsChanged?.Invoke(_lastStats);
                         break;
                     case "screen":

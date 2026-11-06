@@ -115,6 +115,18 @@ public sealed class CnWeeklyScenario : IScenario
     /// <summary>当前挂机的活动槽位（0 起，活动列表卡行从左数；主要奖励刷满退列表后 +1）。</summary>
     private int _slotIndex;
 
+    // ---- 主页 → 比赛活动列表 导航（2026-11-05 实机：老配方三拍永远到不了目的地） ----
+    /// <summary>比赛页卡行策略阶梯（先下 N 次再左 M 次）。新版 UI 卡序/行数变了就换下一档，
+    /// 不把某一版布局写死成一个魔法序列。</summary>
+    private static readonly (int Down, int Left)[] HomeCardStrategies =
+        { (1, 1), (1, 2), (1, 3), (2, 1), (2, 2), (1, 0) };
+    /// <summary>主页导航累计尝试次数（按阶梯取策略；到达活动列表即清零）。</summary>
+    private int _navTries;
+    /// <summary>连续落在「识别不出的页面」的次数（B 逃生预算；认出任何页面即清零）。</summary>
+    private int _navUnknown;
+    /// <summary>上次打印未知页面 OCR 原文的时间（限流，未知页每 20s 一条）。</summary>
+    private DateTime _unknownDumpAt;
+
     // ---- 巡回赛主要奖励核验（主页勾 → i 信息弹窗 x/x，用户 2026-10-17 流程） ----
     /// <summary>核验步：0=未在核验；1=已右移到 i；2=已按 A 等弹窗；3=已确认拿满（退场）。</summary>
     private int _rewardCheckStage;
@@ -136,6 +148,9 @@ public sealed class CnWeeklyScenario : IScenario
     private DateTime? _titleSince;
 
     public string Name => "国服周活动";
+
+    /// <summary>比赛中（供引擎把手柄诊断挡在比赛之外）。</summary>
+    public bool InMatch => _matchSession.Active;
 
     public CnWeeklyScenario(BotEngine engine, Action<string, LogLevel> log)
     {
@@ -269,12 +284,13 @@ public sealed class CnWeeklyScenario : IScenario
         {
             case MlActionKind.PadEnterMatch:
                 // 国服主页不走国际服的下→左×6：国服主页是页签行（推荐/比赛/签约/商店），
-                // 上×2 进页签行 → 左×4 饱和归位「推荐」→ 右×1 到「比赛」
-                _log("[国服周活动] 主页导航：上×2 → 左×4 归位推荐页签 → 右进比赛页签", LogLevel.Info);
-                await _engine.Pad.DpadRepeat(PadDir.Up, 2);
-                await _engine.Pad.DpadRepeat(PadDir.Left, 4);
-                await _engine.Pad.Dpad(PadDir.Right);
-                break;
+                // 上×2 进页签行 → 左×4 饱和归位「推荐」→ 右×1 到「比赛」。
+                // ★2026-11-05 实机：这里只按三拍就等下一帧，一旦下一帧不是 HomeMatch 也不是
+                // 活动列表（新版 UI 页签/卡行读不全），共享流程会把同一三拍无限重放，永远到不了
+                // 活动列表。改为一次按完整序列（进页签→进卡行→A），并做页面安全检查。
+                if (CnWeeklyBrain.LooksLikeCnHome(obs.Ocr))
+                    return await NavigateToEventListAsync("主菜单");
+                return await EscapeUnknownPageAsync(obs, "不是主页特征");
 
             case MlActionKind.PadConfirm:
                 _log($"[国服周活动] 手柄 A：{action.Target}", LogLevel.Info);
@@ -336,6 +352,7 @@ public sealed class CnWeeklyScenario : IScenario
     /// <summary>返回正数/0=本轮已处理（下一轮延时）；null=未接管（走共享决策）。</summary>
     private async Task<int?> HandleCnAsync(CwScreen cw, MlScreen ml, Observation obs)
     {
+        if (cw != CwScreen.None) _navUnknown = 0; // 认出任何国服界面 = 脱离未知页，逃生预算清零
         switch (_phase)
         {
             case CwPhase.Flow:
@@ -351,17 +368,17 @@ public sealed class CnWeeklyScenario : IScenario
                             return 8000;
                         }
                         // 饱和归位（任意焦点/页签状态皆可达）：上×2 进页签行 → 左×4 到最左「推荐」
-                        // → 右×1 到「比赛」页签 → 下进卡行（默认落天梯巅峰赛）→ 左到「比赛活动」→ A
-                        _log("[国服周活动] 主页：上×2 左×4 归位推荐 → 右进比赛页 → 下 → 左 → A 进比赛活动", LogLevel.Info);
-                        await _engine.Pad.DpadRepeat(PadDir.Up, 2);
-                        await _engine.Pad.DpadRepeat(PadDir.Left, 4);
-                        await _engine.Pad.Dpad(PadDir.Right);
-                        await _engine.Pad.Dpad(PadDir.Down);
-                        await _engine.Pad.Dpad(PadDir.Left);
-                        await _engine.Pad.Confirm();
-                        return 3200;
+                        // → 右×1 到「比赛」页签 → 进卡行选「比赛活动」→ A
+                        // 卡行步数按策略阶梯逐轮换档（新版 UI 卡序变化时不死循环）
+                        return await NavigateToEventListAsync(cw == CwScreen.HomeMatch ? "比赛页签" : "推荐页签");
 
                     case CwScreen.EventsList:
+                        if (_navTries > 0)
+                        {
+                            _navTries = 0;
+                            _navUnknown = 0;
+                            _log("[国服周活动] 已到比赛活动列表（目的地）", LogLevel.Success);
+                        }
                         return await EnterEventAsync();
 
                     case CwScreen.EventIntro:
@@ -735,6 +752,53 @@ public sealed class CnWeeklyScenario : IScenario
             default:
                 return null;
         }
+    }
+
+    /// <summary>
+    /// 主页 → 比赛活动列表 的完整导航（一次按完，不靠"下一帧碰巧是比赛页"接力）：
+    /// 上×2 进页签行 → 左×4 饱和归位「推荐」→ 右×1「比赛」→ 下×N 进卡行 → 左×M 到
+    /// 「比赛活动」→ A 进入。N/M 取策略阶梯（<see cref="HomeCardStrategies"/>）：新版 UI 的
+    /// 比赛页卡序/行数与旧版不同时，逐轮换档，而不是把某一版布局写死。
+    /// </summary>
+    private async Task<int> NavigateToEventListAsync(string reason)
+    {
+        var (down, left) = HomeCardStrategies[_navTries % HomeCardStrategies.Length];
+        _navTries++;
+        _log($"[国服周活动] 主页导航（{reason}·第 {_navTries} 次，下×{down} 左×{left}）：" +
+             "上×2 → 左×4 归位推荐页签 → 右进比赛页签 → 进卡行选「比赛活动」→ A", LogLevel.Info);
+        await _engine.Pad.DpadRepeat(PadDir.Up, 2);
+        await _engine.Pad.DpadRepeat(PadDir.Left, 4);
+        await _engine.Pad.Dpad(PadDir.Right);
+        for (int i = 0; i < down; i++) await _engine.Pad.Dpad(PadDir.Down);
+        if (left > 0) await _engine.Pad.DpadRepeat(PadDir.Left, left);
+        await _engine.Pad.Confirm();
+        return 3200;
+    }
+
+    /// <summary>
+    /// 落在识别不出的页面（既不是国服主页，也不是活动链上的任何界面）：绝不盲按主页导航
+    /// 序列（下/左/A 会把未知页的焦点推到不可控处，最坏开进别的模式），只 B 逃生回上一页；
+    /// 连续 6 次仍脱不出去则暂停并提示反馈（同时打一条限流 OCR 原文，便于远程定位这是什么页）。
+    /// </summary>
+    private async Task<int> EscapeUnknownPageAsync(Observation obs, string why)
+    {
+        if (_streak < 1) return 700; // 过渡帧防抖：淡入帧不按键
+        if ((DateTime.Now - _unknownDumpAt).TotalSeconds > 20)
+        {
+            _unknownDumpAt = DateTime.Now;
+            _log($"[国服周活动] 未知页面 OCR：{string.Join(" | ", obs.Ocr.MergedWords.Select(w => w.Text))}",
+                LogLevel.Debug);
+        }
+        if (++_navUnknown > 6)
+        {
+            _navUnknown = 0;
+            _log($"[国服周活动] 连续 6 次落在无法识别的页面（{why}），暂停 8s；若反复出现请点「反馈」打包日志与截图",
+                LogLevel.Error);
+            return 8000;
+        }
+        _log($"[国服周活动] 页面无法识别（{why}）：B 返回上一页重走导航（第 {_navUnknown} 次）", LogLevel.Warn);
+        await _engine.Pad.Back();
+        return 2400;
     }
 
     /// <summary>活动列表页（用户 2026-10-17 实机）：列表打开时光标停在「对阵电脑」页签行上，

@@ -10,11 +10,32 @@ public sealed class Pad
     private readonly Random _rnd = new();
     private readonly HumanPacer? _pace;
 
+    // ---- 性能埋点（P1-14）：场景一秒钟到底花多少在"按键"上 ----
+    // 只在 Pad 的公有动作入口计时：内部 Task.Delay（按住/间隔）也算动作时间——
+    // 那本来就是场景为了"让游戏吃到这一下"必须付出的墙钟时间，隐藏它反而看不出瓶颈。
+    private long _busyMs;
+    private long _actionCount;
+
+    /// <summary>累计花在按键/摇杆动作上的时间（毫秒）。主循环按轮取差值记进 PerfTrace。</summary>
+    public long BusyMs => Interlocked.Read(ref _busyMs);
+
+    /// <summary>累计动作次数。</summary>
+    public long ActionCount => Interlocked.Read(ref _actionCount);
+
     public Pad(IVirtualPad vg, TimingConfig timing)
     {
         _vg = vg;
         _t = timing;
         _pace = timing.HumanPacingEnabled ? new HumanPacer() : null;
+    }
+
+    /// <summary>动作计时包装：次数 +1，耗时累加（异常也计，便于看出"卡在提交上"）。</summary>
+    private async Task Timed(Func<Task> action)
+    {
+        Interlocked.Increment(ref _actionCount);
+        long t0 = Environment.TickCount64;
+        try { await action().ConfigureAwait(false); }
+        finally { Interlocked.Add(ref _busyMs, Environment.TickCount64 - t0); }
     }
 
     private int Jitter(int baseMs)
@@ -33,51 +54,51 @@ public sealed class Pad
     }
 
     /// <summary>下一步 / 确认（手柄 A）。</summary>
-    public async Task Confirm()
+    public Task Confirm() => Timed(async () =>
     {
         await MaybeHesitate();
         await _vg.TapAsync(PadButton.A, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
-    }
+    });
 
     /// <summary>返回（手柄 B）。</summary>
-    public async Task Back()
+    public Task Back() => Timed(async () =>
     {
         await MaybeHesitate();
         await _vg.TapAsync(PadButton.B, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
-    }
+    });
 
     /// <summary>按任意指定按钮（供声明式导航图使用）。</summary>
-    public async Task Press(PadButton b)
+    public Task Press(PadButton b) => Timed(async () =>
     {
         await MaybeHesitate();
         await _vg.TapAsync(b, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
-    }
+    });
 
-    public async Task Dpad(PadDir dir)
+    public Task Dpad(PadDir dir) => Timed(async () =>
     {
         await MaybeHesitate();
         await _vg.TapDpadAsync(dir, Jitter(_t.DpadHoldMs), Jitter(_t.TapGapMs));
-    }
+    });
 
-    public Task X() => _vg.TapAsync(PadButton.X, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
-    public Task Y() => _vg.TapAsync(PadButton.Y, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
-    public Task LB() => _vg.TapAsync(PadButton.LeftShoulder, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
-    public Task RB() => _vg.TapAsync(PadButton.RightShoulder, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
-    public Task R3() => _vg.TapAsync(PadButton.RightThumb, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
-    public Task L3() => _vg.TapAsync(PadButton.LeftThumb, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
-    public Task Start() => _vg.TapAsync(PadButton.Start, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
+    public Task X() => Timed(() => _vg.TapAsync(PadButton.X, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
+    public Task Y() => Timed(() => _vg.TapAsync(PadButton.Y, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
+    public Task LB() => Timed(() => _vg.TapAsync(PadButton.LeftShoulder, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
+    public Task RB() => Timed(() => _vg.TapAsync(PadButton.RightShoulder, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
+    public Task R3() => Timed(() => _vg.TapAsync(PadButton.RightThumb, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
+    public Task L3() => Timed(() => _vg.TapAsync(PadButton.LeftThumb, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
+    public Task Start() => Timed(() => _vg.TapAsync(PadButton.Start, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
 
     /// <summary>右扳机 RT（个别赛前确认页右下角提示「RT 确定」）。</summary>
-    public async Task RT()
+    public Task RT() => Timed(async () =>
     {
         _vg.SetRightTrigger(255);
         await Task.Delay(Jitter(_t.TapHoldMs));
         _vg.SetRightTrigger(0);
         await Task.Delay(Jitter(_t.TapGapMs));
-    }
+    });
 
     /// <summary>右摇杆轻推（联赛主页右侧“使用的物品”翻页）。</summary>
-    public Task RsFlick(PadDir dir) => _vg.FlickRightStickAsync(dir, Jitter(160), Jitter(200));
+    public Task RsFlick(PadDir dir) => Timed(() => _vg.FlickRightStickAsync(dir, Jitter(160), Jitter(200)));
 
     public Task DpadRepeat(PadDir dir, int count)
         => RepeatAsync(count, () => Dpad(dir));
@@ -86,13 +107,13 @@ public sealed class Pad
     /// 快速连按方向键（换人巡检等状态机的批量移光标用）：保持/间隔减半、跳过拟人犹豫。
     /// 机械导航不承担拟人语义——真人推方向键本就是连续快按；单步 Dpad 仍走完整拟人节奏。
     /// </summary>
-    public async Task DpadRepeatFast(PadDir dir, int count)
+    public Task DpadRepeatFast(PadDir dir, int count) => Timed(async () =>
     {
         int hold = Jitter(Math.Max(60, _t.DpadHoldMs / 2));
         int gap = Jitter(Math.Max(80, _t.TapGapMs / 2));
         for (int i = 0; i < count; i++)
             await _vg.TapDpadAsync(dir, hold, gap);
-    }
+    });
 
     /// <summary>结算 / 奖励页：缓慢连按 A。</summary>
     public async Task ConfirmMany(int count, CancellationToken ct)
