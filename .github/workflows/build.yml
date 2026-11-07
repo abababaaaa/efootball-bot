@@ -191,20 +191,27 @@ jobs:
           $size = (Get-Item $exe).Length
           $file = "EfootballBot-$ver.exe"
           $bucket = "s3://$env:R2_BUCKET"
-          aws s3 cp $exe "$bucket/$file" --endpoint-url $env:R2_ENDPOINT --content-type application/octet-stream --cache-control 'public, max-age=31536000, immutable'
+          # 逐条检查 aws 的退出码：aws s3 cp 失败时只往 stderr 打一行 "upload failed"，
+          # 进程仍返回 0 之后的 Write-Host 照跑——v6.1.3 首跑就是这样「日志说成功、桶里什么都没有」。
+          function Push-Object([string]$src, [string]$key, [string]$ctype, [string]$cache) {
+            & aws s3 cp $src "$bucket/$key" --endpoint-url $env:R2_ENDPOINT --region auto --content-type $ctype --cache-control $cache
+            if ($LASTEXITCODE -ne 0) { throw "R2 上传失败：$key（见上面 aws 的报错，常见是密钥无权或被吊销）" }
+            Write-Host "R2 uploaded: $key"
+          }
+          Push-Object $exe $file 'application/octet-stream' 'public, max-age=31536000, immutable'
           Write-Host "R2 binary uploaded: $file ($size bytes)"
           $manifest = @{ version = $ver; file = $file; sha256 = $sha; size = $size } | ConvertTo-Json -Compress
           Set-Content -Path latest-pre.json -Value $manifest -Encoding ascii
-          aws s3 cp latest-pre.json "$bucket/latest-pre.json" --endpoint-url $env:R2_ENDPOINT --content-type application/json --cache-control 'no-cache'
+          Push-Object 'latest-pre.json' 'latest-pre.json' 'application/json' 'no-cache'
           # 正式版才更新 latest.json（测试版用户读 latest-pre.json，两清单独立）
           if (-not $isPre) {
             Set-Content -Path latest.json -Value $manifest -Encoding ascii
-            aws s3 cp latest.json "$bucket/latest.json" --endpoint-url $env:R2_ENDPOINT --content-type application/json --cache-control 'no-cache'
+            Push-Object 'latest.json' 'latest.json' 'application/json' 'no-cache'
           }
           # 差量补丁（上面若生成成功）：patches/patch-<旧>-to-<新>.bin。客户端 TryDeltaAsync
           # 会按 exe 所在目录找 patches/，主源上也有补丁就不会再为几 MB 的差量去连 GitHub
           foreach ($p in (Get-ChildItem 'release-artifact/patch-*.bin' -ErrorAction SilentlyContinue)) {
-            aws s3 cp $p.FullName "$bucket/patches/$($p.Name)" --endpoint-url $env:R2_ENDPOINT --content-type application/octet-stream --cache-control 'public, max-age=31536000, immutable'
+            Push-Object $p.FullName "patches/$($p.Name)" 'application/octet-stream' 'public, max-age=31536000, immutable'
             Write-Host "R2 patch uploaded: $($p.Name)"
           }
           Write-Host "R2 published: $tag ($file)"
