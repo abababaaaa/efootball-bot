@@ -1,5 +1,6 @@
 using System.Text.RegularExpressions;
 using EfootballBot.Core.Vision;
+using EfootballBot.Core.Vision.Yolo;
 
 namespace EfootballBot.Core.Bot.Scenarios.PeakLadder;
 
@@ -18,6 +19,13 @@ public enum PlScreen
     ActivityHome,
     /// <summary>「请选择参赛模式」弹窗（单场比赛/连续比赛/取消，手柄光标默认在取消）。</summary>
     ModeDialog,
+    /// <summary>赛后小结弹窗（最佳球员/最佳射手/本次段位分+240/确认/详情），盖在活动主页上。
+    /// 国服天梯的「网页层」结算页：虚拟手柄 A 不生效（实机 2026-11-07 12:15：连按 A 42 次
+    /// 画面一动不动），只能鼠标点「确认」。</summary>
+    MatchSummary,
+    /// <summary>段位积分页（段位名 + 天梯积分 + 升级进度条 + 右下「下一步」）。与赛后小结同一网页层：
+    /// A/B 均不生效（实机 2026-11-07 12:53：白银联赛页 A×5 + B×6 画面不动），只能鼠标点右下按钮。</summary>
+    RankProgress,
 }
 
 /// <summary>
@@ -38,21 +46,49 @@ public static class PeakLadderBrain
     public const double GoMatchFallbackX = 0.143;
     public const double GoMatchFallbackY = 0.244;
 
+    /// <summary>段位积分页右下「下一步」按钮（2026-11-07 实机截图量取：蓝条横跨 x 0.78~0.96，
+    /// 文字「下一步」在 x≈0.91 / y≈0.925）。只在 OCR 与 YOLO 都定位不到按钮时兜底用，
+    /// 取蓝条中部——含/不含标题栏两种归一化口径下都落在按钮内。</summary>
+    public const double RankNextFallbackX = 0.870;
+    public const double RankNextFallbackY = 0.920;
+
     private static readonly Regex Digits = new(@"\d+", RegexOptions.Compiled);
 
     // ---------------- 界面分类 ----------------
 
     /// <summary>
-    /// 界面分类。判定顺序：参赛模式弹窗 → 活动主页 → 模式选择页 → 主页（比赛页签/推荐页签）。
-    /// 活动主页标题「教练天梯巅峰赛」与模式选择页四卡都含「天梯巅峰赛」、主页头部也含
-    /// 「活动剩余时间」，因此必须按此顺序互斥（弹窗的「当前剩余参赛场次」无「本周」前缀不误判主页）。
+    /// 界面分类。判定顺序：参赛模式弹窗 → 赛后小结弹窗 → 段位积分页 → 活动主页 → 模式选择页
+    /// → 主页（比赛页签/推荐页签）。活动主页标题「教练天梯巅峰赛」与模式选择页四卡都含
+    /// 「天梯巅峰赛」、主页头部也含「活动剩余时间」，因此必须按此顺序互斥（弹窗的
+    /// 「当前剩余参赛场次」无「本周」前缀不误判主页）。
+    /// 赛后天梯的两类「网页层」页面（赛后小结 / 段位积分）会盖在活动主页上，背景的
+    /// 前往比赛/本周可参赛场次 仍可读，所以两者都必须排在活动主页之前。
     /// </summary>
-    public static PlScreen Classify(OcrResult ocr)
+    /// <param name="dets">YOLO 检测框（可选）：段位积分页的「下一步」OCR 常整帧漏读，
+    /// 靠右下角的 btn_confirm 框才能确认是这一页。</param>
+    public static PlScreen Classify(OcrResult ocr, IReadOnlyList<YoloDetection>? dets = null)
     {
         // 参赛模式弹窗：标题独有词；或 单场+连续 两选项同屏
         if (ocr.ContainsJoined("请选择参赛模式") ||
             (ocr.ContainsJoined("单场比赛") && ocr.ContainsJoined("连续比赛")))
             return PlScreen.ModeDialog;
+
+        // 赛后小结弹窗：只认固定标签词「本次段位分」（+ 最佳球员/连续比赛已完成 兜底）。
+        // 段位分数字、球员名每场都变，不作判定点。
+        if (ocr.ContainsJoined("本次段位分") ||
+            (ocr.ContainsJoined("最佳球员") && ocr.ContainsJoined("连续比赛已完成")))
+            return PlScreen.MatchSummary;
+
+        // 段位积分页：天梯积分 + (下一步 | 升级 | 右下确认框)，且不含活动主页任何特征词。
+        // 活动主页也印着「天梯积分：1200」「1500(升级)」，靠 前往比赛/比赛记录/本周可参赛场次
+        // 排他；反过来若 OCR 把主页这三行全漏读，误判后点的也是右下角空处，不会误推进
+        // （实在落空，下一轮会由 _streak 兜底退回主页导航）。
+        if (ocr.ContainsJoined("天梯积分") &&
+            !ocr.ContainsJoined("前往比赛") && !ocr.ContainsJoined("比赛记录") &&
+            !ocr.ContainsJoined("本周可参赛场次") &&
+            (ocr.ContainsJoined("下一步") || ocr.ContainsJoined("升级") ||
+             FindBottomConfirm(dets) is not null))
+            return PlScreen.RankProgress;
 
         // 活动主页：「本周可参赛场次」独有；前往比赛+比赛记录 兜底（OCR 漏读数字行时）
         if (ocr.ContainsJoined("本周可参赛场次") ||
@@ -128,6 +164,57 @@ public static class PeakLadderBrain
             if (w.CenterY >= 0.45) continue;
             if (!w.NormText.Contains("前往比赛")) continue;
             if (best is null || w.CenterX < best.CenterX) best = w;
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// 在 OCR 中找下半屏的推进按钮文字（下一步 / 确认 / 确定）：取最靠下、同高取最靠右的一枚
+    /// （结算页的推进键在右下、弹窗的确认键在底部按钮行）。找不到返回 null，调用方接着用
+    /// YOLO 框 / 兜底坐标 / 手柄。段位名、积分、球员名等可变内容一律不作锚点。
+    /// </summary>
+    public static OcrWord? FindAdvanceWord(OcrResult ocr, params string[] keywords)
+    {
+        OcrWord? best = null;
+        foreach (var w in ocr.MergedWords)
+        {
+            if (w.CenterY < 0.55) continue;
+            if (!keywords.Any(k => w.NormText.Contains(k, StringComparison.OrdinalIgnoreCase))) continue;
+            if (best is null || w.CenterY > best.CenterY ||
+                (Math.Abs(w.CenterY - best.CenterY) < 0.02 && w.CenterX > best.CenterX))
+                best = w;
+        }
+        return best;
+    }
+
+    /// <summary>在 OCR 中找弹窗选项文字（参赛模式弹窗的「单场比赛」），限定卡片区 y 0.35~0.85。
+    /// 手柄导航无效的帧上，场景层改用它做鼠标点击锚点。</summary>
+    public static OcrWord? FindOptionWord(OcrResult ocr, string keyword)
+    {
+        OcrWord? best = null;
+        foreach (var w in ocr.MergedWords)
+        {
+            if (w.CenterY < 0.35 || w.CenterY > 0.85) continue;
+            if (!w.NormText.Contains(keyword, StringComparison.OrdinalIgnoreCase)) continue;
+            if (best is null || w.CenterY < best.CenterY) best = w;
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// 右下角的 btn_confirm 检测框（段位积分页的「下一步」大蓝条，实机置信度 0.92）。
+    /// 限定右下四分之一（x&gt;0.55 / y&gt;0.72），避开比赛中回放横幅、列表行等误检；
+    /// 同分区取置信度最高的一枚。dets 为空返回 null。
+    /// </summary>
+    public static YoloDetection? FindBottomConfirm(IReadOnlyList<YoloDetection>? dets, float minScore = 0.45f)
+    {
+        if (dets is null) return null;
+        YoloDetection? best = null;
+        foreach (var d in dets)
+        {
+            if (d.ClassName != "btn_confirm" || d.Score < minScore) continue;
+            if (d.CenterX < 0.55 || d.CenterY < 0.72) continue;
+            if (best is null || d.Score > best.Score) best = d;
         }
         return best;
     }
