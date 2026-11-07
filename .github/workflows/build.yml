@@ -160,12 +160,14 @@ jobs:
             -Body (@{ body = $body } | ConvertTo-Json) -ContentType 'application/json'
           Write-Host "SHA256 appended to release $($rel.tag_name)"
 
-      # ---- 国内直连源（Cloudflare R2：免费 10GB、流量免费、免实名，r2.dev 公开桶）----
+      # ---- 国内直连主源（Cloudflare R2：免费 10GB、流量免费、免实名，r2.dev 公开桶）----
       # 前提（一次性）：Cloudflare → R2 建桶并启用 r2.dev 公开访问 → 创建 API Token
       # （Object Read & Write），仓库 Secrets：R2_ACCOUNT_ID / R2_ACCESS_KEY_ID /
-      # R2_SECRET_ACCESS_KEY / R2_BUCKET；桶公开地址填入 Updater.R2PublicBaseUrl。
+      # R2_SECRET_ACCESS_KEY / R2_BUCKET；再把桶公开地址填进 Updater.BuiltInPrimaryBaseUrl
+      # （或客户端 config.json 的 Update.PrimaryBaseUrl），客户端即走主源。
       # 未配置 Secret 时本步自动跳过，客户端走 镜像 → GitHub 直连 候选链。
-      # 顺序=先 exe 后清单：清单最后可见，不会出现"新清单配旧 exe"。
+      # 顺序=先二进制后清单：清单最后可见，不会出现「新清单配旧 exe」。
+      # 文件名带版本号并写进清单的 file 字段：正式版与测试版互不覆盖，桶内可并存多个版本。
       - name: Publish to Cloudflare R2
         # 注意：if: 里不能引用 secrets 上下文（Unrecognized named-value，整个 workflow 解析失败，
         # e9ab974 首发实测 run 59/60 双双 no-jobs failure）——改在脚本内检测，未配置时直接退出
@@ -181,19 +183,57 @@ jobs:
             Write-Host 'R2 secrets not configured, skipping publish (client falls back to mirrors -> GitHub).'
             exit 0
           }
-          $exe = 'release-artifact/EfootballBot.exe'
-          $manifest = @{
-            version = '${{ github.ref_name }}'.TrimStart('v')
-            sha256  = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
-            size    = (Get-Item $exe).Length
-          } | ConvertTo-Json -Compress
-          Set-Content -Path latest-pre.json -Value $manifest -Encoding ascii
-          aws s3 cp $exe "s3://$env:R2_BUCKET/EfootballBot.exe" --endpoint-url $env:R2_ENDPOINT --content-type application/octet-stream
-          aws s3 cp latest-pre.json "s3://$env:R2_BUCKET/latest-pre.json" --endpoint-url $env:R2_ENDPOINT --content-type application/json
-          # 正式版才更新 latest.json（测试版用户读 latest-pre.json，两清单独立）
           $tag = '${{ github.ref_name }}'
-          if ($tag -notlike '*-*' -and $tag -notmatch '^v\d+\.\d+\.\d+\.\d+$') {
+          $ver = $tag.TrimStart('v')
+          $isPre = $tag -like '*-*' -or $tag -match '^v\d+\.\d+\.\d+\.\d+$'
+          $exe = 'release-artifact/EfootballBot.exe'
+          $sha = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
+          $size = (Get-Item $exe).Length
+          $file = "EfootballBot-$ver.exe"
+          $bucket = "s3://$env:R2_BUCKET"
+          aws s3 cp $exe "$bucket/$file" --endpoint-url $env:R2_ENDPOINT --content-type application/octet-stream --cache-control 'public, max-age=31536000, immutable'
+          Write-Host "R2 binary uploaded: $file ($size bytes)"
+          $manifest = @{ version = $ver; file = $file; sha256 = $sha; size = $size } | ConvertTo-Json -Compress
+          Set-Content -Path latest-pre.json -Value $manifest -Encoding ascii
+          aws s3 cp latest-pre.json "$bucket/latest-pre.json" --endpoint-url $env:R2_ENDPOINT --content-type application/json --cache-control 'no-cache'
+          # 正式版才更新 latest.json（测试版用户读 latest-pre.json，两清单独立）
+          if (-not $isPre) {
             Set-Content -Path latest.json -Value $manifest -Encoding ascii
-            aws s3 cp latest.json "s3://$env:R2_BUCKET/latest.json" --endpoint-url $env:R2_ENDPOINT --content-type application/json
+            aws s3 cp latest.json "$bucket/latest.json" --endpoint-url $env:R2_ENDPOINT --content-type application/json --cache-control 'no-cache'
           }
-          Write-Host "R2 published: $tag"
+          # 差量补丁（上面若生成成功）：patches/patch-<旧>-to-<新>.bin。客户端 TryDeltaAsync
+          # 会按 exe 所在目录找 patches/，主源上也有补丁就不会再为几 MB 的差量去连 GitHub
+          foreach ($p in (Get-ChildItem 'release-artifact/patch-*.bin' -ErrorAction SilentlyContinue)) {
+            aws s3 cp $p.FullName "$bucket/patches/$($p.Name)" --endpoint-url $env:R2_ENDPOINT --content-type application/octet-stream --cache-control 'public, max-age=31536000, immutable'
+            Write-Host "R2 patch uploaded: $($p.Name)"
+          }
+          Write-Host "R2 published: $tag ($file)"
+          # 清理：带版本号的包只留最近 3 个（清单/模型包不动），桶不会被旧包撑爆
+          try {
+            $objs = @()
+            foreach ($line in (aws s3 ls "$bucket/" --endpoint-url $env:R2_ENDPOINT)) {
+              if ($line -match '^\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\s+\d+\s+(EfootballBot-[^/]+\.exe)$') {
+                $objs += [pscustomobject]@{
+                  When = [datetime]::ParseExact("$($Matches[1]) $($Matches[2])", 'yyyy-MM-dd HH:mm:ss', $null)
+                  Key = $Matches[3]
+                }
+              }
+            }
+            foreach ($old in ($objs | Sort-Object When -Descending | Select-Object -Skip 3)) {
+              aws s3 rm "$bucket/$($old.Key)" --endpoint-url $env:R2_ENDPOINT | Out-Null
+              Write-Host "R2 pruned: $($old.Key)"
+            }
+            $patchObjs = @()
+            foreach ($line in (aws s3 ls "$bucket/patches/" --endpoint-url $env:R2_ENDPOINT)) {
+              if ($line -match '^\s*(\d{4}-\d{2}-\d{2})\s+(\d{2}:\d{2}:\d{2})\s+\d+\s+(patch-[^/]+\.bin)$') {
+                $patchObjs += [pscustomobject]@{
+                  When = [datetime]::ParseExact("$($Matches[1]) $($Matches[2])", 'yyyy-MM-dd HH:mm:ss', $null)
+                  Key = $Matches[3]
+                }
+              }
+            }
+            foreach ($old in ($patchObjs | Sort-Object When -Descending | Select-Object -Skip 6)) {
+              aws s3 rm "$bucket/patches/$($old.Key)" --endpoint-url $env:R2_ENDPOINT | Out-Null
+              Write-Host "R2 pruned patch: $($old.Key)"
+            }
+          } catch { Write-Host "R2 prune skipped: $_" }

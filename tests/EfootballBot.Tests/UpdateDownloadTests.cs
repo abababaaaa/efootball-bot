@@ -21,12 +21,16 @@ public class UpdateDownloadTests : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "updtest-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
         _target = Path.Combine(_dir, "download.bin");
+        // 程序内置了真实主源地址（BuiltInPrimaryBaseUrl），测试要从「未配置」这个干净状态起步，
+        // 否则候选链会多出主源一项、把「镜像 → GitHub」的断言弄错。需要主源的用例自己赋值。
+        Updater.R2PublicBaseUrl = "";
     }
 
     public void Dispose()
     {
         try { Directory.Delete(_dir, recursive: true); } catch { }
-        Updater.R2PublicBaseUrl = ""; // 静态状态复位，避免泄漏到其他用例
+        Environment.SetEnvironmentVariable(Updater.PrimaryBaseUrlEnvVar, null);
+        Updater.Configure(null); // 静态状态复位（主源 + 版本检查缓存），避免泄漏到其他用例
     }
 
     // ---------------- 候选构建（纯函数） ----------------
@@ -61,6 +65,80 @@ public class UpdateDownloadTests : IDisposable
         Updater.R2PublicBaseUrl = "https://pub-abc123.r2.dev";
         var urls = Updater.BuildDownloadUrls(new Version(2, 0, 7), "efootball-bot-win-x64.zip");
         Assert.DoesNotContain(urls, u => u.Contains("r2.dev"));
+    }
+
+    // ---------------- 主源基址（配置化：环境变量 > config.json > 内置常量） ----------------
+
+    [Theory]
+    [InlineData("https://pub-abc123.r2.dev/", "https://pub-abc123.r2.dev")]
+    [InlineData("  https://cdn.example.com/upd//  ", "https://cdn.example.com/upd")]
+    [InlineData("http://127.0.0.1:8080", "http://127.0.0.1:8080")]
+    [InlineData("", "")]
+    [InlineData("   ", "")]
+    [InlineData("ftp://files.example.com", "")] // 非 http(s)：宁可不用也不要拼出打不开的地址
+    [InlineData("pub-abc123.r2.dev", "")]       // 裸域名：缺协议，Uri 判为相对地址
+    [InlineData("not a url", "")]
+    public void 主源基址_归一化(string raw, string expected)
+        => Assert.Equal(expected, Updater.NormalizeBaseUrl(raw));
+
+    [Fact]
+    public void 主源基址_环境变量优先于配置_配置优先于内置()
+    {
+        Environment.SetEnvironmentVariable(Updater.PrimaryBaseUrlEnvVar, null);
+
+        Updater.Configure("https://cfg.example.com/");
+        Assert.Equal("https://cfg.example.com", Updater.PrimaryBaseUrl);
+
+        Updater.Configure(null); // 未配置 + 未内置 → 该通道关闭
+        Assert.Equal(Updater.NormalizeBaseUrl(Updater.BuiltInPrimaryBaseUrl), Updater.PrimaryBaseUrl);
+
+        Environment.SetEnvironmentVariable(Updater.PrimaryBaseUrlEnvVar, "https://env.example.com");
+        Updater.Configure("https://cfg.example.com");
+        Assert.Equal("https://env.example.com", Updater.PrimaryBaseUrl);
+    }
+
+    [Fact]
+    public void 主源基址_通道描述展示真实生效域名()
+    {
+        Updater.Configure("https://pub-abc123.r2.dev");
+        Assert.Equal("主源 pub-abc123.r2.dev → 加速镜像 → GitHub 直连", Updater.DescribeChannel());
+    }
+
+    [Theory]
+    [InlineData("EfootballBot-6.1.2.exe", "EfootballBot-6.1.2.exe")]
+    [InlineData(null, "EfootballBot.exe")]
+    [InlineData("   ", "EfootballBot.exe")]
+    [InlineData("../../evil.exe", "EfootballBot.exe")]   // 上跳路径
+    [InlineData("sub/EfootballBot.exe", "EfootballBot.exe")] // 带目录
+    [InlineData("https://evil.example.com/x.exe", "EfootballBot.exe")] // 整条 URL
+    [InlineData("EfootballBot.zip", "EfootballBot.exe")] // 只认 exe
+    public void 清单文件名_只接受纯文件名(string? raw, string expected)
+        => Assert.Equal(expected, Updater.ResolveManifestFileName(raw));
+
+    [Fact]
+    public void 主源下载地址_用清单文件名而非固定名()
+    {
+        Updater.R2PublicBaseUrl = "https://pub-abc.r2.dev";
+        var urls = Updater.BuildDownloadUrls(new Version(6, 1, 2), "EfootballBot-6.1.2.exe");
+
+        Assert.Equal("https://pub-abc.r2.dev/EfootballBot-6.1.2.exe", urls[0]);
+        Assert.EndsWith("releases/download/v6.1.2/EfootballBot-6.1.2.exe", urls[^1]);
+    }
+
+    [Fact]
+    public async Task 主源清单说已最新_不再回退GitHub()
+    {
+        // 环回桩同时充当「主源清单」：清单版本 = 本机版本 → 结论必须是「已是最新」。
+        // 若实现仍去问 GitHub，本机无外网/被墙时这里会超时或返回错误，测试即失败。
+        string json = $"{{\"version\":\"{Updater.CurrentVersion}\",\"size\":1}}";
+        var (url, loop) = StartStub(Encoding.UTF8.GetBytes(json));
+        Updater.Configure(url[..url.IndexOf("/EfootballBot.exe", StringComparison.Ordinal)]);
+
+        var result = await Updater.CheckAsync(includePrerelease: false, force: true);
+
+        Assert.True(result.UpToDate);
+        Assert.False(result.IsError);
+        await loop;
     }
 
     // ---------------- SHA256 解析（纯函数，CI 追加到 Release 正文的行） ----------------

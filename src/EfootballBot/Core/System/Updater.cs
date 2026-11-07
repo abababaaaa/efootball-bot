@@ -6,20 +6,92 @@ using System.Text.RegularExpressions;
 namespace EfootballBot.Core.System;
 
 /// <summary>
-/// 自动更新。版本检查：R2 清单（国内直连，10 秒超时）→ GitHub Releases API（兜底，
+/// 自动更新。版本检查：主源清单（对象存储/CDN 直连，10 秒超时）→ GitHub Releases API（兜底，
 /// api.github.com 与 github.com 下载域不同路，实测裸网可达）。下载不区分来源，统一走
-/// 候选链：R2 直连源 → 加速镜像前缀 → GitHub 直连（UpdateApplier 逐个尝试，60 秒无数据
-/// 即换下一个），下载完成后按 SHA256 校验（R2 清单或 Release 正文提供）——镜像被篡改或
-/// 发错版本都会因哈希不匹配被弃用并切换下一通道，最后一档 GitHub 直连是信任锚点。
+/// 候选链：主源直连 → 加速镜像前缀 → GitHub 直连（UpdateApplier 逐个尝试，60 秒无数据
+/// 即换下一个），下载完成后按 SHA256 校验（主源清单或 Release 正文提供）——镜像被篡改或
+/// 发错版本都会因哈希不匹配被弃用并切换下一通道。
+/// <para>主源基址的优先级：环境变量 <see cref="PrimaryBaseUrlEnvVar"/> → config.json 的
+/// Update.PrimaryBaseUrl → 编译期常量 <see cref="BuiltInPrimaryBaseUrl"/>。空 = 未启用，
+/// 候选链自动跳过该通道（发布时只需在 CI 里配好桶，客户端不用改代码）。</para>
 /// </summary>
 public static class Updater
 {
     /// <summary>GitHub 仓库地址（owner/repo），无需用户手动填写。</summary>
     public const string DefaultRepository = "abababaaaa/efootball-bot";
 
-    /// <summary>R2 公开桶基地址（如 https://pub-xxxx.r2.dev ），CI 发版时同步 exe 与版本清单；
-    /// 空 = 未配置，自动跳过该通道（建桶后填入即可生效）。internal set 供单测切换。</summary>
-    public static string R2PublicBaseUrl { get; internal set; } = "";
+    /// <summary>
+    /// 编译期内置的主源基址（Cloudflare R2 公开桶）。所有新版本开箱走主源；
+    /// config.json 与 <see cref="Configure"/> 里的值优先级更高，换桶/换域名不必重新发版。
+    /// 空 = 未内置，只有显式配置过主源的机器才启用该通道。
+    /// </summary>
+    public const string BuiltInPrimaryBaseUrl = "https://pub-5f1aff2ad4fd4fd4a12a51f3e73fa02a.r2.dev";
+
+    /// <summary>环境变量：临时把主源指向新桶/另一台机器做验证，不必改 config.json。</summary>
+    public const string PrimaryBaseUrlEnvVar = "EFOOTBALL_UPDATE_BASE";
+
+    /// <summary>当前生效的主更新源基址（对象存储 / CDN 直链根，协议 + 域名 + 路径，末尾不带 /）。
+    /// 空 = 未启用，候选链退回「加速镜像 → GitHub 直连」。启动时由 <see cref="Configure"/> 按
+    /// 环境变量 → config.json → 内置常量 的顺序赋值。</summary>
+    public static string PrimaryBaseUrl { get; private set; } = BuiltInPrimaryBaseUrl;
+
+    /// <summary>旧名保留（模型包下载与既有调用方在用），等价于 <see cref="PrimaryBaseUrl"/>。
+    /// internal set 供测试切换来源；赋值统一走 <see cref="NormalizeBaseUrl"/>，脏值落成空串。</summary>
+    public static string R2PublicBaseUrl
+    {
+        get => PrimaryBaseUrl;
+        internal set => PrimaryBaseUrl = NormalizeBaseUrl(value);
+    }
+
+    /// <summary>应用配置里的主源基址（启动时调一次；不调则用内置常量）。
+    /// 优先级：环境变量 &gt; 传入值（config.json）&gt; 内置常量。切源后版本检查缓存作废。</summary>
+    public static void Configure(string? configuredBaseUrl)
+    {
+        string? env = Environment.GetEnvironmentVariable(PrimaryBaseUrlEnvVar);
+        string picked = !string.IsNullOrWhiteSpace(env) ? env!
+            : !string.IsNullOrWhiteSpace(configuredBaseUrl) ? configuredBaseUrl!
+            : BuiltInPrimaryBaseUrl;
+        PrimaryBaseUrl = NormalizeBaseUrl(picked);
+        _cachedResult = null;
+        _cacheKey = null;
+        _cacheTime = DateTime.MinValue;
+    }
+
+    /// <summary>基址归一化：去首尾空白、去末尾斜杠、只认 http/https 绝对地址。
+    /// 手输/复制带的空格、结尾 /、或误填成 ftp:// 与裸域名都落成空串（= 不启用该通道），
+    /// 而不是拼出 "https://host//latest.json" 这种照样 404 的地址。</summary>
+    internal static string NormalizeBaseUrl(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return "";
+        string trimmed = raw.Trim().TrimEnd('/');
+        if (!Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)) return "";
+        if (uri.Scheme != Uri.UriSchemeHttp && uri.Scheme != Uri.UriSchemeHttps) return "";
+        if (string.IsNullOrEmpty(uri.Host)) return "";
+        return trimmed;
+    }
+
+    /// <summary>清单里的 file 字段只允许「纯文件名」：带路径分隔符/查询串/上跳的脏值一律
+    /// 回退到默认名，避免被远端清单把下载地址指到桶外或拼出越权路径。</summary>
+    internal static string ResolveManifestFileName(string? file)
+    {
+        const string fallback = "EfootballBot.exe";
+        if (string.IsNullOrWhiteSpace(file)) return fallback;
+        string name = file.Trim();
+        if (name.Length > 128) return fallback;
+        if (name.Contains('/') || name.Contains('\\') || name.Contains('?') || name.Contains('#') ||
+            name.Contains(':') || name.Contains("..")) return fallback;
+        if (!name.EndsWith(".exe", StringComparison.OrdinalIgnoreCase)) return fallback;
+        return name;
+    }
+
+    /// <summary>设置页展示用的一句话通道描述（真实生效值，不是配置意向）。</summary>
+    public static string DescribeChannel()
+    {
+        if (string.IsNullOrEmpty(PrimaryBaseUrl))
+            return "加速镜像 → GitHub 直连（未配置主源）";
+        string host = Uri.TryCreate(PrimaryBaseUrl, UriKind.Absolute, out var uri) ? uri.Host : PrimaryBaseUrl;
+        return $"主源 {host} → 加速镜像 → GitHub 直连";
+    }
 
     /// <summary>下载加速镜像前缀（第三方 GitHub 反代，拼在完整原始 URL 前）。2026-10-16 实测
     /// 存活：gh-proxy.com、ghproxy.net、ghproxy.cn（速度随时段波动）；ghfast.top / ghproxy.cc /
@@ -43,8 +115,10 @@ public static class Updater
         string Browser_Download_Url
     );
 
-    /// <summary>R2 版本清单（CI 发版时写入桶内 latest.json / latest-pre.json）。</summary>
-    private sealed record R2Manifest(string Version, long Size, string? Sha256);
+    /// <summary>主源版本清单（CI 发版时写入桶内 latest.json / latest-pre.json）。
+    /// File = 桶内二进制文件名（带版本号，正式版与测试版互不覆盖；老清单无此字段时
+    /// 回退到固定的 EfootballBot.exe）。</summary>
+    private sealed record R2Manifest(string Version, long Size, string? Sha256, string? File);
 
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
@@ -73,7 +147,7 @@ public static class Updater
     /// <summary>可选 GitHub Token（从环境变量 GITHUB_TOKEN 读取），用于提高 API 限流上限。</summary>
     private static string? GithubToken => Environment.GetEnvironmentVariable("GITHUB_TOKEN");
 
-    /// <summary>检查最新版本：R2 清单优先、GitHub API 兜底（带 30 分钟缓存）。</summary>
+    /// <summary>检查最新版本：主源清单优先、GitHub API 兜底（带 30 分钟缓存）。</summary>
     /// <param name="force">true 时跳过缓存（手动检查时用）。</param>
     public static async Task<UpdateResult> CheckAsync(string? repository = null, bool includePrerelease = false, bool force = false)
     {
@@ -82,40 +156,47 @@ public static class Updater
         if (!force && _cachedResult is not null && _cacheKey == key && DateTime.Now - _cacheTime < CacheTtl)
             return _cachedResult;
 
-        var r2 = await CheckR2Async(includePrerelease);
-        if (r2 is not null)
-            return Cache(r2, key);
+        // 主源有结论（有新版本 / 已是最新）就以它为准，不再问 GitHub——否则「已是最新」的用户
+        // 在 GitHub 连不上的网络里照样会看到「无法连接更新源」，等于主源白配。主源未配置 /
+        // 不可达 / 清单损坏时才回退 GitHub，两条路都失败才报错。
+        var primary = await CheckPrimaryAsync(includePrerelease);
+        if (primary is not null)
+            return Cache(primary, key);
 
         var github = await CheckGitHubAsync(repository, includePrerelease);
         if (!github.IsError)
             return Cache(github, key);
 
-        return UpdateResult.Error("无法连接更新源（直连清单与 GitHub 均失败），请检查网络后重试");
+        return UpdateResult.Error("无法连接更新源（主源清单与 GitHub 均失败），请检查网络后重试");
     }
 
-    /// <summary>国内直连源检查：读 R2 公开桶版本清单（匿名、无 API 限流）。任何失败或"没有
-    /// 比本机更新的版本"都返回 null，静默交给 GitHub 检查兜底——清单只反映"上一次 CI 构建"，
-    /// GitHub 才是完整事实源。</summary>
-    private static async Task<UpdateResult?> CheckR2Async(bool includePrerelease)
+    /// <summary>主源检查：读桶内版本清单（匿名、无 API 限流、不用翻墙）。清单能读到就给出
+    /// 结论（有新版本 / 已是最新）；只有「未配置、不可达、清单损坏」才返回 null 交 GitHub 兜底。
+    /// 已是最新也返回结论，是为了让配了主源的机器彻底不依赖 GitHub——发版时 CI 会同时更新
+    /// 两份清单，上传失败会让 release job 直接失败，不会静默停留在旧版本。</summary>
+    private static async Task<UpdateResult?> CheckPrimaryAsync(bool includePrerelease)
     {
-        if (string.IsNullOrWhiteSpace(R2PublicBaseUrl)) return null;
+        if (string.IsNullOrEmpty(PrimaryBaseUrl)) return null;
         try
         {
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             http.DefaultRequestHeaders.UserAgent.ParseAdd("EfootballBot");
             string manifestName = includePrerelease ? "latest-pre.json" : "latest.json";
             var m = await http.GetFromJsonAsync<R2Manifest>(
-                $"{R2PublicBaseUrl.TrimEnd('/')}/{manifestName}", JsonOpts);
+                $"{PrimaryBaseUrl}/{manifestName}", JsonOpts);
             if (m?.Version is null || !Version.TryParse(m.Version, out var remoteVer)) return null;
-            if (remoteVer <= CurrentVersion) return null;
+            if (remoteVer <= CurrentVersion)
+                return UpdateResult.AlreadyLatest($"已是最新版本 v{FormatVersion(CurrentVersion)}");
 
+            // 清单自带文件名（带版本号）时按它下；老清单没有该字段则用固定名。远端清单是
+            // 不可信输入，文件名先过一遍净化，拼不出桶外路径。
             return UpdateResult.Available(remoteVer, $"v{remoteVer}",
-                BuildDownloadUrls(remoteVer), m.Size, null, singleExecutable: true,
+                BuildDownloadUrls(remoteVer, ResolveManifestFileName(m.File)), m.Size, null, singleExecutable: true,
                 expectedSha256: string.IsNullOrWhiteSpace(m.Sha256) ? null : m.Sha256.ToLowerInvariant());
         }
         catch
         {
-            return null; // R2 不可达/清单损坏：回退 GitHub，不打扰用户
+            return null; // 主源不可达/清单损坏：回退 GitHub，不打扰用户
         }
     }
 
@@ -175,15 +256,15 @@ public static class Updater
     }
 
     /// <summary>构建下载候选地址序列（同一份字节的多个来源，任一成功即可，非分卷拼接）：
-    /// R2 直连源（已配置且为目标是 exe 时）→ 各加速镜像 → GitHub 直连（恒在最后兜底）。
+    /// 主源直连（已配置且目标是 exe 时）→ 各加速镜像 → GitHub 直连（恒在最后兜底）。
     /// CI 用同一构建产物发布到所有来源，ExpectedSha256 对全部候选一体适用。</summary>
     internal static List<string> BuildDownloadUrls(Version v, string fileName = "EfootballBot.exe")
     {
         string gh = $"https://github.com/{DefaultRepository}/releases/download/v{v}/{fileName}";
         var urls = new List<string>();
-        if (!string.IsNullOrWhiteSpace(R2PublicBaseUrl) &&
+        if (!string.IsNullOrEmpty(PrimaryBaseUrl) &&
             fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
-            urls.Add($"{R2PublicBaseUrl.TrimEnd('/')}/{fileName}");
+            urls.Add($"{PrimaryBaseUrl}/{fileName}");
         foreach (var p in DownloadMirrorPrefixes)
             urls.Add(p + gh);
         urls.Add(gh);

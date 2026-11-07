@@ -259,6 +259,7 @@ public partial class MainWindow
         // 自动更新
         TxtCurrentVersion.Text = "v" + Updater.FormatVersion(Updater.CurrentVersion);
         TxtUpdateRepo.Text = Updater.DefaultRepository;
+        TxtUpdateChannel.Text = Updater.DescribeChannel() + "，自动选路 + SHA256 完整性校验";
         ChkCheckOnStartup.IsChecked = _cfg.Update.CheckOnStartup;
         ChkIncludePrerelease.IsChecked = _cfg.Update.IncludePrerelease;
         ChkAutoDownloadInstall.IsChecked = _cfg.Update.AutoDownloadInstall;

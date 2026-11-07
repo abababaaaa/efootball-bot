@@ -231,11 +231,19 @@ public sealed class HotkeyConfig
     };
 }
 
-/// <summary>自动更新配置（GitHub Releases）。</summary>
+/// <summary>自动更新配置（主源清单 + GitHub Releases 兜底）。</summary>
 public sealed class UpdateConfig
 {
     /// <summary>GitHub 仓库 owner/repo 格式（如 "myname/efootball-bot"）。</summary>
     public string Repository { get; set; } = "";
+
+    /// <summary>
+    /// 主更新源基址（对象存储 / CDN 直链根，如 Cloudflare R2 公开桶 https://pub-xxxx.r2.dev）。
+    /// 客户端从 {基址}/latest.json（测试版 latest-pre.json）读版本，从 {基址}/{file} 下二进制；
+    /// 任一环节失败自动回退「加速镜像 → GitHub 直连」，不影响装不上。
+    /// 留空 = 用程序内置地址；内置也为空则不启用该通道。改这里不需要重新编译。
+    /// </summary>
+    public string PrimaryBaseUrl { get; set; } = "";
 
     /// <summary>启动时自动检查更新。</summary>
     public bool CheckOnStartup { get; set; } = true;

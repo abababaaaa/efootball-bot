@@ -152,7 +152,13 @@
 
 ## 自动更新
 
-多通道自动选路（加速镜像链 → GitHub 直连），**每个候选下载完立即做 SHA256 校验，不匹配就换下一个通道**；支持**差量补丁**（只下变化的部分，通常几 MB）。
+多通道自动选路（**国内直连主源 → 加速镜像链 → GitHub 直连**），**每个候选下载完立即做 SHA256 校验，不匹配就换下一个通道**；支持**差量补丁**（只下变化的部分，通常几 MB）。
+
+主源是对象存储（默认 Cloudflare R2 公开桶）上的两样东西：一份几十字节的版本清单 `latest.json`（测试版读 `latest-pre.json`）和带版本号的安装包 `EfootballBot-<版本>.exe`。客户端只读清单就能判断有没有新版，**不经过 GitHub 也能量到、能下**；清单里的 `file` / `sha256` / `size` 由 CI 发版时写入，哈希对不上就弃用该通道、换下一个。差量补丁（`patches/patch-<旧>-to-<新>.bin`，通常几 MB）也放在主源上，常规升级同样不碰 GitHub。
+
+换源不用重新编译：`data\config.json` 的 `Update.PrimaryBaseUrl` 优先于程序内置地址，环境变量 `EFOOTBALL_UPDATE_BASE` 优先级最高（自测新桶时用）。
+
+> 开通主源（维护者，一次性）：Cloudflare → R2 建桶 → 开启 r2.dev 公开访问 → 建 Object Read & Write 的 API Token → 仓库 Secrets 填 `R2_ACCOUNT_ID` / `R2_ACCESS_KEY_ID` / `R2_SECRET_ACCESS_KEY` / `R2_BUCKET` → 把桶地址填进 `Updater.BuiltInPrimaryBaseUrl` 发一版。之后每次打 tag，CI 自动上传版本包与清单（桶里只保留最近 3 个版本包）。详见 [主更源设计](docs/superpowers/specs/2026-11-07-primary-update-source-design.md)。
 
 更新用 rename-swap 方式替换自身：旧 exe 先改名 → 新 exe 就位 → 失败自动回滚 → 重启后清理备份。
 

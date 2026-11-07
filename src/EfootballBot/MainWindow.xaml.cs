@@ -50,6 +50,11 @@ public partial class MainWindow : Window
         InitModuleRuns();
         _cfg = AppConfig.Load();
 
+        // 主更新源：环境变量 > config.json 的 Update.PrimaryBaseUrl > 内置常量。
+        // 必须早于任何 Updater.CheckAsync（构造尾部就会自动检查一次），否则首轮检查
+        // 会按「未配置主源」跑，白白退回 GitHub。
+        Updater.Configure(_cfg.Update.PrimaryBaseUrl);
+
         // 首次启动（无 Theme 字段或为空）→ 显示主题选择覆盖层
         if (string.IsNullOrWhiteSpace(_cfg.Theme))
             _cfg.Theme = ThemeManager.Dark;

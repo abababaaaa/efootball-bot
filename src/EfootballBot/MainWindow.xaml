@@ -2503,7 +2503,7 @@
                                         Padding="12,9" Margin="0,8,0,0">
                                     <StackPanel>
                                         <TextBlock Text="下载通道" Foreground="{DynamicResource TextMuted}" FontSize="10.5"/>
-                                        <TextBlock Text="国内直连源 → 加速镜像 → GitHub，自动选路 + SHA256 完整性校验"
+                                        <TextBlock x:Name="TxtUpdateChannel" Text="国内直连源 → 加速镜像 → GitHub，自动选路 + SHA256 完整性校验"
                                                    Foreground="{DynamicResource TextMuted}" FontSize="10.5"
                                                    TextWrapping="Wrap" Margin="0,4,0,0"/>
                                     </StackPanel>
