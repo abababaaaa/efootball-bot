@@ -71,9 +71,11 @@ public static class StudTrainingBrain
         if (IsPlayerActions(ocr)) return StudScreen.PlayerActions;
         if (IsTrainingPlayerDetail(ocr)) return StudScreen.TrainingPlayerDetail;
         if (IsSortPopup(ocr)) return StudScreen.SortPopup;
-        if (IsPositionFilter(ocr)) return StudScreen.PositionFilter;
+        // 子页标题优先于背景行：球员评价子页背景也印着「最佳位置」，
+        // 若先判最佳位置会把评价页误判成位置页（2026-11-08 CI 实机帧回归）。
         if (IsTrainingFilter(ocr)) return StudScreen.TrainingFilter;
         if (IsRatingFilter(ocr)) return StudScreen.RatingFilter;
+        if (IsPositionFilter(ocr)) return StudScreen.PositionFilter;
         if (IsActionMenu(ocr)) return StudScreen.ActionMenu;
         if (IsPostAcquireDetail(ocr)) return StudScreen.PostAcquireDetail;
         if (IsContractDetail(ocr)) return StudScreen.ContractDetail;
@@ -121,14 +123,21 @@ public static class StudTrainingBrain
         ocr.ContainsJoined("选择视图") && ocr.ContainsJoined("筛选") && ocr.ContainsJoined("取消");
 
     public static bool IsFilter(OcrResult ocr) =>
-        ocr.ContainsJoined("完成") &&
+        HasFilterDoneButton(ocr) &&
         (ocr.ContainsJoined("球员筛选") || ocr.ContainsJoined("俱乐部球队"));
+
+    /// <summary>
+    /// 筛选页底部「B 返回 / 完成」按钮。不能直接用 ContainsJoined("完成")：
+    /// 培育子页的「未完成培育」也含「完成」二字，会把子页误判成筛选页。
+    /// </summary>
+    public static bool HasFilterDoneButton(OcrResult ocr) =>
+        ocr.Words.Any(w => w.CenterY > 0.85 && w.NormText.EndsWith("完成", StringComparison.Ordinal));
 
     public static bool IsPositionFilter(OcrResult ocr) =>
         ocr.ContainsJoined("最佳位置") && ocr.ContainsJoined("搜索将基于任一选定的筛选条件");
 
     public static bool IsTrainingFilter(OcrResult ocr) =>
-        !ocr.ContainsJoined("完成") &&
+        !HasFilterDoneButton(ocr) &&
         (ocr.ContainsJoined("未完成培育") || ocr.ContainsJoined("已完成培育"));
 
     public static bool IsSkillResult(OcrResult ocr) =>
@@ -210,7 +219,7 @@ public static class StudTrainingBrain
     }
 
     public static bool IsRatingFilter(OcrResult ocr) =>
-        ocr.ContainsJoined("球员评价") && !ocr.ContainsJoined("完成") && !ocr.ContainsJoined("价格");
+        ocr.ContainsJoined("球员评价") && !HasFilterDoneButton(ocr) && !ocr.ContainsJoined("价格");
 
     /// <summary>
     /// 读取右侧子页当前高亮（白底）行的文字。最佳位置/培育/球员评价子页的选中行为纯白，
