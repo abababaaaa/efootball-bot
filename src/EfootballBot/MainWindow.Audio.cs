@@ -10,7 +10,7 @@ namespace EfootballBot;
 /// 「挂机时静音游戏」：只把游戏进程的音频会话静音（Windows 音量合成器里单独给游戏静音的效果），
 /// 系统音量与其他软件完全不受影响。
 /// <para>
-/// 六个游戏模块页的「本次运行」栏各有一个开关（共用同一配置 <see cref="Core.Config.AudioConfig"/>），
+/// 各游戏模块页的「本次运行」栏各有一个开关（共用同一配置 <see cref="Core.Config.AudioConfig"/>），
 /// 点它随时开关游戏声音：挂机中点一下就立刻生效，不用停止再开始。
 /// 挂机开始自动静音，停止自动恢复；游戏中途重启会新建音频会话（静音不继承），
 /// 挂机期间按秒级巡检重放静音。
@@ -24,12 +24,12 @@ public partial class MainWindow
     /// <summary>当前是否由本程序把游戏静音（用于日志去重与停止时恢复）。</summary>
     private bool _muteApplied;
 
-    /// <summary>批量回填/同步 6 个复选框时屏蔽事件，避免互相触发写配置。</summary>
+    /// <summary>批量回填/同步所有模块的复选框时屏蔽事件，避免互相触发写配置。</summary>
     private bool _syncingMuteUi;
 
     private CheckBox[] MuteCheckboxes() => new[]
     {
-        ChkMuteMyLeague, ChkMuteWeekly, ChkMuteAiLadder,
+        ChkMuteMyLeague, ChkMuteWeekly, ChkMuteAiLadder, ChkMuteStud,
         ChkMuteCn, ChkMuteCnWeekly, ChkMuteCnMyLeague,
     };
 

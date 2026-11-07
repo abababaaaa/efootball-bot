@@ -9,6 +9,7 @@ using EfootballBot.Core.Bot.Scenarios.CnWeekly;
 using EfootballBot.Core.Bot.Scenarios.CnMyLeague;
 using EfootballBot.Core.Bot.Scenarios.PeakLadder;
 using EfootballBot.Core.Bot.Scenarios.AiLadder;
+using EfootballBot.Core.Bot.Scenarios.Stud;
 using EfootballBot.Core.Observation;
 using EfootballBot.Core.System;
 #if CHILD_SESSION_BETA
@@ -261,10 +262,11 @@ public sealed class BotEngine : IDisposable
         Stats.StartedAt ??= DateTime.Now;
         // 场景模式（cndaily=国服天梯巅峰赛 / cnweekly=国服周活动 / cnmyleague=国服我的联赛 /
         // intl=国际服我的联赛 / intlweekly=国际服周活动 / intlladder=国际服AI天梯联赛 /
+        // intlstudbuy=种马购买 / intlstudtrain=种马培训（筛选 + 技巧训练） /
         // intlswaptest=满级换人测试——只跑一次巡检即自动停）
         // 需接管虚拟手柄（B 键逃生依赖）；observe 纯观察不操作游戏
         bool scenarioMode = mode is "cndaily" or "cnweekly" or "cnmyleague" or "intl" or "intlweekly" or "intlladder"
-            or "intlswaptest";
+            or "intlstudbuy" or "intlstudtrain" or "intlswaptest";
         bool cn = mode is "cndaily" or "cnweekly" or "cnmyleague";
         _cnSession = cn; // 接力目标按服校验：国际服会话绝不切到国服模块（反之亦然）
         CancellationToken token;
@@ -601,6 +603,8 @@ public sealed class BotEngine : IDisposable
         "cndaily" => new PeakLadderScenario(this, LogInternal),
         "cnmyleague" => new CnMyLeagueScenario(this, LogInternal),
         "intlladder" => new AiLadderScenario(this, LogInternal),
+        "intlstudbuy" => new StudTrainingScenario(this, LogInternal, training: false),
+        "intlstudtrain" => new StudTrainingScenario(this, LogInternal, training: true),
         "intlswaptest" => new MyLeagueScenario(this, LogInternal, swapTestOnly: true),
         "intl" => new MyLeagueScenario(this, LogInternal),
         _ => null,

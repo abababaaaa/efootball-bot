@@ -399,6 +399,10 @@
                                              Style="{StaticResource SegTab}"
                                              ToolTip="国际服 eFootball™联赛·对阵AI类别：组别循环冲级，可设达到组别停止"
                                              Checked="RbAiLadder_Checked"/>
+                                <RadioButton x:Name="RbStud" GroupName="IntlModule" Content="种马培训"
+                                             Style="{StaticResource SegTab}"
+                                             ToolTip="种马球员培训（购买）：批量买入 0GP 种马，或筛选待培训球员并消耗随机技巧卡"
+                                             Checked="RbStud_Checked"/>
                             </StackPanel>
                         </Border>
                     </Border>
@@ -943,6 +947,211 @@
                         <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
                         <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}" Text="达到设定场次（本次挂机累计）自动停止并还原窗口；0 = 一直挂机，自定义请输入正整数"/>
                         </Grid>
+                    </StackPanel>
+
+                    <!-- 种马球员培训（购买）内容：购买 / 培训 两个子模块共用本次运行按钮 -->
+                    <StackPanel x:Name="StudContent" Visibility="Collapsed">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="Auto"/>
+                            </Grid.ColumnDefinitions>
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal">
+                                    <Ellipse Width="8" Height="8" Fill="#FFE0B23C"
+                                             VerticalAlignment="Center" Margin="0,0,9,0"/>
+                                    <TextBlock Text="种马球员培训（购买）" Style="{StaticResource PageTitle}"/>
+                                    <Border Style="{StaticResource Chip}" Margin="10,2,0,0">
+                                        <TextBlock Text="国际服" FontSize="10"
+                                                   Foreground="{DynamicResource TextSecondary}"/>
+                                    </Border>
+                                </StackPanel>
+                                <TextBlock Style="{StaticResource PageSub}"
+                                           Text="批量签下 0GP 种马，或筛选待培训球员后消耗技能卡"/>
+                                <Border Style="{StaticResource Chip}" HorizontalAlignment="Left" Margin="0,8,0,0"
+                                        ToolTip="全局热键：运行中按一次=暂停，暂停中再按一次=彻底终止（设置页可改键，可关闭）">
+                                    <StackPanel Orientation="Horizontal">
+                                        <TextBlock Text="暂停/终止热键" FontSize="10.5"
+                                                   Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
+                                        <TextBlock x:Name="TxtHkStud" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                                   FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
+                                    </StackPanel>
+                                </Border>
+
+                                <Grid Margin="0,10,0,0" MaxWidth="560">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"
+                                               Text="购买：合约 → 普通球员 → 价格升序 → 第 1 张（门将）/第 2 张（非门将）"/>
+                                    <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"
+                                               Text="培训：我的球队 → 球员 → 筛选（除 GK / 未完成培育 / 最低评价）"/>
+                                    <Ellipse Grid.Row="2" Style="{StaticResource BulletDot}"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}"
+                                               Text="全自动模拟手柄；开始前请先回到游戏主菜单"/>
+                                </Grid>
+                            </StackPanel>
+                            <Border Grid.Column="1" Style="{StaticResource RailCard}" Width="190"
+                                    Margin="16,0,0,0" VerticalAlignment="Top">
+                                <StackPanel>
+                                    <TextBlock Text="本次运行" Style="{StaticResource GroupLabel}" Margin="2,0,0,8"/>
+                                    <Button x:Name="BtnStartStud" Content="开始"
+                                            Style="{StaticResource PrimaryBtn}" FontSize="13" Height="36"
+                                            Click="BtnStartStud_Click"
+                                            ToolTip="按当前子模块开始；开始后此按钮变为「一键结束」"/>
+                                    <Button x:Name="BtnPauseStud" Content="暂停" Style="{StaticResource GhostBtn}"
+                                            Height="30" Margin="0,6,0,0"
+                                            IsEnabled="False" Click="BtnPause_Click"/>
+                                    <Button x:Name="BtnManualStud" Content="发现问题手动停止"
+                                            Style="{StaticResource DangerOutlineBtn}" Height="30" Margin="0,6,0,0"
+                                            IsEnabled="False" Click="BtnManualStop_Click"
+                                            ToolTip="停止挂机并自动截取当前游戏画面，生成反馈包发给作者"/>
+                                    <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
+                                    <CheckBox x:Name="ChkMuteStud" Content="挂机时静音游戏" Margin="2,0,0,0"
+                                              Checked="ChkMuteGame_Toggled" Unchecked="ChkMuteGame_Toggled"
+                                              ToolTip="开始挂机后只把游戏的声音静音（系统音量与其他软件不受影响）；点它随时开关游戏声音，停止挂机自动恢复"/>
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <!-- 子模块页签 -->
+                        <Border Style="{StaticResource TabTrack}" HorizontalAlignment="Left" Margin="0,12,0,0">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton x:Name="RbStudBuy" GroupName="StudModule" Content="购买"
+                                             Style="{StaticResource SegTab}" IsChecked="True"
+                                             Checked="RbStudBuy_Checked"/>
+                                <RadioButton x:Name="RbStudTrain" GroupName="StudModule" Content="培训"
+                                             Style="{StaticResource SegTab}"
+                                             Checked="RbStudTrain_Checked"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 购买子模块 -->
+                        <StackPanel x:Name="StudBuyContent">
+                            <TextBlock Text="买入设置" Style="{StaticResource GroupLabel}" Margin="0,12,0,0"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                                    <TextBlock Text="门将数量" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
+                                               HorizontalAlignment="Left"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <ComboBox x:Name="CmbStudGkCount" Width="104" SelectedIndex="0"
+                                                  SelectionChanged="CmbStudCount_SelectionChanged">
+                                            <ComboBoxItem Content="0"/>
+                                            <ComboBoxItem Content="1"/>
+                                            <ComboBoxItem Content="5"/>
+                                            <ComboBoxItem Content="10"/>
+                                            <ComboBoxItem Content="自定义"/>
+                                        </ComboBox>
+                                        <TextBox x:Name="TxtStudGkCount" Width="58" Margin="8,0,0,0"
+                                                 VerticalAlignment="Center" Visibility="Collapsed" Text="1"
+                                                 ToolTip="输入 0~999 的整数"/>
+                                        <TextBlock Text="个" FontSize="11.5" VerticalAlignment="Center" Margin="6,0,0,0"
+                                                   Foreground="{DynamicResource TextMuted}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                                <StackPanel Grid.Column="1">
+                                    <TextBlock Text="非门将数量（默认）" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
+                                               HorizontalAlignment="Left"/>
+                                    <StackPanel Orientation="Horizontal">
+                                        <ComboBox x:Name="CmbStudOutfieldCount" Width="104" SelectedIndex="1"
+                                                  SelectionChanged="CmbStudCount_SelectionChanged">
+                                            <ComboBoxItem Content="0"/>
+                                            <ComboBoxItem Content="1"/>
+                                            <ComboBoxItem Content="5"/>
+                                            <ComboBoxItem Content="10"/>
+                                            <ComboBoxItem Content="自定义"/>
+                                        </ComboBox>
+                                        <TextBox x:Name="TxtStudOutfieldCount" Width="58" Margin="8,0,0,0"
+                                                 VerticalAlignment="Center" Visibility="Collapsed" Text="1"
+                                                 ToolTip="输入 0~999 的整数"/>
+                                        <TextBlock Text="个" FontSize="11.5" VerticalAlignment="Center" Margin="6,0,0,0"
+                                                   Foreground="{DynamicResource TextMuted}"/>
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
+                            <TextBlock Style="{StaticResource SmallText}" Margin="0,9,0,0" MaxWidth="560"
+                                       Text="两类可分别设置、可同时购买（0 = 不买）。每买 1 个都会重新归顶并按「价格·升序」选人；门将取第 1 张，非门将取第 2 张。"/>
+                            <Grid Margin="0,10,0,0" MaxWidth="560">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"
+                                           Text="购买预算按 0GP 设计：付款弹窗会自动上移焦点再确认，不会碰到取消"/>
+                                <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"
+                                           Text="列表没有可买球员时会停在普通球员页并写日志，请及时手动停止"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <!-- 培训子模块 -->
+                        <StackPanel x:Name="StudTrainContent" Visibility="Collapsed">
+                            <TextBlock Text="培训设置" Style="{StaticResource GroupLabel}" Margin="0,12,0,0"/>
+                            <CheckBox x:Name="ChkStudTrainGk" Content="培训门将种马" Margin="0,2,0,0"
+                                      ToolTip="默认否。开启后筛选不再排除 GK——但游戏内无法单独设定只打几个门将种马，请谨慎开启"/>
+                            <TextBlock Style="{StaticResource SmallText}" Margin="0,7,0,0" MaxWidth="560"
+                                       Foreground="{DynamicResource Warning}"
+                                       Text="注意：开启「培训门将种马」后，筛选会保留全部位置（不再排除 GK）；游戏内无法单独设定只培训几个门将种马，请谨慎开启。"/>
+                            <StackPanel Margin="0,12,0,0">
+                                <TextBlock Text="技能卡培训（消耗）个数" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"
+                                           HorizontalAlignment="Left"/>
+                                <StackPanel Orientation="Horizontal">
+                                    <ComboBox x:Name="CmbStudSkillCount" Width="116" SelectedIndex="0"
+                                              SelectionChanged="CmbStudCount_SelectionChanged">
+                                        <ComboBoxItem Content="0"/>
+                                        <ComboBoxItem Content="1"/>
+                                        <ComboBoxItem Content="5"/>
+                                        <ComboBoxItem Content="10"/>
+                                        <ComboBoxItem Content="自定义"/>
+                                        <ComboBoxItem Content="全部"/>
+                                    </ComboBox>
+                                    <TextBox x:Name="TxtStudSkillCount" Width="58" Margin="8,0,0,0"
+                                             VerticalAlignment="Center" Visibility="Collapsed" Text="1"
+                                             ToolTip="输入 0~999 的整数"/>
+                                    <TextBlock Text="张" FontSize="11.5" VerticalAlignment="Center" Margin="6,0,0,0"
+                                               Foreground="{DynamicResource TextMuted}"/>
+                                </StackPanel>
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource SmallText}" Margin="0,7,0,0" MaxWidth="560"
+                                       Text="每名球员执行一次随机技巧训练（消耗 1 张随机技巧卡）；0 = 只筛选不训练，「全部」= 训练筛选后的所有球员。"/>
+                            <Grid Margin="0,10,0,0" MaxWidth="560">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"
+                                           Text="最佳位置：除 GK 外 12 类全选（开启培训门将时跳过这一步）"/>
+                                <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"
+                                           Text="培育 = 未完成培育；球员评价 = 最后一档（一颗星，OCR 读不出时走固定 ↓×4）"/>
+                                <Ellipse Grid.Row="2" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}"
+                                           Text="筛选完成后逐名进入技巧训练：随机道具 → 执行训练课 → 记录技巧名，结束输出消耗与收获汇总"/>
+                            </Grid>
+                        </StackPanel>
                     </StackPanel>
                         </StackPanel>
                     </ScrollViewer>

@@ -30,6 +30,8 @@ public partial class MainWindow
             new ModuleRun(BtnTestSwap, BtnPauseMyLeague, BtnManualMyLeague, "intlswaptest", null),
             new ModuleRun(BtnStartWeekly, BtnPauseWeekly, BtnManualWeekly, "intlweekly", null),
             new ModuleRun(BtnStartAiLadder, BtnPauseAiLadder, BtnManualAiLadder, "intlladder", null),
+            // 种马模块共用一枚开始按钮：具体模式由当前子页签在 BtnStartStud_Click 里决定
+            new ModuleRun(BtnStartStud, BtnPauseStud, BtnManualStud, "intlstudbuy", null),
             new ModuleRun(BtnStartCn, BtnPauseCn, BtnManualCn, "cndaily", null),
             new ModuleRun(BtnStartCnWeekly, BtnPauseCnWeekly, BtnManualCnWeekly, "cnweekly", null),
             new ModuleRun(BtnStartCnMyLeague, BtnPauseCnMyLeague, BtnManualCnMyLeague, "cnmyleague", null),

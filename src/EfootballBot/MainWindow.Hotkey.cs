@@ -71,7 +71,7 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>各模块页头部的热键胶囊（8 个模块全覆盖，懒初始化）。</summary>
+    /// <summary>各模块页头部的热键胶囊（全部模块覆盖，懒初始化）。</summary>
     private readonly List<TextBlock> _hotkeyChips = new();
 
     private List<TextBlock> HotkeyChips()
@@ -80,7 +80,7 @@ public partial class MainWindow
         {
             foreach (var t in new[]
                      {
-                         TxtHkIntlPreMatch, TxtHkIntlLeague, TxtHkIntlWeekly, TxtHkIntlLadder,
+                         TxtHkIntlPreMatch, TxtHkIntlLeague, TxtHkIntlWeekly, TxtHkIntlLadder, TxtHkStud,
                          TxtHkCnPreMatch, TxtHkCnLeague, TxtHkCnWeekly, TxtHkCnMyLeague,
                      })
                 if (t is not null) _hotkeyChips.Add(t);
@@ -91,7 +91,7 @@ public partial class MainWindow
     /// <summary>热键短标签（如 F10）；热键未启用时返回 null，按钮不加后缀。</summary>
     private string? HotkeyLabel => _cfg is { Hotkey.Enabled: true } c ? c.Hotkey.DisplayString() : null;
 
-    /// <summary>把当前热键配置同步到设置页标签、8 个模块页胶囊与运行按钮。</summary>
+    /// <summary>把当前热键配置同步到设置页标签、各模块页胶囊与运行按钮。</summary>
     private void RefreshHotkeyUi()
     {
         if (LblHotkeyMain is null) return; // XAML 初始化顺序保护

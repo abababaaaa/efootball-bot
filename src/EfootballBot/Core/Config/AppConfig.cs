@@ -395,6 +395,28 @@ public sealed class AiLadderConfig
 }
 
 /// <summary>
+/// 种马球员培训（购买）配置（国际服）。两个子模块共用一段配置：
+/// 购买=按价格升序反复签下 0GP 球员；培训=筛选非门将/未完成培育/最低评价球员后进入技能卡流程。
+/// </summary>
+public sealed class StudTrainingConfig
+{
+    /// <summary>本次买入门将种马数量（0 = 不买）。</summary>
+    public int BuyGoalkeeperCount { get; set; } = 0;
+
+    /// <summary>本次买入非门将种马数量（0 = 不买；默认 1，符合「非门将为默认」）。</summary>
+    public int BuyOutfieldCount { get; set; } = 1;
+
+    /// <summary>是否也培训门将种马。默认否：开启后筛选不再排除 GK，且无法单独限定只打几个门将。</summary>
+    public bool TrainGoalkeepers { get; set; } = false;
+
+    /// <summary>技能卡消耗个数（0/1/5/10/自定义）；配合 <see cref="SkillCardAll"/> 表示「全部」。</summary>
+    public int SkillCardCount { get; set; } = 0;
+
+    /// <summary>技能卡消耗选择「全部」。</summary>
+    public bool SkillCardAll { get; set; } = false;
+}
+
+/// <summary>
 /// 周活动挂机配置（国际服）。赛事等级与自动控制是活动设置浮层的核验项；
 /// 自动控制强制开、弹性自动控制强制关（硬编码，不设配置）。
 /// </summary>
@@ -640,6 +662,9 @@ public sealed class AppConfig
 
     // —— AI天梯联赛（国际服，eFootball™联赛·对阵AI类别）——
     public AiLadderConfig AiLadder { get; set; } = new();
+
+    // —— 种马球员培训（购买，国际服）——
+    public StudTrainingConfig StudTraining { get; set; } = new();
 
     // —— 周活动（国服，比赛活动冠军赛）——
     public CnWeeklyConfig CnWeekly { get; set; } = new();

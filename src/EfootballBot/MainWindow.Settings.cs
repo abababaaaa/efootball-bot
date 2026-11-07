@@ -28,6 +28,12 @@ public partial class MainWindow
     /// <summary>场次计数停止固定档位（索引=下拉序，0=无限跑）；索引 6 = 自定义（读输入框）。</summary>
     private static readonly int[] StopAfterPresets = { 0, 1, 3, 5, 10, 20 };
 
+    /// <summary>种马购买数量档位（索引=下拉序）；索引 4 = 自定义（读输入框）。</summary>
+    private static readonly int[] StudBuyCountPresets = { 0, 1, 5, 10 };
+
+    /// <summary>技能卡消耗数量档位；索引 4 = 自定义，索引 5 = 全部（单独存 SkillCardAll）。</summary>
+    private static readonly int[] StudSkillCountPresets = { 0, 1, 5, 10 };
+
     /// <summary>周活动（国际服）全部完成后的接力模块（索引=下拉序；空串=不跳转，停止挂机）。
     /// 值即引擎模式名，由 BotEngine.HandoffTo 按同一张表换场景。</summary>
     private static readonly string[] WeeklyAfterModules = { "", "intl", "intlladder" };
@@ -72,6 +78,47 @@ public partial class MainWindow
         if (cmb.SelectedIndex >= 0 && cmb.SelectedIndex < StopAfterPresets.Length)
             return StopAfterPresets[cmb.SelectedIndex];
         return int.TryParse(txt.Text.Trim(), out int v) && v > 0 ? v : 0;
+    }
+
+    /// <summary>种马数量回填：预设值选对应档，其他值进「自定义」并显示输入框。</summary>
+    private static void LoadStudCountUi(ComboBox cmb, TextBox txt, int value, int[] presets)
+    {
+        value = Math.Clamp(value, 0, 999);
+        int idx = Array.IndexOf(presets, value);
+        if (idx >= 0)
+        {
+            cmb.SelectedIndex = idx;
+            txt.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            cmb.SelectedIndex = presets.Length; // 自定义
+            txt.Text = value.ToString();
+            txt.Visibility = Visibility.Visible;
+        }
+    }
+
+    /// <summary>种马数量读取：自定义输入非法时回退 0（不买）。</summary>
+    private static int SaveStudCountUi(ComboBox cmb, TextBox txt, int[] presets)
+    {
+        if (cmb.SelectedIndex >= 0 && cmb.SelectedIndex < presets.Length)
+            return presets[cmb.SelectedIndex];
+        return int.TryParse(txt.Text.Trim(), out int v) ? Math.Clamp(v, 0, 999) : 0;
+    }
+
+    /// <summary>购买/技能卡数量下拉选中「自定义」时显示输入框（父容器内就地配对，避免初始化空引用）。</summary>
+    private void CmbStudCount_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (sender is not ComboBox cmb || cmb.Parent is not StackPanel panel) return;
+        int i = panel.Children.IndexOf(cmb);
+        for (int j = i + 1; j < panel.Children.Count; j++)
+        {
+            if (panel.Children[j] is TextBox txt)
+            {
+                txt.Visibility = cmb.SelectedIndex == 4 ? Visibility.Visible : Visibility.Collapsed;
+                return;
+            }
+        }
     }
 
     /// <summary>选「自定义」时显示手动输入框（两个下拉共用，按容器内位置配对）。
@@ -215,6 +262,22 @@ public partial class MainWindow
         CmbAiStopAtDivision.SelectedIndex = aiDiv is >= 1 and <= 10 ? 11 - aiDiv : 0;
         LoadStopAfterUi(CmbAiStopAfterMatches, TxtAiStopAfterMatches, _cfg.AiLadder.StopAfterMatches);
 
+        // 种马球员培训（购买）：两类买入数量 + 培训开关 + 技能卡消耗数量
+        _loadingConfig = true;
+        LoadStudCountUi(CmbStudGkCount, TxtStudGkCount, _cfg.StudTraining.BuyGoalkeeperCount, StudBuyCountPresets);
+        LoadStudCountUi(CmbStudOutfieldCount, TxtStudOutfieldCount, _cfg.StudTraining.BuyOutfieldCount, StudBuyCountPresets);
+        ChkStudTrainGk.IsChecked = _cfg.StudTraining.TrainGoalkeepers;
+        if (_cfg.StudTraining.SkillCardAll)
+        {
+            CmbStudSkillCount.SelectedIndex = 5;
+            TxtStudSkillCount.Visibility = Visibility.Collapsed;
+        }
+        else
+        {
+            LoadStudCountUi(CmbStudSkillCount, TxtStudSkillCount, _cfg.StudTraining.SkillCardCount, StudSkillCountPresets);
+        }
+        _loadingConfig = false;
+
         // 日志设置
         ChkFileLog.IsChecked = _cfg.FileLogEnabled;
         TxtMaxLogFiles.Text = _cfg.MaxLogFiles.ToString();
@@ -349,7 +412,7 @@ public partial class MainWindow
         _cfg.Schedule.Enabled = ChkScheduleEnabled.IsChecked == true;
         ApplySchedule(persist: false);
         _cfg.PostMatchActivity.AutoAdvanceWeeklyTasks = ChkPmAutoAdvance.IsChecked == true;
-        // 挂机时静音游戏（六个模块页共用一份；复选框改动时已即时保存，这里兜住"改完直接关窗"）
+        // 挂机时静音游戏（各模块页共用一份；复选框改动时已即时保存，这里兜住"改完直接关窗"）
         if (ChkMuteMyLeague.IsChecked is bool mutePref) _cfg.Audio.MuteGame = mutePref;
 
         // 我的联赛道具
@@ -402,6 +465,17 @@ public partial class MainWindow
             ? 11 - CmbAiStopAtDivision.SelectedIndex
             : 0;
         _cfg.AiLadder.StopAfterMatches = SaveStopAfterUi(CmbAiStopAfterMatches, TxtAiStopAfterMatches);
+
+        // 种马球员培训（购买）：两类数量分开保存，默认非门将 1、门将 0
+        _cfg.StudTraining.BuyGoalkeeperCount =
+            SaveStudCountUi(CmbStudGkCount, TxtStudGkCount, StudBuyCountPresets);
+        _cfg.StudTraining.BuyOutfieldCount =
+            SaveStudCountUi(CmbStudOutfieldCount, TxtStudOutfieldCount, StudBuyCountPresets);
+        _cfg.StudTraining.TrainGoalkeepers = ChkStudTrainGk.IsChecked == true;
+        _cfg.StudTraining.SkillCardAll = CmbStudSkillCount.SelectedIndex == 5;
+        _cfg.StudTraining.SkillCardCount = _cfg.StudTraining.SkillCardAll
+            ? 0
+            : SaveStudCountUi(CmbStudSkillCount, TxtStudSkillCount, StudSkillCountPresets);
 
         // 文件日志配置：只有真变了才重新初始化。SaveUiToConfig 在每次点开始时都会执行，
         // 无条件 Initialize 会新建会话文件，把"应用启动/主界面就绪"留在上一个文件里

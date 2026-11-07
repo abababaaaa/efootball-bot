@@ -23,7 +23,8 @@ public partial class MainWindow
 {
     // 左栏导航模式：游戏模块 / 设置 / 更新 / GitHub / 网络监测 / 日志历史 / 反馈 / 关于
     private enum NavMode { Game, Settings, Update, GitHub, Network, LogViewer, Feedback, About }
-    private NavMode _currentNav = NavMode.Game;
+    // 用户要求：每次开启软件默认停在「更新」页（不再默认游戏模块）。
+    private NavMode _currentNav = NavMode.Update;
 
     private void RbModule_Checked(object sender, RoutedEventArgs e)
     {
