@@ -800,9 +800,9 @@
                                     <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                 <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}" Text="一键启动游戏本体，或直接打开游戏自带的设置工具"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="一键启动"/><Run Text="游戏本体" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="，或直接打开游戏自带的设置工具。"/></TextBlock>
                                 <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}" Text="位置自动定位；找不到时先启动一次游戏再点"/>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="位置"/><Run Text="自动定位" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="；找不到时先启动一次游戏再点。"/></TextBlock>
                                 </Grid>
                                 <TextBlock x:Name="TxtPreMatchPath" Style="{StaticResource MonoText}"
                                            TextWrapping="Wrap" MaxWidth="520" Margin="0,10,0,0" Opacity="0.85"
@@ -1035,11 +1035,11 @@
                                     <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                 <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}" Text="开赛前自动核验活动设置，等级不一致自动改选"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="开赛前自动核验活动设置，等级不一致会"/><Run Text="自动改选" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="。"/></TextBlock>
                                 <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}" Text="主要奖励拿满自动换下一个，已完成的自动跳过"/>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="主要奖励拿满"/><Run Text="自动换下一个" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="，已完成的自动跳过。"/></TextBlock>
                                 <Ellipse Grid.Row="2" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}" Text="达到设定场次自动停止；需连接虚拟手柄"/>
+                                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="达到设定场次"/><Run Text="自动停止" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="；需要连接虚拟手柄。"/></TextBlock>
                                 </Grid>
                             </StackPanel>
                             <Border Grid.Column="1" Style="{StaticResource RailCard}" Padding="10,10" Margin="14,0,0,0" VerticalAlignment="Top">
@@ -1171,9 +1171,9 @@
                                     <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                 <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}" Text="可设达到指定组别自动停止，也可按场次停止"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="可设"/><Run Text="达到指定组别自动停止" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="，也可按场次停止。"/></TextBlock>
                                 <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}" Text="需虚拟手柄；占用时自动让步，停手恢复"/>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="需要"/><Run Text="虚拟手柄" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="；被占用时自动让步，停手后恢复。"/></TextBlock>
                                 </Grid>
                             </StackPanel>
                             <Border Grid.Column="1" Style="{StaticResource RailCard}" Padding="10,10" Margin="14,0,0,0" VerticalAlignment="Top">
@@ -1302,13 +1302,13 @@
                                     </Grid.RowDefinitions>
                                     <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
                                     <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"
-                                               Text="购买：合约 → 普通球员 → 价格升序 → 第 1 张（门将）/第 2 张（非门将）"/>
+                                              ><Run Text="购买　按"/><Run Text="价格升序" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="取前两张，"/><Run Text="第 1 张留给门将" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="。"/></TextBlock>
                                     <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
                                     <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"
-                                               Text="培训：我的球队 → 球员 → 筛选（除 GK / 未完成培育 / 最低评价）"/>
+                                              ><Run Text="培训　筛掉"/><Run Text="门将" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="、"/><Run Text="未完成培育" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="、"/><Run Text="评价不是最低" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="的球员。"/></TextBlock>
                                     <Ellipse Grid.Row="2" Style="{StaticResource BulletDot}"/>
                                     <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}"
-                                               Text="全自动模拟手柄；开始前请先回到游戏主菜单"/>
+                                              ><Run Text="开始前请先"/><Run Text="回到游戏主菜单" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="；全程自动模拟手柄。"/></TextBlock>
                                 </Grid>
                             </StackPanel>
                             <Border Grid.Column="1" Style="{StaticResource RailCard}" Padding="10,10" Margin="14,0,0,0" VerticalAlignment="Top">
@@ -1837,11 +1837,11 @@
                                     <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
                                 <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}" Text="自动核对难度，不一致自动改选"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="开赛前自动核对"/><Run Text="难度" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="，不一致就改选。"/></TextBlock>
                                 <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}" Text="物品页自动买加成道具，赛后自动补购"/>
+                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="经过物品页时自动买"/><Run Text="加成道具" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="，赛后自动补购。"/></TextBlock>
                                 <Ellipse Grid.Row="2" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}" Text="达到场次停止并还原窗口，卡住自动恢复"/>
+                                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="达到设定场次"/><Run Text="自动停止并还原窗口" Foreground="{DynamicResource AccentGlow}" TextDecorations="Underline"/><Run Text="，卡住会自动恢复。"/></TextBlock>
                                 <Ellipse Grid.Row="3" Style="{StaticResource BulletDot}"/>
                                 <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource BulletText}" Text="需管理员运行 + 虚拟手柄；占用时让步"/>
                                 </Grid>
