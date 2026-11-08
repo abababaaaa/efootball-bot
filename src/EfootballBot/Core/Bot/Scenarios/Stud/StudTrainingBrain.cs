@@ -142,6 +142,7 @@ public static class StudTrainingBrain
 
     public static bool IsSkillResult(OcrResult ocr) =>
         ocr.ContainsJoined("OK") && !ocr.ContainsJoined("获得") &&
+        (ocr.ContainsJoined("技巧列表") || ocr.ContainsJoined("技巧训练") || ocr.ContainsJoined("使")) &&
         !ocr.ContainsJoined("选择要使用的物品") && !ocr.ContainsJoined("执行训练课") &&
         !ocr.ContainsJoined("付款确认");
 
@@ -168,22 +169,39 @@ public static class StudTrainingBrain
     /// 技巧训练页第一个「附加技巧」槽是否为空（蓝色加号）。实机 2026-11-08：
     /// 第一格中心 x≈0.557 / y≈0.324，加号为高蓝低红；选中边框在四角，不进入中心探针区。
     /// </summary>
-    public static bool HasEmptyFirstSkillSlot(FrameData f)
+    public static bool HasEmptyFirstSkillSlot(FrameData f) => SkillSlotBlueCounts(f)[0] >= 25;
+
+    /// <summary>
+    /// 任意一个「附加技巧」槽是否显示蓝色加号。实机 2026-11-08 反馈：第一格已有技巧时，
+    /// 游戏会把光标自动移到下一个空槽（第二格变蓝框 + 蓝色加号）。只探第一格会误判
+    /// 「第一格不是加号」并把所有球员跳过，因此改为扫描 5 个槽位。
+    /// </summary>
+    public static bool HasEmptySkillSlot(FrameData f) => SkillSlotBlueCounts(f).Any(c => c >= 25);
+
+    /// <summary>5 个附加技巧槽中心区域的蓝色像素数（排障日志用；顺序=左上/右上/左中/右中/左下）。</summary>
+    public static int[] SkillSlotBlueCounts(FrameData f) => new[]
     {
-        if (f.Width < 200 || f.Height < 120 || f.Bgra.Length < f.Width * f.Height * 4) return false;
-        int x0 = (int)(f.Width * 0.518), x1 = (int)(f.Width * 0.630);
-        int y0 = (int)(f.Height * 0.235), y1 = (int)(f.Height * 0.365);
+        CountBlue(f, 0.574, 0.300), CountBlue(f, 0.790, 0.300),
+        CountBlue(f, 0.574, 0.535), CountBlue(f, 0.790, 0.535),
+        CountBlue(f, 0.574, 0.765),
+    };
+
+    private static int CountBlue(FrameData f, double cx, double cy)
+    {
+        if (f.Width < 200 || f.Height < 120 || f.Bgra.Length < f.Width * f.Height * 4) return 0;
+        int x0 = (int)(f.Width * (cx - 0.056)), x1 = (int)(f.Width * (cx + 0.056));
+        int y0 = (int)(f.Height * (cy - 0.065)), y1 = (int)(f.Height * (cy + 0.065));
         int blue = 0;
-        for (int y = y0; y < y1; y++)
+        for (int y = Math.Max(0, y0); y < Math.Min(f.Height, y1); y++)
         {
-            for (int x = x0; x < x1; x++)
+            for (int x = Math.Max(0, x0); x < Math.Min(f.Width, x1); x++)
             {
                 int i = (y * f.Width + x) * 4;
                 int b = f.Bgra[i], g = f.Bgra[i + 1], r = f.Bgra[i + 2];
                 if (b > 170 && g > 110 && r < 125 && b - r > 80) blue++;
             }
         }
-        return blue >= 25;
+        return blue;
     }
 
     /// <summary>

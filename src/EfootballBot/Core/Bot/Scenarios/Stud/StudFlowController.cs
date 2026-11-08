@@ -12,7 +12,7 @@ namespace EfootballBot.Core.Bot.Scenarios.Stud;
 /// → 签下 → 付款确认上移 + A → 获得弹窗 A → 详情 A → 回列表重复。</para>
 /// <para>培训：主菜单 → 我的球队 → 球员 → X 动作 → 筛选（最佳位置除 GK 外 12 类、
 /// 培育→未完成培育、球员评价→最后一档）→ 完成 → 逐名球员 → X 球员动作 → 技巧训练 →
-/// 确认第一格为空 → 随机道具 → 执行训练课 → 记录结果大字 → B/B 回列表，循环到设定数量。</para>
+/// 确认当前空槽为蓝色加号 → 随机道具 → 执行训练课 → 记录结果大字 → B/B 回列表，循环到设定数量。</para>
 /// </summary>
 public sealed class StudFlowController
 {
@@ -938,7 +938,7 @@ public sealed class StudFlowController
         _slotProbeTries = 0;
         _log(_trainRemaining == int.MaxValue
             ? $"[种马培训] 打开第 {_playerIndex + 1} 名球员（全部）"
-            : $"[种马培训] 打开第 {_trainedRuns + 1}/{_trainedRuns + _trainRemaining} 名球员", LogLevel.Info);
+            : $"[种马培训] 打开第 {_playerIndex + 1}/{_playerIndex + _trainRemaining} 名球员", LogLevel.Info);
 
         var pad = _engine.Pad;
         await pad.DpadRepeatFast(PadDir.Up, 9);
@@ -1021,19 +1021,20 @@ public sealed class StudFlowController
         _stall = 0;
         if (!_skillSlotEmpty)
         {
-            _skillSlotEmpty = StudTrainingBrain.HasEmptyFirstSkillSlot(frame);
+            _skillSlotEmpty = StudTrainingBrain.HasEmptySkillSlot(frame);
             if (!_skillSlotEmpty && ++_slotProbeTries <= 3)
                 return 500; // 过场帧未渲染完，重探
             if (!_skillSlotEmpty)
             {
-                _log("[种马培训] 附加技巧第一格不是蓝色加号（可能已满/已学）：B 退出，换下一名", LogLevel.Warn);
+                _log("[种马培训] 5 个附加技巧槽都没有蓝色加号（已满/已学）：B 退出，换下一名；" +
+                     $"蓝色像素={string.Join("/", StudTrainingBrain.SkillSlotBlueCounts(frame))}", LogLevel.Warn);
                 await _engine.Pad.Back();
                 _phase = Phase.TrainSkillBackDetail;
                 return 1200;
             }
         }
 
-        _log("[种马培训] 技巧训练：第一格为空，A 下一步", LogLevel.Info);
+        _log("[种马培训] 技巧训练：当前空槽为蓝色加号，A 下一步", LogLevel.Info);
         await _engine.Pad.Confirm();
         _phase = Phase.TrainSkillItem;
         return 1200;

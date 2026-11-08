@@ -99,6 +99,7 @@ public class StudTrainingTests
 
         RunOcr(ocr, Path.Combine(StudDir, "stud_34_skill_training_after.png"), out var filledFrame);
         Assert.False(StudTrainingBrain.HasEmptyFirstSkillSlot(filledFrame), "训练后第一格已写入技巧，不应再判为空");
+        Assert.True(StudTrainingBrain.HasEmptySkillSlot(filledFrame), "第一格已满时游戏会把光标移到第二格，任意槽有蓝色加号即应继续");
 
         var result = RunOcr(ocr, Path.Combine(StudDir, "stud_33_skill_result.png"), out _);
         string? name = StudTrainingBrain.ReadSkillResultName(result);
