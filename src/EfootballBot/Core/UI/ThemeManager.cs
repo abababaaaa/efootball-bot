@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Media;
+using Wpf.Ui.Appearance;
 
 namespace EfootballBot.Core.UI;
 
@@ -21,15 +22,32 @@ public static class ThemeManager
     /// <summary>把指定主题的所有 Token 颜色写入 Application.Current.Resources。</summary>
     public static void ApplyTheme(string themeName)
     {
-        var colors = themeName switch
+        var source = themeName switch
         {
             Light => LightColors,
             DeepBlue => DeepBlueColors,
             _ => DarkColors,
         };
+
+        // 统一底色：窗口 / 左栏 / 右栏 / 卡片用同一个值，
+        // 否则三栏交界处会出现深浅不一的接缝（用户反馈「露出一块底色」）。
+        var colors = new Dictionary<string, string>(source);
+        foreach (var key in new[] { "SideLeftBg", "SideRightBg", "CardBg", "NavSectionBg", "TrackBg" })
+            colors[key] = colors["WindowBg"];
+
         var app = Application.Current.Resources;
         foreach (var (key, hex) in colors)
             app[key] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+
+        // WPF-UI（Fluent 2）控件随自定义主题同步：亮色→Light，暗色/深蓝→Dark
+        try
+        {
+            ApplicationThemeManager.Apply(themeName == Light ? ApplicationTheme.Light : ApplicationTheme.Dark);
+        }
+        catch
+        {
+            // 主题服务尚未初始化时忽略：自定义 Token 仍然生效
+        }
     }
 
     /// <summary>获取某主题下某个 Token 的颜色（用于主题选择预览卡片）。</summary>

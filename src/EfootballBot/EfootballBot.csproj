@@ -22,8 +22,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <!-- 测试版版本号按 4 段测试版约定（未发版，仅本地构建）；正式版保持 6.1 -->
-    <Version Condition="'$(ChildSessionBeta)' != 'true'">6.2.1.0</Version>
-    <Version Condition="'$(ChildSessionBeta)' == 'true'">6.2.1.1</Version>
+    <Version Condition="'$(ChildSessionBeta)' != 'true'">6.3.0.0</Version>
+    <Version Condition="'$(ChildSessionBeta)' == 'true'">6.3.0.1</Version>
     <DefineConstants Condition="'$(ChildSessionBeta)' == 'true'">$(DefineConstants);CHILD_SESSION_BETA</DefineConstants>
     <Product>eFootball 挂机助手</Product>
     <Company>EfootballBot</Company>
@@ -66,6 +66,7 @@
     <!-- ViGEm 客户端托管封装（v3.3.0 自 HIDMaestro 回退 ViGEmBus）：自带原生 vigemclient.dll（x64），
          与 ViGEmBus 内核驱动通信；驱动本体由内置官方安装器按需静默安装（见 DriverInstaller） -->
     <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.256" />
+    <PackageReference Include="WPF-UI" Version="4.3.0" />
     <!-- YOLO letterbox 预处理已自写（ImageScaling，双线性+灰边，测试工程用 OpenCV 参照实现做逐像素等价对照）；
          主工程不再依赖 OpenCvSharp（原 OpenCvSharpExtern.dll 58.9MB + ffmpeg 25.2MB 随包剔除，发布体积 -~50MB 压缩后） -->
   </ItemGroup>

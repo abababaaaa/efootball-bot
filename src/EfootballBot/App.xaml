@@ -1,7 +1,16 @@
-﻿<Application x:Class="EfootballBot.App"
+<Application x:Class="EfootballBot.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml">
     <Application.Resources>
+        <ResourceDictionary>
+            <!-- WPF-UI（Fluent 2）：主题色板 + 控件默认样式。
+                 本地 Token 字典留在 ResourceDictionary 内、优先级高于合并字典，
+                 因此自定义主题（暗色/亮色/深蓝）仍然掌控全局配色。 -->
+            <ResourceDictionary.MergedDictionaries>
+                <ui:ThemesDictionary Theme="Dark"/>
+                <ui:ControlsDictionary/>
+            </ResourceDictionary.MergedDictionaries>
         <!-- ================================================================
              设计系统「Pitch Console」
              分层深蓝黑底 · 翡翠绿主色 · 发丝描边 · 12px 圆角 · 微按压缩放
@@ -59,20 +68,22 @@
                           ShadowDepth="2" Opacity="0.45"/>
 
         <!-- ============ 容器 / 文字 ============ -->
+        <!-- 扁平分区：不再画闭合卡片框，只用一条发丝线分隔。
+             页面本身是平的，唯一有底的容器留给「本次运行」操作栏与日志凹槽，
+             这样不会再出现「卡中卡」。 -->
         <Style x:Key="Card" TargetType="Border">
-            <Setter Property="Background" Value="{DynamicResource CardBg}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="Padding" Value="16,13"/>
-            <Setter Property="Margin" Value="0,0,0,10"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Divider}"/>
+            <Setter Property="BorderThickness" Value="0,1,0,0"/>
+            <Setter Property="CornerRadius" Value="0"/>
+            <Setter Property="Padding" Value="0,15,0,0"/>
+            <Setter Property="Margin" Value="0,0,0,16"/>
         </Style>
         <!-- 内嵌凹槽：日志 / 提示 / 输入组 -->
         <Style x:Key="Inset" TargetType="Border">
-            <Setter Property="Background" Value="{DynamicResource InsetBg}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Background" Value="{DynamicResource Surface2}"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="9"/>
         </Style>
         <Style x:Key="H2" TargetType="TextBlock">
             <Setter Property="FontSize" Value="13.5"/>
@@ -145,11 +156,13 @@
         </Style>
 
         <!-- 分区小标题（运行设置 / 模块选项 / 本次运行） -->
+        <!-- 段标题：全部页面统一成「白色粗体」，与「我的联赛」页模板一致。
+             原先 10.5px 灰色放在深底上几乎看不出层级。 -->
         <Style x:Key="GroupLabel" TargetType="TextBlock">
-            <Setter Property="FontSize" Value="10.5"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
-            <Setter Property="Margin" Value="0,0,0,7"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="FontWeight" Value="Bold"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="Margin" Value="0,0,0,9"/>
         </Style>
         <!-- 卡内小节标题（声明页的分项、表单分组名） -->
         <Style x:Key="SubHead" TargetType="TextBlock">
@@ -509,7 +522,9 @@
                         </Grid>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="track" Property="Background" Value="{DynamicResource Accent}"/>
+                                <!-- 开启态：纯白轨道 + 深色滑块（不再与主按钮抢绿色） -->
+                                <Setter TargetName="track" Property="Background" Value="#FFFFFFFF"/>
+                                <Setter TargetName="thumb" Property="Background" Value="{DynamicResource WindowBg}"/>
                                 <Setter TargetName="thumb" Property="HorizontalAlignment" Value="Right"/>
                                 <Setter TargetName="thumb" Property="Margin" Value="0,0,2,0"/>
                             </Trigger>
@@ -566,7 +581,11 @@
                 <Setter.Value>
                     <ControlTemplate TargetType="ComboBox">
                         <Grid>
+                            <!-- 展开按钮必须铺满整个 ComboBox：之前没有显式对齐，
+                                 在 Grid 里被其它子元素挤成 0 高度，点击落不到它身上，
+                                 表现为「下拉框画得好好的但点不开」。 -->
                             <ToggleButton Focusable="False" ClickMode="Press"
+                                          HorizontalAlignment="Stretch" VerticalAlignment="Stretch"
                                           Background="{Binding Background,RelativeSource={RelativeSource TemplatedParent}}"
                                           BorderBrush="{Binding BorderBrush,RelativeSource={RelativeSource TemplatedParent}}"
                                           IsChecked="{Binding IsDropDownOpen,Mode=TwoWay,RelativeSource={RelativeSource TemplatedParent}}">
@@ -684,6 +703,41 @@
             </Setter>
         </Style>
 
+
+        <!-- 三级菜单专用：选中态用白色文字 + 中性底，不再和主按钮抢绿色 -->
+        <Style x:Key="SubTab" TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource SegTabFg}"/>
+            <Setter Property="FontSize" Value="12.5"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Margin" Value="2,0"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <Border x:Name="bd" CornerRadius="8" Padding="16,7" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="1">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource Surface2}"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Divider}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsMouseOver" Value="True"/>
+                                    <Condition Property="IsChecked" Value="False"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource SegTabHover}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource SegTabHoverFg}"/>
+                            </MultiTrigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- ============ 图标（导航 / 行内）：统一 16px、线宽 1.6、圆头 ============ -->
         <Style x:Key="IconPath" TargetType="Path">
             <Setter Property="Width" Value="16"/>
@@ -699,19 +753,17 @@
         <!-- ============ 右侧统计块 ============ -->
         <Style x:Key="StatTile" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource Surface2}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource Divider}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="8"/>
             <Setter Property="Padding" Value="10,8"/>
         </Style>
 
         <!-- ============ 操作栏容器（本次运行 / 主要操作） ============ -->
         <Style x:Key="RailCard" TargetType="Border">
             <Setter Property="Background" Value="{DynamicResource InsetBg}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
-            <Setter Property="BorderThickness" Value="1"/>
-            <Setter Property="CornerRadius" Value="12"/>
-            <Setter Property="Padding" Value="12"/>
+            <Setter Property="BorderThickness" Value="0"/>
+            <Setter Property="CornerRadius" Value="10"/>
+            <Setter Property="Padding" Value="14,13"/>
         </Style>
 
         <!-- ============ 进度条（胶囊轨道 + 绿色填充） ============ -->
@@ -866,5 +918,6 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        </ResourceDictionary>
     </Application.Resources>
 </Application>

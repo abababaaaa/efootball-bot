@@ -22,9 +22,215 @@ namespace EfootballBot;
 public partial class MainWindow
 {
     // 左栏导航模式：游戏模块 / 设置 / 更新 / GitHub / 网络监测 / 日志历史 / 反馈 / 关于
-    private enum NavMode { Game, Settings, Update, GitHub, Network, LogViewer, Feedback, About }
+    private enum NavMode { Home, Game, Settings, Update, GitHub, Network, LogViewer, Feedback, About }
     // 用户要求：每次开启软件默认停在「更新」页（不再默认游戏模块）。
-    private NavMode _currentNav = NavMode.Update;
+    private NavMode _currentNav = NavMode.Home;
+
+    // ---------------- 三级导航 ----------------
+    private enum TopSection { Home, Game, Tools, About }
+    private NavMode _lastToolNav = NavMode.Settings;
+    private bool _suppressTopNav;
+    private bool _suppressSubTab;
+
+    private void BtnHomeStart_Click(object sender, RoutedEventArgs e) => NavigateTo(NavMode.Game);
+
+    /// <summary>首页功能磁贴：直接跳到对应模块（服务器 + 三级页签一起切好）。</summary>
+    private void BtnHomeTile_Click(object sender, MouseButtonEventArgs e)
+    {
+        if (sender is not FrameworkElement { Tag: string tag }) return;
+        switch (tag)
+        {
+            case "League":
+                RbIntl.IsChecked = true;
+                NavigateTo(NavMode.Game);
+                RbMyLeague.IsChecked = true;
+                break;
+            case "Weekly":
+                RbIntl.IsChecked = true;
+                NavigateTo(NavMode.Game);
+                RbWeekly.IsChecked = true;
+                break;
+            case "AiLadder":
+                RbIntl.IsChecked = true;
+                NavigateTo(NavMode.Game);
+                RbAiLadder.IsChecked = true;
+                break;
+            case "Stud":
+                RbIntl.IsChecked = true;
+                NavigateTo(NavMode.Game);
+                RbStud.IsChecked = true;
+                break;
+            case "CnLeague":
+                RbCn.IsChecked = true;
+                NavigateTo(NavMode.Game);
+                RbCnLeague.IsChecked = true;
+                break;
+            case "Network":
+                NavigateTo(NavMode.Network);
+                break;
+        }
+    }
+    private void BtnHomeFeedback_Click(object sender, RoutedEventArgs e) => NavigateTo(NavMode.Feedback);
+
+    private void TopNav_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded || _suppressTopNav) return;
+        if (sender is not RadioButton { Tag: string tag }) return;
+        switch (tag)
+        {
+            case "Home": NavigateTo(NavMode.Home); break;
+            case "Game": NavigateTo(NavMode.Game); break;
+            case "About": NavigateTo(NavMode.About); break;
+            default:
+                NavigateTo(_lastToolNav is NavMode.Game or NavMode.About ? NavMode.Settings : _lastToolNav);
+                break;
+        }
+    }
+
+    /// <summary>三级菜单点击 → 转发给面板里原来的隐藏页签（它才是真正的状态机）。</summary>
+    private void SubTab_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded || _suppressSubTab) return;
+        if (sender is not RadioButton { Tag: string target }) return;
+        // 直接按 Tag 切换内容面板：镜像页签转发不可靠（目标本来就是选中态时 Checked 不触发），
+        // 单选框只作为视觉状态，内容可见性由这里统一决定。
+        ShowByTag(target);
+
+        if (FindName(target) is not RadioButton src) return;
+        if (src.IsChecked == true)
+        {
+            // 目标页签本来就是选中态（默认页）：先复位再置位，强制触发一次 Checked，
+            // 否则「我的联赛」这类默认页点了没反应，看起来像按钮失效。
+            src.IsChecked = false;
+        }
+        src.IsChecked = true;
+    }
+
+    /// <summary>
+    /// 工具页分段：Tag 形如 "UpdatePanel:1" —— 把该 ScrollViewer 的内容按顺序只显示第 N 段。
+    /// 不改动页面本身的结构，因此不会影响任何控件与绑定。
+    /// </summary>
+    private void SecTabByIndex_Checked(object sender, RoutedEventArgs e) { }
+
+    /// <summary>设置页子分段：只显示 Tag 指定的那块（防检测 / 赛后活动 / 挂机节奏）。</summary>
+    private void SecTab_Checked(object sender, RoutedEventArgs e)
+    {
+        if (!IsLoaded) return;
+        if (sender is not RadioButton { Tag: string target }) return;
+
+        // 形如 "UpdatePanel:1" → 按索引切段
+        if (target.Contains(':'))
+        {
+            var parts = target.Split(':');
+            if (FindName(parts[0]) is ScrollViewer sv && sv.Content is Panel content
+                && int.TryParse(parts[1], out var idx) && idx < content.Children.Count)
+            {
+                for (var k = 0; k < content.Children.Count; k++)
+                    content.Children[k].Visibility = k == idx ? Visibility.Visible : Visibility.Collapsed;
+                sv.ScrollToTop();
+            }
+            return;
+        }
+
+        SetTabImportant.Visibility = Visibility.Visible;
+        SetTabDisplay.Visibility = Visibility.Collapsed;
+        SetTabInput.Visibility = Visibility.Collapsed;
+        SetTabDaily.Visibility = Visibility.Collapsed;
+        SetTabDev.Visibility = Visibility.Collapsed;
+        foreach (UIElement child in SetTabImportant.Children)
+            if (child is FrameworkElement fe2 && fe2.Tag is string tg && tg.StartsWith("Imp"))
+                fe2.Visibility = tg == target ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>只显示某个工具页滚动内容里的第 idx 段。</summary>
+    private void ShowSection(string panelName, int idx)
+    {
+        if (FindName(panelName) is not ScrollViewer sv || sv.Content is not Panel content) return;
+        if (idx < 0 || idx >= content.Children.Count) return;
+        for (var k = 0; k < content.Children.Count; k++)
+            content.Children[k].Visibility = k == idx ? Visibility.Visible : Visibility.Collapsed;
+
+        // 服务器测速页：关掉外层纵向滚动，内容才能拿到视口高度，
+        // 表格的 Star 行才会真正向下撑满（否则 ScrollViewer 用无限高度测量，* 等于 Auto）。
+        var fill = (panelName == "NetworkPanel" && idx == 0)
+                || (panelName == "UpdatePanel" && idx == 1);
+        sv.VerticalScrollBarVisibility = fill ? ScrollBarVisibility.Disabled : ScrollBarVisibility.Auto;
+
+        sv.ScrollToTop();
+    }
+
+    private void ShowByTag(string tag)
+    {
+        void Set(FrameworkElement panel, bool on)
+            => panel.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+
+        switch (tag)
+        {
+            case "RbPreMatch": Set(PreMatchContent, true); Set(LeagueContent, false); Set(WeeklyContent, false); Set(AiLadderContent, false); Set(StudContent, false); break;
+            case "RbMyLeague": Set(PreMatchContent, false); Set(LeagueContent, true); Set(WeeklyContent, false); Set(AiLadderContent, false); Set(StudContent, false); break;
+            case "RbWeekly": Set(PreMatchContent, false); Set(LeagueContent, false); Set(WeeklyContent, true); Set(AiLadderContent, false); Set(StudContent, false); break;
+            case "RbAiLadder": Set(PreMatchContent, false); Set(LeagueContent, false); Set(WeeklyContent, false); Set(AiLadderContent, true); Set(StudContent, false); break;
+            case "RbStud": Set(PreMatchContent, false); Set(LeagueContent, false); Set(WeeklyContent, false); Set(AiLadderContent, false); Set(StudContent, true); break;
+            case "RbCnPreMatch": Set(CnPreMatchContent, true); Set(CnLeagueContent, false); Set(CnWeeklyContent, false); Set(CnMyLeagueContent, false); break;
+            case "RbCnLeague": Set(CnPreMatchContent, false); Set(CnLeagueContent, true); Set(CnWeeklyContent, false); Set(CnMyLeagueContent, false); break;
+            case "RbCnWeekly": Set(CnPreMatchContent, false); Set(CnLeagueContent, false); Set(CnWeeklyContent, true); Set(CnMyLeagueContent, false); break;
+            case "RbCnMyLeague": Set(CnPreMatchContent, false); Set(CnLeagueContent, false); Set(CnWeeklyContent, false); Set(CnMyLeagueContent, true); break;
+        }
+    }
+
+    private void SyncSubTabs()
+    {
+        void Sync(RadioButton sub, RadioButton src)
+        {
+            if (src?.IsChecked == true && sub.IsChecked != true)
+            {
+                _suppressSubTab = true;
+                sub.IsChecked = true;
+                _suppressSubTab = false;
+            }
+        }
+        Sync(SubRbPreMatch, RbPreMatch);
+        Sync(SubRbMyLeague, RbMyLeague);
+        Sync(SubRbWeekly, RbWeekly);
+        Sync(SubRbAiLadder, RbAiLadder);
+        Sync(SubRbStud, RbStud);
+        Sync(SubRbCnPreMatch, RbCnPreMatch);
+        Sync(SubRbCnLeague, RbCnLeague);
+        Sync(SubRbCnWeekly, RbCnWeekly);
+        Sync(SubRbCnMyLeague, RbCnMyLeague);
+        Sync(SubRbSetImportant, RbSetImportant);
+        Sync(SubRbSetDisplay, RbSetDisplay);
+        Sync(SubRbSetInput, RbSetInput);
+        Sync(SubRbSetDaily, RbSetDaily);
+        // 开发者选项已独立成左栏入口，不再参与三级菜单同步
+    }
+
+    /// <summary>拖动由 TopBar 手动处理；不再二次设置 WindowChrome，
+    /// 否则会和 FluentWindow 模板里的 chrome 叠成两套，导致点击命中偏移（控件看着在、点不到）。</summary>
+    private void ApplyCaptionChrome()
+    {
+    }
+
+    private void TopBar_MouseLeftButtonDown(object sender, MouseButtonEventArgs e)
+    {
+        // 命中任何 Control（按钮、下拉框、输入框、勾选框…）都不抢鼠标：
+        // 早期只排除了 ButtonBase，导致点 ComboBox 时也会进 DragMove 的模态循环，
+        // 窗口被拖住，所有下拉/输入都「看着在、点不动」。
+        for (DependencyObject? d = e.OriginalSource as DependencyObject; d is not null && d != sender;
+             d = VisualTreeHelper.GetParent(d))
+        {
+            if (d is System.Windows.Controls.Control) return;
+        }
+        if (e.ClickCount == 2)
+        {
+            WindowState = WindowState == WindowState.Maximized ? WindowState.Normal : WindowState.Maximized;
+            return;
+        }
+        if (e.ButtonState == MouseButtonState.Pressed && WindowState != WindowState.Maximized)
+        {
+            try { DragMove(); } catch (InvalidOperationException) { }
+        }
+    }
 
     private void RbModule_Checked(object sender, RoutedEventArgs e)
     {
@@ -208,21 +414,115 @@ public partial class MainWindow
     }
 
 
+    private bool _rightUserCollapsed;
+
+    /// <summary>首页：整块右栏（实时画面/统计/日志）与展开条一起隐藏，中栏占满整行。</summary>
+    private void ApplyHomeLayout()
+    {
+        SetRightPanelCollapsed(true);
+        RightRail.Visibility = Visibility.Collapsed;
+    }
+
     private void BtnRightCollapse_Click(object sender, RoutedEventArgs e)
     {
-
+        _rightUserCollapsed = true;
         SetRightPanelCollapsed(true);
     }
 
     private void BtnRightExpand_Click(object sender, RoutedEventArgs e)
     {
-
+        _rightUserCollapsed = false;
         SetRightPanelCollapsed(false);
     }
 
     private void NavigateTo(NavMode mode)
     {
         _currentNav = mode;
+
+        // ---------- 一级分区 ----------
+        var section = mode == NavMode.Home ? TopSection.Home
+                    : mode == NavMode.Game ? TopSection.Game
+                    : mode == NavMode.About ? TopSection.About
+                    : TopSection.Tools;
+        if (section == TopSection.Tools) _lastToolNav = mode;
+
+        _suppressTopNav = true;
+        TopNavHome.IsChecked = section == TopSection.Home;
+        TopNavGame.IsChecked = section == TopSection.Game;
+        TopNavTools.IsChecked = section == TopSection.Tools;
+        TopNavAbout.IsChecked = section == TopSection.About;
+        _suppressTopNav = false;
+
+        bool homeSection = section == TopSection.Home;
+        NavLabelGame.Visibility = homeSection ? Visibility.Collapsed : NavLabelGame.Visibility;
+        bool gameSection = section == TopSection.Game;
+        bool toolsSection = section == TopSection.Tools;
+        bool aboutSection = section == TopSection.About;
+
+        NavLabelGame.Visibility = gameSection ? Visibility.Visible : Visibility.Collapsed;
+        RbCn.Visibility = gameSection ? Visibility.Visible : Visibility.Collapsed;
+        RbIntl.Visibility = gameSection ? Visibility.Visible : Visibility.Collapsed;
+        BtnWindowRescue.Visibility = gameSection ? Visibility.Visible : Visibility.Collapsed;
+
+        NavLabelTools.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
+        BtnSettings.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
+        BtnDevTools.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
+        BtnUpdate.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
+        BtnGitHub.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
+        BtnNetwork.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
+        BtnLogViewer.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
+        BtnFeedback.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
+
+        NavLabelAbout.Visibility = aboutSection ? Visibility.Visible : Visibility.Collapsed;
+        BtnAbout.Visibility = aboutSection ? Visibility.Visible : Visibility.Collapsed;
+
+        bool showIntl = mode == NavMode.Game && !IsCnSelected;
+        bool showCn = mode == NavMode.Game && IsCnSelected;
+        bool showSet = mode == NavMode.Settings;
+        SubMenuIntl.Visibility = showIntl ? Visibility.Visible : Visibility.Collapsed;
+        SubMenuCn.Visibility = showCn ? Visibility.Visible : Visibility.Collapsed;
+        SubMenuSettings.Visibility = showSet ? Visibility.Visible : Visibility.Collapsed;
+        bool showUpd = mode == NavMode.Update;
+        bool showNet = mode == NavMode.Network;
+        bool showGh = mode == NavMode.GitHub;
+        bool showFb = mode == NavMode.Feedback;
+
+        SubMenuUpdate.Visibility = showUpd ? Visibility.Visible : Visibility.Collapsed;
+        SubMenuNetwork.Visibility = showNet ? Visibility.Visible : Visibility.Collapsed;
+        SubMenuGithub.Visibility = showGh ? Visibility.Visible : Visibility.Collapsed;
+        SubMenuFeedback.Visibility = showFb ? Visibility.Visible : Visibility.Collapsed;
+
+        SubMenuHost.Visibility = (showIntl || showCn || showSet || showUpd || showNet || showGh || showFb)
+            ? Visibility.Visible : Visibility.Collapsed;
+        if (mode == NavMode.Home) SubMenuHost.Visibility = Visibility.Collapsed;
+
+        // 开发者页：隐藏设置的三级页签，只显示开发者内容
+        if (mode == NavMode.Settings && _devMode)
+        {
+            SubMenuSettings.Visibility = Visibility.Collapsed;
+            SubMenuHost.Visibility = Visibility.Collapsed;
+            SetTabImportant.Visibility = Visibility.Collapsed;
+            SetTabDisplay.Visibility = Visibility.Collapsed;
+            SetTabInput.Visibility = Visibility.Collapsed;
+            SetTabDaily.Visibility = Visibility.Collapsed;
+            SetTabDev.Visibility = Visibility.Visible;
+        }
+        else if (mode == NavMode.Settings)
+        {
+            SetTabDev.Visibility = Visibility.Collapsed;
+            SetTabImportant.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            _devMode = false;
+        }
+
+        // 进入工具页先落到第一段，避免整页一次性铺开
+        if (showUpd) ShowSection("UpdatePanel", 0);
+        if (showNet) ShowSection("NetworkPanel", 0);
+        if (showGh) ShowSection("GitHubPanel", 0);
+        if (showFb) ShowSection("FeedbackPanel", 0);
+        SyncSubTabs();
 
         bool isGame = mode == NavMode.Game;
         bool isSettings = mode == NavMode.Settings;
@@ -233,12 +533,20 @@ public partial class MainWindow
         bool isFeedback = mode == NavMode.Feedback;
         bool isAbout = mode == NavMode.About;
 
+        // 首页面板
+        bool isHome = mode == NavMode.Home;
+        HomePanel.Visibility = isHome ? Visibility.Visible : Visibility.Collapsed;
+        if (isHome) ApplyHomeLayout();
+        else if (!isGame) SetRightPanelCollapsed(true);   // 工具页默认收起实时画面，保留右侧展开条
+        else SetRightPanelCollapsed(_rightUserCollapsed);
+
         // 游戏模块面板
         PanelIntl.Visibility = isGame && !IsCnSelected ? Visibility.Visible : Visibility.Collapsed;
         PanelCn.Visibility = isGame && IsCnSelected ? Visibility.Visible : Visibility.Collapsed;
 
         // 设置面板
         SettingsPanel.Visibility = isSettings ? Visibility.Visible : Visibility.Collapsed;
+        if (!isSettings) BtnDevTools.Tag = null;
 
         // 更新面板
         UpdatePanel.Visibility = isUpdate ? Visibility.Visible : Visibility.Collapsed;
@@ -294,8 +602,28 @@ public partial class MainWindow
 
     private void BtnSettings_Click(object sender, RoutedEventArgs e)
     {
+        _devMode = false;
         SaveUiToConfig();
         NavigateTo(NavMode.Settings);
+    }
+
+    private bool _devMode;
+
+    /// <summary>左栏「开发者」：进入开发者页（与设置并列，不显示设置的三级页签）。</summary>
+    private void BtnDevTools_Click(object sender, RoutedEventArgs e)
+    {
+        SaveUiToConfig();
+        _devMode = true;
+        NavigateTo(NavMode.Settings);
+        SubMenuSettings.Visibility = Visibility.Collapsed;
+        SubMenuHost.Visibility = Visibility.Collapsed;
+        SetTabImportant.Visibility = Visibility.Collapsed;
+        SetTabDisplay.Visibility = Visibility.Collapsed;
+        SetTabInput.Visibility = Visibility.Collapsed;
+        SetTabDaily.Visibility = Visibility.Collapsed;
+        SetTabDev.Visibility = Visibility.Visible;
+        BtnDevTools.Tag = "Active";
+        BtnSettings.Tag = null;
     }
 
     private void BtnUpdate_Click(object sender, RoutedEventArgs e)

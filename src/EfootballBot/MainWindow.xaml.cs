@@ -20,7 +20,7 @@ using EfootballBot.Ipc;
 
 namespace EfootballBot;
 
-public partial class MainWindow : Window
+public partial class MainWindow
 {
     private readonly AppConfig _cfg;
     private WorkerHost? _workerHost;
@@ -63,7 +63,7 @@ public partial class MainWindow : Window
         LoadConfigToUi();
         InitGameMute(); // 各模块页的「挂机时静音游戏」开关回填 + 巡检计时器
         // 启动默认页固定为「更新」：在窗口显示前完成切换，避免先闪一下游戏模块。
-        NavigateTo(NavMode.Update);
+        NavigateTo(NavMode.Home);
 
         // 初始化文件日志（早于 BotEngine 创建，否则第一条日志会丢失）
         FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles, _cfg.LogRetentionDays);
@@ -95,6 +95,7 @@ public partial class MainWindow : Window
                 ShowThemeOverlay(_cfg.Theme);
             // 左栏初始选中态：模块胶囊高亮由 Tag=Active 门控（见 App.xaml ModuleRadio），
             // 构造期走不到 NavigateTo，必须在这里补一次，否则启动后国际服胶囊不高亮
+            ApplyCaptionChrome();
             NavigateTo(_currentNav);
             // 上代异常退出遗留的 Worker 先清理（它会占着玩家 1，导致开始挂机抢不到手柄）
             WorkerHost.KillOrphanedWorkers((lv, msg) =>

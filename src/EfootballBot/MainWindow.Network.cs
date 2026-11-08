@@ -101,7 +101,7 @@ public partial class MainWindow
             LvGithub.ItemsSource = _githubRows;
             LvServers.ItemsSource = _serverRows;
             // 点表头排序（名称/IP/类型/延迟，再点一次反向）
-            LvServers.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler(ColumnHeader_Click));
+            LvServers.AddHandler(System.Windows.Controls.Primitives.DataGridColumnHeader.ClickEvent, new RoutedEventHandler(ColumnHeader_Click));
             LvGithub.AddHandler(GridViewColumnHeader.ClickEvent, new RoutedEventHandler(ColumnHeader_Click));
             var view = (System.ComponentModel.ICollectionView)LvServers.Items;
             view.Filter = o =>
@@ -242,9 +242,9 @@ public partial class MainWindow
 
     private void ColumnHeader_Click(object sender, RoutedEventArgs e)
     {
-        if (e.OriginalSource is not GridViewColumnHeader { Column: { } col } h) return;
+        if (e.OriginalSource is not System.Windows.Controls.Primitives.DataGridColumnHeader { Column: { } dcol }) return;
         // 表头带过 ▲/▼ 标记，映射前先剥掉
-        string header = (col.Header as string ?? "").TrimEnd('▲', '▼', ' ');
+        string header = (dcol.Header as string ?? "").TrimEnd('▲', '▼', ' ');
         string? key = header switch
         {
             "名称" or "域名" => "SortLabel",
@@ -254,7 +254,7 @@ public partial class MainWindow
             _ => null,
         };
         if (key is null) return;
-        var list = ReferenceEquals(sender, LvGithub) ? LvGithub : LvServers;
+        var list = (System.Windows.Controls.ItemsControl)LvServers;
         if (_sortKey == key) _sortDesc = !_sortDesc; else { _sortKey = key; _sortDesc = false; }
         var view = System.Windows.Data.CollectionViewSource.GetDefaultView(list.ItemsSource);
         view.SortDescriptions.Clear();
@@ -263,12 +263,11 @@ public partial class MainWindow
                       : System.ComponentModel.ListSortDirection.Ascending));
         view.Refresh();
 
-        // 表头小箭头：当前排序列表头显示 ▲/▼
-        foreach (GridViewColumn c in ((GridView)list.View).Columns)
+        // 表头小箭头：当前排序列显示 ▲/▼
+        foreach (var c in LvServers.Columns)
         {
             string baseText = (c.Header as string ?? "").TrimEnd('▲', '▼', ' ');
-            if (c == col) c.Header = baseText + (_sortDesc ? " ▼" : " ▲");
-            else c.Header = baseText;
+            c.Header = ReferenceEquals(c, dcol) ? baseText + (_sortDesc ? " ▼" : " ▲") : baseText;
         }
     }
 
