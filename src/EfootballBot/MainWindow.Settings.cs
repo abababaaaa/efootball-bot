@@ -177,6 +177,13 @@ public partial class MainWindow
         // OCR 性能档（0=默认 / 1=提速：检测长边 640）
         CmbOcrPerf.SelectedIndex = _cfg.OcrPerf.DetLimitSideLength > 0 ? 1 : 0;
 
+        // Rust 视觉 sidecar：开关 + exe 就绪状态（只做提示，找不到时引擎自动回退）
+        ChkVisionSidecar.IsChecked = _cfg.VisionSidecar.Enabled;
+        var sidecarExe = EfootballBot.Core.Vision.Sidecar.VisionSidecarLocator.Locate(_cfg.VisionSidecar.ExePath);
+        TxtVisionSidecarState.Text = sidecarExe is null
+            ? "未找到 vision-svc.exe（rust\build.bat 构建后放到程序目录）"
+            : "已就绪";
+
         // OCR 频率
         int[] ocrMsValues = { 500, 900, 1500, 2500, 5000 };
         for (int i = 0; i < ocrMsValues.Length; i++)
@@ -395,6 +402,8 @@ public partial class MainWindow
         }
         // OCR 性能档：0=默认（0 = 用 Sdcb 默认 960）/ 1=提速（检测长边 640）
         _cfg.OcrPerf.DetLimitSideLength = CmbOcrPerf.SelectedIndex == 1 ? 640 : 0;
+        // Rust 视觉 sidecar 开关（下次开始挂机生效；失败由引擎自动回退 WGC）
+        _cfg.VisionSidecar.Enabled = ChkVisionSidecar.IsChecked == true;
         if (CmbPreviewInterval.SelectedIndex >= 0)
         {
             int[] pvMs = { 150, 300, 500, 1000, 2000 };

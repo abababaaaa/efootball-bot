@@ -360,7 +360,7 @@
                         </StackPanel>
                     </Button>
                     <Button x:Name="BtnGitHub" Style="{StaticResource NavToolBtn}" Click="BtnGitHub_Click"
-                            ToolTip="GitHub 加速（GitPort 内核）与 GitHub 域名延迟测速">
+                            ToolTip="GitHub 访问加速（FastGithub 内核：hosts 择优直连）、镜像下载加速与域名延迟测速">
                         <StackPanel Orientation="Horizontal">
                             <Path Style="{StaticResource IconPath}"
                                   Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"
@@ -523,7 +523,7 @@
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}"/>
                         </StackPanel.Resources>
-                        <RadioButton x:Name="GhTabPort" GroupName="GhNav" Content="链接优化" IsChecked="True"
+                        <RadioButton x:Name="GhTabPort" GroupName="GhNav" Content="访问加速" IsChecked="True"
                                      Tag="GitHubPanel:0" Checked="SecTab_Checked"/>
                         <RadioButton x:Name="GhTabSpeed" GroupName="GhNav" Content="域名测速"
                                      Tag="GitHubPanel:1" Checked="SecTab_Checked"/>
@@ -2266,6 +2266,14 @@
                             <Ellipse Grid.Row="2" Style="{StaticResource BulletDot}"/>
                             <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="游戏建议 "/><Run Text="无边框窗口"/><Run Text="；更改在下次开始挂机时生效"/></TextBlock>
                             </Grid>
+                            <!-- Rust 侧车捕获（M1.5）：勾选后由 vision-svc 进程做 WGC/DXGI 捕获，
+                                 帧经共享内存回零拷贝回主进程；失败自动回退进程内 WGC/DXGI/GDI 链。 -->
+                            <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
+                                <TextBlock Text="Rust 侧车捕获" Style="{StaticResource FieldLabel}" Width="104" VerticalAlignment="Center"/>
+                                <CheckBox x:Name="ChkVisionSidecar" VerticalAlignment="Center" Content="交给 vision-svc（实验）"
+                                          ToolTip="外置 Rust 进程 vision-svc 做 WGC/DXGI 捕获，帧走共享内存回主进程。当前只接管捕获（OCR 引擎用下面下拉选）；黑屏/远程会话/虚拟显示器自动回退进程内 WGC。下次开始挂机生效，缺少 vision-svc.exe 时自动忽略。"/>
+                                <TextBlock x:Name="TxtVisionSidecarState" Margin="10,0,0,0" VerticalAlignment="Center" Opacity="0.65"/>
+                            </StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
                                 <TextBlock Text="OCR 识别引擎" Style="{StaticResource FieldLabel}" Width="104" VerticalAlignment="Center"/>
                                 <ComboBox x:Name="CmbOcrEngine" Width="300" Margin="10,0,0,0" SelectedIndex="0"
@@ -2273,6 +2281,7 @@
                                     <ComboBoxItem Content="SimdPaddle（推荐，默认）"/>
                                     <ComboBoxItem Content="RapidOCR Small（备用）"/>
                                     <ComboBoxItem Content="Unlimited-OCR（外部服务，慢）"/>
+                                    <ComboBoxItem Content="Rust sidecar（vision-svc，实验）"/>
                                 </ComboBox>
                             </StackPanel>
                             <StackPanel x:Name="PnlUnlimitedOcr" Orientation="Horizontal" Margin="0,10,0,0"
@@ -2716,59 +2725,111 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <!-- ===== GitHub 优化面板（GitPort 内核 + GitHub 域名测速） ===== -->
+            <!-- ===== GitHub 面板（FastGithub 访问加速 / 镜像下载加速 / 域名测速） ===== -->
             <ScrollViewer x:Name="GitHubPanel" Grid.Row="2" Visibility="Collapsed"
                           Style="{StaticResource PageScroll}">
                 <StackPanel Margin="0,2,0,0">
 
-                    <!-- ===== GitHub 链接优化（GitPort 内核 + GitHub 域名测速） ===== -->
+                    <!-- ===== 第 0 段：访问加速 + 下载加速 ===== -->
+                    <StackPanel>
+
+                        <!-- 访问加速（FastGithub 内核：hosts 择优直连） -->
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                    <TextBlock Style="{StaticResource H2}">GitHub 访问加速</TextBlock>
+                                    <Ellipse x:Name="DotFastGithub" Width="8" Height="8" Margin="12,0,6,0"
+                                             VerticalAlignment="Center" Fill="{DynamicResource EnvDotIdle}"/>
+                                    <TextBlock x:Name="TxtFastGithubState" Text="内核未下载" FontSize="12"
+                                               VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"/>
+                                </StackPanel>
+                                <Grid Margin="0,4,0,0" MaxWidth="640" HorizontalAlignment="Left">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="把 github.com、api、raw、codeload 等 "/><Run Text="21 个域名指向实测最快边缘节点"/><Run Text="（TCP 初筛 + HTTPS 复验择优）：不改系统代理、不装证书，全程 HTTPS"/></TextBlock>
+                                    <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="内核来自开源项目 "/><Run Text="FastGithub"/><Run Text="（单文件 44 MB），首次使用下载一次；每次「一键加速」实测 21 个域名，约 20–60 秒"/></TextBlock>
+                                    <Ellipse Grid.Row="2" Style="{StaticResource BulletDot}"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="只改 hosts 的固定标记段，其它行原样保留；"/><Run Text="被其它加速器（Steam++ 等）占用的行会临时注释，点「停止还原」一起复原"/></TextBlock>
+                                </Grid>
+                                <WrapPanel Margin="0,10,0,0">
+                                    <Button x:Name="BtnFastGithubAction" Content="下载内核" Style="{StaticResource GhostBtn}"
+                                            Padding="14,7" Click="BtnFastGithubAction_Click"/>
+                                    <Button x:Name="BtnFastGithubPanel" Content="内核面板" Style="{StaticResource GhostBtn}"
+                                            Padding="14,7" Margin="10,0,0,0" Click="BtnFastGithubPanel_Click"
+                                            ToolTip="打开 FastGithub 自带界面（可视化测速 / 镜像开关 / 还原），与这里共用同一份 hosts 与配置"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtFastGithubStatus" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"
+                                           Margin="0,8,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 下载加速（镜像链） -->
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                    <TextBlock Style="{StaticResource H2}">下载加速</TextBlock>
+                                </StackPanel>
+                                <Grid Margin="0,4,0,0" MaxWidth="640" HorizontalAlignment="Left">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="镜像前缀套在原始链接前（Release / raw / archive 全适用），"/><Run Text="不依赖 hosts 是否已加速"/></TextBlock>
+                                    <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="本程序的更新下载与内核下载共用同一条镜像链："/><Run Text="默认镜像 → 其余预设 → GitHub 直连兜底"/><Run Text="，任一通道失败自动换下一个"/></TextBlock>
+                                </Grid>
+                                <WrapPanel Margin="0,10,0,0" VerticalAlignment="Center">
+                                    <ComboBox x:Name="CbFastGithubMirror" Width="240" Height="30" FontSize="12"
+                                              IsEditable="True" IsTextSearchEnabled="False"
+                                              VerticalContentAlignment="Center"
+                                              ToolTip="镜像前缀（可下拉选预设，也可直接填任意 http(s) 反代前缀）"/>
+                                    <Button x:Name="BtnFastGithubMirrorProbe" Content="镜像测速" Style="{StaticResource GhostBtn}"
+                                            Padding="14,7" Margin="10,0,0,0" Click="BtnFastGithubMirrorProbe_Click"/>
+                                    <Button x:Name="BtnFastGithubMirrorApply" Content="设为默认" Style="{StaticResource GhostBtn}"
+                                            Padding="14,7" Margin="10,0,0,0" Click="BtnFastGithubMirrorApply_Click"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtFastGithubMirrorState" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"
+                                           Margin="0,8,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+
+                    <!-- ===== 第 1 段：域名测速 ===== -->
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Style="{StaticResource H2}">GitHub 链接优化</TextBlock>
-                                <Ellipse x:Name="DotGitPort" Width="8" Height="8" Margin="12,0,6,0"
-                                         VerticalAlignment="Center" Fill="{DynamicResource EnvDotIdle}"/>
-                                <TextBlock x:Name="TxtGitPortState" Text="未运行" FontSize="12"
-                                           VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"/>
+                                <TextBlock Style="{StaticResource H2}">GitHub 域名延迟</TextBlock>
                             </StackPanel>
-                            <Grid Margin="0,4,0,0" MaxWidth="560" HorizontalAlignment="Left">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                    <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                                <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="本地代理接管 GitHub 全家（clone / push / Release / raw / 网页），"/><Run Text="内置真实 IP 表免疫 DNS 污染"/><Run Text="，其他网站流量不受影响"/></TextBlock>
-                                <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="内核来自开源项目 gitport-github（"/><Run Text="约 8 MB"/><Run Text="），首次使用需下载一次；分流/PAC/镜像链开关在其工作台页面配置"/></TextBlock>
-                                <Ellipse Grid.Row="2" Style="{StaticResource BulletDot}"/>
-                                <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="停止或退出程序会结束内核；系统代理状态由内核退出时自动还原"/></TextBlock>
-                            </Grid>
-                            <WrapPanel Margin="0,10,0,0">
-                                <Button x:Name="BtnGitPortAction" Content="下载内核" Style="{StaticResource GhostBtn}"
-                                        Padding="14,7" Click="BtnGitPortAction_Click"/>
-                                <Button x:Name="BtnGitPortWorkbench" Content="打开工作台" Style="{StaticResource GhostBtn}"
-                                        Padding="14,7" Margin="10,0,0,0" Click="BtnGitPortWorkbench_Click"/>
-                            </WrapPanel>
-                            <TextBlock x:Name="TxtGitPortStatus" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"
-                                       Margin="0,8,0,0" TextWrapping="Wrap"/>
-
-                            <Rectangle Style="{StaticResource Hairline}" Margin="0,12,0,10"/>
-                            <TextBlock Text="GitHub 域名延迟" Style="{StaticResource SubHead}"/>
                             <TextBlock FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
-                                       Text="先看这张表：GitHub 域名延迟都在 200ms 以上或大量无响应 = 该开加速了；打开加速后再测一遍对比。"/>
+                                       Text="先看这张表：域名延迟都在 200ms 以上或大量无响应 = 该开加速了；加速后再测一遍对比。「内核测速」走 FastGithub 的 TCP+HTTPS 复验，比纯 ping 更接近真实可用性。"/>
                             <WrapPanel Margin="0,10,0,0">
                                 <Button x:Name="BtnGithubMeasure" Content="测量 GitHub" Style="{StaticResource GhostBtn}"
-                                        Padding="14,7" Click="BtnGithubMeasure_Click"/>
+                                        Padding="14,7" Click="BtnGithubMeasure_Click"
+                                        ToolTip="本机 DNS 解析 + TCP 443 直连测速（不依赖内核）"/>
+                                <Button x:Name="BtnFastGithubProbe" Content="内核测速" Style="{StaticResource GhostBtn}"
+                                        Padding="14,7" Margin="10,0,0,0" Click="BtnFastGithubProbe_Click"
+                                        ToolTip="调用 FastGithub --selftest：TCP 初筛 + HTTPS 复验，只测速不改 hosts"/>
                                 <TextBlock x:Name="TxtGithubSummary" FontSize="11.5" Foreground="{DynamicResource TextMuted}"
                                            VerticalAlignment="Center" Margin="14,0,0,0"/>
                             </WrapPanel>
-                            <ListView x:Name="LvGithub" Height="196" FontSize="12.5" Margin="0,8,0,0"
+                            <ListView x:Name="LvGithub" Height="236" FontSize="12.5" Margin="0,8,0,0"
                                       Background="Transparent" BorderThickness="0"
                                       Foreground="{DynamicResource TextPrimary}"
                                       ItemContainerStyle="{StaticResource NetRowStyle}"
@@ -2790,6 +2851,7 @@
                                                 </DataTemplate>
                                             </GridViewColumn.CellTemplate>
                                         </GridViewColumn>
+                                        <GridViewColumn Header="状态" Width="70" DisplayMemberBinding="{Binding StateText}"/>
                                     </GridView>
                                 </ListView.View>
                             </ListView>

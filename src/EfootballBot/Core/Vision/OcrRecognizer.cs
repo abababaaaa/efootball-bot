@@ -216,6 +216,10 @@ public enum OcrEngineKind
     /// 本程序以 HTTP 客户端接入 OpenAI 兼容服务（见 <see cref="UnlimitedOcrBackend"/>）。
     /// 逐帧秒级~数十秒，只作精度参照/离线校准；服务不可达自动回退 SimdPaddle。</summary>
     UnlimitedOcr = 3,
+
+    /// <summary>Rust sidecar（vision-svc）内的 ONNX Runtime 推理：帧经共享内存送过去，
+    /// 与 SimdPaddle 共用同一套 models/v6 权重。不可用时自动回退 SimdPaddle。</summary>
+    Sidecar = 4,
 }
 
 /// <summary>OCR 后端统一契约：输入一帧 BGRA，输出归一化坐标词块。</summary>
@@ -255,7 +259,8 @@ public sealed class OcrRecognizer : IDisposable
     /// <param name="tuning">难读文本调优（美术字/碎词化）。null = <see cref="OcrTuning.Off"/>，历史行为不变。</param>
     public OcrRecognizer(OcrEngineKind engine, string? preferredTag = null,
         int downscaleLongSide = DefaultDownscaleLongSide, bool preferInt8 = true,
-        EfootballBot.Core.Config.UnlimitedOcrConfig? unlimitedOcr = null, OcrTuning? tuning = null)
+        EfootballBot.Core.Config.UnlimitedOcrConfig? unlimitedOcr = null, OcrTuning? tuning = null,
+        EfootballBot.Core.Config.VisionSidecarConfig? sidecar = null)
     {
         EngineKind = engine;
         _downscaleLongSide = downscaleLongSide;
@@ -271,6 +276,26 @@ public sealed class OcrRecognizer : IDisposable
                 {
                     // 外部服务随时可能没起：绝不因试验引擎断了挂机
                     FallbackNote = $"Unlimited-OCR 加载失败已回退 SimdPaddle：{ex.Message}";
+                    try
+                    {
+                        _backend = new SimdPaddleOcrBackend(_tuning);
+                    }
+                    catch (Exception ex2)
+                    {
+                        FallbackNote += $"；SimdPaddle 亦失败，回退 RapidV6：{ex2.Message}";
+                        _backend = new RapidV6OcrBackend(preferInt8);
+                    }
+                }
+                break;
+            case OcrEngineKind.Sidecar:
+                try
+                {
+                    _backend = new SidecarOcrBackend(sidecar ?? new EfootballBot.Core.Config.VisionSidecarConfig());
+                }
+                catch (Exception ex)
+                {
+                    // sidecar 没构建/没启动：绝不因为试验引擎断了挂机
+                    FallbackNote = $"vision-svc 后端加载失败已回退 SimdPaddle：{ex.Message}";
                     try
                     {
                         _backend = new SimdPaddleOcrBackend(_tuning);

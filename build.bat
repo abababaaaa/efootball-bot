@@ -48,6 +48,22 @@ for /f "skip=1 delims=" %%F in ('dir /b /o-d "%~dp0publish\EfootballBot.old-*.ex
     del /f /q "%~dp0publish\%%F" >nul 2>&1
 )
 if defined OLDBAK echo Old build kept as publish\%OLDBAK% (only the newest backup is retained).
+rem --- Rust vision sidecar (optional, A/B plan) ---------------------------------
+rem Build vision-svc.exe when a Rust toolchain is present, and drop it next to the
+rem main exe so the "VisionSidecar.Enabled" switch can find it. Silent no-op when
+rem cargo is missing: the bot then just keeps using the in-process capture chain.
+set SIDECAR=%~dp0rust\bin\vision-svc.exe
+echo [2b/3] Rust vision sidecar (optional)...
+if not exist "%~dp0rust\build.bat" goto :sidecar_done
+call "%~dp0rust\build.bat"
+:sidecar_done
+if exist "%SIDECAR%" (
+    copy /y "%SIDECAR%" "%~dp0publish\vision-svc.exe" >nul 2>&1
+    echo vision-svc.exe deployed to publish\.
+) else (
+    echo NOTE: vision-svc.exe not built - VisionSidecar stays disabled.
+)
+
 echo [3/3] Done. publish\EfootballBot.exe is now the new build.
 echo.
 pause

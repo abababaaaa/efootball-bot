@@ -584,6 +584,38 @@ public sealed class MonitorConfig
     public string Token { get; set; } = "";
 }
 
+/// <summary>
+/// Rust 视觉 sidecar（vision-svc）配置。默认关闭：关闭时捕获/OCR 全走原有进程内实现，
+/// 行为与旧版一致；打开后由外置 Rust 进程接管捕获（可再选它跑 OCR/YOLO），失败自动回退。
+/// </summary>
+public sealed class VisionSidecarConfig
+{
+    /// <summary>总开关。勾选后下次开始挂机生效。</summary>
+    public bool Enabled { get; set; } = false;
+
+    /// <summary>vision-svc.exe 路径；空 = 自动查找（程序目录 / 开发期 rust/bin）。</summary>
+    public string ExePath { get; set; } = "";
+
+    /// <summary>models 目录（v6/*.onnx + yolo/*）；空 = 自动查找（程序目录 / 仓库 src\EfootballBot\models）。</summary>
+    public string ModelsDir { get; set; } = "";
+
+    /// <summary>捕获后端："auto"（默认：DXGI 黑帧自动切 WGC）/ "dxgi" / "wgc"。</summary>
+    public string Backend { get; set; } = "auto";
+
+    /// <summary>目标抓帧率（Desktop Duplication 有变化才会出帧，这里只是上限）。</summary>
+    public int Fps { get; set; } = 30;
+
+    /// <summary>是否用 sidecar 接管画面捕获（关闭则只用它的推理能力）。</summary>
+    public bool UseForCapture { get; set; } = true;
+
+    /// <summary>是否用 sidecar 跑 YOLO 检测。实测 CPU 下侧车比进程内慢（313ms vs 131ms），默认关；
+    /// 等 GPU EP 可用后再打开才有意义。</summary>
+    public bool UseForYolo { get; set; } = false;
+
+    /// <summary>把 sidecar 的 stdout/stderr 也打进日志（排障用）。</summary>
+    public bool Verbose { get; set; } = false;
+}
+
 public sealed class AppConfig
 {
     /// <summary>
@@ -611,6 +643,9 @@ public sealed class AppConfig
 
     // —— 推理（ONNX Runtime EP 降级 + YOLO 目标检测）——
     public InferenceConfig Inference { get; set; } = new();
+
+    // —— Rust 视觉 sidecar（方案 A）：默认关闭时行为与旧版完全一致 ——
+    public VisionSidecarConfig VisionSidecar { get; set; } = new();
     public YoloConfig Yolo { get; set; } = new();
 
     /// <summary>OCR 性能档（检测降采样 / 行级重读）：默认全关。</summary>

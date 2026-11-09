@@ -70,7 +70,7 @@ public sealed class BotEngine : IDisposable
     /// <summary>虚拟手柄（连接失败按 <see cref="PadBackendInfo.FallbackChain"/> 回退时整体换实例）。</summary>
     public IVirtualPad Pad360 { get; private set; }
     public Pad Pad { get; private set; }
-    public readonly WindowCapture Capture;
+    public readonly CaptureHost Capture;
     /// <summary>DXGI 桌面复制捕获器（Vortice 实现，实现 ICaptureProvider）。</summary>
     private ICaptureProvider? _dxgi;
     private bool _dxgiStepWired;
@@ -222,7 +222,15 @@ public sealed class BotEngine : IDisposable
     public BotEngine(AppConfig cfg)
     {
         _cfg = cfg;
-        Capture = new WindowCapture();
+        Capture = new CaptureHost();
+        Capture.SidecarLog += (level, text) =>
+            LogInternal($"[sidecar] {text}", level switch
+            {
+                "Error" => LogLevel.Error,
+                "Warn" => LogLevel.Warn,
+                "Success" => LogLevel.Success,
+                _ => LogLevel.Info,
+            });
         // 手柄后端（AppConfig.Pad.Backend，唯一后端 Vigem=Xbox 360 形态、占用 XInput 玩家 1）。
         // 任一时刻只存在一只虚拟手柄。
         Pad360 = CreatePad(cfg.Pad.Backend);
@@ -1071,6 +1079,54 @@ public sealed class BotEngine : IDisposable
     private async Task StartCaptureAsync(int w, int h)
     {
         var failures = new List<string>();
+
+        // —— 方案 A：Rust sidecar 接管捕获（配置开启时优先；任何失败自动回退原 WGC/DXGI/GDI 链）——
+        if (_cfg.VisionSidecar.Enabled && _cfg.VisionSidecar.UseForCapture &&
+            await TryStartSidecarAsync(w, h, failures)) return;
+
+        async Task<bool> TryStartSidecarAsync(int sw, int sh, List<string> fails)
+        {
+            try
+            {
+                LogInternal($"开始捕获游戏窗口（Rust sidecar vision-svc，{sw}×{sh}，DXGI 复制走独立进程）", LogLevel.Info);
+                Capture.EnableSidecar(_cfg.VisionSidecar);
+                if (!Capture.IsRunning) Capture.Start(_window!.Handle, sw, sh);
+
+                var deadline = DateTime.Now.AddSeconds(6);
+                while (DateTime.Now < deadline && Capture.LastFrameAt == DateTime.MinValue)
+                    await Task.Delay(80);
+                if (Capture.LastFrameAt == DateTime.MinValue)
+                    throw new TimeoutException("sidecar 6s 内未产出帧（exe 缺失/管道未连接/DXGI 被占用）");
+
+                // 黑帧校验（与 DXGI 路径同口径）：HDR 降位失败/虚拟显示器会产出全黑帧
+                var checkDeadline = DateTime.Now.AddSeconds(3);
+                bool sawContent = false;
+                while (DateTime.Now < checkDeadline)
+                {
+                    await Task.Delay(200);
+                    var probeFrame = Capture.TryGetLatest();
+                    if (probeFrame is not null && !IsMostlyBlack(probeFrame)) { sawContent = true; break; }
+                }
+                if (!sawContent)
+                    throw new TimeoutException("sidecar 捕获画面全黑（显示器输出/HDR 降位异常）");
+
+                if (Observation.Provider != Capture)
+                {
+                    try { _dxgi?.Stop(); } catch { }
+                    try { _gdi?.Stop(); } catch { }
+                    Observation.AttachProvider(Capture);
+                }
+                LogInternal("Rust sidecar 捕获已就绪（vision-svc 独立进程）", LogLevel.Success);
+                return true;
+            }
+            catch (Exception ex)
+            {
+                LogInternal($"sidecar 捕获不可用：{ex.Message}", LogLevel.Warn);
+                Capture.DisableSidecar();
+                fails.Add($"sidecar：{ex.Message}");
+                return false;
+            }
+        }
 
         async Task<bool> TryStartDxgiAsync()
         {

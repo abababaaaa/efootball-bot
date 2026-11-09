@@ -740,10 +740,11 @@ public partial class MainWindow
         _hotkey.Dispose();
         try { _monitor?.Dispose(); } catch { }
         _monitor = null;
-        // 网络页：停游戏内连接监控 + 关闭悬浮窗 + 停 GitPort 内核（内核退出自愈逻辑负责还原系统代理）
+        // 网络页：停游戏内连接监控 + 关闭悬浮窗 + 停 FastGithub 自愈看门狗。
+        // hosts 加速段不随退出还原（与内核面板行为一致：写进去就一直生效，想撤销点「停止还原」）
         try { _inGame?.Stop(); } catch { }
         try { _overlay?.Close(); } catch { }
-        EfootballBot.Core.System.GitPortManager.Stop();
+        EfootballBot.Core.System.FastGithubKernel.StopWatchdog();
         // 先杀 Worker（虚拟手柄随引擎停止断开），再走停靠还原——
         // ★必须先于停靠还原：Worker 里的停靠看门狗存活期间会把刚还原的窗口再移出屏幕，
         //   而还原记录已被删除，游戏就永远留在屏幕外（挂机中直接关主窗口的实测路径）

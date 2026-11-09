@@ -43,6 +43,7 @@ public class ChallengeRealFrameTests
         "challenge_intro.png",
         "challenge_card_home.png",
         "challenge_settings.png",
+        "challenge_unlock_popup.png",
     };
 
     [Fact]
@@ -197,6 +198,21 @@ public class ChallengeRealFrameTests
         Assert.False(WeeklyBrain.ChallengeProgressDone(ocr));
         Assert.True(WeeklyBrain.IsChallengeCardHome(ocr));
         Assert.False(WeeklyBrain.IsMainRewardDone(ocr, frame));
+    }
+
+    [Fact]
+    public void ChallengeUnlockPopup_ClassifiesAsPopup_NotChallengeList()
+    {
+        // 实机 2026-11-08 国际服反馈帧「挑战2已解锁 / 通过此全新挑战测试自己的技巧! / OK」：
+        // 弹窗盖层下「挑战清单」标题、卡号 01/02、底栏「返回」全部可读——必须判解锁弹窗
+        // （场景层随后 A 清弹窗并重新归位扫描），不得判成可操作清单
+        var (screen, ocr, frame) = Load("challenge_unlock_popup.png");
+        _out.WriteLine("joined: " + ocr.JoinedText);
+        Assert.True(WeeklyBrain.IsChallengeUnlockPopup(ocr), "实机帧必须命中解锁弹窗判定");
+        Assert.Equal(WkScreen.ChallengeUnlockPopup, screen);
+        // 弹窗盖层下的卡位探针（灰锁/绿勾）本就不作判定依据——只 dump 便于回归对照
+        foreach (var c in WeeklyBrain.ScanChallengeCards(ocr, frame))
+            _out.WriteLine($"card {c.Index:00} slot{c.Slot} locked={c.Locked} checked={c.Checked}");
     }
 
     [Fact]

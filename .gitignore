@@ -1,5 +1,6 @@
 bin/
 obj/
+rust/target/
 publish*/
 .vs/
 
@@ -59,3 +60,18 @@ tools/ocr_candidates_*/
 
 # 校准诊断临时裁图（诊断测试自动生成）
 tests/EfootballBot.Tests/TestData/swap/diag/
+
+# 本地实验/临时目录（不入库、随构建产物清掉）
+_scratch/
+_research/
+etk_work/
+feedback_analysis/
+tools/VisionProbe/bin/
+tools/VisionProbe/obj/
+
+# Rust sidecar 只入库源码，构建产物与本地产物不入库
+rust/bin/
+
+# 编辑器/手工备份
+*.bak
+*.bak[0-9]*

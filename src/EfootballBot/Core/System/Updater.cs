@@ -93,11 +93,10 @@ public static class Updater
         return $"主源 {host} → 加速镜像 → GitHub 直连";
     }
 
-    /// <summary>下载加速镜像前缀（第三方 GitHub 反代，拼在完整原始 URL 前）。2026-10-16 实测
-    /// 存活：gh-proxy.com、ghproxy.net、ghproxy.cn（速度随时段波动）；ghfast.top / ghproxy.cc /
-    /// gh.llkk.cc / github.moeyy.xyz 等一批已死，勿照抄旧清单。全部失败自动回退 GitHub 直连。</summary>
-    public static readonly string[] DownloadMirrorPrefixes =
-        { "https://gh-proxy.com/", "https://ghproxy.net/", "https://ghproxy.cn/" };
+    /// <summary>下载加速镜像前缀（第三方 GitHub 反代，拼在完整原始 URL 前）。镜像清单与「GitHub 访问加速」
+    /// 页共用 <see cref="FastGithubKernel.MirrorPrefixes"/>：2026-11-09 实测 ghfast.top / ghproxy.net /
+    /// gh-proxy.com 可用（速度随时段波动），用户在下载加速卡里选的默认镜像排在最前。全部失败回退直连。</summary>
+    public static IReadOnlyList<string> DownloadMirrorPrefixes => FastGithubKernel.MirrorPrefixes;
 
     /// <summary>GitHub Release API 的简化模型。</summary>
     private record GhRelease(
@@ -265,9 +264,8 @@ public static class Updater
         if (!string.IsNullOrEmpty(PrimaryBaseUrl) &&
             fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
             urls.Add($"{PrimaryBaseUrl}/{fileName}");
-        foreach (var p in DownloadMirrorPrefixes)
-            urls.Add(p + gh);
-        urls.Add(gh);
+        // 镜像链与内核下载同一条：默认镜像 → 其余预设 → 直连兜底（WithMirrors 内部去重）
+        urls.AddRange(FastGithubKernel.WithMirrors(gh));
         return urls;
     }
 

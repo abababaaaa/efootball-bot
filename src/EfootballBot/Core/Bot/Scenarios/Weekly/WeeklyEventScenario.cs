@@ -11,6 +11,10 @@ namespace EfootballBot.Core.Bot.Scenarios.Weekly;
 /// （赛事等级=配置值；自动控制强制开、弹性自动控制强制关）→ A 前往比赛。
 /// 比赛中流程与我的联赛完全共用：InMatch 随机点击、终场、结算弹窗、满级检测、场次计数。
 /// 赛后回到活动主页自动循环，直到主要奖励完成（探针校准前恒按"进行中"继续刷）。
+/// 挑战活动新子内容（2026-11-08）：介绍页 →「选择地区」→「选择球队」两页各按一次 Y 随机后
+/// 直接 A 下一步（无确认键、不来回随机）→「要使用&lt;队名&gt;吗？」上×1 A 进入 → 挑战清单。
+/// 挑战清单上可能盖「挑战N已解锁 / OK」解锁弹窗（2026-11-08 用户实机）：任何阶段命中都
+/// 先 A 清弹窗，清完重新归位扫描（见 HandleChallengeUnlockPopupAsync）。
 /// 判定只用固定 UI 词与固定几何（活动名/图片/积分数字每周轮换，禁作判定点）。
 /// </summary>
 public sealed class WeeklyEventScenario : IScenario
@@ -77,6 +81,22 @@ public sealed class WeeklyEventScenario : IScenario
     /// <summary>单场周活动「选择赛事等级」页导航累计动作数（超限按当前焦点 A 兜底继续，
     /// 绝不停在难度页干等——issue #1 实机：旧逻辑在此页零动作原地卡死）。</summary>
     private int _diffAttempts;
+    /// <summary>「选择地区/选择球队」页随机后已按过的「下一步」（A）次数（换页清零；
+    /// 用满 WeeklyBrain.MaxPickNextAttempts 就 B 退出该子流程）。</summary>
+    private int _pickAttempts;
+    /// <summary>当前选择页是否已经按过 Y 随机（用户 2026-11-08 规则：每页随机只按一次，
+    /// 之后直接下一步；只有换页才重置，绝不在同一页来回随机）。</summary>
+    private bool _pickRandomPressed;
+    /// <summary>按完随机后同一页仍在屏上的帧数（满 WeeklyBrain.PickConfirmGraceFrames
+    /// 才认随机没把页面带走，等转场动画走完再按下一步）。</summary>
+    private int _pickSamePageFrames;
+    /// <summary>上一次按 Y 随机时所在的页面（换页清零 _pickAttempts/_pickRandomPressed）。</summary>
+    private WkScreen _pickPage = WkScreen.None;
+    /// <summary>球队确认弹窗「上×1 → A」的连续无进展次数（前两次上移确认，第三次直接 A，
+    /// 再不行 B 取消回球队页，绝不无限按）。</summary>
+    private int _teamConfirmAttempts;
+    /// <summary>选择页按 B 仍退不出去（下一帧还在同一页）的次数；超 3 次停止挂机（退出受阻）。</summary>
+    private int _pickEscapes;
     /// <summary>已拉黑槽位仍停在介绍页的 B 退出次数（超 3 强制顺延槽位，防退出受阻死循环）。</summary>
     private int _blacklistEscape;
 
@@ -110,6 +130,13 @@ public sealed class WeeklyEventScenario : IScenario
     private int _chVanishRescans;
     /// <summary>已放弃的挑战活动清单反复弹回的轮数（介绍页 B 无效时防无限弹循环，超限停止挂机）。</summary>
     private int _chStuckBouts;
+    /// <summary>「挑战N已解锁」弹窗连续按 A 的累计次数（弹窗消失即清零；超限回屏幕驱动重判，
+    /// 防 OCR 误判时对着普通页面无限按 A）。</summary>
+    private int _unlockPopupPresses;
+
+    /// <summary>同一枚解锁弹窗最多连按几次 A；超限认为弹窗不是 A 能关的（或识别误判），
+    /// 回 Flow 让屏幕驱动重判并暂停一拍。</summary>
+    private const int MaxUnlockPopupPresses = 6;
 
     private string _lastScreenName = "";
     private int _streak;
@@ -327,6 +354,13 @@ public sealed class WeeklyEventScenario : IScenario
         }
         _adviceOpen = false;
 
+        // 挑战解锁弹窗「挑战N已解锁 / OK」（2026-11-08 国际服实机）：盖在挑战清单上，只有一个
+        // OK 键。任何阶段命中都在这里接管——弹窗半透明盖层下清单标题/卡号/底栏仍在，落清单
+        // 分支会让归位/移卡全被吃掉，卡位锁探针还会被弹窗浅灰底误判成锁定 → 回撤退 B 退不掉
+        // → 清单↔弹窗死循环（用户反馈：识别不到这个弹窗）。
+        if (wk == WkScreen.ChallengeUnlockPopup)
+            return await HandleChallengeUnlockPopupAsync();
+
         // 比赛历史页：任何阶段误入都先 B 退回活动主页（该页无可推进项，交给共享决策会被
         // 误检的 btn_confirm 拖成「盲按 A 三十轮再 B 逃生」的死循环，实机 2026-10-26 反馈包）。
         // 真正把焦点修好的动作在 LaunchReady 的归位里——退出历史页后游戏把焦点还给
@@ -342,6 +376,23 @@ public sealed class WeeklyEventScenario : IScenario
             await _engine.Pad.Back();
             return 2200;
         }
+
+        // 挑战活动新增前置流程（2026-11-08 国际服「Road to CAF AFCON 2027」子内容）：
+        // 介绍页按进入 → 选择地区 → 选择球队 →「要使用<队名>吗？」确认弹窗 → 正常挑战清单。
+        // 三页都没有推进词（只有底栏 B 返回 / Y 随机，弹窗只有 进入 + 取消），落共享决策会被
+        // 判 Unknown 原地干等，所以任何阶段命中都接管；半途启动直接落在这些页时同样接得上。
+        // 用户规则（2026-11-08）：两页随机各按一次就够，不来回点；没有确认键，随机按完直接
+        // 下一步（A）——见 HandleTeamPickAsync / WeeklyBrain.DecidePickStep。
+        if (wk == WkScreen.TeamConfirm)
+            return await HandleTeamConfirmAsync();
+        if (wk is WkScreen.RegionSelect or WkScreen.TeamSelect)
+            return await HandleTeamPickAsync(wk);
+        _pickAttempts = 0;
+        _pickRandomPressed = false;
+        _pickSamePageFrames = 0;
+        _pickPage = WkScreen.None;
+        _pickEscapes = 0;
+        _teamConfirmAttempts = 0;
 
         // 单场周活动「选择赛事等级」页（2026-10-30 用户截图 + issue #1）：任何阶段命中都接管，
         // 旧逻辑该页 wk=None/ml=DifficultyPage 无人处理 → 原地干等。半途启动/标题被遮挡
@@ -918,7 +969,119 @@ public sealed class WeeklyEventScenario : IScenario
         return 1400;
     }
 
+    // ---------------- 球队选择前置流程（挑战活动新子内容） ----------------
+
+    /// <summary>
+    /// 「选择地区 / 选择球队」页（用户 2026-11-08 实机规则）：每页只按 <b>一次</b> Y 随机，
+    /// 随机点完直接下一步，绝不在同一页来回随机。两页都没有确认键（底栏只有 B 返回 / Y 随机），
+    /// 所以随机之后唯一的推进动作就是 A（游戏把随机高亮项当选中项，A 即「下一步」）：
+    /// ① 本页还没随机 → Y×1；② 随机刚按完 → 等过渡帧（转场约 1~2s，抢按会打断动画）；
+    /// ③ 随机已按过、页面没动 → A 下一步；④ 下一步用满 3 次仍不动 → B 退出该子流程；
+    /// B 退出累计 3 次仍在原页 → 停止挂机（退出受阻，交人工看状态）。
+    /// 决策逻辑见 <see cref="WeeklyBrain.DecidePickStep"/>（纯函数，单测锁定「只随机一次」）。
+    /// </summary>
+    private async Task<int> HandleTeamPickAsync(WkScreen wk)
+    {
+        if (_pickPage != wk)
+        {
+            _pickPage = wk;
+            _pickAttempts = 0;
+            _pickRandomPressed = false;
+            _pickSamePageFrames = 0;
+        }
+
+        string page = wk == WkScreen.RegionSelect ? "地区选择" : "球队选择";
+        var step = WeeklyBrain.DecidePickStep(_pickRandomPressed, _pickSamePageFrames, _pickAttempts, _pickEscapes);
+
+        switch (step)
+        {
+            case WeeklyBrain.WkPickAction.PressRandom:
+                _pickRandomPressed = true;
+                _pickSamePageFrames = 0;
+                _log($"[周活动] {page}页：Y 随机×1（随机只按这一次，按完直接下一步）", LogLevel.Info);
+                await _engine.Pad.Y();
+                return 2000;
+
+            case WeeklyBrain.WkPickAction.Wait:
+                _pickSamePageFrames++;
+                return 1400;
+
+            case WeeklyBrain.WkPickAction.PressNext:
+                _pickAttempts++;
+                _log($"[周活动] {page}页：随机已按过、页面未跳（该页无确认键），A 下一步（第 {_pickAttempts} 次）", LogLevel.Info);
+                await _engine.Pad.Confirm();
+                return 2000;
+
+            case WeeklyBrain.WkPickAction.Escape:
+                _pickEscapes++;
+                _pickAttempts = 0;
+                _pickSamePageFrames = 0;
+                _log($"[周活动] {page}页随机后 A 下一步多次未推进，B 退出该子流程（第 {_pickEscapes} 次，若反复出现请回报日志）", LogLevel.Warn);
+                await _engine.Pad.Back();
+                return 2500;
+
+            default: // WeeklyBrain.WkPickAction.Stop
+                _log($"[周活动] {page}页 B 退出受阻（连续 {_pickEscapes} 次仍在原页），停止挂机（请手动检查活动状态）", LogLevel.Error);
+                _engine.StopWithError($"{page}页退出受阻");
+                return 0;
+        }
+    }
+
+    /// <summary>
+    /// 球队确认弹窗「要使用&lt;队名&gt;吗？」：纵排 进入(上) / 取消(下)，★默认焦点在「取消」，
+    /// 直接 A 会取消回选球队页（用户 2026-11-08 实机）。上×1 → A 进入；连按两次弹窗仍在
+    /// （焦点本就落在「进入」的变体）改直接 A；再不行 B 取消回球队页重选，绝不无限按。
+    /// </summary>
+    private async Task<int> HandleTeamConfirmAsync()
+    {
+        if (++_teamConfirmAttempts > 3)
+        {
+            _teamConfirmAttempts = 0;
+            _log("[周活动] 球队确认弹窗多次未推进，B 取消后回到球队页重选", LogLevel.Warn);
+            await _engine.Pad.Back();
+            return 2400;
+        }
+        if (_teamConfirmAttempts <= 2)
+        {
+            _log("[周活动] 球队确认弹窗（默认焦点在「取消」）：上×1 → A 进入", LogLevel.Info);
+            await _engine.Pad.Dpad(PadDir.Up);
+            await _engine.Pad.Confirm();
+            return 2600;
+        }
+        _log("[周活动] 球队确认弹窗仍在：焦点可能已在「进入」，直接 A", LogLevel.Info);
+        await _engine.Pad.Confirm();
+        return 2400;
+    }
+
     // ---------------- 挑战活动子流程 ----------------
+
+    /// <summary>
+    /// 挑战解锁弹窗处置（用户 2026-11-08 国际服实机帧「挑战2已解锁 / 通过此全新挑战测试自己的
+    /// 技巧! / OK」）：弹窗只有一个 OK（默认焦点），A 即关闭；关闭后清单回到「可打第一张无锁
+    /// 无勾卡」的初始排版，所以清完直接按清单阶段重新归位扫描（SetPhase 复位游标/消失计数）。
+    /// 连续 6 次 A 仍在=识别误判或弹窗不吃 A：回 Flow 暂停一拍重判，绝不对普通页面无限按 A。
+    /// </summary>
+    private async Task<int> HandleChallengeUnlockPopupAsync()
+    {
+        if (_unlockPopupPresses >= MaxUnlockPopupPresses)
+        {
+            _unlockPopupPresses = 0;
+            _log("[周活动·挑战] 解锁弹窗连按 A 未消失，暂停 5s 回屏幕驱动重判（若反复出现请回报日志）", LogLevel.Warn);
+            SetPhase(WkPhase.Flow);
+            return 5000;
+        }
+        _unlockPopupPresses++;
+        if (!_challengeMode)
+        {
+            _challengeMode = true;
+            _log("[周活动] 检测到挑战解锁弹窗：确认本活动为挑战活动，进入挑战子流程", LogLevel.Success);
+        }
+        _log($"[周活动·挑战] 「挑战N已解锁」弹窗盖在清单上（第 {_unlockPopupPresses} 次）：A 确认关闭，关闭后重新归位扫描", LogLevel.Info);
+        await _engine.Pad.Confirm();
+        // 弹窗吃掉期间的方向输入全部无效：清完按清单阶段从头归位（SetPhase 复位扫描游标）
+        SetPhase(WkPhase.ChallengeList);
+        return 2200;
+    }
 
     /// <summary>进入挑战子流程：激活挑战模式并切到清单扫描阶段（下一轮先饱和左移归位）。
     /// 本槽位已放弃/已完成时绝不重进——实机 2026-10-17 死循环根因：拉黑后退出被介绍页
@@ -978,6 +1141,8 @@ public sealed class WeeklyEventScenario : IScenario
             if (++_attempts > 10) { SetPhase(WkPhase.Flow); return 600; } // 过场/未知帧超预算：回屏幕驱动自愈
             return 1200;
         }
+
+        _unlockPopupPresses = 0; // 清单干净可见：解锁弹窗已关，连按计数归零
 
         if (!_chScanReady)
         {

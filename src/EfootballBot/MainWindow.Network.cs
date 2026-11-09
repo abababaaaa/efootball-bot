@@ -11,14 +11,16 @@ using EfootballBot.Core.System;
 
 namespace EfootballBot;
 
-// 网络页：GitPort GitHub 加速内核管理 + 服务器延迟测试 + 实时监控（每秒 tcping，丢包率与曲线）
+// 网络页：FastGithub 访问加速内核 + 镜像下载加速 + 服务器延迟测试 + 实时监控（每秒 tcping，丢包率与曲线）
 public partial class MainWindow
 {
     private NetworkProbe? _probe;
     private ObservableCollection<ServerRowVm> _serverRows = new();   // 国际服网络监测（游戏/更新/候选/手填 IP）
     private ObservableCollection<ServerRowVm> _githubRows = new();   // GitHub 链接优化（域名目标）
     private CancellationTokenSource? _measureCts;
-    private bool _gitPortBusy;
+    private bool _githubBusy;        // 下载内核 / 一键加速 / 停止还原 / 内核测速进行中
+    private bool _githubMirrorBusy;  // 镜像测速进行中
+    private bool _githubHooked;      // 内核自愈提示只订阅一次
 
     // 监控启动时选中的行（曲线跟随它；换行立即换曲线）
     private ServerRowVm? SelectedRow => LvServers.SelectedItem as ServerRowVm;
@@ -44,6 +46,10 @@ public partial class MainWindow
 
         private string _delayText = "—";
         public string DelayText { get => _delayText; set { _delayText = value; Raise(nameof(DelayText)); } }
+
+        private string _stateText = "";
+        /// <summary>内核测速给出的可用性（可用 / 受限 / 不可用 / 失败）；空 = 未测。</summary>
+        public string StateText { get => _stateText; set { _stateText = value; Raise(nameof(StateText)); } }
 
         private Brush _dotBrush = (Brush)Application.Current.Resources["EnvDotIdle"];
         public Brush DotBrush { get => _dotBrush; set { _dotBrush = value; Raise(nameof(DotBrush)); } }
@@ -115,7 +121,7 @@ public partial class MainWindow
                 return true;
             };
         }
-        RefreshGitPortState();
+        InitFastGithubPage();
         UpdateServerSummary();
         RefreshLineState();
     }
@@ -217,23 +223,42 @@ public partial class MainWindow
         }
     }
 
-    private void RefreshGitPortState()
+    /// <summary>进入页面：订阅内核自愈提示 + 初始化镜像下拉 + 刷新卡片状态（幂等）。</summary>
+    private void InitFastGithubPage()
     {
-        if (_gitPortBusy) return;
-        bool running = GitPortManager.IsRunning;
-        bool installed = GitPortManager.IsInstalled;
-        BtnGitPortAction.Content = !installed ? "下载内核" : running ? "停止加速" : "启动加速";
-        if (!installed) { DotGitPort.Fill = BrushIdle; TxtGitPortState.Text = "内核未下载"; return; }
-        if (!running) { DotGitPort.Fill = BrushIdle; TxtGitPortState.Text = "未运行"; return; }
-        // 工作台端口探测最长 400ms：放后台，避免切页时界面卡一下
-        DotGitPort.Fill = (Brush)Application.Current.Resources["Warning"];
-        TxtGitPortState.Text = "检测工作台…";
-        _ = Task.Run(() => GitPortManager.IsWorkbenchUp).ContinueWith(t => Dispatcher.BeginInvoke(() =>
+        if (!_githubHooked)
         {
-            bool up = t.Result;
-            DotGitPort.Fill = up ? BrushOk : (Brush)Application.Current.Resources["Warning"];
-            TxtGitPortState.Text = up ? "运行中 · 工作台就绪" : "启动中（工作台未就绪）";
-        }));
+            _githubHooked = true;
+            FastGithubKernel.Notice += message => Dispatcher.BeginInvoke(() =>
+            {
+                AppendLog(message, LogLevel.Warn);
+                RefreshFastGithubState();
+            });
+        }
+        if (CbFastGithubMirror.ItemsSource is null)
+        {
+            CbFastGithubMirror.ItemsSource = FastGithubKernel.MirrorPrefixes;
+            CbFastGithubMirror.Text = FastGithubKernel.DefaultMirror;
+        }
+        RefreshFastGithubState();
+    }
+
+    /// <summary>刷新加速卡状态：以 hosts 实读为准（内核进程可有可无，只改 hosts 就生效）。</summary>
+    private void RefreshFastGithubState()
+    {
+        if (BtnFastGithubAction is null || _githubBusy) return;
+        bool installed = FastGithubKernel.IsInstalled;
+        int applied = FastGithubKernel.AppliedDomains.Count;
+
+        BtnFastGithubAction.Content = !installed ? "下载内核" : applied > 0 ? "停止还原" : "一键加速";
+        BtnFastGithubPanel.IsEnabled = installed;
+        DotFastGithub.Fill = applied > 0 ? BrushOk : BrushIdle;
+        TxtFastGithubState.Text = !installed
+            ? "内核未下载"
+            : applied > 0 ? $"已加速 · 接管 {applied} 个域名" : "未加速";
+        TxtFastGithubStatus.Text = applied > 0
+            ? $"hosts 已指向实测最快节点（内核 {FastGithubKernel.InstalledVersion}）；下载走镜像 {FastGithubKernel.DefaultMirror}"
+            : "";
     }
 
     // 表头排序：两列映射到 VM 属性；延迟列把未测(-int.MinValue)排最后
@@ -271,70 +296,164 @@ public partial class MainWindow
         }
     }
 
-    // ---------------- GitPort ----------------
+    // ---------------- FastGithub 访问加速 ----------------
 
-    private async void BtnGitPortAction_Click(object sender, System.Windows.RoutedEventArgs e)
+    /// <summary>主按钮三态：未装 → 下载内核；已装未加速 → 一键加速；已加速 → 停止还原。</summary>
+    private async void BtnFastGithubAction_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (_gitPortBusy) return;
+        if (_githubBusy) return;
+        _githubBusy = true;
+        BtnFastGithubAction.IsEnabled = false;
         try
         {
-            if (!GitPortManager.IsInstalled)
+            if (!FastGithubKernel.IsInstalled)
             {
-                _gitPortBusy = true;
-                BtnGitPortAction.IsEnabled = false;
-                TxtGitPortStatus.Text = "正在下载 GitPort 内核（走镜像链，约 8 MB）…";
-                AppendLog("开始下载 GitPort GitHub 加速内核…", LogLevel.Info);
-                bool downloading = true;
-                await GitPortManager.DownloadAsync(
-                    s => Dispatcher.BeginInvoke(() => { if (downloading) TxtGitPortStatus.Text = s; }),
-                    System.Threading.CancellationToken.None);
-                downloading = false;
-                TxtGitPortStatus.Text = "内核下载完成，点「启动加速」即可。";
-                AppendLog($"GitPort 内核下载完成（{GitPortManager.Version}）", LogLevel.Success);
+                TxtFastGithubStatus.Text = "正在下载 FastGithub 内核（镜像链，约 38 MB）…";
+                AppendLog("开始下载 FastGithub 内核…", LogLevel.Info);
+                var progress = new Progress<string>(text => TxtFastGithubStatus.Text = text);
+                await FastGithubKernel.DownloadAsync(progress);
+                AppendLog($"FastGithub 内核已就绪（{FastGithubKernel.InstalledVersion}）", LogLevel.Success);
+                TxtFastGithubStatus.Text = "内核就绪，点「一键加速」开始测速并写 hosts。";
             }
-            else if (GitPortManager.IsRunning)
+            else if (FastGithubKernel.IsApplied)
             {
-                GitPortManager.Stop((m, lv) => { AppendLog(m, lv); });
-                TxtGitPortStatus.Text = "";
+                TxtFastGithubStatus.Text = "正在还原 hosts…";
+                var (ok, message) = await FastGithubKernel.RestoreAsync();
+                TxtFastGithubStatus.Text = message;
+                AppendLog(message, ok ? LogLevel.Success : LogLevel.Error);
             }
             else
             {
-                _gitPortBusy = true;
-                BtnGitPortAction.IsEnabled = false;
-                TxtGitPortStatus.Text = "正在启动内核…";
-                bool ok = await Task.Run(() => GitPortManager.Start((m, lv) =>
-                    Dispatcher.BeginInvoke(() => AppendLog(m, lv))));
-                TxtGitPortStatus.Text = ok ? "" : "启动超时：进程已拉起但工作台未就绪，可稍后点「打开工作台」重试。";
+                TxtFastGithubStatus.Text = "正在测速 21 个 GitHub 域名并写 hosts（约 20–60 秒）…";
+                AppendLog("FastGithub 开始测速并择优写入 hosts…", LogLevel.Info);
+                var result = await FastGithubKernel.ApplyAsync();
+                TxtFastGithubStatus.Text = result.Message;
+                AppendLog(result.Message, result.Ok ? LogLevel.Success : LogLevel.Error);
+                ApplyFastGithubNodes(result.Nodes);
             }
         }
-        catch (OperationCanceledException) { TxtGitPortStatus.Text = "下载已取消。"; }
+        catch (OperationCanceledException) { TxtFastGithubStatus.Text = "操作已取消。"; }
         catch (Exception ex)
         {
-            TxtGitPortStatus.Text = $"失败：{ex.Message}";
-            AppendLog($"GitPort 操作失败：{ex.Message}", LogLevel.Error);
+            TxtFastGithubStatus.Text = $"失败：{ex.Message}";
+            AppendLog($"FastGithub 操作失败：{ex.Message}", LogLevel.Error);
         }
         finally
         {
-            _gitPortBusy = false;
-            BtnGitPortAction.IsEnabled = true;
-            RefreshGitPortState();
+            _githubBusy = false;
+            BtnFastGithubAction.IsEnabled = true;
+            RefreshFastGithubState();
         }
     }
 
-    private void BtnGitPortWorkbench_Click(object sender, System.Windows.RoutedEventArgs e)
+    /// <summary>打开内核自带面板（可视化测速 / 镜像开关），与本页共用同一份 hosts 与配置。</summary>
+    private void BtnFastGithubPanel_Click(object sender, System.Windows.RoutedEventArgs e)
     {
-        if (!GitPortManager.IsInstalled)
+        if (!FastGithubKernel.IsInstalled)
         {
-            TxtGitPortStatus.Text = "先下载并启动内核，再打开工作台。";
+            TxtFastGithubStatus.Text = "先下载内核，再打开面板。";
             return;
         }
-        if (!GitPortManager.IsRunning)
+        FastGithubKernel.OpenPanel();
+        TxtFastGithubStatus.Text = "已打开 FastGithub 面板：面板里的加速/还原与本页操作的是同一份 hosts。";
+    }
+
+    /// <summary>内核自检（--selftest，只测速不改 hosts）：TCP 初筛 + HTTPS 复验，结果回填延迟表。</summary>
+    private async void BtnFastGithubProbe_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_githubBusy) return;
+        if (!FastGithubKernel.IsInstalled)
         {
-            TxtGitPortStatus.Text = "内核未运行，正在启动…";
-            _ = Task.Run(() => GitPortManager.Start((m, lv) => Dispatcher.BeginInvoke(() => AppendLog(m, lv))))
-                .ContinueWith(_ => Dispatcher.BeginInvoke(RefreshGitPortState));
+            TxtGithubSummary.Text = "先下载内核再测速";
+            return;
         }
-        GitPortManager.OpenWorkbench();
+        _githubBusy = true;
+        BtnFastGithubProbe.IsEnabled = false;
+        try
+        {
+            TxtGithubSummary.Text = "内核测速中（TCP 初筛 + HTTPS 复验，约 20–60 秒）…";
+            var outcome = await FastGithubKernel.ProbeAsync();
+            ApplyFastGithubNodes(outcome.Nodes);
+            TxtGithubSummary.Text = outcome.Message;
+            AppendLog(outcome.Message, outcome.Nodes.Count > 0 ? LogLevel.Success : LogLevel.Warn);
+        }
+        catch (Exception ex)
+        {
+            TxtGithubSummary.Text = "测速失败：" + ex.Message;
+            AppendLog("FastGithub 内核测速失败：" + ex.Message, LogLevel.Warn);
+        }
+        finally
+        {
+            _githubBusy = false;
+            BtnFastGithubProbe.IsEnabled = true;
+        }
+    }
+
+    /// <summary>把内核探测/加速结果回填到域名表（按域名匹配，表里没有的域名忽略）。</summary>
+    private void ApplyFastGithubNodes(IReadOnlyList<FastGithubKernel.FastGithubNode> nodes)
+    {
+        if (nodes.Count == 0) return;
+        foreach (var node in nodes)
+        {
+            var row = _githubRows.FirstOrDefault(r =>
+                string.Equals(r.Label, node.Host, StringComparison.OrdinalIgnoreCase));
+            if (row is null) continue;
+            row.Ip = node.Ip;
+            row.Ms = (int)Math.Min(node.Ms, int.MaxValue);
+            row.StateText = node.StateText;
+        }
+        UpdateGithubSummary();
+    }
+
+    // ---------------- 下载加速（镜像链） ----------------
+
+    /// <summary>并行实测每个预设镜像（拉 Release 小样本的首块），最快者回填下拉，等用户确认再落配置。</summary>
+    private async void BtnFastGithubMirrorProbe_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        if (_githubMirrorBusy) return;
+        _githubMirrorBusy = true;
+        BtnFastGithubMirrorProbe.IsEnabled = false;
+        try
+        {
+            TxtFastGithubMirrorState.Text = "镜像测速中…";
+            var probes = await Task.WhenAll(
+                FastGithubKernel.MirrorPrefixes.Select(prefix => FastGithubKernel.ProbeMirrorAsync(prefix)));
+            TxtFastGithubMirrorState.Text = string.Join(" · ", probes.Select(p =>
+                $"{MirrorHost(p.Prefix)} {(p.Ok ? p.Ms + " ms" : "不可用")}"));
+            var best = probes.Where(p => p.Ok).OrderBy(p => p.Ms).FirstOrDefault();
+            if (best is null)
+            {
+                AppendLog("镜像测速：全部不可用，下载将回退 GitHub 直连", LogLevel.Warn);
+                return;
+            }
+            CbFastGithubMirror.Text = best.Prefix;
+            AppendLog($"镜像测速：最快 {best.Prefix}（{best.Ms} ms），点「设为默认」生效", LogLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            TxtFastGithubMirrorState.Text = "镜像测速失败：" + ex.Message;
+        }
+        finally
+        {
+            _githubMirrorBusy = false;
+            BtnFastGithubMirrorProbe.IsEnabled = true;
+        }
+    }
+
+    /// <summary>把下拉里的前缀落成默认镜像（写 %APPDATA%\FastGithub\mirror.txt，与内核面板共用）。</summary>
+    private void BtnFastGithubMirrorApply_Click(object sender, System.Windows.RoutedEventArgs e)
+    {
+        FastGithubKernel.DefaultMirror = CbFastGithubMirror.Text;
+        CbFastGithubMirror.Text = FastGithubKernel.DefaultMirror;
+        TxtFastGithubMirrorState.Text =
+            $"下载加速已切到 {FastGithubKernel.DefaultMirror}（更新下载与内核下载同样生效）";
+        AppendLog(TxtFastGithubMirrorState.Text, LogLevel.Success);
+        RefreshFastGithubState();
+    }
+
+    private static string MirrorHost(string prefix)
+    {
+        try { return new Uri(prefix).Host; } catch { return prefix; }
     }
 
     // ---------------- 服务器测量 ----------------

@@ -41,10 +41,10 @@ public class UpdateDownloadTests : IDisposable
         var urls = Updater.BuildDownloadUrls(new Version(2, 0, 7));
         string gh = "https://github.com/abababaaaa/efootball-bot/releases/download/v2.0.7/EfootballBot.exe";
 
-        Assert.Equal(Updater.DownloadMirrorPrefixes.Length + 1, urls.Count);
         Assert.Equal(gh, urls[^1]); // 直连兜底必须最后
-        for (int i = 0; i < Updater.DownloadMirrorPrefixes.Length; i++)
-            Assert.Equal(Updater.DownloadMirrorPrefixes[i] + gh, urls[i]);
+        // 镜像链与 FastGithub 内核共用（默认镜像 → 其余预设 → 直连），逐个前缀都拼在完整 URL 前
+        Assert.Equal(FastGithubKernel.WithMirrors(gh), urls);
+        Assert.True(urls.Count >= FastGithubKernel.MirrorPrefixes.Length + 1);
     }
 
     [Fact]
@@ -56,7 +56,7 @@ public class UpdateDownloadTests : IDisposable
 
         Assert.Equal("https://pub-abc123.r2.dev/EfootballBot.exe", urls[0]);
         Assert.Equal(gh, urls[^1]);
-        Assert.Equal(Updater.DownloadMirrorPrefixes.Length + 2, urls.Count);
+        Assert.Equal(FastGithubKernel.WithMirrors(gh).Count + 1, urls.Count);
     }
 
     [Fact]

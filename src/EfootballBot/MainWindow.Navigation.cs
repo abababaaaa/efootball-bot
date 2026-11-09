@@ -571,7 +571,7 @@ public partial class MainWindow
 
         // 切换到日志查看器时刷新文件列表
         if (isLog) RefreshLogFileList();
-        if (isGitHub || isNetwork) { InitNetworkPage(); RefreshGitPortState(); }
+        if (isGitHub || isNetwork) { InitNetworkPage(); RefreshFastGithubState(); }
 
         // 左栏工具按钮激活高亮（NavToolBtn 样式识别 Tag=Active）
         BtnSettings.Tag = isSettings ? "Active" : null;

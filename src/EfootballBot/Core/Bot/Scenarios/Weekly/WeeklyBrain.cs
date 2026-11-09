@@ -29,10 +29,23 @@ public enum WkScreen
     /// <summary>挑战活动「挑战清单」弹窗（进入挑战活动后出现，01/02… 编号卡纵排，
     /// 已完成卡右上有勾、未解锁卡右下有锁）。挑战子流程的菜单侧。</summary>
     ChallengeList,
+    /// <summary>挑战解锁弹窗「挑战N已解锁 / 通过此全新挑战测试自己的技巧! / OK」（2026-11-08
+    /// 国际服实机）：盖在挑战清单上，只有一个 OK 键。背后「挑战清单」标题、卡号 01/02、
+    /// 底栏「返回」全部仍被 OCR 读到，整屏会被误判成可操作的清单——必须单独分类先按 A 清掉。</summary>
+    ChallengeUnlockPopup,
     /// <summary>单场周活动「选择赛事等级」整页（2026-10-30 用户截图 + issue #1）：页首大标题
     /// + 左列难度行（新手~传奇，每屏 6 行需下滚）+ 右栏该等级奖励（主要奖励/等级奖励）。
     /// 进入活动卡后先弹「请选择赛事等级」说明弹窗（OK），再在本页选等级开赛。</summary>
     EventDifficulty,
+    /// <summary>挑战活动「选择地区」页（2026-11-08 国际服「Road to CAF AFCON 2027」新子内容）：
+    /// 左列大区列表 + 右侧「选择地区。」提示 + 底栏「B 返回 / Y 随机」。</summary>
+    RegionSelect,
+    /// <summary>同一子内容第二步「选择球队」页：左侧国旗网格 + 右侧固定框「选择球队。」
+    /// （可租借球员列表 / 活动适合程度）+ 底栏「Y 随机」。</summary>
+    TeamSelect,
+    /// <summary>球队选择后的确认弹窗「要使用&lt;队名&gt;吗？」：纵排 进入(上) / 取消(下)，
+    /// ★默认焦点在「取消」——直接 A 会取消回选球队页（用户 2026-11-08 实机）。</summary>
+    TeamConfirm,
 }
 
 /// <summary>挑战清单里一张可见卡的解析结果。Index 为卡上大字编号（1 起）；
@@ -58,12 +71,19 @@ public static class WeeklyBrain
     /// <summary>
     /// 周活动界面分类。先于 MyLeagueBrain.Classify 执行——活动主页也含「前往比赛」，
     /// 不先判会被误归 LeaguePage（与关键比赛弹窗被 MatchHub 兜底抢判同一坑）。
-    /// 判定顺序：挑战清单 → 建议面板 → 比赛历史 → 盖层弹窗 → 活动设置 → 入场弹窗 →
-    /// 活动主页 → 活动列表 → 活动介绍。
+    /// 判定顺序：挑战解锁弹窗 → 挑战清单 → 建议面板 → 比赛历史 → 盖层弹窗 → 活动设置 →
+    /// 入场弹窗 → 活动主页 → 活动列表 → 活动介绍。
     /// </summary>
     public static WkScreen Classify(IReadOnlyList<YoloDetection> dets, OcrResult ocr,
         bool topRightHasContent = false, bool matchContext = false, bool mostlyLightPage = false)
     {
+        // 挑战解锁弹窗（「挑战N已解锁 / OK」盖在挑战清单上，2026-11-08 国际服实机）：
+        // ★必须先于挑战清单判定——弹窗半透明盖层下清单标题/卡号/底栏「返回」全部可读，
+        // 先判清单会把弹窗当成可操作清单：归位/移卡被单按钮弹窗吃掉（方向键无效），
+        // 卡位锁探针还被弹窗浅灰底误判成「锁定」→ 回撤退 B → B 退不掉 → 死循环。
+        if (IsChallengeUnlockPopup(ocr))
+            return WkScreen.ChallengeUnlockPopup;
+
         // 挑战清单弹窗（挑战活动进入后的卡片列表）：标题「挑战清单」为强特征，最先判定。
         // 无标题兜底：卡位行两枚 H≥0.08 的大字卡号（普通文字 H≈0.04，只有卡编号这么高）
         // 分布在左右两卡位 + 底栏「返回」词。不先判会被共享分类兜成 LeaguePage（页面只有
@@ -91,6 +111,18 @@ public static class WeeklyBrain
         if (!ocr.ContainsJoined("前往比赛") && ocr.ContainsJoined("返回") &&
             ocr.Words.Any(w => w.CenterY < 0.22 && w.NormText.Contains("比赛历史")))
             return WkScreen.MatchHistory;
+
+        // 挑战活动新增前置流程（2026-11-08 国际服「Road to CAF AFCON 2027」子内容）：
+        // 介绍页按进入 → 「选择地区」→「选择球队」→ 确认弹窗「要使用<队名>吗？」→ 挑战清单。
+        // 前两页只有底栏「B 返回 / Y 随机」，没有任何推进词，落共享分类会被判 Unknown 原地干等；
+        // 确认弹窗只有「进入 / 取消」，同样没有推进词。三页都在这里接管。
+        // ★确认弹窗必须最先判：弹窗盖在球队页上，背后「选择球队。」仍会被 OCR 读到。
+        if (IsTeamConfirmPopup(ocr))
+            return WkScreen.TeamConfirm;
+        if (IsRegionSelectPage(ocr))
+            return WkScreen.RegionSelect;
+        if (IsTeamSelectPage(ocr))
+            return WkScreen.TeamSelect;
 
         // 单场周活动「选择赛事等级」整页（2026-10-30 用户三张截图 + GitHub issue #1 手机照：
         // 该页 wk=None、ml=DifficultyPage，周活动状态机无人接管 → 日志只刷「界面：DifficultyPage」
@@ -194,6 +226,77 @@ public static class WeeklyBrain
         MyLeagueBrain.Difficulties.Count(d => ocr.Words.Any(w =>
             w.CenterX < 0.25 && w.Text.Replace(" ", "").Contains(d))) >= 2;
 
+    // ---------------- 球队选择前置流程（2026-11-08 用户四张实机帧） ----------------
+
+    /// <summary>
+    /// 球队确认弹窗「要使用&lt;队名&gt;吗？」（选好球队按 A/进入后弹出）：
+    /// 副标题「活动期间，可在[活动设置] &gt; [选择的球队]更改选择的球队。」
+    /// 上半句「要使用」本身是固定 UI 文案，队名每周变不作判定点。判据取「要使用 + 取消」同屏
+    /// （弹窗恒带取消键）或副标题「更改选择的球队」——单认「要使用」会被别处同词文案误吃。
+    /// </summary>
+    public static bool IsTeamConfirmPopup(OcrResult ocr) =>
+        ocr.ContainsJoined("更改选择的球队") ||
+        (ocr.ContainsJoined("要使用") && ocr.ContainsJoined("取消"));
+
+    /// <summary>
+    /// 「选择地区」页（球队选择前置流程第一步）：右侧提示词「选择地区」+ 底栏「Y 随机」胶囊。
+    /// 两个条件都要——只认提示词会被别处同名文案误触发，只认「随机」会被任何带随机按钮的页吃掉。
+    /// </summary>
+    public static bool IsRegionSelectPage(OcrResult ocr) =>
+        HasRandomChip(ocr) && ocr.Words.Any(w => w.NormText.Contains("选择地区"));
+
+    /// <summary>
+    /// 「选择球队」页（同流程第二步）：右侧固定框提示词「选择球队」+ 底栏「Y 随机」。
+    /// 该框在用户描述里恒在（右侧一定有这个框），左侧国旗网格/球队名每轮变，一律不作判定点。
+    /// </summary>
+    public static bool IsTeamSelectPage(OcrResult ocr) =>
+        HasRandomChip(ocr) && ocr.Words.Any(w => w.NormText.Contains("选择球队"));
+
+    /// <summary>底栏「Y 随机」胶囊：词「随机」落在屏幕底部（y&gt;0.85，实机 y≈0.94）。</summary>
+    private static bool HasRandomChip(OcrResult ocr) =>
+        ocr.Words.Any(w => w.CenterY > 0.85 && w.NormText.Contains("随机"));
+
+    // ---------------- 选择页推进规则（用户 2026-11-08 实机规则） ----------------
+
+    /// <summary>随机按完后的过渡宽限帧数：同页连续观测满这么多帧才认「随机没把页面带走」
+    /// （地区 → 球队的转场约 1~2s，一帧就判会抢在转场前把 A 按掉）。</summary>
+    public const int PickConfirmGraceFrames = 2;
+
+    /// <summary>随机按过之后最多再按几次 A（下一步）；超了 B 退出该子流程，绝不在同一页来回按。</summary>
+    public const int MaxPickNextAttempts = 3;
+
+    /// <summary>子流程内 B 退出累计上限；超了停止挂机（退出受阻，交人工看游戏状态）。</summary>
+    public const int MaxPickEscapes = 3;
+
+    /// <summary>选择页（选择地区 / 选择球队）每轮的动作。</summary>
+    public enum WkPickAction
+    {
+        /// <summary>本页还没随机过：按一次 Y（整页只按这一次）。</summary>
+        PressRandom,
+        /// <summary>随机刚按完：等过渡帧。</summary>
+        Wait,
+        /// <summary>随机已按过、页面没动：该页没有确认键，A 就是「下一步」。</summary>
+        PressNext,
+        /// <summary>多次下一步仍不动：B 退出该子流程。</summary>
+        Escape,
+        /// <summary>B 也退不出去：停止挂机。</summary>
+        Stop,
+    }
+
+    /// <summary>
+    /// 选择页推进决策（纯函数，单测锁定）。用户 2026-11-08 实机规则：
+    /// 「随机点一次就行了，不用来回点；没有确认键，点完一次随机就可以点下一步了」。
+    /// randomPressed=本页是否已按过 Y；samePageFrames=按完随机后同页已观测帧数；
+    /// nextAttempts=本页已按过的「下一步」次数；escapes=子流程内已用的 B 退出次数。
+    /// </summary>
+    public static WkPickAction DecidePickStep(bool randomPressed, int samePageFrames, int nextAttempts, int escapes)
+    {
+        if (!randomPressed) return WkPickAction.PressRandom;
+        if (samePageFrames < PickConfirmGraceFrames) return WkPickAction.Wait;
+        if (nextAttempts < MaxPickNextAttempts) return WkPickAction.PressNext;
+        return escapes < MaxPickEscapes ? WkPickAction.Escape : WkPickAction.Stop;
+    }
+
     /// <summary>
     /// 检测难度列表当前聚焦行（光标）：左列难度词行带（词左 -0.28 ~ 词右 +0.06、y±0.035）
     /// 的亮像素（lum&gt;200）计数——白底高亮行 ≈1283/1285，未聚焦行 29~81，说明弹窗盖着时
@@ -240,6 +343,26 @@ public static class WeeklyBrain
                             w.NormText.Contains("取消")) &&
          ocr.Words.Any(w => w.CenterX is > 0.4 and < 0.6 && w.CenterY is > 0.45 and < 0.62 &&
                             w.NormText.Contains("进入")));
+
+    /// <summary>
+    /// 挑战解锁弹窗「挑战N已解锁」判定（用户 2026-11-08 国际服实机帧）：
+    /// 标题行固定文案「已解锁」（挑战序号每周变，不作判定点）+ 屏中部白色 OK 按钮
+    /// （或固定副标题「测试自己的技巧」）。
+    /// 弹窗盖在挑战清单上，背后「挑战清单」标题/卡号/底栏「返回」全在，单看清单特征必被
+    /// 误判成可操作清单——必须先判本弹窗，按 A 清掉再回归清单扫描。
+    /// OK 按钮限 y&lt;0.85：底栏「B 返回」蓝框会被同款词/框吃掉，不能当弹窗证据。
+    /// </summary>
+    public static bool IsChallengeUnlockPopup(OcrResult ocr)
+    {
+        var ok = ocr.FindButton("OK");
+        bool centeredOk = ok is not null && ok.CenterY < 0.85;
+        if (ocr.ContainsJoined("已解锁") && (centeredOk || ocr.ContainsJoined("测试自己的技巧")))
+            return true;
+        // 兜底：盖在挑战清单上的其它单按钮 OK 弹窗（挑战完成/奖励到账/条件达成，同款版式）。
+        // 这类弹窗和清单共用一套盖层样式，同样吃掉方向键并污染卡位探针——清单本体底栏只有
+        // 「B 返回」，屏幕中部不会出现 OK，所以「清单特征 + 屏中部 OK」必是弹窗，按 A 清掉无害。
+        return centeredOk && (ocr.ContainsJoined("挑战清单") || HasChallengeListCardNumbers(ocr));
+    }
 
     /// <summary>
     /// 挑战清单兜底特征：卡号带（y 0.15~0.40、x&lt;0.72）里左右两卡位各有一枚

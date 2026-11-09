@@ -4,6 +4,7 @@ using EfootballBot.Core.Capture;
 using EfootballBot.Core.Vision;
 using EfootballBot.Core.Vision.Yolo;
 using Xunit;
+using WkPickAction = EfootballBot.Core.Bot.Scenarios.Weekly.WeeklyBrain.WkPickAction;
 
 namespace EfootballBot.Tests;
 
@@ -349,6 +350,57 @@ public class WeeklyBrainTests
     }
 
     [Fact]
+    public void Classify_ChallengeUnlockPopup_BeatsChallengeList()
+    {
+        // 实机 2026-11-08 国际服：清单上盖「挑战2已解锁 / 通过此全新挑战测试自己的技巧! / OK」，
+        // ★弹窗半透明盖层下标题「挑战清单」、卡号 01/02、底栏「返回」全部仍被 OCR 读到——
+        // 先判清单会把弹窗当成可操作清单（方向键被单按钮弹窗吃掉、卡位锁探针被弹窗浅灰底
+        // 误判成锁定 → 回撤退 B 退不掉 → 死循环）。必须先判解锁弹窗、按 A 清掉。
+        var ocr = Ocr(W("挑战清单", 0.13, 0.11), BigW("01", 0.11, 0.28), BigW("02", 0.42, 0.29),
+            W("挑战2已解锁", 0.50, 0.40), W("通过此全新挑战测试自己的技巧!", 0.50, 0.50),
+            W("OK", 0.50, 0.59), W("返回", 0.10, 0.93));
+        Assert.Equal(WkScreen.ChallengeUnlockPopup, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_ChallengeUnlockPopup_OnlyOkButton_IsEnough()
+    {
+        // 副标题被 OCR 漏读时，只要「已解锁」+ 屏中部 OK 按钮即可判定（弹窗恒带 OK）
+        var ocr = Ocr(W("挑战清单", 0.13, 0.11), BigW("01", 0.11, 0.28), BigW("02", 0.42, 0.29),
+            W("挑战3已解锁", 0.50, 0.40), W("OK", 0.50, 0.59));
+        Assert.Equal(WkScreen.ChallengeUnlockPopup, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_ChallengeListWithAnyCenteredOk_IsModalPopup()
+    {
+        // 同款版式的其它弹窗（挑战完成/奖励到账）同样盖在清单上并吃掉方向键：
+        // 清单本体底栏只有「B 返回」，屏中部出现 OK 必是模态弹窗 → 一律按 A 清掉再扫卡
+        var ocr = Ocr(W("挑战清单", 0.13, 0.11), BigW("01", 0.11, 0.28), BigW("02", 0.42, 0.29),
+            W("挑战完成", 0.50, 0.40), W("OK", 0.50, 0.59), W("返回", 0.10, 0.93));
+        Assert.Equal(WkScreen.ChallengeUnlockPopup, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_ChallengeUnlockWordWithoutPopup_StaysChallengeList()
+    {
+        // 「已解锁」单独出现在页面正文（无屏中部 OK/固定副标题）：不得当弹窗盲按 A
+        var ocr = Ocr(W("挑战清单", 0.13, 0.11), BigW("01", 0.11, 0.28), BigW("02", 0.42, 0.29),
+            W("完成上一挑战后解锁", 0.45, 0.60), W("返回", 0.10, 0.93));
+        Assert.Equal(WkScreen.ChallengeList, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_ChallengeUnlockPopup_BottomBarOkIsNotPopupEvidence()
+    {
+        // 底栏「B 返回」蓝框/词常被 OCR 读成 OK（y≈0.93）：底栏 OK 不算弹窗按钮，
+        // 否则干净清单会被无限按 A
+        var ocr = Ocr(W("挑战清单", 0.13, 0.11), BigW("01", 0.11, 0.28), BigW("02", 0.42, 0.29),
+            W("已解锁", 0.50, 0.55), W("OK", 0.50, 0.93), W("返回", 0.10, 0.93));
+        Assert.Equal(WkScreen.ChallengeList, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
     public void Classify_ChallengeList_FallbackByBigCardNumbers_WhenTitleMissed()
     {
         // 标题漏读兜底：左右两卡位各一枚 H≥0.08 两位数字 + 底栏「返回」
@@ -445,5 +497,106 @@ public class WeeklyBrainTests
         Assert.Null(s.Level);          // 背后页面的「赛事等级 顶尖球员」在左半屏，不算浮层等级行
         Assert.True(s.AutoControl);
         Assert.False(s.FlexibleAutoControl);
+    }
+
+    // ---------------- 球队选择前置流程（2026-11-08 国际服新子内容） ----------------
+
+    [Fact]
+    public void Classify_RegionSelect_ByTipAndRandomChip()
+    {
+        // 实机帧 wk_teampick_region：左列大区（非洲）+ 右侧「选择地区。」+ 底栏「B 返回 / Y 随机」
+        // 实测坐标：提示词 @(0.72,0.58)、底栏「随机」@(0.43,0.93)
+        var ocr = Ocr(W("非洲", 0.19, 0.14), W("选择地区。", 0.72, 0.58),
+            W("返回", 0.09, 0.93), W("随机", 0.43, 0.93));
+        Assert.Equal(WkScreen.RegionSelect, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_TeamSelect_ByTipAndRandomChip()
+    {
+        // 实机帧 wk_teampick_team：右侧固定框「选择球队。」+ 租借球员列表 + 底栏「Y 随机」。
+        // 球队名 / 国旗 / 球员名都是可变内容，不参与判定
+        // 实测坐标：提示词 @(0.72,0.31)、租借列表 @(0.72,0.36..0.76)
+        var ocr = Ocr(W("Mozambique", 0.26, 0.14), W("选择球队。", 0.72, 0.31),
+            W("以下球员可以租借。", 0.72, 0.36), W("Reinildo Mandava", 0.63, 0.45),
+            W("返回", 0.09, 0.93), W("随机", 0.43, 0.93));
+        Assert.Equal(WkScreen.TeamSelect, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_TeamConfirm_BeatsTeamSelectBehind()
+    {
+        // 实机帧 wk_teampick_confirm：「要使用Mozambique吗？」弹窗盖在球队页上，
+        // 背后「选择球队。」仍会被 OCR 读到 → 必须先判确认弹窗（否则一直按 Y 随机）
+        // 实测坐标：主句 @(0.50,0.35)、副标题 @(0.49,0.44)、进入 @0.55、取消 @0.65
+        var ocr = Ocr(W("要使用Mozambique吗?", 0.50, 0.35),
+            W("活动期间,可在[活动设置]>[选择的球队]更改选择的球队。", 0.49, 0.44),
+            W("进入", 0.50, 0.55), W("取消", 0.50, 0.65),
+            W("选择球队。", 0.72, 0.31), W("随机", 0.43, 0.93));
+        Assert.Equal(WkScreen.TeamConfirm, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.True(WeeklyBrain.IsTeamConfirmPopup(ocr));
+    }
+
+    [Fact]
+    public void Classify_SelectionTips_NeedRandomChipInBottomBar()
+    {
+        // 底栏没有「Y 随机」胶囊时，同名提示词不得把别处页面判成选择页
+        Assert.Equal(WkScreen.None,
+            WeeklyBrain.Classify(Array.Empty<YoloDetection>(), Ocr(W("选择球队", 0.72, 0.22))));
+        Assert.Equal(WkScreen.None,
+            WeeklyBrain.Classify(Array.Empty<YoloDetection>(), Ocr(W("选择地区", 0.74, 0.42))));
+        // 「随机」在页面中部（非底栏胶囊）也不算
+        Assert.Equal(WkScreen.None, WeeklyBrain.Classify(Array.Empty<YoloDetection>(),
+            Ocr(W("选择球队", 0.72, 0.22), W("随机", 0.50, 0.50))));
+    }
+
+    // ---------------- 选择页推进（用户 2026-11-08 规则：随机只按一次，按完直接下一步） ----------------
+
+    [Fact]
+    public void DecidePickStep_RandomPressedOnlyOnce()
+    {
+        // 本页还没随机 → 按一次 Y
+        Assert.Equal(WkPickAction.PressRandom, WeeklyBrain.DecidePickStep(false, 0, 0, 0));
+        // 按完随机先等过渡帧（转场 1~2s，抢按会打断动画）
+        Assert.Equal(WkPickAction.Wait, WeeklyBrain.DecidePickStep(true, 0, 0, 0));
+        Assert.Equal(WkPickAction.Wait, WeeklyBrain.DecidePickStep(true, 1, 0, 0));
+        // 过渡满 → 下一步（A），★不再是再按一次 Y
+        Assert.Equal(WkPickAction.PressNext, WeeklyBrain.DecidePickStep(true, 2, 0, 0));
+        Assert.Equal(WkPickAction.PressNext, WeeklyBrain.DecidePickStep(true, 6, 2, 0));
+        // 下一步用满 3 次 → B 退出；B 也用满 3 次 → 停止挂机
+        Assert.Equal(WkPickAction.Escape, WeeklyBrain.DecidePickStep(true, 9, 3, 0));
+        Assert.Equal(WkPickAction.Escape, WeeklyBrain.DecidePickStep(true, 9, 3, 2));
+        Assert.Equal(WkPickAction.Stop, WeeklyBrain.DecidePickStep(true, 9, 3, 3));
+    }
+
+    [Fact]
+    public void DecidePickStep_SamePageLoop_YieldsExactlyOneRandomPress()
+    {
+        // 模拟「页面一直不变」的循环：整页只允许出现一次 Y，其余全是下一步/退出
+        bool pressed = false;
+        int same = 0, next = 0, esc = 0;
+        var acts = new List<WkPickAction>();
+        for (int i = 0; i < 200; i++)
+        {
+            var a = WeeklyBrain.DecidePickStep(pressed, same, next, esc);
+            acts.Add(a);
+            if (a == WkPickAction.PressRandom) pressed = true;
+            else if (a == WkPickAction.Wait) same++;
+            else if (a == WkPickAction.PressNext) next++;
+            else if (a == WkPickAction.Escape) { esc++; next = 0; same = 0; }
+            else break; // Stop
+        }
+        Assert.Equal(1, acts.Count(a => a == WkPickAction.PressRandom));
+        Assert.Equal(WeeklyBrain.MaxPickNextAttempts * (WeeklyBrain.MaxPickEscapes + 1),
+            acts.Count(a => a == WkPickAction.PressNext));
+        Assert.Equal(WkPickAction.Stop, acts[^1]);
+    }
+
+    [Fact]
+    public void DecidePickStep_NewPage_StartsWithOneRandomAgain()
+    {
+        // 换页（地区 → 球队）后调用方重置 pressed：新页必须重新只随机一次
+        Assert.Equal(WkPickAction.PressRandom, WeeklyBrain.DecidePickStep(false, 0, 0, 0));
+        Assert.Equal(WkPickAction.PressRandom, WeeklyBrain.DecidePickStep(false, 5, 3, 3));
     }
 }

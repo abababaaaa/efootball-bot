@@ -21,20 +21,37 @@ public sealed record Perception(
 /// </summary>
 public sealed class PerceptionPipeline : IDisposable
 {
-    private readonly Yolo.YoloDetector? _yolo;
+    private readonly IDetector? _detector;
 
     /// <summary>YOLO 是否启用（模型就位且配置开启）。</summary>
-    public bool YoloEnabled => _yolo is not null;
-    public string? YoloLabel => _yolo?.ModelLabel;
+    public bool YoloEnabled => _detector is not null;
+    public string? YoloLabel => _detector?.Label;
 
-    private PerceptionPipeline(Yolo.YoloDetector? yolo) => _yolo = yolo;
+    private PerceptionPipeline(IDetector? detector) => _detector = detector;
 
     /// <summary>按配置构造管线。模型缺失时返回仅 OCR 的管线（不抛异常）。</summary>
-    public static PerceptionPipeline Create(AppConfig cfg, Inference.OnnxSessionFactory factory, Action<string, LogLevel> log)
+    public static PerceptionPipeline Create(AppConfig cfg, Inference.OnnxSessionFactory factory,
+        Action<string, LogLevel> log, VisionSidecarConfig? sidecar = null)
     {
-        Yolo.YoloDetector? yolo = null;
+        IDetector? yolo = null;
         if (cfg.Yolo.Enabled)
         {
+            // 侧车检测（M2）：配置开启时模型活在 vision-svc 里，主进程不再加载 YOLO 权重
+            if (sidecar is { Enabled: true, UseForYolo: true })
+            {
+                try
+                {
+                    yolo = new SidecarDetector(sidecar);
+                    log($"目标检测已启用：{yolo.Label}（vision-svc）", LogLevel.Success);
+                    return new PerceptionPipeline(yolo);
+                }
+                catch (Exception ex)
+                {
+                    log($"sidecar 检测器初始化失败，回退进程内 YOLO：{ex.Message}", LogLevel.Warn);
+                    yolo = null;
+                }
+            }
+
             var modelPath = System.AppPaths.FindBundledFile("models", "yolo", "yolo26n.onnx");
             if (modelPath is null)
             {
@@ -45,9 +62,9 @@ public sealed class PerceptionPipeline : IDisposable
                 try
                 {
                     var classesPath = System.AppPaths.FindBundledFile("models", "yolo", "classes.txt");
-                    yolo = new Yolo.YoloDetector(modelPath, classesPath, factory,
-                        (float)cfg.Yolo.ScoreThreshold, (float)cfg.Yolo.NmsIou);
-                    log($"目标检测已启用：{yolo.ModelLabel}（EP={factory.ActiveProvider}）", LogLevel.Success);
+                    yolo = new InProcDetector(new Yolo.YoloDetector(modelPath, classesPath, factory,
+                        (float)cfg.Yolo.ScoreThreshold, (float)cfg.Yolo.NmsIou));
+                    log($"目标检测已启用：{yolo.Label}（EP={factory.ActiveProvider}）", LogLevel.Success);
                 }
                 catch (Exception ex)
                 {
@@ -66,9 +83,9 @@ public sealed class PerceptionPipeline : IDisposable
     /// <summary>对一帧执行 YOLO 检测（OCR 由 ObservationService 节流完成，此处只补检测）。</summary>
     public async Task<IReadOnlyList<Yolo.YoloDetection>> DetectAsync(FrameData frame, CancellationToken ct)
     {
-        if (_yolo is null) return Array.Empty<Yolo.YoloDetection>();
-        return await Task.Run(() => _yolo.Detect(frame, ct), ct);
+        if (_detector is null) return Array.Empty<Yolo.YoloDetection>();
+        return await _detector.DetectAsync(frame, ct);
     }
 
-    public void Dispose() => _yolo?.Dispose();
+    public void Dispose() => (_detector as IDisposable)?.Dispose();
 }

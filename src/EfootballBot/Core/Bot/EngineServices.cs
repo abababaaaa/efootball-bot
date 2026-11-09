@@ -60,7 +60,7 @@ public static class EngineServices
                 return _ocr;
             }
 
-            var created = new OcrRecognizer(cfg.OcrEngine, unlimitedOcr: cfg.UnlimitedOcr, tuning: BuildTuning(cfg));
+            var created = new OcrRecognizer(cfg.OcrEngine, unlimitedOcr: cfg.UnlimitedOcr, tuning: BuildTuning(cfg), sidecar: cfg.VisionSidecar);
             var old = _ocr;
             _ocr = created;
             _ocrKey = key;
@@ -83,7 +83,7 @@ public static class EngineServices
                 return _perception;
             }
 
-            var created = PerceptionPipeline.Create(cfg, factory, log);
+            var created = PerceptionPipeline.Create(cfg, factory, log, cfg.VisionSidecar);
             var old = _perception;
             _perception = created;
             _perceptionKey = key;
