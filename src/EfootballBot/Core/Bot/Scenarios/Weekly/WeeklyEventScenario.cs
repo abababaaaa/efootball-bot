@@ -1,3 +1,4 @@
+using System.IO;
 using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Input;
@@ -11,6 +12,8 @@ namespace EfootballBot.Core.Bot.Scenarios.Weekly;
 /// （赛事等级=配置值；自动控制强制开、弹性自动控制强制关）→ A 前往比赛。
 /// 比赛中流程与我的联赛完全共用：InMatch 随机点击、终场、结算弹窗、满级检测、场次计数。
 /// 赛后回到活动主页自动循环，直到主要奖励完成（探针校准前恒按"进行中"继续刷）。
+/// 介绍页「进入」（2026-11-09）：光标在「进入」就直接 A，一个方向键都不按；光标被游戏记忆到
+/// 「详情」上时先上×1 归位再 A，并按「详情」说明面板当场 B 关闭（见 PressIntroEnterAsync）。
 /// 挑战活动新子内容（2026-11-08）：介绍页 →「选择地区」→「选择球队」两页各按一次 Y 随机后
 /// 直接 A 下一步（无确认键、不来回随机）→「要使用&lt;队名&gt;吗？」上×1 A 进入 → 挑战清单。
 /// 挑战清单上可能盖「挑战N已解锁 / OK」解锁弹窗（2026-11-08 用户实机）：任何阶段命中都
@@ -99,6 +102,11 @@ public sealed class WeeklyEventScenario : IScenario
     private int _pickEscapes;
     /// <summary>已拉黑槽位仍停在介绍页的 B 退出次数（超 3 强制顺延槽位，防退出受阻死循环）。</summary>
     private int _blacklistEscape;
+    /// <summary>介绍页「进入」的累计尝试次数（键在「进入」上却依然没进活动 → 下一轮改上移归位，
+    /// 见 <see cref="WeeklyBrain.DecideIntroEntry"/>）。进活动主页/回列表时清零。</summary>
+    private int _introEnterTries;
+    /// <summary>介绍页卡死只转存一次实机帧（远程排障用，避免每次挂机刷几百张图）。</summary>
+    private bool _introStuckDumped;
 
     // ---- 挑战活动子流程（挑战清单弹窗出现时激活；退回活动列表时复位） ----
     /// <summary>当前活动是挑战活动（以「挑战清单」弹窗或卡详情页「完成的条件」识别）。</summary>
@@ -377,6 +385,20 @@ public sealed class WeeklyEventScenario : IScenario
             return 2200;
         }
 
+        // 介绍页「详情」说明面板（2026-11-09 国际服实机）：介绍页那记 A 落在「详情」上时打开的是
+        // 浅色文档面板（右上只有「关闭」、没有「进入」），面板里没有任何 A 能推进的东西。
+        // 旧逻辑把它判成 LeagueInfoPage → 干等 15 帧（约 30s）才 B 退回介绍页，退回来光标还在
+        // 「详情」上 → 又 A 又开面板，整夜零场次（日志 EventIntro ↔ LeagueInfoPage 每 30s 一轮）。
+        // 这里当场 B 关闭，并把「按 A 进不去」的实证记进介绍页决策：下一轮改成上移归位。
+        if (wk == WkScreen.None && WeeklyBrain.IsIntroDetailPanel(obs.Ocr))
+        {
+            _introEnterTries = Math.Max(_introEnterTries, WeeklyBrain.IntroEnterTriesBeforeNudge);
+            _log("[周活动] 打开的是介绍页「详情」说明面板（页内无「进入」按钮），B 关闭回介绍页，" +
+                 "下一轮先上移把光标对准「进入」", LogLevel.Warn);
+            await _engine.Pad.Back();
+            return 2200;
+        }
+
         // 挑战活动新增前置流程（2026-11-08 国际服「Road to CAF AFCON 2027」子内容）：
         // 介绍页按进入 → 选择地区 → 选择球队 →「要使用<队名>吗？」确认弹窗 → 正常挑战清单。
         // 三页都没有推进词（只有底栏 B 返回 / Y 随机，弹窗只有 进入 + 取消），落共享决策会被
@@ -434,7 +456,8 @@ public sealed class WeeklyEventScenario : IScenario
                         _hubStep = 0; // 已进入活动链：比赛页扫描结束（防赛后误触发扫描分支）
                         _hubRound = 0;
                         SetPhase(WkPhase.IntroPopups);
-                        return await PressConfirmAsync(wk == WkScreen.EventIntro ? "介绍页：进入" : "入场弹窗：确认");
+                        if (wk == WkScreen.EventIntro) return await PressIntroEnterAsync(obs);
+                        return await PressConfirmAsync("入场弹窗：确认");
                     case WkScreen.EventHome:
                         _hubStep = 0;
                         _hubRound = 0;
@@ -511,9 +534,15 @@ public sealed class WeeklyEventScenario : IScenario
 
             case WkPhase.IntroPopups:
             {
-                if (wk == WkScreen.EventHome) { SetPhase(WkPhase.AtHome); return 600; }
+                if (wk == WkScreen.EventHome)
+                {
+                    _introEnterTries = 0;   // 已进活动主页：介绍页的按键实证作废
+                    _introStuckDumped = false;
+                    SetPhase(WkPhase.AtHome);
+                    return 600;
+                }
                 if (wk == WkScreen.EventsList) { SetPhase(WkPhase.Flow); return 800; }
-                if (wk == WkScreen.EventIntro) return await PressConfirmAsync("介绍页：进入");
+                if (wk == WkScreen.EventIntro) return await PressIntroEnterAsync(obs);
                 if (wk == WkScreen.ChallengeList)
                     return await EnterChallengeListPhaseAsync(); // 挑战活动：介绍页按进入后弹的是挑战清单
                 if (wk == WkScreen.EntryPopup) return await PressConfirmAsync("入场弹窗：确认");
@@ -526,11 +555,20 @@ public sealed class WeeklyEventScenario : IScenario
                                      _memory.SawWithin(MlScreen.MatchStartPage, TimeSpan.FromMinutes(2), DateTime.Now);
                     if (!nearMatch)
                     {
-                        _log("[周活动] 入场弹窗长时间未结束，B 退回列表重试", LogLevel.Warn);
+                        _log($"[周活动] 介绍页/入场弹窗长时间未结束（{wk} / {ml}），B 退回列表重试：" +
+                             OcrDigest(obs.Ocr), LogLevel.Warn);
                         SetPhase(WkPhase.Flow);
                         await _engine.Pad.Back();
                         return 2200;
                     }
+                }
+                // 卡在既非主页也非弹窗的页面上：第 6 帧转存一次实机帧 + OCR 原文，
+                // 下一份反馈包就能直接看到那个"认不出来"的页面长什么样（远程排障用）。
+                if (_attempts == 6 && !_introStuckDumped)
+                {
+                    _introStuckDumped = true;
+                    _log($"[周活动] 介绍页推进受阻（{wk} / {ml}），转存实机帧备查：{OcrDigest(obs.Ocr)}", LogLevel.Warn);
+                    DumpLiveFrame(obs.Frame, "wk_intro_stuck");
                 }
                 // 未识别的入场弹窗：OCR 有推进词就点（同比赛中弹窗规则），否则等待
                 if (obs.Ocr.ContainsJoined("下一步") || obs.Ocr.ContainsJoined("OK") ||
@@ -1393,6 +1431,11 @@ public sealed class WeeklyEventScenario : IScenario
     {
         _phase = phase;
         _attempts = 0;
+        if (phase == WkPhase.IntroPopups)
+        {
+            _introEnterTries = 0;     // 新一次入场：介绍页的按键实证作废
+            _introStuckDumped = false;
+        }
         if (phase == WkPhase.ChallengeList)
         {
             _chScanReady = false; // 进阶段先饱和左移归位再开始扫
@@ -1408,5 +1451,74 @@ public sealed class WeeklyEventScenario : IScenario
         _log($"[周活动] 手柄 A：{what}", LogLevel.Info);
         await _engine.Pad.Confirm();
         return 2500;
+    }
+
+    /// <summary>
+    /// 活动介绍页「进入」（用户 2026-11-09 国际服规则：光标默认在「进入」，直接点下一步即可，
+    /// 介绍页不该有任何方向键）。游戏会把上一页的光标位置记忆下来——点过「详情」后光标停在
+    /// 详情上，直接 A 只会打开灰色说明面板，面板里没有能推进的按钮，退回来光标还在详情上 →
+    /// 整夜在介绍页打转。所以先做像素级焦点探针（<see cref="WeeklyBrain.DetectFocusedIntroButton"/>）：
+    /// · 光标在「进入」→ 直接 A，一个方向键都不按；
+    /// · 光标在「详情」→ 上×1 归位到「进入」再 A（绝不往下点）；
+    /// · 探针读不出 → 先按用户默认直接 A，连续 <see cref="WeeklyBrain.IntroEnterTriesBeforeNudge"/>
+    ///   次没推进再改上移归位，绝不对同一页无限重复同一个无效动作。
+    /// </summary>
+    private async Task<int> PressIntroEnterAsync(Observation obs)
+    {
+        var focus = WeeklyBrain.DetectFocusedIntroButton(obs.Frame, obs.Ocr);
+        var step = WeeklyBrain.DecideIntroEntry(focus, _introEnterTries);
+        _introEnterTries++;
+        if (step == WeeklyBrain.WkIntroAction.PressEnter)
+        {
+            string why = focus == WeeklyBrain.WkIntroFocus.Enter ? "白底高亮" : "聚焦探针未读出，按默认光标在「进入」";
+            _log($"[周活动] 介绍页：光标在「进入」（{why}）→ 直接 A，不按方向键", LogLevel.Info);
+            await _engine.Pad.Confirm();
+            return 2500;
+        }
+        _log($"[周活动] 介绍页：光标在「详情」（第 {_introEnterTries} 次尝试）→ 上×1 归位到「进入」后 A", LogLevel.Warn);
+        await _engine.Pad.Dpad(PadDir.Up);
+        await _engine.Pad.Confirm();
+        return 2600;
+    }
+
+    /// <summary>OCR 行摘要（排障用，截断防日志膨胀）。</summary>
+    private static string OcrDigest(OcrResult ocr)
+    {
+        var text = string.Join(" | ", ocr.Lines.Select(l => l.Text.Replace(" ", "")));
+        return text.Length <= 320 ? text : text[..320];
+    }
+
+    /// <summary>
+    /// 实机帧转存（远程排障用，失败静默）：写 data\dump\{tag}_时间戳.png。
+    /// 场景：某个页面判定在离线帧上对、实机上却认不出——只有真帧才能校准。
+    /// </summary>
+    private void DumpLiveFrame(FrameData f, string tag)
+    {
+        var pixels = (byte[])f.Bgra.Clone(); // 帧池复用数组：观察线程先拷贝，后台只做编码
+        string dir = Path.Combine(EfootballBot.Core.System.AppPaths.DataDir, "dump");
+        string file = Path.Combine(dir, $"{tag}_{DateTime.Now:yyyyMMdd_HHmmss}.png");
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                Directory.CreateDirectory(dir);
+                var info = new SkiaSharp.SKImageInfo(f.Width, f.Height,
+                    SkiaSharp.SKColorType.Bgra8888, SkiaSharp.SKAlphaType.Premul);
+                unsafe
+                {
+                    fixed (byte* p = pixels)
+                    {
+                        using var bmp = new SkiaSharp.SKBitmap();
+                        if (!bmp.InstallPixels(info, (nint)p, info.RowBytes)) return;
+                        using var img = SkiaSharp.SKImage.FromBitmap(bmp);
+                        using var data = img.Encode(SkiaSharp.SKEncodedImageFormat.Png, 100);
+                        using var fs = File.OpenWrite(file);
+                        data.SaveTo(fs);
+                    }
+                }
+                _log($"[周活动] 已存实机帧：{file}", LogLevel.Info);
+            }
+            catch { }
+        });
     }
 }

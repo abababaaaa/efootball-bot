@@ -256,6 +256,109 @@ public static class WeeklyBrain
     private static bool HasRandomChip(OcrResult ocr) =>
         ocr.Words.Any(w => w.CenterY > 0.85 && w.NormText.Contains("随机"));
 
+    // ---------------- 介绍页按钮聚焦（2026-11-09 国际服实机反馈） ----------------
+
+    /// <summary>活动介绍页（进入/详情 纵排按钮）当前焦点落在哪个按钮上。</summary>
+    public enum WkIntroFocus
+    {
+        /// <summary>探针读不出（OCR 漏读按钮词 / 帧过暗）——调用方按「默认光标在进入」保守处理。</summary>
+        Unknown,
+        /// <summary>焦点在「进入」（白底高亮），A 就是进活动，不需要任何方向键。</summary>
+        Enter,
+        /// <summary>焦点在「详情」——此时直接 A 只会打开说明面板，必须先上移一格。</summary>
+        Detail,
+    }
+
+    /// <summary>介绍页这一轮该按什么。</summary>
+    public enum WkIntroAction
+    {
+        /// <summary>直接 A（不按任何方向键）。</summary>
+        PressEnter,
+        /// <summary>上×1 归位到「进入」后再 A。</summary>
+        UpThenEnter,
+    }
+
+    /// <summary>介绍页直接 A 连续这么多次都没推进 → 不论探针怎么说都先上移归位（自愈兜底：
+    /// 探针误读成「进入」而实际光标在「详情」时，绝不能永远重复同一个无效动作）。</summary>
+    public const int IntroEnterTriesBeforeNudge = 4;
+
+    /// <summary>聚焦按钮判定阈值：聚焦行是白底（实机中位亮度 242），未聚焦是深色半透明（实机 49）。</summary>
+    private const int IntroFocusedLuma = 120;
+
+    /// <summary>两个按钮都偏亮/偏暗时，靠亮度差判胜出（实机差值 &gt;150，留足余量）。</summary>
+    private const int IntroFocusedLumaGap = 40;
+
+    /// <summary>
+    /// 活动介绍页（「巡回活动 / 挑战活动」大图 + 纵排「进入 / 详情」两枚按钮）的焦点检测。
+    /// 用户 2026-11-09 国际服实机：进介绍页时光标默认在「进入」，直接按 A（下一步）即可，
+    /// 页面不该有任何方向键——但游戏会把上一页的光标位置记忆下来（点过「详情」后光标停在
+    /// 详情上），此时按 A 只会打开灰色说明面板，面板里没有任何能推进的按钮，旧逻辑要干等
+    /// 15 帧（约 30s）才 B 退，退回来光标还在详情上 → 整夜在介绍页打转（实机日志
+    /// 2026-11-09 23:35~23:48：EventIntro ↔ LeagueInfoPage 每 30s 一轮，零场次）。
+    /// 因此先读像素判断焦点：白底高亮 = 聚焦行。
+    /// 只认按钮词的位置与按钮底色，不用活动名/图片（可变内容禁令）。
+    /// </summary>
+    public static WkIntroFocus DetectFocusedIntroButton(FrameData frame, OcrResult ocr)
+    {
+        var enter = IntroButtonWord(ocr, "进入");
+        var detail = IntroButtonWord(ocr, "详情");
+        if (enter is null || detail is null) return WkIntroFocus.Unknown;
+
+        int lumaEnter = IntroButtonBandLuma(frame, enter);
+        int lumaDetail = IntroButtonBandLuma(frame, detail);
+        bool enterLit = lumaEnter >= IntroFocusedLuma;
+        bool detailLit = lumaDetail >= IntroFocusedLuma;
+        if (enterLit && !detailLit) return WkIntroFocus.Enter;
+        if (detailLit && !enterLit) return WkIntroFocus.Detail;
+        if (Math.Abs(lumaEnter - lumaDetail) >= IntroFocusedLumaGap)
+            return lumaEnter > lumaDetail ? WkIntroFocus.Enter : WkIntroFocus.Detail;
+        return WkIntroFocus.Unknown;
+    }
+
+    /// <summary>
+    /// 介绍页推进决策（纯函数，单测锁定）：焦点在「详情」→ 先上移归位；焦点在「进入」→
+    /// 直接 A，一个方向键都不按（用户 2026-11-09 规则）；探针读不出 → 先按用户默认（直接 A）。
+    /// 自愈兜底：连续 <paramref name="failedEnters"/> 次都没推进（&gt;=IntroEnterTriesBeforeNudge）
+    /// 时，不再相信探针，改上移归位一次——绝不对同一页无限重复同一个无效动作
+    /// （探针误读成「进入」而光标实际停在「详情」时，靠这一条脱困）。
+    /// </summary>
+    public static WkIntroAction DecideIntroEntry(WkIntroFocus focus, int failedEnters)
+    {
+        if (failedEnters >= IntroEnterTriesBeforeNudge) return WkIntroAction.UpThenEnter;
+        if (focus == WkIntroFocus.Detail) return WkIntroAction.UpThenEnter;
+        return WkIntroAction.PressEnter;
+    }
+
+    /// <summary>
+    /// 介绍页「详情」说明面板判定：浅色文档页，右上角只有「关闭」提示，没有「进入」按钮
+    /// （进入/详情的介绍页本体恒有「进入」）。命中即 B 当场关闭，不在该页干等预算。
+    /// </summary>
+    public static bool IsIntroDetailPanel(OcrResult ocr)
+        => ocr.Words.Count >= 8
+           && !ocr.Words.Any(w => w.NormText.Contains("进入"))
+           && ocr.Words.Any(w => w.CenterY < 0.16 && w.NormText.Contains("关闭"));
+
+    /// <summary>介绍页按钮词：取纵向按钮区（y&gt;0.55）里最像按钮的那枚（字高最大）。</summary>
+    private static OcrWord? IntroButtonWord(OcrResult ocr, string keyword)
+        => ocr.Words.Concat(ocr.MergedWords)
+            .Where(w => w.CenterY > 0.55 && w.CenterX < 0.55 && w.NormText.Contains(keyword))
+            .OrderByDescending(w => w.H)
+            .FirstOrDefault();
+
+    /// <summary>
+    /// 按钮底色亮度（中位亮度）：以按钮文字为中心取一条横向亮带（文字左右各 5% 宽，
+    /// 上下各半个字高）——聚焦按钮是白底（中位亮度 ~242），未聚焦是深色半透明（~49）。
+    /// 区域偏窄是为了不把按钮外的球场背景/相邻按钮圈进来。
+    /// </summary>
+    private static int IntroButtonBandLuma(FrameData frame, OcrWord w)
+    {
+        const double padX = 0.05;
+        double padY = w.H * 0.5;
+        double x0 = Math.Clamp(w.X - padX, 0, 1), x1 = Math.Clamp(w.X + w.W + padX, 0, 1);
+        double y0 = Math.Clamp(w.Y - padY, 0, 1), y1 = Math.Clamp(w.Y + w.H + padY, 0, 1);
+        return RegionProbe.MedianLuma(frame, x0, x1, y0, y1);
+    }
+
     // ---------------- 选择页推进规则（用户 2026-11-08 实机规则） ----------------
 
     /// <summary>随机按完后的过渡宽限帧数：同页连续观测满这么多帧才认「随机没把页面带走」
