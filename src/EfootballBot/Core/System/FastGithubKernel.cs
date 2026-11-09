@@ -1,7 +1,9 @@
 using System.Diagnostics;
 using System.IO;
 using System.IO.Compression;
+using System.Net;
 using System.Net.Http;
+using System.Net.Sockets;
 using System.Text;
 using System.Text.RegularExpressions;
 
@@ -267,8 +269,16 @@ public static class FastGithubKernel
                     : "hosts 未写入（请确认以管理员身份运行，且安全软件未拦截 hosts 修改）";
             return new ApplyResult(false, 0, nodes, string.IsNullOrWhiteSpace(tail) ? why : why + "；" + tail);
         }
+        // 内核的「WEAK(403/404) 也算可用」会把只回 404 的黑洞节点写进 hosts——实测表现为
+        // 浏览器打开 github.com 变成 GitHub Pages 的 404 页。所以写完之后必须用真实 HTTP 再验收一遍。
+        var repair = await VerifyAndRepairAsync(ct).ConfigureAwait(false);
+        int applied = ParseBlock(ReadHosts()).Count;
         StartWatchdog();
-        return new ApplyResult(true, map.Count, nodes, $"已加速 {map.Count} 个域名（hosts 已指向实测最快节点）");
+
+        var summary = new StringBuilder($"已加速 {applied} 个域名（hosts 已指向实测最快节点）；{repair.Message}");
+        foreach (var line in repair.Repairs) summary.Append("；").Append(line);
+        foreach (var line in repair.Removed) summary.Append("；").Append(line);
+        return new ApplyResult(true, applied, nodes, summary.ToString());
     }
 
     /// <summary>停止并还原：内核 --restore 优先，失败则按标记手动删块 + 还原被注释的第三方行。</summary>
@@ -410,6 +420,177 @@ public static class FastGithubKernel
         {
             return new MirrorProbe(NormalizeMirror(prefix), -1, 0);
         }
+    }
+
+    // ---------------- 加速后的「真实可用性」验收 ----------------
+
+    /// <summary>
+    /// 必须验收的关键域名与探测路径。FastGithub 自己的判定只要「TLS 握手成功且状态码 200-399」
+    /// 就算 GOOD，403/404 也算 WEAK 可用 —— 实测存在对任何路径都回 404 的边缘节点（甚至是黑洞），
+    /// 被当可用节点写进 hosts 后，浏览器打开 github.com 就是那个 GitHub Pages 404 页。
+    /// 这里对映射结果再发一次真实 HTTP 请求做验收。
+    /// </summary>
+    private static readonly (string Host, string Path)[] CriticalHosts =
+    {
+        ("github.com", "/"),
+        ("api.github.com", "/"),
+        ("codeload.github.com", "/"),
+        ("raw.githubusercontent.com", "/dotnet/runtime/main/README.md"),
+    };
+
+    /// <summary>验收结果：某域名指向某 IP 时的真实 HTTP 状态与耗时。</summary>
+    public sealed record HostCheck(string Host, string Ip, int StatusCode, int Ms)
+    {
+        /// <summary>只有 2xx/3xx 算可用；404（Pages 兜底页/黑节点）与连接失败都不算。</summary>
+        public bool Ok => StatusCode is >= 200 and < 400;
+    }
+
+    /// <summary>验收 + 纠偏的结果（Repairs/Removed 会拼进加速日志给用户看）。</summary>
+    public sealed record RepairResult(int Checked, int Ok, IReadOnlyList<string> Repairs,
+        IReadOnlyList<string> Removed, string Message);
+
+    /// <summary>验收失败时的重挑候选（顺序按实测延迟从好到差）。</summary>
+    private static readonly Dictionary<string, string[]> RepairPool = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["github.com"] = new[]
+        {
+            "20.27.177.113", "20.205.243.166", "140.82.112.3", "140.82.113.3",
+            "140.82.114.3", "140.82.116.3", "4.237.22.38", "20.26.156.215", "20.200.245.247",
+        },
+        ["api.github.com"] = new[] { "20.205.243.168", "140.82.112.6", "140.82.113.6", "140.82.114.6", "140.82.116.6" },
+        ["codeload.github.com"] = new[] { "20.205.243.165", "140.82.112.9", "140.82.113.9", "140.82.114.9" },
+        ["raw.githubusercontent.com"] = new[] { "185.199.108.133", "185.199.109.133", "185.199.110.133", "185.199.111.133" },
+    };
+
+    /// <summary>对「域名 + 指定 IP」发一次真实 HTTPS GET（强制走该 IP，SNI 与 Host 仍是域名）。</summary>
+    public static async Task<HostCheck> CheckAsync(string host, string ip, string path, CancellationToken ct = default)
+    {
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var handler = new SocketsHttpHandler
+            {
+                UseProxy = false,
+                AllowAutoRedirect = false,
+                ConnectTimeout = TimeSpan.FromSeconds(6),
+                ConnectCallback = async (context, token) =>
+                {
+                    var socket = new Socket(SocketType.Stream, ProtocolType.Tcp) { NoDelay = true };
+                    try
+                    {
+                        await socket.ConnectAsync(
+                            new IPEndPoint(IPAddress.Parse(ip), context.DnsEndPoint.Port), token).ConfigureAwait(false);
+                        return new NetworkStream(socket, ownsSocket: true);
+                    }
+                    catch
+                    {
+                        socket.Dispose();
+                        throw;
+                    }
+                },
+            };
+            using var http = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(10) };
+            http.DefaultRequestHeaders.UserAgent.ParseAdd(
+                "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36");
+            using var resp = await http.GetAsync($"https://{host}{path}", HttpCompletionOption.ResponseHeadersRead, ct)
+                .ConfigureAwait(false);
+            return new HostCheck(host, ip, (int)resp.StatusCode, (int)sw.ElapsedMilliseconds);
+        }
+        catch
+        {
+            return new HostCheck(host, ip, 0, -1);
+        }
+    }
+
+    /// <summary>
+    /// 验收当前 hosts 加速段：关键域名真实打不开的，从候选池重挑一个能打开的 IP 换上去；
+    /// 候选全不行就把该域名从加速段摘掉（回落系统 DNS，总比指着 404 黑节点强）。
+    /// 只有真的发生替换/删除才写 hosts，其余情况一个字节都不动。
+    /// </summary>
+    public static async Task<RepairResult> VerifyAndRepairAsync(CancellationToken ct = default)
+    {
+        var map = new Dictionary<string, string>(ParseBlock(ReadHosts()), StringComparer.OrdinalIgnoreCase);
+        if (map.Count == 0)
+            return new RepairResult(0, 0, Array.Empty<string>(), Array.Empty<string>(), "当前没有生效的加速段");
+
+        var repairs = new List<string>();
+        var removed = new List<string>();
+        int checkedCount = 0, ok = 0;
+
+        foreach (var (host, path) in CriticalHosts)
+        {
+            if (!map.TryGetValue(host, out var current)) continue;
+            checkedCount++;
+
+            var first = await CheckAsync(host, current, path, ct).ConfigureAwait(false);
+            if (first.Ok)
+            {
+                ok++;
+                continue;
+            }
+
+            string? replacement = null;
+            int bestMs = int.MaxValue;
+            if (RepairPool.TryGetValue(host, out var pool))
+            {
+                foreach (var candidate in pool)
+                {
+                    if (string.Equals(candidate, current, StringComparison.Ordinal)) continue;
+                    var check = await CheckAsync(host, candidate, path, ct).ConfigureAwait(false);
+                    if (!check.Ok) continue;
+                    if (check.Ms < bestMs)
+                    {
+                        bestMs = check.Ms;
+                        replacement = candidate;
+                    }
+                    if (check.Ms < 1200) break; // 够快就不再多试，省用户等待
+                }
+            }
+
+            if (replacement is not null)
+            {
+                map[host] = replacement;
+                repairs.Add($"{host}: {current}（{Describe(first)}）→ {replacement}（{bestMs} ms）");
+                ok++;
+            }
+            else
+            {
+                map.Remove(host);
+                removed.Add($"{host}: {current}（{Describe(first)}）已移除，改用系统解析");
+            }
+        }
+
+        if (repairs.Count > 0 || removed.Count > 0)
+        {
+            string merged = StripBlock(ReadHosts()).TrimEnd('\r', '\n') + "\r\n\r\n" + BuildBlock(map);
+            if (WriteHosts(merged))
+            {
+                SaveCache(map);
+                FlushDns();
+            }
+        }
+
+        string message = checkedCount == 0
+            ? "无需验收"
+            : $"可用性验收 {ok}/{checkedCount}" +
+              (repairs.Count > 0 ? $"，替换 {repairs.Count} 个坏节点" : "") +
+              (removed.Count > 0 ? $"，移除 {removed.Count} 个无解域名" : "");
+        return new RepairResult(checkedCount, ok, repairs, removed, message);
+    }
+
+    private static string Describe(HostCheck check) => check.StatusCode == 0 ? "连接失败" : $"HTTP {check.StatusCode}";
+
+    /// <summary>把加速段写回内核自己的节点缓存（自愈看门狗按它补段）。</summary>
+    private static void SaveCache(IReadOnlyDictionary<string, string> map)
+    {
+        try
+        {
+            Directory.CreateDirectory(KernelDataDir);
+            var sb = new StringBuilder();
+            foreach (var kv in map) sb.Append(kv.Key).Append('\t').Append(kv.Value).Append("\r\n");
+            File.WriteAllText(CacheFile, sb.ToString(), new UTF8Encoding(false));
+        }
+        catch { }
     }
 
     // ---------------- hosts 读写（与内核同一套标记） ----------------

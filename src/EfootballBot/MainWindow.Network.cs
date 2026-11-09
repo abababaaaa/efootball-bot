@@ -21,6 +21,7 @@ public partial class MainWindow
     private bool _githubBusy;        // 下载内核 / 一键加速 / 停止还原 / 内核测速进行中
     private bool _githubMirrorBusy;  // 镜像测速进行中
     private bool _githubHooked;      // 内核自愈提示只订阅一次
+    private bool _githubVerified;    // 本次会话已做过「加速段真实可用性验收」
 
     // 监控启动时选中的行（曲线跟随它；换行立即换曲线）
     private ServerRowVm? SelectedRow => LvServers.SelectedItem as ServerRowVm;
@@ -241,6 +242,34 @@ public partial class MainWindow
             CbFastGithubMirror.Text = FastGithubKernel.DefaultMirror;
         }
         RefreshFastGithubState();
+        VerifyAppliedOnceAsync();
+    }
+
+    /// <summary>
+    /// 每次启动/首次进页面，对已生效的加速段做一次真实可用性验收（只验关键域名，几秒）。
+    /// 6.4.0 之前内核可能把「对任何路径都返回 404 的边缘节点」当可用节点写进 hosts——
+    /// 用户表现就是浏览器打开 github.com 变成 GitHub Pages 404 页。验收会把坏节点换掉/摘掉。
+    /// </summary>
+    private void VerifyAppliedOnceAsync()
+    {
+        if (_githubVerified || !FastGithubKernel.IsApplied) return;
+        _githubVerified = true;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                var repair = await FastGithubKernel.VerifyAndRepairAsync();
+                if (repair.Repairs.Count == 0 && repair.Removed.Count == 0) return;
+                _ = Dispatcher.BeginInvoke(() =>
+                {
+                    AppendLog("GitHub 加速验收：" + repair.Message, LogLevel.Warn);
+                    foreach (var line in repair.Repairs) AppendLog("  " + line, LogLevel.Info);
+                    foreach (var line in repair.Removed) AppendLog("  " + line, LogLevel.Info);
+                    RefreshFastGithubState();
+                });
+            }
+            catch { /* 验收失败不影响已有加速段 */ }
+        });
     }
 
     /// <summary>刷新加速卡状态：以 hosts 实读为准（内核进程可有可无，只改 hosts 就生效）。</summary>

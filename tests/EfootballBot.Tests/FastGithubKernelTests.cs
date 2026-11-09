@@ -106,6 +106,22 @@ public class FastGithubKernelTests
         Assert.Empty(FastGithubKernel.ParseNodeLines("--- hosts 状态 ---\r\nhasBlock=False\r\n"));
     }
 
+    // ---------------- 加速段「真实可用性」验收 ----------------
+
+    [Theory]
+    [InlineData(200, true)]
+    [InlineData(204, true)]
+    [InlineData(301, true)]
+    [InlineData(302, true)]
+    [InlineData(403, false)]   // 内核把它当 WEAK 可用，但对用户就是打不开
+    [InlineData(404, false)]   // 用户实测的那个「GitHub Pages 404 页」节点
+    [InlineData(0, false)]     // 连接失败/超时
+    public void 验收判定_只认2xx与3xx_404与失败一律不可用(int status, bool ok)
+    {
+        var check = new FastGithubKernel.HostCheck("github.com", "20.27.177.115", status, 100);
+        Assert.Equal(ok, check.Ok);
+    }
+
     // ---------------- 镜像链 ----------------
 
     [Fact]
