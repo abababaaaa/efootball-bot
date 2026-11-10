@@ -287,6 +287,12 @@ public sealed class WeeklyEventScenario : IScenario
                 await _engine.Pad.Confirm();
                 break;
 
+            case MlActionKind.PadDownConfirm:
+                _log($"[周活动] 弹窗下移确认：{action.Target}", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
+                await _engine.Pad.Confirm();
+                break;
+
             case MlActionKind.PadStartPress:
                 _log($"[周活动] {action.Target}", LogLevel.Info);
                 await _engine.Pad.Start();
@@ -457,7 +463,7 @@ public sealed class WeeklyEventScenario : IScenario
                         _hubRound = 0;
                         SetPhase(WkPhase.IntroPopups);
                         if (wk == WkScreen.EventIntro) return await PressIntroEnterAsync(obs);
-                        return await PressConfirmAsync("入场弹窗：确认");
+                        return await HandlePopupAsync(obs, "入场弹窗");
                     case WkScreen.EventHome:
                         _hubStep = 0;
                         _hubRound = 0;
@@ -520,10 +526,21 @@ public sealed class WeeklyEventScenario : IScenario
                     _hubStep++; // 失败（B 回比赛页）时下一轮试下一格；成功由 EnterNextEventAsync 清零
                     return 2800;
                 }
+                // 弹窗（奖励到账 / 物品已送到收件箱 / 机会交易 / 比赛回放…）：不管 _hubStep 是多少，
+                // 一律先按弹窗规则推进，绝不 B。★2026-11-09 夜间事故根因：_hubStep 是上一轮比赛页
+                // 扫描残留的值，HasConfirm 恰好落进下面那条「其他板块页 → B」规则，而单键弹窗
+                // （「物品已送到收件箱 / OK」）按 B 没有任何反应 → 每 2.2s 一次 B 空转整夜，
+                // 日志「打开的是其他板块页面（HasConfirm）」刷屏 6 小时、零场次。
+                if (wk == WkScreen.None && ml == MlScreen.HasConfirm)
+                {
+                    _hubStep = 0;
+                    _hubRound = 0;
+                    return await HandlePopupAsync(obs, "弹窗");
+                }
                 // 扫描途中按 A 打开了别的板块页面（锦标赛/eFootball联赛/我的联赛子页等）：
                 // 不是活动列表就 B 退回比赛页，下一轮换下一格（不落共享决策乱按）
                 if (_hubStep > 0 && wk == WkScreen.None &&
-                    ml is MlScreen.LeaguePage or MlScreen.HasConfirm or MlScreen.PointsPage or MlScreen.ItemList)
+                    ml is MlScreen.LeaguePage or MlScreen.PointsPage or MlScreen.ItemList)
                 {
                     _log($"[周活动] 打开的是其他板块页面（{ml}），B 退回比赛页继续扫描", LogLevel.Info);
                     await _engine.Pad.Back();
@@ -545,8 +562,8 @@ public sealed class WeeklyEventScenario : IScenario
                 if (wk == WkScreen.EventIntro) return await PressIntroEnterAsync(obs);
                 if (wk == WkScreen.ChallengeList)
                     return await EnterChallengeListPhaseAsync(); // 挑战活动：介绍页按进入后弹的是挑战清单
-                if (wk == WkScreen.EntryPopup) return await PressConfirmAsync("入场弹窗：确认");
-                if (ml == MlScreen.HasConfirm) return await PressConfirmAsync("入场弹窗：下一步");
+                if (wk == WkScreen.EntryPopup || ml == MlScreen.HasConfirm)
+                    return await HandlePopupAsync(obs, "入场弹窗");
                 if (++_attempts > 15)
                 {
                     // 比赛上下文中的过场（加载/品牌帧）可能连续超过预算：B 在比赛附近危险
@@ -1451,6 +1468,47 @@ public sealed class WeeklyEventScenario : IScenario
         _log($"[周活动] 手柄 A：{what}", LogLevel.Info);
         await _engine.Pad.Confirm();
         return 2500;
+    }
+
+    /// <summary>
+    /// 弹窗推进（用户 2026-11-10 规则）：先看弹窗有几个按键——一个按键 → 直接按下一步（A）；
+    /// 两个及以上 → 看白底高光那枚是不是 确认/进行/OK/下一步/进入/继续/领取 这类推进键，
+    /// 是 → 直接 A；不是（高光在 取消/返回/关闭 上）→ 按上下关系挪一格到推进键再 A。
+    /// 决策与像素探针见 <see cref="PopupBrain"/>（纯函数，可单测）。
+    /// 认不出按钮词的弹窗退回原来的「有推进词就 A」行为，绝不停在原地。
+    /// </summary>
+    private async Task<int> HandlePopupAsync(Observation obs, string context)
+    {
+        var action = PopupBrain.Decide(obs.Frame, obs.Ocr, out var note);
+        switch (action)
+        {
+            case PopupAction.DownThenConfirm:
+                _log($"[周活动] {context}：{note}", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
+                await _engine.Pad.Confirm();
+                return 2400;
+            case PopupAction.UpThenConfirm:
+                _log($"[周活动] {context}：{note}", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Up);
+                await _engine.Pad.Confirm();
+                return 2400;
+            case PopupAction.PressConfirm:
+                _log($"[周活动] {context}：{note}", LogLevel.Info);
+                await _engine.Pad.Confirm();
+                return 2400;
+            default:
+                // 按钮词没读到：有推进词就按 A（同比赛中弹窗规则），否则等一拍由上层重判
+                if (obs.Ocr.ContainsJoined("下一步") || obs.Ocr.ContainsJoined("OK") ||
+                    obs.Ocr.ContainsJoined("确认") || obs.Ocr.ContainsJoined("进入") ||
+                    obs.Ocr.ContainsJoined("继续"))
+                {
+                    _log($"[周活动] {context}：{note}，OCR 有推进词 → A", LogLevel.Info);
+                    await _engine.Pad.Confirm();
+                    return 2400;
+                }
+                _log($"[周活动] {context}：{note}，暂不按键等一拍重判", LogLevel.Debug);
+                return 1200;
+        }
     }
 
     /// <summary>

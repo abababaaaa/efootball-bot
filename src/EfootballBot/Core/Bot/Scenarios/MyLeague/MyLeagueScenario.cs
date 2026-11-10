@@ -408,6 +408,12 @@ public class MyLeagueScenario : IScenario
                 await _engine.Pad.Confirm();
                 break;
 
+            case MlActionKind.PadDownConfirm:
+                _log($"[我的联赛] 弹窗下移确认：{action.Target}", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
+                await _engine.Pad.Confirm();
+                break;
+
             case MlActionKind.PadStartPress:
                 _log($"[我的联赛] {action.Target}", LogLevel.Info);
                 await _engine.Pad.Start();

@@ -325,6 +325,12 @@ public sealed class CnWeeklyScenario : IScenario
                 await _engine.Pad.Confirm();
                 break;
 
+            case MlActionKind.PadDownConfirm:
+                _log($"[国服周活动] 弹窗下移确认：{action.Target}", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Down);
+                await _engine.Pad.Confirm();
+                break;
+
             case MlActionKind.PadStartPress:
                 _log($"[国服周活动] {action.Target}", LogLevel.Info);
                 await _engine.Pad.Start();

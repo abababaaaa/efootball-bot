@@ -83,6 +83,8 @@ public enum MlActionKind
     MatchIdleTap,
     /// <summary>弹窗上移确认（购买弹窗焦点默认在取消，需上移点上方带数字的确认按钮）。</summary>
     PadUpConfirm,
+    /// <summary>弹窗下移确认（推进键在光标下方：取消在上、确认在下那类弹窗，见 PopupBrain）。</summary>
+    PadDownConfirm,
     /// <summary>标题画面按 X（eFootball 启动标题的进入键，A 无效）。</summary>
     PadXPress,
     /// <summary>暂停键（Start）：国服比赛中右上角出现「跳过比赛✅」横幅时打开暂停菜单
@@ -507,6 +509,22 @@ public static class MyLeagueBrain
                 if (screenStreak >= ConfirmEscapeStreak && (screenStreak - ConfirmEscapeStreak) % 5 == 0)
                     return new MlAction(MlActionKind.GamepadBack, 2400, "弹窗久按无效，B 逃生");
                 bool slow = screenStreak >= StuckStreak;
+                // 弹窗按键规则（用户 2026-11-10）：单按钮直接 A；多按钮看白底高光那枚是不是
+                // 确认/进行/OK/下一步 这类推进键，是 → 直接 A，不是 → 按上下关系挪一格再 A。
+                // 难度选择页/启动设定窗仍走旧判定（它们的确认键本来就是默认焦点，挪格反而进列表）。
+                if (!IsDifficultyChoice(ocr) && !IsGameSettingsDialog(ocr))
+                {
+                    var popup = PopupBrain.Decide(frame, ocr, out var popupNote);
+                    switch (popup)
+                    {
+                        case PopupAction.DownThenConfirm:
+                            return new MlAction(MlActionKind.PadDownConfirm, slow ? 5000 : 2000, popupNote);
+                        case PopupAction.UpThenConfirm:
+                            return new MlAction(MlActionKind.PadUpConfirm, slow ? 5000 : 2000, popupNote);
+                        case PopupAction.PressConfirm:
+                            return new MlAction(MlActionKind.PadConfirm, slow ? 5000 : 2000, popupNote);
+                    }
+                }
                 if ((ocr.ContainsJoined("取消") || ocr.ContainsJoined("关闭")) &&
                     !IsDifficultyChoice(ocr) && !IsGameSettingsDialog(ocr))
                     return new MlAction(MlActionKind.PadUpConfirm, slow ? 5000 : 2000, "弹窗确认（上移避开取消/关闭）");
