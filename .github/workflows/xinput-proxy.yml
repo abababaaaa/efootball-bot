@@ -13,24 +13,31 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup MSVC
-        uses: ilammy/msvc-dev-cmd@v1
+      # 用与本地一致的 mingw-w64 工具链构建：MSVC 版在 CI 上历史失败（cl /DEF 组合），
+      # 产物语义已由 gcc 版实测（导出序号 2..8 / 100..103 与 System32 一致）。
+      - uses: msys2/setup-msys2@v2
         with:
-          arch: x64
+          msystem: MINGW64
+          update: false
+          install: mingw-w64-x86_64-gcc
 
-      - name: Build xinput1_3.dll
+      - name: Build proxies
+        shell: msys2 {0}
         working-directory: tools/xinput-proxy
         run: |
-          cl /nologo /O2 /MT /LD /W4 /GS- /D_CRT_SECURE_NO_WARNINGS xinput1_3.c /link /DEF:xinput1_3.def /OUT:xinput1_3.dll kernel32.lib user32.lib
+          gcc -shared -O2 -Wall -o xinput1_3.dll xinput1_3.c xinput1_3.def -lkernel32 -luser32 -static-libgcc
+          gcc -shared -O2 -Wall -o xinput1_4.dll xinput1_3.c xinput1_4.def -lkernel32 -luser32 -static-libgcc
 
-      - name: Verify exports
+      - name: Verify export ordinals
+        shell: pwsh
         working-directory: tools/xinput-proxy
         run: |
-          dumpbin /exports xinput1_3.dll
+          ./verify-dll.ps1 -Path ./xinput1_3.dll
 
       - uses: actions/upload-artifact@v4
         with:
           name: xinput-proxy-x64
           path: |
             tools/xinput-proxy/xinput1_3.dll
+            tools/xinput-proxy/xinput1_4.dll
             tools/xinput-proxy/xinput_proxy.ini.example
