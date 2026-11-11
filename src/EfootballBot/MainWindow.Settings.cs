@@ -174,6 +174,9 @@ public partial class MainWindow
         // 全权接管（挂机禁用真实手柄）：开关见「手柄接管」卡
         ChkPadTakeover.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
 
+        // 手柄后端（进程内代理 / ViGEmBus）：下拉项由 PadBackendInfo.UiOrder 生成
+        LoadPadBackendUi();
+
         // OCR 性能档（0=默认 / 1=提速：检测长边 640）
         CmbOcrPerf.SelectedIndex = _cfg.OcrPerf.DetLimitSideLength > 0 ? 1 : 0;
 
@@ -638,8 +641,232 @@ public partial class MainWindow
         SetTabInput.Visibility = RbSetInput.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SetTabDaily.Visibility = RbSetDaily.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
         SetTabDev.Visibility = RbSetDev.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
+
+        // 切到「手柄与输入」时重算代理投放状态（用户可能刚在资源管理器里删/加了文件）
+        if (RbSetInput.IsChecked == true) RefreshPadBackendState();
     }
 
+    // ---------------- 手柄后端（v6.5：进程内代理 / ViGEmBus） ----------------
+
+    /// <summary>填充后端下拉并刷新投放状态。</summary>
+    private void LoadPadBackendUi()
+    {
+        if (CmbPadBackend is null) return;
+        CmbPadBackend.Items.Clear();
+        foreach (var kind in PadBackendInfo.UiOrder)
+            CmbPadBackend.Items.Add(PadBackendInfo.DisplayName(kind));
+        CmbPadBackend.SelectedIndex = PadBackendInfo.UiIndexOf(_cfg.Pad.Backend);
+        RefreshPadBackendState();
+    }
+
+    private void CmbPadBackend_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingConfig || CmbPadBackend is null) return;
+        _cfg.Pad.Backend = PadBackendInfo.FromUiIndex(CmbPadBackend.SelectedIndex);
+        _cfg.Save();
+        RefreshPadBackendState();
+    }
+
+    private void BtnProxyRefresh_Click(object sender, RoutedEventArgs e) => RefreshPadBackendState();
+
+    /// <summary>自动投放：按当前解析到的两服目录写入代理。</summary>
+    private void BtnProxyInstall_Click(object sender, RoutedEventArgs e)
+    {
+        var targets = ResolvePadTargets();
+        if (targets.Count == 0)
+        {
+            TxtPadBackendState.Text = "未定位到游戏目录：先启动一次游戏（或打开一次设置工具）后重试，或点「手动选择目录…」。";
+            return;
+        }
+        var report = new System.Text.StringBuilder();
+        foreach (var (dir, exeName, targetId) in targets)
+            DeployProxyTo(dir, exeName, targetId, report);
+        RefreshPadBackendState();
+        TxtPadBackendState.Text = report.ToString().TrimEnd() + Environment.NewLine + TxtPadBackendState.Text;
+    }
+
+    /// <summary>手动选目录投放（自动定位失败/多副本时的逃生门）。</summary>
+    private void BtnProxyPick_Click(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "选择游戏的 Binaries\\Win64 目录（里面有 eFootball.exe / eFootballOnline.exe）",
+            Multiselect = false,
+        };
+        if (dlg.ShowDialog(this) != true) return;
+
+        string dir = dlg.FolderName;
+        var exes = new[] { "eFootball.exe", "eFootballOnline.exe" }
+            .Select(n => Path.Combine(dir, n))
+            .Where(File.Exists)
+            .ToList();
+        if (exes.Count == 0)
+        {
+            TxtPadBackendState.Text = "该目录里没有 eFootball.exe / eFootballOnline.exe，换个目录（要选 Binaries\\Win64 本身）。";
+            return;
+        }
+
+        var report = new System.Text.StringBuilder();
+        foreach (var exe in exes)
+        {
+            string name = Path.GetFileName(exe);
+            int targetId = name.Contains("Online", StringComparison.OrdinalIgnoreCase) ? 2 : 1;
+            DeployProxyTo(dir, name, targetId, report);
+        }
+        RefreshPadBackendState();
+        TxtPadBackendState.Text = report.ToString().TrimEnd() + Environment.NewLine + TxtPadBackendState.Text;
+    }
+
+    /// <summary>把程序目录的代理 DLL + ini 写到指定目录。</summary>
+    private void DeployProxyTo(string dir, string exeName, int targetId, System.Text.StringBuilder report)
+    {
+        string src = Path.Combine(Core.System.AppPaths.ExeDir, "xinput1_3.dll");
+        if (!File.Exists(src))
+        {
+            report.AppendLine("程序目录缺少 xinput1_3.dll：先运行 tools\\xinput-proxy\\build.bat 构建。");
+            return;
+        }
+        try
+        {
+            Directory.CreateDirectory(dir);
+            string dst = Path.Combine(dir, "xinput1_3.dll");
+            if (File.Exists(dst)) File.Copy(dst, dst + ".bak", overwrite: true);
+            try
+            {
+                File.Copy(src, dst, overwrite: true);
+            }
+            catch (IOException)
+            {
+                // 游戏正在运行 → DLL 被映射，直接覆盖会失败；改名让位再写（游戏进程继续用旧映像）。
+                if (File.Exists(dst)) File.Move(dst, dst + ".bak", overwrite: true);
+                File.Copy(src, dst, overwrite: true);
+            }
+
+            // 同时投放 1_4：SDL2 / 中间件是动态 LoadLibrary("XInput1_4.dll")，
+            // 只有 1_3 只能覆盖游戏自身的静态导入。
+            string src14 = Path.Combine(Core.System.AppPaths.ExeDir, "xinput1_4.dll");
+            if (File.Exists(src14))
+            {
+                string dst14 = Path.Combine(dir, "xinput1_4.dll");
+                try { File.Copy(src14, dst14, overwrite: true); }
+                catch (IOException)
+                {
+                    if (File.Exists(dst14)) File.Move(dst14, dst14 + ".bak", overwrite: true);
+                    File.Copy(src14, dst14, overwrite: true);
+                }
+            }
+
+            string ini = string.Join(Environment.NewLine, new[]
+            {
+                "[proxy]",
+                "TargetProcess=" + exeName,
+                "TargetId=" + targetId.ToString(),
+                // 注意：这里是普通字符串（非逐字），\\ 会写成单个反斜杠；
+                // 写成 @"...Local\\EfootballBot..." 会让 ini 里出现两个反斜杠，
+                // 代理与 Worker 的映射名对不上 → 永远读不到状态（2026-11-11 实机踩到）。
+                "SharedName=Local\\EfootballBot.Pad.v1",
+                "Enable=1",
+                "Log=1",
+                "CounterHook=1",
+                "HeartbeatTimeoutMs=1500",
+                "",
+            });
+            File.WriteAllText(Path.Combine(dir, "xinput_proxy.ini"), ini, new System.Text.UTF8Encoding(false));
+            report.AppendLine("已投放：" + dir + "（" + exeName + "，TargetId=" + targetId + "）");
+        }
+        catch (UnauthorizedAccessException)
+        {
+            report.AppendLine("投放失败（无写入权限）：" + dir + " —— 本程序需以管理员身份运行（Program Files 下的游戏必须提权写）。");
+        }
+        catch (Exception ex)
+        {
+            report.AppendLine("投放失败：" + dir + " → " + ex.Message);
+        }
+    }
+
+    /// <summary>撤回：删掉两个文件（有 .bak 就还原）。</summary>
+    private void BtnProxyRemove_Click(object sender, RoutedEventArgs e)
+    {
+        var report = new System.Text.StringBuilder();
+        foreach (var (dir, _, _) in ResolvePadTargets())
+        {
+            foreach (var name in new[] { "xinput1_3.dll", "xinput_proxy.ini" })
+            {
+                string path = Path.Combine(dir, name);
+                try
+                {
+                    if (File.Exists(path)) { File.Delete(path); report.AppendLine("已删除：" + path); }
+                    string bak = path + ".bak";
+                    if (File.Exists(bak)) { File.Move(bak, path, overwrite: true); report.AppendLine("已还原：" + path); }
+                }
+                catch (Exception ex)
+                {
+                    report.AppendLine("删除失败：" + path + " → " + ex.Message);
+                }
+            }
+        }
+        RefreshPadBackendState();
+        TxtPadBackendState.Text = (report.Length == 0 ? "没有可撤回的文件。" : report.ToString().TrimEnd())
+                                  + Environment.NewLine + TxtPadBackendState.Text;
+    }
+
+    /// <summary>刷新状态行：当前后端 + 两服投放情况 + 程序目录源文件。</summary>
+    private void RefreshPadBackendState()
+    {
+        if (TxtPadBackendState is null) return;
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("当前后端：" + PadBackendInfo.DisplayName(_cfg.Pad.Backend) + "（切换后下次开始挂机生效）");
+
+        string src = Path.Combine(Core.System.AppPaths.ExeDir, "xinput1_3.dll");
+        sb.AppendLine(File.Exists(src) ? "程序目录代理：已就绪" : "程序目录代理：缺失（改用 install.ps1 手动投放）");
+
+        // 游戏在跑：代理 DLL 已被映射，替换/首次投放都要重启游戏才生效
+        bool gameRunning = false;
+        try
+        {
+            gameRunning = System.Diagnostics.Process.GetProcessesByName("eFootball").Length > 0
+                       || System.Diagnostics.Process.GetProcessesByName("eFootballOnline").Length > 0;
+        }
+        catch { }
+        if (gameRunning)
+            sb.AppendLine("游戏正在运行：投放/替换代理后需要重启游戏才会加载新的 xinput1_3.dll");
+
+        AppendTarget("国际服", ResolveGameBinDir(intl: true, _cfg.GamePaths.IntlSettingsTool));
+        AppendTarget("国服", ResolveGameBinDir(intl: false, _cfg.GamePaths.CnSettingsTool));
+
+        TxtPadBackendState.Text = sb.ToString().TrimEnd();
+
+        void AppendTarget(string label, (string? Dir, string? ExeName) target)
+        {
+            if (string.IsNullOrEmpty(target.Dir))
+            {
+                sb.AppendLine(label + "：未定位到游戏目录");
+                return;
+            }
+            bool installed = File.Exists(Path.Combine(target.Dir, "xinput1_3.dll"));
+            sb.AppendLine(label + "：" + (installed ? "已投放" : "未投放") + " — " + target.Dir);
+        }
+    }
+
+    /// <summary>国际服 / 国服 Binaries\\Win64 目录（Steam 库打分 + 设置工具记忆）。</summary>
+    private static (string? Dir, string? ExeName) ResolveGameBinDir(bool intl, string? settingsToolPath)
+    {
+        string? hint = string.IsNullOrWhiteSpace(settingsToolPath) ? null : Path.GetDirectoryName(settingsToolPath);
+        string? exe = GameSettingsLocator.LocateGameExe(intl, hint);
+        if (string.IsNullOrEmpty(exe)) return (null, null);
+        return (Path.GetDirectoryName(exe), Path.GetFileName(exe));
+    }
+
+    /// <summary>需要投放的目标集合（能定位到才算）。</summary>
+    private List<(string Dir, string ExeName, int TargetId)> ResolvePadTargets()
+    {
+        var list = new List<(string Dir, string ExeName, int TargetId)>();
+        var intl = ResolveGameBinDir(intl: true, _cfg.GamePaths.IntlSettingsTool);
+        if (intl.Dir is not null && intl.ExeName is not null) list.Add((intl.Dir, intl.ExeName, 1));
+        var cn = ResolveGameBinDir(intl: false, _cfg.GamePaths.CnSettingsTool);
+        if (cn.Dir is not null && cn.ExeName is not null) list.Add((cn.Dir, cn.ExeName, 2));
+        return list;
+    }
     // ---------------- 训练数据采集（存帧） ----------------
 
     /// <summary>打开 exe 同级 captures\ 目录（不存在则先创建，便于空目录也能打开）。</summary>

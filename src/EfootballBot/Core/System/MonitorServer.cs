@@ -1,5 +1,9 @@
+using System.Collections.Concurrent;
 using System.IO;
+using System.IO.Compression;
 using System.Net;
+using System.Reflection;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using EfootballBot.Core.Bot;
@@ -31,6 +35,11 @@ public sealed record MonitorEventRow(DateTime At, string Kind, string Text);
 /// <c>http://电脑IP:端口/?t=token</c> 即可看运行状态与实时日志、比赛/满级动态，
 /// 并暂停/继续/停止/单步。微信内置浏览器直接打开本页即可（手机与电脑同一 WiFi 时）。
 ///
+/// 页面本体是嵌入资源（Assets\web\monitor.html / .css / .js），不再在 C# 里拼字符串：
+/// - 静态资源带 gzip + ETag + 304，重复打开只走一次条件请求；
+/// - /api/stream 是 SSE 长连接（1 秒一帧快照），比三路 3 秒轮询省电、实时性更好；
+/// - SSE 不通时页面自动回落原来的 /api/status|log|events 轮询，行为与旧版一致。
+///
 /// 设计约束：
 /// - 只监听本机所有网卡，不向外网注册任何东西，不上传任何数据；
 /// - 有 token 才能执行操作（无 token 时页面只读；日志/动态与状态一样只读）；
@@ -46,6 +55,10 @@ public sealed class MonitorServer : IDisposable
     private readonly Action<string, LogLevel>? _log;
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
+    private readonly ConcurrentDictionary<Guid, Stream> _streams = new();
+
+    /// <summary>SSE 推送间隔：1 秒（原来三路轮询是 3 秒，这里更实时且只占一条连接）。</summary>
+    private static readonly TimeSpan StreamInterval = TimeSpan.FromSeconds(1);
 
     public string Url { get; private set; } = "";
 
@@ -141,26 +154,38 @@ public sealed class MonitorServer : IDisposable
             switch (path)
             {
                 case "/":
-                    await WriteAsync(ctx, 200, "text/html; charset=utf-8", Html(token, canOperate));
+                    await AssetAsync(ctx, "monitor.html", "text/html; charset=utf-8", cacheSeconds: 0);
+                    return;
+                case "/assets/monitor.css":
+                    await AssetAsync(ctx, "monitor.css", "text/css; charset=utf-8");
+                    return;
+                case "/assets/monitor.js":
+                    await AssetAsync(ctx, "monitor.js", "application/javascript; charset=utf-8");
+                    return;
+                case "/api/stream":
+                    await StreamAsync(ctx, canOperate);
                     return;
                 case "/api/status":
-                    var s = _status();
-                    await WriteAsync(ctx, 200, "application/json; charset=utf-8", JsonSerializer.Serialize(new
-                    {
-                        running = s.Running,
-                        paused = s.Paused,
-                        mode = s.Mode,
-                        matches = s.Matches,
-                        keyMatches = s.KeyMatches,
-                        playersMaxed = s.PlayersMaxed,
-                        elapsed = s.Elapsed,
-                        lastScreen = s.LastScreen,
-                        lastError = s.LastError,
-                        at = s.At.ToString("yyyy-MM-dd HH:mm:ss"),
-                        lan = LanUrl(),
-                        canOperate,
-                    }));
+                {
+                    var s0 = _status();
+                    await WriteAsync(ctx, 200, "application/json; charset=utf-8",
+                        JsonSerializer.Serialize(new
+                        {
+                            running = s0.Running,
+                            paused = s0.Paused,
+                            mode = s0.Mode,
+                            matches = s0.Matches,
+                            keyMatches = s0.KeyMatches,
+                            playersMaxed = s0.PlayersMaxed,
+                            elapsed = s0.Elapsed,
+                            lastScreen = s0.LastScreen,
+                            lastError = s0.LastError,
+                            at = s0.At.ToString("yyyy-MM-dd HH:mm:ss"),
+                            lan = LanUrl(),
+                            canOperate,
+                        }));
                     return;
+                }
                 case "/api/log":
                 {
                     int n = int.TryParse(ctx.Request.QueryString["n"], out var reqN)
@@ -206,9 +231,147 @@ public sealed class MonitorServer : IDisposable
         }
         catch (Exception ex)
         {
-            _log?.Invoke($"监控页请求处理失败：{ex.Message}", LogLevel.Debug);
+            _log?.Invoke($"监控页请求处理失败（{ctx.Request.Url?.AbsolutePath}）：{ex.Message}", LogLevel.Debug);
             try { ctx.Response.Abort(); } catch { }
         }
+    }
+
+    // ---------------- SSE ----------------
+
+    /// <summary>一帧快照（状态 + 最近 20 条动态 + 最近 100 条日志），整包 ≤ 数十 KB。</summary>
+    private string Snapshot(bool canOperate)
+    {
+        var s = _status();
+        var events = _eventsProvider?.Invoke() ?? Array.Empty<MonitorEventRow>();
+        var logs = _logProvider?.Invoke(100) ?? Array.Empty<MonitorLogRow>();
+        return JsonSerializer.Serialize(new
+        {
+            status = new
+            {
+                running = s.Running,
+                paused = s.Paused,
+                mode = s.Mode,
+                matches = s.Matches,
+                keyMatches = s.KeyMatches,
+                playersMaxed = s.PlayersMaxed,
+                elapsed = s.Elapsed,
+                lastScreen = s.LastScreen,
+                lastError = s.LastError,
+                at = s.At.ToString("yyyy-MM-dd HH:mm:ss"),
+                canOperate,
+            },
+            events = events.Take(20).Select(r => new { t = r.At.ToString("HH:mm:ss"), kind = r.Kind, msg = r.Text }),
+            logs = logs.Select(r => new { t = r.Time, lv = r.Level, msg = r.Text }),
+        });
+    }
+
+    private async Task StreamAsync(HttpListenerContext ctx, bool canOperate)
+    {
+        var res = ctx.Response;
+        res.StatusCode = 200;
+        res.ContentType = "text/event-stream; charset=utf-8";
+        res.Headers["Cache-Control"] = "no-cache, no-transform";
+        res.SendChunked = true;
+
+        var id = Guid.NewGuid();
+        var stream = res.OutputStream;
+        _streams[id] = stream;
+        try
+        {
+            await WriteEventAsync(stream, Snapshot(canOperate));
+            var ct = _cts?.Token ?? CancellationToken.None;
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(StreamInterval, ct);
+                await WriteEventAsync(stream, Snapshot(canOperate));
+            }
+        }
+        catch
+        {
+            // 客户端断开（切后台/锁屏/关页面）走这里：正常路径，不记错误
+        }
+        finally
+        {
+            _streams.TryRemove(id, out _);
+            try { res.Close(); } catch { }
+        }
+    }
+
+    private static async Task WriteEventAsync(Stream stream, string json)
+    {
+        var payload = Encoding.UTF8.GetBytes($"data: {json}\n\n");
+        await stream.WriteAsync(payload);
+        await stream.FlushAsync();
+    }
+
+    // ---------------- 静态资源 ----------------
+
+    private sealed record Asset(byte[] Raw, byte[] Gz, string ETag);
+
+    private static readonly ConcurrentDictionary<string, Asset> _assets = new();
+
+    private static Asset LoadAsset(string name)
+    {
+        return _assets.GetOrAdd(name, key =>
+        {
+            var asm = Assembly.GetExecutingAssembly();
+            using var res = asm.GetManifestResourceStream("EfootballBot.web." + key)
+                      ?? throw new InvalidOperationException($"嵌入资源缺失：EfootballBot.web.{key}");
+            using var rawMs = new MemoryStream();
+            res.CopyTo(rawMs);
+            var raw = rawMs.ToArray();
+            using var gzMs = new MemoryStream();
+            using (var gz = new GZipStream(gzMs, CompressionLevel.Optimal, leaveOpen: true))
+                gz.Write(raw, 0, raw.Length);
+            var etag = "\"" + Convert.ToHexString(SHA1.HashData(raw)).ToLowerInvariant()[..16] + "\"";
+            return new Asset(raw, gzMs.ToArray(), etag);
+        });
+    }
+
+    private static async Task AssetAsync(HttpListenerContext ctx, string name, string contentType, int cacheSeconds = 86400)
+    {
+        var asset = LoadAsset(name);
+
+        if (ETagMatches(ctx.Request.Headers["If-None-Match"], asset.ETag))
+        {
+            ctx.Response.StatusCode = 304;
+            ctx.Response.Headers["ETag"] = asset.ETag;
+            ctx.Response.Close();
+            return;
+        }
+
+        var res = ctx.Response;
+        res.StatusCode = 200;
+        res.ContentType = contentType;
+        res.Headers["ETag"] = asset.ETag;
+        res.Headers["Vary"] = "Accept-Encoding";
+        res.Headers["Cache-Control"] = cacheSeconds > 0
+            ? $"public, max-age={cacheSeconds}"
+            : "no-cache";
+        // 只对声明支持 gzip 的客户端压缩；其它（几乎只有 curl/脚本）拿原文
+        var gzipOk = (ctx.Request.Headers["Accept-Encoding"] ?? "")
+            .Contains("gzip", StringComparison.OrdinalIgnoreCase);
+        var body = gzipOk ? asset.Gz : asset.Raw;
+        if (gzipOk) res.Headers["Content-Encoding"] = "gzip";
+        res.ContentLength64 = body.Length;
+        await res.OutputStream.WriteAsync(body);
+        res.OutputStream.Close();
+    }
+
+    /// <summary>
+    /// If-None-Match 宽松比较：容忍 W/ 弱前缀、引号被中间层剥掉（curl/部分代理会）、多值列表。
+    /// </summary>
+    private static bool ETagMatches(string? ifNoneMatch, string etag)
+    {
+        if (string.IsNullOrEmpty(ifNoneMatch)) return false;
+        var target = etag.Trim('"');
+        foreach (var part in ifNoneMatch.Split(','))
+        {
+            var t = part.Trim();
+            if (t.StartsWith("W/", StringComparison.Ordinal)) t = t[2..];
+            if (t.Trim('"') == target) return true;
+        }
+        return false;
     }
 
     private static async Task WriteAsync(HttpListenerContext ctx, int code, string contentType, string body)
@@ -221,112 +384,16 @@ public sealed class MonitorServer : IDisposable
         ctx.Response.OutputStream.Close();
     }
 
-    private string Html(string token, bool canOperate)
-    {
-        string q = string.IsNullOrEmpty(token) ? "" : $"?t={Uri.EscapeDataString(token)}";
-        string op = canOperate ? "" : "disabled";
-        return $$"""
-        <!doctype html><html lang="zh-CN"><head><meta charset="utf-8">
-        <meta name="viewport" content="width=device-width,initial-scale=1">
-        <title>挂机监控</title>
-        <style>
-          body{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;background:#12151c;color:#e6e9ef;margin:0;padding:18px}
-          .card{background:#1b202b;border-radius:14px;padding:16px;margin-bottom:12px}
-          h1{font-size:17px;margin:0 0 12px}
-          .row{display:flex;justify-content:space-between;padding:5px 0;font-size:14px;border-bottom:1px solid #262c3a}
-          .row:last-child{border:0}
-          .k{color:#9aa4b2}.v{font-weight:600}
-          .dot{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px}
-          button{margin:6px 8px 0 0;padding:10px 16px;border-radius:10px;border:1px solid #2f3949;
-                 background:#232b39;color:#e6e9ef;font-size:14px}
-          button:disabled{opacity:.35}
-          #err{color:#ff9a9a;font-size:13px;margin-top:6px}
-          .muted{color:#7b8696;font-size:12px;margin-top:10px}
-          #events{font-size:13px;max-height:260px;overflow-y:auto}
-          #events .ev{padding:4px 0;border-bottom:1px solid #262c3a;line-height:1.45}
-          #events .ev:last-child{border:0}
-          #log{font-family:Consolas,Menlo,monospace;font-size:11.5px;line-height:1.55;
-               max-height:340px;overflow-y:auto;white-space:pre-wrap;word-break:break-all}
-          .lv-OK{color:#3ddc84}.lv-Warn{color:#ffd166}.lv-Error{color:#ff9a9a}
-          .ev-比赛完成{color:#3ddc84}.ev-关键比赛{color:#6cb6ff}.ev-球员满级{color:#ffd166}
-        </style></head><body>
-        <div class="card"><h1>eFootball 挂机监控</h1>
-          <div class="row"><span class="k">状态</span><span class="v" id="st">—</span></div>
-          <div class="row"><span class="k">场景</span><span class="v" id="mode">—</span></div>
-          <div class="row"><span class="k">场次</span><span class="v" id="m">—</span></div>
-          <div class="row"><span class="k">关键场次</span><span class="v" id="km">—</span></div>
-          <div class="row"><span class="k">用时</span><span class="v" id="el">—</span></div>
-          <div class="row"><span class="k">感知</span><span class="v" id="sc">—</span></div>
-        </div>
-        <div class="card">
-          <button id="bp" onclick="act('pause')" {{op}}>暂停</button>
-          <button onclick="act('resume')" {{op}}>继续</button>
-          <button onclick="act('step')" {{op}}>单步</button>
-          <button onclick="act('stop')" {{op}}>停止</button>
-          <div id="err"></div>
-          <div class="muted">操作需带 token 打开本页；页面每 3 秒自动刷新。</div>
-        </div>
-        <div class="card"><h1>比赛 / 满级动态</h1>
-          <div id="events">—</div>
-          <div class="muted">比赛完成与球员满级事件（最近 50 条）。</div>
-        </div>
-        <div class="card"><h1>实时日志</h1>
-          <div id="log">—</div>
-          <div class="muted">最近 100 条运行日志，每 3 秒刷新。</div>
-        </div>
-        <script>
-          const T = q(); function q(){const u=new URL(location.href);return u.searchParams.get('t')||''}
-          function esc(s){const d=document.createElement('div');d.textContent=s==null?'':String(s);return d.innerHTML}
-          async function tick(){
-            try{
-              const r = await fetch('/api/status' + (T ? '?t='+encodeURIComponent(T) : ''));
-              const s = await r.json();
-              document.getElementById('st').innerHTML =
-                '<span class="dot" style="background:'+(s.running?(s.paused?'#ffd166':'#3ddc84'):'#777')+'"></span>'+
-                (s.running?(s.paused?'已暂停':'运行中'):'未运行');
-              document.getElementById('mode').textContent = s.mode || '—';
-              document.getElementById('m').textContent = s.matches;
-              document.getElementById('km').textContent = s.keyMatches;
-              document.getElementById('el').textContent = s.elapsed || '—';
-              document.getElementById('sc').textContent = s.lastScreen || '—';
-              document.getElementById('err').textContent = s.lastError ? ('最近错误：'+s.lastError) : '';
-            }catch(e){document.getElementById('st').textContent='连接失败'}
-          }
-          async function tickEvents(){
-            try{
-              const r = await fetch('/api/events' + (T ? '?t='+encodeURIComponent(T) : ''));
-              const d = await r.json();
-              document.getElementById('events').innerHTML = (d.rows||[]).map(e =>
-                '<div class="ev"><span class="ev-'+esc(e.kind)+'">['+esc(e.t)+'] '+esc(e.kind)+'</span> '+esc(e.msg)+'</div>'
-              ).join('') || '暂无动态';
-            }catch(e){}
-          }
-          async function tickLog(){
-            try{
-              const r = await fetch('/api/log?n=100' + (T ? '&t='+encodeURIComponent(T) : ''));
-              const d = await r.json();
-              const el = document.getElementById('log');
-              const nearBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 30;
-              el.innerHTML = (d.rows||[]).map(l =>
-                '<div class="lv-'+esc(l.lv)+'">['+esc(l.t)+'] '+esc(l.msg)+'</div>').join('');
-              if (nearBottom) el.scrollTop = el.scrollHeight;
-            }catch(e){}
-          }
-          async function act(c){
-            const r = await fetch('/api/'+c + (T ? '?t='+encodeURIComponent(T) : ''));
-            if(!r.ok) document.getElementById('err').textContent = '操作被拒绝（token 或状态不允许）';
-            tick();
-          }
-          tick(); tickEvents(); tickLog();
-          setInterval(tick, 3000); setInterval(tickEvents, 3000); setInterval(tickLog, 3000);
-        </script></body></html>
-        """;
-    }
-
     public void Dispose()
     {
         try { _cts?.Cancel(); } catch { }
-        try { _listener?.Stop(); _listener?.Close(); } catch { }
+        try { _listener?.Stop(); } catch { }
+        try { _listener?.Close(); } catch { }
+        foreach (var s in _streams.Values)
+        {
+            try { s.Close(); } catch { }
+        }
+        _streams.Clear();
         _listener = null;
     }
 }

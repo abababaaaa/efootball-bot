@@ -1,0 +1,25 @@
+; xinput1_3.def —— 序号必须与 System32\xinput1_3.dll 完全一致
+; 实测：C:\Windows\System32\xinput1_3.dll base=1
+;   1 DllMain                        5 XInputEnable
+;   2 XInputGetState                 6 XInputGetDSoundAudioDeviceGuids
+;   3 XInputSetState                 7 XInputGetBatteryInformation
+;   4 XInputGetCapabilities          8 XInputGetKeystroke
+; eFootball.exe 只按序号导入 #2 / #3（实测，见 docs/plans/2026-11-11-*.md）
+LIBRARY xinput1_3
+
+EXPORTS
+    ; 序号 1 用空桩占位（System32 里是 DllMain），保证序号 1..8 全部存在
+    ProxyOrdinal1                  @1
+    XInputGetState                 @2
+    XInputSetState                 @3
+    XInputGetCapabilities          @4
+    XInputEnable                   @5
+    XInputGetDSoundAudioDeviceGuids @6
+    XInputGetBatteryInformation    @7
+    XInputGetKeystroke             @8
+
+    ; 未文档化导出（部分游戏用 XInputGetStateEx 取 Guide 键）
+    XInputGetStateEx               @100 NONAME
+    XInputWaitForGuideButton       @101 NONAME
+    XInputCancelGuideButtonWait    @102 NONAME
+    XInputPowerOffController       @103 NONAME

@@ -44,6 +44,16 @@ public partial class MainWindow
         Focus();
     }
 
+    /// <summary>
+    /// 应用窗口材质。切换主题后必须重新调用：<see cref="ThemeManager.ApplyTheme"/> 会把
+    /// WindowBg 复原成纯色，材质就不透了。
+    /// </summary>
+    private void ApplyWindowAppearance()
+    {
+        if (!IsInitialized) return;
+        ThemeManager.ApplyWindowBackdrop(this, _cfg.Appearance.Backdrop);
+    }
+
     public MainWindow()
     {
         InitializeComponent();
@@ -59,6 +69,12 @@ public partial class MainWindow
         if (string.IsNullOrWhiteSpace(_cfg.Theme))
             _cfg.Theme = ThemeManager.Dark;
         ThemeManager.ApplyTheme(_cfg.Theme);
+
+        // 窗口材质（Mica/Acrylic）：句柄就绪后才应用到 DWM；不支持的系统自动回退纯色
+        SourceInitialized += (_, _) =>
+        {
+            try { ApplyWindowAppearance(); } catch { /* 材质失败不影响功能 */ }
+        };
 
         LoadConfigToUi();
         InitGameMute(); // 各模块页的「挂机时静音游戏」开关回填 + 巡检计时器

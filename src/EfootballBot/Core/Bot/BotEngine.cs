@@ -727,7 +727,9 @@ public sealed class BotEngine : IDisposable
         {
             // ViGEmBus 驱动缺失时静默安装（内置官方安装器；本程序自 v2.0.6 强制管理员启动，
             // 提权上下文内 runas 不再弹 UAC）。失败不阻断——Connect 还会再报一次明确错误。
-            if (!Input.VigemPad.IsDriverInstalled())
+            // 进程内代理不占系统槽位：驱动安装、真实手柄让位、玩家 1 微码验证统统不需要。
+            bool primaryIsVigem = PadBackendInfo.FallbackChain(_cfg.Pad.Backend)[0] == PadBackendKind.Vigem;
+            if (primaryIsVigem && !Input.VigemPad.IsDriverInstalled())
             {
                 LogInternal("未检测到 ViGEmBus 驱动，开始静默安装（内置官方安装器，首次约 10-30 秒）…", LogLevel.Warn);
                 try
@@ -755,7 +757,7 @@ public sealed class BotEngine : IDisposable
             // 影子模式不禁用真实手柄：它只是「看 Bot 想做什么」，用户随时可以自己上手玩
             if (_cfg.DryRun && _cfg.HidHide.HidePhysicalGamepad)
                 LogInternal("影子模式：跳过真实手柄禁用（不会影响你正常使用手柄）", LogLevel.Info);
-            if (!Pad360.IsConnected && _cfg.HidHide.HidePhysicalGamepad && !_cfg.DryRun)
+            if (primaryIsVigem && !Pad360.IsConnected && _cfg.HidHide.HidePhysicalGamepad && !_cfg.DryRun)
             {
                 // 蓝牙配对但已关机的手柄节点依然 present+enabled（2026-10-24 反馈包实机：每次启动
                 // 都误禁用一轮，禁用升级白耗 16-20 秒，还连带触发预览超时与"未完全生效"两条假报错）。
@@ -786,30 +788,54 @@ public sealed class BotEngine : IDisposable
                         LogInternal("自动禁用未完全生效——真实手柄可能仍在向游戏输入（若蓝牙手柄仍响应请手动关闭其电源，详见 data\\pad-control.log）", LogLevel.Warn);
                 }
             }
-            await ConnectPadWithFallbackAsync();
-            LogInternal("虚拟手柄已连接（Xbox 360 形态，需占玩家 1 才能被游戏消费）",
-                LogLevel.Success);
-
-            // 关键一步：连上之后必须验证「玩家 1 到底是虚拟手柄还是真实手柄」。
-            // 旧流程只在上面的"连接前"按设备节点禁用真实手柄，两种情形会漏：
-            // ① 真实手柄在虚拟手柄连上之后才被系统认作玩家 1（蓝牙重连/开机时序）；
-            // ② 设备节点已禁用但 XInput 仍把它报为连接（有线手柄常见）。
-            // 漏掉的表现就是用户看到的那一幕：bot 在跑但游戏对任何按键都没反应。
-            var (outcome, message) = await PadSlotWitness.EnsureVirtualPadInSlot0Async(
-                () => Pad360, _cfg.HidHide.HidePhysicalGamepad, _cfg.DryRun, LogInternal);
-            if (outcome == PadSlotWitness.YieldOutcome.AbortAskUser)
+            // 代理模式：XInput 已被进程内代理隔离，但 DirectInput / raw HID（国服客户端的
+            // SDL2 会走这些路径）仍然能看到真实手柄——按设置做一次设备级禁用兜底，
+            // 代价是其他应用在挂机期间也看不到手柄，停止挂机自动恢复。
+            if (!primaryIsVigem && !_cfg.DryRun && _cfg.HidHide.HidePhysicalGamepad)
             {
-                // 玩家 1 抢不回来 = 游戏不会读 bot 的任何输入，继续挂机只会白跑并让用户以为程序坏了。
-                // 直接终止本次流程，错误码由 GUI 转成弹窗，明确请用户物理断开手柄。
-                // 附带结构化诊断（P1-3）：用户截图弹窗就能说清"到底是谁占着玩家 1"。
-                string diag = Input.PadDiagnostics.Collect(_cfg.HidHide.HidePhysicalGamepad, Pad360);
-                LogInternal("手柄接管失败诊断：" + Environment.NewLine + diag, LogLevel.Error);
-                try { Pad360.Disconnect(); } catch { }
-                throw new PadTakeoverBlockedException(
-                    PadTakeoverBlockedException.Code + " " + message + Environment.NewLine + diag);
+                var connected = HidDeviceEnumerator.FindConnectedPhysicalGamepadDevNodes();
+                if (connected.Count > 0)
+                {
+                    LogInternal("检测到真实手柄：设备级禁用以阻止它给游戏输入（停止挂机自动恢复）。" +
+                        "XInput 侧已被代理隔离，这一步兜底 DirectInput/HID 路径", LogLevel.Warn);
+                    Input.PhysicalPadControl.RequestPadHide();
+                }
             }
-            if (outcome is PadSlotWitness.YieldOutcome.Ready or PadSlotWitness.YieldOutcome.Recovered)
-                LogInternal("玩家 1 归属已确认：虚拟手柄独占游戏输入", LogLevel.Success);
+
+            await ConnectPadWithFallbackAsync();
+
+            if (Pad360.Kind == PadBackendKind.XInputProxy)
+            {
+                // 代理模式：系统槽位无关紧要，真实手柄可以照常插着；只验证"游戏真的读到了"。
+                LogInternal("进程内代理已接管：按键只在游戏进程内生效，系统 XInput 与前台其他应用不受影响",
+                    LogLevel.Success);
+                if (!((ProxyPad)Pad360).WaitForProxy(ProxyPad.DefaultProbeTimeoutMs))
+                {
+                    LogInternal(
+                        "代理尚未被游戏读取：请确认 xinput1_3.dll 已投放到游戏的 Binaries/Win64 目录" +
+                        "（设置 → 手柄与输入 → 投放代理到游戏目录），或换回 ViGEmBus 接管。",
+                        LogLevel.Warn);
+                }
+            }
+            else
+            {
+                LogInternal("虚拟手柄已连接（Xbox 360 形态，需占玩家 1 才能被游戏消费）",
+                    LogLevel.Success);
+
+                // 连上之后验证「玩家 1 到底是虚拟手柄还是真实手柄」：真实手柄晚到/抢槽的兜底。
+                var (outcome, message) = await PadSlotWitness.EnsureVirtualPadInSlot0Async(
+                    () => Pad360, _cfg.HidHide.HidePhysicalGamepad, _cfg.DryRun, LogInternal);
+                if (outcome == PadSlotWitness.YieldOutcome.AbortAskUser)
+                {
+                    string diag = Input.PadDiagnostics.Collect(_cfg.HidHide.HidePhysicalGamepad, Pad360);
+                    LogInternal("手柄接管失败诊断：" + Environment.NewLine + diag, LogLevel.Error);
+                    try { Pad360.Disconnect(); } catch { }
+                    throw new PadTakeoverBlockedException(
+                        PadTakeoverBlockedException.Code + " " + message + Environment.NewLine + diag);
+                }
+                if (outcome is PadSlotWitness.YieldOutcome.Ready or PadSlotWitness.YieldOutcome.Recovered)
+                    LogInternal("玩家 1 归属已确认：虚拟手柄独占游戏输入", LogLevel.Success);
+            }
         }
         else
         {
@@ -827,7 +853,15 @@ public sealed class BotEngine : IDisposable
     /// 影子模式（cfg.DryRun）下包一层 <see cref="DryRunPad"/>：连接/断开照常，输入全部拦下并记日志。</summary>
     private IVirtualPad CreatePad(PadBackendKind kind)
     {
-        IVirtualPad pad = new VigemPad(m => LogInternal(m, LogLevel.Info));
+        IVirtualPad pad = PadBackendInfo.Normalize(kind) switch
+        {
+            // 目标位给全（国际服 + 国服）：具体哪个服生效由游戏目录 xinput_proxy.ini 的
+            // TargetId 决定；Worker 侧不按会话猜服务器，避免接力/切服时位掩码错配。
+            PadBackendKind.XInputProxy => new ProxyPad(
+                SharedPadWriter.TargetGlobal | SharedPadWriter.TargetCn,
+                log: m => LogInternal(m, LogLevel.Info)),
+            _ => new VigemPad(m => LogInternal(m, LogLevel.Info)),
+        };
         return _cfg.DryRun ? new DryRunPad(pad, LogInternal) : pad;
     }
 
@@ -1571,6 +1605,8 @@ public sealed class BotEngine : IDisposable
     private async Task CheckPadOwnershipAsync(CancellationToken ct)
     {
         if (_cfg.DryRun || !_cfg.HidHide.HidePhysicalGamepad) return;
+        // 进程内代理不占系统槽位：slot0 上是真实手柄也无所谓（游戏读的是代理喂的状态）。
+        if (!PadBackendInfo.RequiresSlotZero(Pad360.Kind)) return;
         if (Pad360 is DryRunPad || !Pad360.IsConnected) return;
         // 摇杆微码探测会把左摇杆打到 (-31000,-31000) 120ms：比赛里那是在操控球员，必须避开。
         if (Scenario is { InMatch: true }) return;

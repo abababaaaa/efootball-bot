@@ -2372,15 +2372,46 @@
 
                     <!-- ============ 二级页：手柄与输入 ============ -->
                     <StackPanel x:Name="SetTabInput" Visibility="Collapsed">
-                    <!-- ===== 手柄接管（功能未实现，已停用隐藏） ===== -->
-                    <Border Style="{StaticResource Card}" Margin="0,0,0,12" Visibility="Collapsed">
+                    <!-- ===== 手柄后端（v6.5：进程内代理 / ViGEmBus） ===== -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Text="手柄后端" Style="{StaticResource H2}"/>
+                            </StackPanel>
+                            <TextBlock Style="{StaticResource BulletText}" TextWrapping="Wrap" Margin="0,2,0,8">
+                                <Run Text="进程内代理：不创建设备、不占 XInput 槽位，按键只出现在目标游戏进程里，前台其他应用收不到；需要把 xinput1_3.dll 放到游戏 Binaries\Win64（下面按钮可直接投放）。"/>
+                                <LineBreak/>
+                                <Run Text="ViGEmBus 接管：传统方式，会占用玩家 1，真实手柄需要让位。切换后下次开始挂机生效。"/>
+                            </TextBlock>
+                            <StackPanel Orientation="Horizontal" Margin="0,2,0,6">
+                                <TextBlock Text="后端" Style="{StaticResource FieldLabel}" Width="64" VerticalAlignment="Center"/>
+                                <ComboBox x:Name="CmbPadBackend" Width="240" HorizontalAlignment="Left"
+                                          SelectionChanged="CmbPadBackend_Changed"/>
+                            </StackPanel>
+                            <TextBlock x:Name="TxtPadBackendState" Style="{StaticResource BulletText}"
+                                       TextWrapping="Wrap" Margin="0,2,0,8" Text="检测中…"/>
+                            <WrapPanel>
+                                <Button x:Name="BtnProxyInstall" Content="投放代理到游戏目录" Padding="12,5" Margin="0,0,8,0"
+                                        Click="BtnProxyInstall_Click"/>
+                                <Button x:Name="BtnProxyRemove" Content="撤回代理" Padding="12,5" Margin="0,0,8,0"
+                                        Click="BtnProxyRemove_Click"/>
+                                <Button x:Name="BtnProxyRefresh" Content="重新检测" Padding="12,5" Margin="0,0,8,0"
+                                        Click="BtnProxyRefresh_Click"/>
+                                <Button x:Name="BtnProxyPick" Content="手动选择目录…" Padding="12,5"
+                                        Click="BtnProxyPick_Click"/>
+                            </WrapPanel>
+                        </StackPanel>
+                    </Border>
+                    <!-- ===== 手柄接管（v6.5 起可用：设备级兜底 DirectInput/HID） ===== -->
+                    <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
                                 <TextBlock Text="手柄接管" Style="{StaticResource H2}"/>
                             </StackPanel>
 
-                            <CheckBox x:Name="ChkPadTakeover" Content="挂机时禁用真实手柄（全权接管，推荐）"
+                            <CheckBox x:Name="ChkPadTakeover" Content="挂机时禁止真实手柄输入（设备级，停止挂机自动恢复）"
                                       Margin="0,4,0,0" FontWeight="SemiBold"
                                       Checked="ChkPadTakeover_Changed" Unchecked="ChkPadTakeover_Changed"/>
                                                         <Grid Margin="0,4,0,0" MaxWidth="520" HorizontalAlignment="Left">
@@ -3304,7 +3335,7 @@
                     </StackPanel>
                 </Grid>
 
-                <Border Grid.Row="1" Background="{DynamicResource PreviewBg}" BorderBrush="{DynamicResource CardBorder}"
+                <Border x:Name="PreviewFrame" Grid.Row="1" Background="{DynamicResource PreviewBg}" BorderBrush="{DynamicResource CardBorder}"
                         BorderThickness="1" CornerRadius="10" Height="196" ClipToBounds="True">
                     <Grid>
                         <Image x:Name="Preview" Stretch="Uniform"/>

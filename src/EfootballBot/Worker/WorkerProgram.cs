@@ -168,13 +168,13 @@ public static class WorkerProgram
                         if (f is not null && f.TimestampMs != lastFrameStamp)
                         {
                             lastFrameStamp = f.TimestampMs;
-                            // 降采样到 480×270 再编码 PNG base64
-                            string b64 = EncodePreviewPng(f.Bgra, f.Width, f.Height);
+                            // 降采样到 640×360 后 JPEG 编码（PNG→JPEG 快 5~10 倍、体积小一个数量级）
+                            string b64 = EncodePreviewJpeg(f.Bgra, f.Width, f.Height);
                             await SendAsync(PipeProtocol.EvPreview(b64));
                         }
                     }
                     catch { }
-                    await Task.Delay(500, ct);
+                    await Task.Delay(PreviewFrameIntervalMs, ct);
                 }
             }, ct);
         }
@@ -365,16 +365,35 @@ public static class WorkerProgram
         return 0;
     }
 
-    /// <summary>将 BGRA 帧降采样到 480×270 并编码为 PNG base64。WPF 位图对象需经 Dispatcher 线程创建。</summary>
-    private static string EncodePreviewPng(byte[] bgra, int sw, int sh)
+    /// <summary>
+    /// 预览帧间隔（毫秒）。挂机感知本身只需 ≤300ms 粒度，但右侧实时画面是给人看的：
+    /// 100ms ≈ 10fps，配合 JPEG(q70) 后单帧约 15~20KB，管道带宽 ~200KB/s、GUI 解码 ~2ms/帧，
+    /// 在"看得清动作"与"不抢引擎 CPU"之间取平衡。旧实现是 500ms（2fps）+ PNG，观感像卡住的截图。
+    /// </summary>
+    private const int PreviewFrameIntervalMs = 100;
+
+    /// <summary>
+    /// 将 BGRA 帧降采样到 640×360、按 UI 背景色补边、JPEG(q70) 编码后 base64。
+    /// 相比旧实现（480×270 PNG + Dispatcher.Invoke 回 UI 线程编码）：
+    ///   1) JPEG 编码比 PNG 快 5~10 倍，输出体积小一个数量级（管道与 GUI 解码同步变轻）；
+    ///   2) BitmapSource.Create 产出可 Freeze 的对象，后台线程直接编码，
+    ///      省掉每帧一次 Application.Dispatcher.Invoke 跨线程往返。
+    /// 返回的 base64 由 GUI 侧 BitmapImage 解码（自动识别 JPEG，无需改协议）。
+    /// </summary>
+    private static string EncodePreviewJpeg(byte[] bgra, int sw, int sh)
     {
-        // 降采样是纯字节运算，可在任意线程做
-        const int pw = 480, ph = 270;
+        const int pw = 640, ph = 360;
         int cw = pw, ch = (int)Math.Round((double)pw * sh / sw);
         if (ch > ph) { ch = ph; cw = (int)Math.Round((double)ph * sw / sh); }
         int offX = (pw - cw) / 2, offY = (ph - ch) / 2;
 
+        // 先铺满 UI 背景色（#0B0F14，BGRA），信箱边不会像 PNG 那样透出透明色
         var buf = new byte[pw * ph * 4];
+        for (int i = 0; i < buf.Length; i += 4)
+        {
+            buf[i] = 0x14; buf[i + 1] = 0x0F; buf[i + 2] = 0x0B; buf[i + 3] = 0xFF;
+        }
+
         for (int y = 0; y < ch; y++)
         {
             int srow = (y * sh / ch) * sw * 4;
@@ -386,24 +405,15 @@ public static class WorkerProgram
                 buf[di] = bgra[si];
                 buf[di + 1] = bgra[si + 1];
                 buf[di + 2] = bgra[si + 2];
-                buf[di + 3] = bgra[si + 3];
+                buf[di + 3] = 0xFF;
             }
         }
 
-        // 位图编码走 WPF Dispatcher 线程（WinExe 无窗口但 Application.Current 存在）
-        var dispatcher = System.Windows.Application.Current?.Dispatcher;
-        if (dispatcher is null || dispatcher.CheckAccess())
-            return EncodePngBytes(buf, pw, ph);
-        return dispatcher.Invoke(() => EncodePngBytes(buf, pw, ph));
-    }
-
-    private static string EncodePngBytes(byte[] buf, int pw, int ph)
-    {
-        var wb = new WriteableBitmap(pw, ph, 96, 96, PixelFormats.Bgra32, null);
-        wb.WritePixels(new Int32Rect(0, 0, pw, ph), buf, pw * 4, 0);
+        var source = BitmapSource.Create(pw, ph, 96, 96, PixelFormats.Bgra32, null, buf, pw * 4);
+        source.Freeze();
+        var enc = new JpegBitmapEncoder { QualityLevel = 70 };
+        enc.Frames.Add(BitmapFrame.Create(source));
         using var ms = new MemoryStream();
-        var enc = new PngBitmapEncoder();
-        enc.Frames.Add(BitmapFrame.Create(wb));
         enc.Save(ms);
         return Convert.ToBase64String(ms.ToArray());
     }

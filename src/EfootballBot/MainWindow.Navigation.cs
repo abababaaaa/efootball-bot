@@ -6,6 +6,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
 using EfootballBot.Core.Bot;
@@ -149,6 +150,7 @@ public partial class MainWindow
         if (idx < 0 || idx >= content.Children.Count) return;
         for (var k = 0; k < content.Children.Count; k++)
             content.Children[k].Visibility = k == idx ? Visibility.Visible : Visibility.Collapsed;
+        AnimatePageIn(content.Children[idx] as FrameworkElement);
 
         // 服务器测速页：关掉外层纵向滚动，内容才能拿到视口高度，
         // 表格的 Star 行才会真正向下撑满（否则 ScrollViewer 用无限高度测量，* 等于 Auto）。
@@ -159,10 +161,44 @@ public partial class MainWindow
         sv.ScrollToTop();
     }
 
+    /// <summary>切页动效时长：180 ms（短到不拖节奏，长到能看清方向）。</summary>
+    private static readonly Duration PageFade = new(TimeSpan.FromMilliseconds(180));
+
+    /// <summary>
+    /// 切页动效：淡入 + 4 px 上浮，EaseOut。页面已有的 RenderTransform 不动它（只做淡入）；
+    /// 配置关闭或窗口未加载时直接落到稳定态，避免出现半透明页面。
+    /// </summary>
+    private void AnimatePageIn(FrameworkElement? el)
+    {
+        if (el is null) return;
+        if (_cfg.Appearance.PageTransition != true || !IsLoaded)
+        {
+            el.BeginAnimation(OpacityProperty, null);
+            el.Opacity = 1;
+            return;
+        }
+
+        var ease = new CubicEase { EasingMode = EasingMode.EaseOut };
+        el.BeginAnimation(OpacityProperty, new DoubleAnimation(0.0, 1.0, PageFade) { EasingFunction = ease });
+
+        if (el.RenderTransform is null or MatrixTransform)
+        {
+            var slide = new TranslateTransform();
+            el.RenderTransform = slide;
+            slide.BeginAnimation(TranslateTransform.YProperty,
+                new DoubleAnimation(4, 0, PageFade) { EasingFunction = ease });
+        }
+    }
+
     private void ShowByTag(string tag)
     {
         void Set(FrameworkElement panel, bool on)
-            => panel.Visibility = on ? Visibility.Visible : Visibility.Collapsed;
+        {
+            var target = on ? Visibility.Visible : Visibility.Collapsed;
+            if (panel.Visibility == target) return;
+            panel.Visibility = target;
+            if (on) AnimatePageIn(panel);
+        }
 
         switch (tag)
         {
@@ -294,6 +330,7 @@ public partial class MainWindow
     {
         _cfg.Theme = _pendingTheme;
         ThemeManager.ApplyTheme(_pendingTheme);
+        ApplyWindowAppearance();   // ApplyTheme 复原了纯色外壳，材质要重新贴上去
         _cfg.Save();
         HideThemeOverlay();
     }

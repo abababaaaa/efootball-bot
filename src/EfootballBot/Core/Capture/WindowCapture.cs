@@ -174,6 +174,10 @@ public sealed class WindowCapture : ICaptureProvider
 
                     Step("⑤ 创建捕获会话");
                     _session = _pool.CreateCaptureSession(item);
+                    // Win11 22H2+：捕获时不描黄色边框（SDK 22621 起才有该属性）
+#if WINDOWS10_0_22621_0_OR_GREATER
+                    try { _session.IsBorderRequired = false; } catch { /* 老系统无此属性 */ }
+#endif
                     _session.StartCapture();
                     _running = true;
                     Step($"⑥ 捕获已开始（{_size.Width}×{_size.Height}）");

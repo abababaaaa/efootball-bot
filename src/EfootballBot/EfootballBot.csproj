@@ -10,8 +10,12 @@
     <ChildSessionBeta Condition="'$(ChildSessionBeta)' == ''">false</ChildSessionBeta>
     <!-- 默认只构建 net10（单数 TargetFramework，dotnet publish 无需 -f）；
          需要验证 net11 GA 就绪性时加 -p:BuildNet11=true（需 .NET 11 SDK，切换为复数 TargetFrameworks） -->
-    <TargetFramework Condition="'$(BuildNet11)' != 'true'">net10.0-windows10.0.19041.0</TargetFramework>
-    <TargetFrameworks Condition="'$(BuildNet11)' == 'true'">net10.0-windows10.0.19041.0;net11.0-windows10.0.19041.0</TargetFrameworks>
+    <!-- 目标平台 22621：只为拿到 Win11 22H2 才有的 API 投影（GraphicsCaptureSession.IsBorderRequired）。
+         运行时下限仍是 19041（Win10 2004）：SupportedOSPlatformVersion 单独压回去，
+         所以 Win10 用户照常能跑，只是那些 API 走运行时守卫/回退。 -->
+    <TargetFramework Condition="'$(BuildNet11)' != 'true'">net10.0-windows10.0.22621.0</TargetFramework>
+    <TargetFrameworks Condition="'$(BuildNet11)' == 'true'">net10.0-windows10.0.22621.0;net11.0-windows10.0.22621.0</TargetFrameworks>
+    <SupportedOSPlatformVersion>10.0.19041.0</SupportedOSPlatformVersion>
     <UseWPF>true</UseWPF>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
@@ -21,9 +25,9 @@
     <RootNamespace>EfootballBot</RootNamespace>
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
-    <!-- 测试版版本号按 4 段测试版约定（未发版，仅本地构建）；正式版保持 6.1 -->
-    <Version Condition="'$(ChildSessionBeta)' != 'true'">6.4.3.0</Version>
-    <Version Condition="'$(ChildSessionBeta)' == 'true'">6.4.3.1</Version>
+    <!-- 测试版版本号按 4 段测试版约定（未发版，仅本地构建）；正式版按 x.y 递增 -->
+    <Version Condition="'$(ChildSessionBeta)' != 'true'">7.0.0.0</Version>
+    <Version Condition="'$(ChildSessionBeta)' == 'true'">7.0.0.1</Version>
     <DefineConstants Condition="'$(ChildSessionBeta)' == 'true'">$(DefineConstants);CHILD_SESSION_BETA</DefineConstants>
     <Product>eFootball 挂机助手</Product>
     <Company>EfootballBot</Company>
@@ -42,6 +46,23 @@
     <IncludeAllContentForSelfExtract>true</IncludeAllContentForSelfExtract>
     <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
   </PropertyGroup>
+
+  <!-- 进程内手柄代理：构建产物里带上它，设置页「投放代理到游戏目录」才有源文件。
+       源码/构建脚本在 tools/xinput-proxy（未构建时不存在 → 条件跳过，不影响构建）。 -->
+  <ItemGroup>
+    <None Include="..\..\tools\xinput-proxy\xinput1_4.dll"
+          Condition="Exists('..\..\tools\xinput-proxy\xinput1_4.dll')"
+          Link="xinput1_4.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          ExcludeFromSingleFile="true" />
+    <None Include="..\..\tools\xinput-proxy\xinput1_3.dll"
+          Condition="Exists('..\..\tools\xinput-proxy\xinput1_3.dll')"
+          Link="xinput1_3.dll"
+          CopyToOutputDirectory="PreserveNewest"
+          CopyToPublishDirectory="PreserveNewest"
+          ExcludeFromSingleFile="true" />
+  </ItemGroup>
 
   <ItemGroup>
     <!-- 主窗口 / exe 图标（Resource 供 WPF 窗口 Icon 引用，ApplicationIcon 供 exe 资源） -->
@@ -67,6 +88,9 @@
          与 ViGEmBus 内核驱动通信；驱动本体由内置官方安装器按需静默安装（见 DriverInstaller） -->
     <PackageReference Include="Nefarius.ViGEm.Client" Version="1.21.256" />
     <PackageReference Include="WPF-UI" Version="4.3.0" />
+    <!-- 崩溃转储归因（ClrMD）：把 minidump 解析成「异常类型 / 出错线程 / 托管栈」，
+         反馈包里直接带结论，省掉每次「用户发来 dump 看不懂」的往返。 -->
+    <PackageReference Include="Microsoft.Diagnostics.Runtime" Version="4.2.751201" />
     <!-- YOLO letterbox 预处理已自写（ImageScaling，双线性+灰边，测试工程用 OpenCV 参照实现做逐像素等价对照）；
          主工程不再依赖 OpenCvSharp（原 OpenCvSharpExtern.dll 58.9MB + ffmpeg 25.2MB 随包剔除，发布体积 -~50MB 压缩后） -->
   </ItemGroup>
@@ -92,6 +116,11 @@
          全部历史版本，不能依赖联网拉 GitHub（国内常被墙）。发版流程本就要求先写 CHANGELOG，
          所以这份内容与 Release 正文同源。 -->
     <EmbeddedResource Include="..\..\CHANGELOG.md" LogicalName="CHANGELOG.md" />
+    <!-- 局域网监控页（手机端）：HTML/CSS/JS 以嵌入资源进程序集，由 MonitorServer
+         以 gzip + ETag 直接吐；单文件发布时随 exe 走，不新增外部文件。 -->
+    <EmbeddedResource Include="Assets\web\monitor.html" LogicalName="EfootballBot.web.monitor.html" />
+    <EmbeddedResource Include="Assets\web\monitor.css" LogicalName="EfootballBot.web.monitor.css" />
+    <EmbeddedResource Include="Assets\web\monitor.js" LogicalName="EfootballBot.web.monitor.js" />
     <!-- eFootball 服务器种子表（155 条：游戏服 5735 / 更新服 CloudFront 443 / 候选服），
          来源=ETK 工具本机实测清单；网络页首次运行导入为默认目标 -->
     <EmbeddedResource Include="Core\System\efootball-servers.json" LogicalName="EfootballBot.efootball-servers.json" />

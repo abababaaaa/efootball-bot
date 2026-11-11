@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Media;
 using Wpf.Ui.Appearance;
+using Wpf.Ui.Controls;
 
 namespace EfootballBot.Core.UI;
 
@@ -47,6 +48,56 @@ public static class ThemeManager
         catch
         {
             // 主题服务尚未初始化时忽略：自定义 Token 仍然生效
+        }
+    }
+
+    /// <summary>
+    /// 窗口材质（Mica / Acrylic / Tabbed）。必须在 <see cref="ApplyTheme"/> 之后调用：
+    /// 本方法会把 WindowBg 换成同色 90% 不透明的版本，材质才从外壳透得出来；
+    /// 不支持的系统（Win10 21H2 及更早）或配置为 None 时自动回退纯色，观感与旧版一致。
+    /// </summary>
+    /// <returns>是否真的启用了材质。</returns>
+    public static bool ApplyWindowBackdrop(Window? window, string? preference)
+    {
+        if (window is null || Application.Current is null) return false;
+
+        var want = (preference ?? "Auto").Trim().ToLowerInvariant() switch
+        {
+            "none" => WindowBackdropType.None,
+            "acrylic" => WindowBackdropType.Acrylic,
+            "tabbed" => WindowBackdropType.Tabbed,
+            "mica" => WindowBackdropType.Mica,
+            _ => WindowBackdropType.Mica,   // Auto：先按 Mica 试，IsSupported 决定要不要回退
+        };
+
+        try
+        {
+            if (want != WindowBackdropType.None && !WindowBackdrop.IsSupported(want))
+                want = WindowBackdropType.None;
+
+            if (want == WindowBackdropType.None)
+            {
+                WindowBackdrop.RemoveBackdrop(window);
+                if (Application.Current.Resources["WindowBg"] is Brush solid) window.Background = solid;
+                return false;
+            }
+
+            WindowBackdrop.ApplyBackdrop(window, want);
+
+            // 外壳底色 0xE6（90%）不透明：材质透得出来，同时在没有 Mica 的机器上
+            // 与原来的纯色观感几乎没有差别。
+            if (Application.Current.Resources["WindowBg"] is SolidColorBrush cur)
+            {
+                var glass = new SolidColorBrush(Color.FromArgb(0xE6, cur.Color.R, cur.Color.G, cur.Color.B));
+                glass.Freeze();
+                Application.Current.Resources["WindowBg"] = glass;
+                window.Background = glass;
+            }
+            return true;
+        }
+        catch
+        {
+            return false;   // 材质失败不影响功能：保留纯色外壳
         }
     }
 

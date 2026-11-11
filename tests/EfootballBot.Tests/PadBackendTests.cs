@@ -86,14 +86,15 @@ public class PadBackendTests
     }
 
     [Fact]
-    public void 后端策略_下拉顺序映射_单后端()
+    public void 后端策略_下拉顺序映射()
     {
-        Assert.Equal(0, PadBackendInfo.UiIndexOf(PadBackendKind.Vigem));
-        Assert.Equal(0, PadBackendInfo.UiIndexOf((PadBackendKind)99)); // 未知值兜底默认
+        // v7.0 起两个后端（代理在前、ViGEm 在后）：下拉顺序与索引必须能双向往返
+        for (int i = 0; i < PadBackendInfo.UiOrder.Length; i++)
+            Assert.Equal(i, PadBackendInfo.UiIndexOf(PadBackendInfo.FromUiIndex(i)));
 
-        Assert.Equal(PadBackendKind.Vigem, PadBackendInfo.FromUiIndex(0));
-        Assert.Equal(PadBackendKind.Vigem, PadBackendInfo.FromUiIndex(-1)); // 越界兜底默认
+        Assert.Equal(PadBackendKind.Vigem, PadBackendInfo.FromUiIndex(-1));  // 越界兜底 Vigem
         Assert.Equal(PadBackendKind.Vigem, PadBackendInfo.FromUiIndex(99));
+        Assert.Equal(0, PadBackendInfo.UiIndexOf((PadBackendKind)99));      // 未知值归首项
     }
 
     /// <summary>虚拟总线后代判定：ViGEmBus 命名节点与 DS4 的 ROOT\SYSTEM 根枚举拓扑必须命中，

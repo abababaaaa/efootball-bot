@@ -259,8 +259,9 @@ public sealed class UpdateConfig
 public sealed class PadConfig
 {
     /// <summary>
-    /// 虚拟手柄后端。唯一后端 Vigem（ViGEmBus 虚拟 Xbox 360，XInput 玩家 1 全通道被
-    /// eFootball 消费）；旧配置遗留的 HIDMaestro 枚举值加载时归一化（同为 0，天然兼容）。
+    /// 虚拟手柄后端。v6.5 起正式构建同时提供 Vigem（ViGEmBus 虚拟 Xbox 360）与
+    /// XInputProxy（目标游戏进程内的 xinput1_3 代理，不占设备、不串前台）；
+    /// 默认仍是 Vigem（老用户行为不变），需要"完全后台"时在设置里切到代理。
     /// </summary>
     public PadBackendKind Backend { get; set; } = PadBackendKind.Vigem;
 
@@ -270,8 +271,9 @@ public sealed class PadConfig
     /// </summary>
     public void MigrateDefaults()
     {
-        if (Backend != PadBackendKind.Vigem)
-            Backend = PadBackendKind.Vigem;
+        // v6.5 起代理已在正式构建开放；Normalize 仍保留：未知值归 Vigem，
+        // 且 ProxyBackendEnabled 可作为编译期急停位把代理压回 ViGEm。
+        Backend = PadBackendInfo.Normalize(Backend);
     }
 }
 
@@ -585,6 +587,19 @@ public sealed class MonitorConfig
 }
 
 /// <summary>
+/// 界面外观：窗口材质（Win11 Mica/Acrylic）与切页动效。
+/// 两项都是纯观感开关，不支持的系统/关闭时行为与旧版完全一致。
+/// </summary>
+public sealed class AppearanceConfig
+{
+    /// <summary>窗口材质：Auto（Win11 用 Mica，Win10 自动回退纯色）/ Mica / Acrylic / Tabbed / None。</summary>
+    public string Backdrop { get; set; } = "Auto";
+
+    /// <summary>切页动效：180 ms 淡入 + 4 px 上浮。关闭后页面瞬时切换。</summary>
+    public bool PageTransition { get; set; } = true;
+}
+
+/// <summary>
 /// Rust 视觉 sidecar（vision-svc）配置。默认关闭：关闭时捕获/OCR 全走原有进程内实现，
 /// 行为与旧版一致；打开后由外置 Rust 进程接管捕获（可再选它跑 OCR/YOLO），失败自动回退。
 /// </summary>
@@ -675,6 +690,9 @@ public sealed class AppConfig
 
     /// <summary>日志历史查看器显示过滤：取值同 RuntimeLogFilter。</summary>
     public string HistoryLogFilter { get; set; } = "All";
+
+    // —— 界面外观：窗口材质 / 切页动效（失败自动回退，不影响功能）——
+    public AppearanceConfig Appearance { get; set; } = new();
 
     // —— 全局停止热键 ——
     public HotkeyConfig Hotkey { get; set; } = new();

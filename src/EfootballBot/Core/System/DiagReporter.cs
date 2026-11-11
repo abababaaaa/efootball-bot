@@ -323,6 +323,25 @@ if ($steam) {
             }
             report.AppendLine($"crash dumps on disk: newest {dumps[0].Name} ({dumps[0].Length / 1024 / 1024} MB, {dumps[0].LastWriteTime:yyyy-MM-dd HH:mm})");
             foreach (var n in notes) report.AppendLine(n);
+
+            // 归因：直接把 dump 解析成结论写进包（ClrMD），省掉「拿回 dump 还要找工具打开」
+            try
+            {
+                var newest = dumps[0];
+                if (newest.Length <= 100 * 1024 * 1024)
+                {
+                    var analysis = DumpAnalyzer.Analyze(newest.FullName);
+                    File.WriteAllText(Path.Combine(dst, newest.Name + ".analysis.txt"), analysis, Encoding.UTF8);
+                    report.AppendLine("--- crash analysis (ClrMD) ---");
+                    foreach (var line in analysis.Split('\n').Take(14)) report.AppendLine(line.TrimEnd());
+                    report.AppendLine($"--- end crash analysis（完整内容见 app_crash 目录下的 {newest.Name}.analysis.txt）---");
+                }
+            }
+            catch (Exception ex)
+            {
+                report.AppendLine($"(crash analysis failed: {ex.Message})");
+            }
+
             return $"crash dumps copied: {copied} -> app_crash\\";
         }
         catch (Exception ex)

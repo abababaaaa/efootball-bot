@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="color-scheme" content="dark">
+<meta name="theme-color" content="#0C1015">
+<title>挂机监控</title>
+<link rel="stylesheet" href="/assets/monitor.css">
+</head>
+<body>
+
+<header class="bar">
+  <div class="ident">
+    <div class="title">eFootball 挂机监控</div>
+    <div class="sub" id="sub">等待连接…</div>
+  </div>
+  <span class="pill" id="pill" data-state="idle"><i></i><span id="pillText">连接中</span></span>
+</header>
+
+<main>
+  <section class="card">
+    <div class="kpi">
+      <div class="hot"><b id="kMatches">—</b><span>场次</span></div>
+      <div><b id="kKey">—</b><span>关键</span></div>
+      <div><b id="kMaxed">—</b><span>满级</span></div>
+      <div><b id="kElapsed">—</b><span>用时</span></div>
+    </div>
+    <div class="meta">
+      <div class="r"><span class="k">当前场景</span><span class="v" id="mScene">—</span></div>
+      <div class="r"><span class="k">画面感知</span><span class="v"><span class="chip" id="mScreen">—</span></span></div>
+      <div class="r"><span class="k">最近错误</span><span class="v err" id="mError">无</span></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <div class="card-h"><h2>比赛 / 满级动态</h2><em id="evCount">—</em></div>
+    <ul class="tl" id="events"><li class="muted">等待事件…</li></ul>
+  </section>
+
+  <section class="card">
+    <div class="card-h"><h2>实时日志</h2><em id="logCount">—</em></div>
+    <div class="log" id="log"><div class="row muted">等待日志…</div></div>
+  </section>
+</main>
+
+<footer>
+  <button class="primary" data-cmd="pause">暂停</button>
+  <button class="ghost" data-cmd="resume">继续</button>
+  <button class="ghost" data-cmd="step">单步</button>
+  <button class="danger" data-cmd="stop">停止</button>
+</footer>
+
+<div class="toast" id="toast"></div>
+<script src="/assets/monitor.js" defer></script>
+</body>
+</html>

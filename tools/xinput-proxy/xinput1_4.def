@@ -1,0 +1,17 @@
+; xinput1_4.def —— 序号必须与 System32\xinput1_4.dll 完全一致（实测 base=1）
+;   1 DllMain          5 XInputEnable       8 XInputGetKeystroke
+;   2 XInputGetState   6 (未用)             10 XInputGetAudioDeviceIds
+;   3 XInputSetState   7 XInputGetBatteryInformation
+;   4 XInputGetCapabilities
+; 用途：SDL2 / 中间件用 LoadLibrary("XInput1_4.dll") 动态加载时，游戏目录这份会被优先命中，
+;       从而把"真实手柄"也挡在游戏之外（XInput 1_3 只覆盖游戏自身的静态导入）。
+LIBRARY xinput1_4
+
+EXPORTS
+    XInputGetState                 @2
+    XInputSetState                 @3
+    XInputGetCapabilities          @4
+    XInputEnable                   @5
+    XInputGetBatteryInformation    @7
+    XInputGetKeystroke             @8
+    XInputGetAudioDeviceIds        @10

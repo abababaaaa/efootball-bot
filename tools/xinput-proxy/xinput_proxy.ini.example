@@ -1,0 +1,18 @@
+; xinput_proxy.ini —— 放在代理 DLL 同目录（游戏 Binaries\Win64）
+[proxy]
+; 只对本进程名生效；其他进程加载本 DLL 也只会原样透传
+TargetProcess=eFootball.exe
+; 1=国际服(PAD_TARGET_GLOBAL) 2=国服(PAD_TARGET_CN)
+TargetId=1
+; 共享内存名（与 Worker 侧一致）
+SharedName=Local\EfootballBot.Pad.v1
+; 1=启用接管；0=永远透传（用于回归对比测试）
+Enable=1
+; 1=写 xinput_proxy.log
+Log=1
+; 1=反 Steam overlay hook（Steam 会把我们的导出改成 JMP 到它自己的处理器）
+CounterHook=1
+; 心跳超时（ms），默认 1500
+HeartbeatTimeoutMs=1500
+; 1=只给"游戏自己目录里的模块"喂合成状态（Steam overlay 等注入模块一律透传），默认 1
+CallerScope=1

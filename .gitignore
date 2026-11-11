@@ -75,3 +75,8 @@ rust/bin/
 # 编辑器/手工备份
 *.bak
 *.bak[0-9]*
+
+# 便携编译工具链（本机构建用，约 750MB，不入库）
+tools/_toolchain/
+# 代理自测运行产物
+tools/xinput-proxy/tests/run/

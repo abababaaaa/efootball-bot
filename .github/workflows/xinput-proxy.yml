@@ -1,0 +1,36 @@
+name: xinput-proxy
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - 'tools/xinput-proxy/**'
+      - '.github/workflows/xinput-proxy.yml'
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Build xinput1_3.dll
+        working-directory: tools/xinput-proxy
+        run: |
+          cl /nologo /O2 /MT /LD /W4 /GS- /D_CRT_SECURE_NO_WARNINGS xinput1_3.c /link /DEF:xinput1_3.def /OUT:xinput1_3.dll kernel32.lib user32.lib
+
+      - name: Verify exports
+        working-directory: tools/xinput-proxy
+        run: |
+          dumpbin /exports xinput1_3.dll
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: xinput-proxy-x64
+          path: |
+            tools/xinput-proxy/xinput1_3.dll
+            tools/xinput-proxy/xinput_proxy.ini.example

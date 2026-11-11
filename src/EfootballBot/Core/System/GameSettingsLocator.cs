@@ -69,39 +69,170 @@ public static class GameSettingsLocator
     /// </summary>
     public static string? LocateGameExe(bool intl, params string?[] hintDirs)
     {
+        // 候选池 + 打分：进程 > Steam 库(有 appmanifest 的活副本) > 提示目录 > Steam 默认路径。
+        // 本机实测：C 盘库有 appmanifest_1665460.acf（StateFlags=4），D 盘库只剩 2024 年的死副本；
+        // 只看"先枚举到哪个库/哪个提示"会把代理投给死副本。
+        var candidates = new List<(string Exe, int Score)>();
+
+        if (intl && LocateGameExeFromRunningProcess() is { } running)
+            candidates.Add((running, 3000));
+
+        if (intl)
+        {
+            foreach (var library in EnumerateSteamLibraries())
+            {
+                var found = FindGameExeNear(Path.Combine(library, "steamapps", "common", IntlGameDirName), intl);
+                if (found is not null) candidates.Add((found, 1000 + ScoreSteamLibrary(library)));
+            }
+        }
+
         foreach (var dir in hintDirs)
         {
+            if (string.IsNullOrWhiteSpace(dir)) continue;
             var found = FindGameExeNear(dir, intl);
-            if (found is not null) return found;
+            if (found is not null) candidates.Add((found, 800));
         }
-        if (!intl) return null;
-        foreach (var library in EnumerateSteamLibraries())
+
+        if (intl)
         {
-            var found = FindGameExeNear(Path.Combine(library, "steamapps", "common", IntlGameDirName), intl);
-            if (found is not null) return found;
+            var fallback = FindGameExeNear(Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
+                "Steam", "steamapps", "common", IntlGameDirName), intl);
+            if (fallback is not null) candidates.Add((fallback, 500));
         }
-        return FindGameExeNear(Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-            "Steam", "steamapps", "common", IntlGameDirName), intl);
+
+        if (candidates.Count == 0) return null;
+        return candidates
+            .OrderByDescending(c => c.Score)
+            .ThenByDescending(c => SafeFileTime(c.Exe))
+            .First().Exe;
     }
 
-    /// <summary>从 startDir 起向上逐级找游戏本体 exe：国际服 {级}\eFootball.exe（根目录），
-    /// 国服 {级}\eFootball\Binaries\Win64\eFootballOnline.exe，最多向上 6 级。</summary>
+    /// <summary>
+    /// 从 startDir 起向上逐级找游戏本体 exe，最多向上 6 级。
+    /// 国际服的安装嵌套层级**不统一**：实测本机是
+    /// {库}\steamapps\common\eFootball\eFootball\eFootball\Binaries\Win64\eFootball.exe
+    /// （比文档里的常规布局多一层 eFootball），所以按候选表逐个试，最后再用限深递归兜底。
+    /// 国服固定 {级}\eFootball\Binaries\Win64\eFootballOnline.exe。
+    /// </summary>
     public static string? FindGameExeNear(string? startDir, bool intl)
     {
-        string relative = intl
-            ? IntlGameExeName + ".exe"
-            : Path.Combine("eFootball", "Binaries", "Win64", CnGameExeName + ".exe");
+        if (string.IsNullOrWhiteSpace(startDir)) return null;
+
+        string[] relatives = intl
+            ? new[]
+            {
+                @"eFootball.exe",
+                @"Binaries\Win64\eFootball.exe",
+                @"eFootball\Binaries\Win64\eFootball.exe",
+                @"eFootball\eFootball\Binaries\Win64\eFootball.exe",
+            }
+            : new[]
+            {
+                @"eFootball\Binaries\Win64\" + CnGameExeName + ".exe",
+                @"Binaries\Win64\" + CnGameExeName + ".exe",
+            };
+        string exeName = intl ? IntlGameExeName + ".exe" : CnGameExeName + ".exe";
+
         var dir = startDir;
         for (int depth = 0; dir is not null && depth < MaxUpwardLevels; depth++)
         {
-            var candidate = Path.Combine(dir, relative);
-            if (File.Exists(candidate)) return candidate;
+            foreach (var relative in relatives)
+            {
+                var candidate = Path.Combine(dir, relative);
+                if (File.Exists(candidate)) return candidate;
+            }
+
+            // 候选表全落空时（非常规嵌套）：在"像游戏根目录"的一级做限深递归
+            if (intl && depth == 0 && Directory.Exists(dir) &&
+                (Path.GetFileName(dir).Equals(IntlGameDirName, StringComparison.OrdinalIgnoreCase)
+                 || File.Exists(Path.Combine(dir, "LauncherPatcher.exe"))))
+            {
+                var deep = SearchExeBounded(dir, exeName, maxDepth: 5);
+                if (deep is not null) return deep;
+            }
 
             var parent = Directory.GetParent(dir)?.FullName;
             if (parent is null || string.Equals(parent, dir, StringComparison.OrdinalIgnoreCase))
                 break;
             dir = parent;
+        }
+        return null;
+    }
+
+    /// <summary>限深广度搜索 exe（跳过 pak/cpk 资源目录）。Steam 库布局怪异时的最后兜底。</summary>
+    private static string? SearchExeBounded(string root, string exeName, int maxDepth)
+    {
+        var queue = new Queue<(string Dir, int Depth)>();
+        queue.Enqueue((root, 0));
+        while (queue.Count > 0)
+        {
+            var (dir, depth) = queue.Dequeue();
+            try
+            {
+                var candidate = Path.Combine(dir, exeName);
+                if (File.Exists(candidate)) return candidate;
+            }
+            catch { }
+            if (depth >= maxDepth) continue;
+            try
+            {
+                foreach (var sub in Directory.EnumerateDirectories(dir))
+                {
+                    var name = Path.GetFileName(sub);
+                    if (name.Equals("pak", StringComparison.OrdinalIgnoreCase)
+                        || name.Equals("cpk", StringComparison.OrdinalIgnoreCase)
+                        || name.Equals("Paks", StringComparison.OrdinalIgnoreCase)
+                        || name.Equals("Content", StringComparison.OrdinalIgnoreCase)) continue;
+                    queue.Enqueue((sub, depth + 1));
+                }
+            }
+            catch { }
+        }
+        return null;
+    }
+
+    /// <summary>Steam 库打分：有 eFootball 的 appmanifest 且 StateFlags=4 → 1000；否则 0。</summary>
+    private static int ScoreSteamLibrary(string library)
+    {
+        try
+        {
+            var acf = Path.Combine(library, "steamapps", "appmanifest_" + IntlSteamAppId + ".acf");
+            if (!File.Exists(acf)) return 0;
+            var text = File.ReadAllText(acf);
+            return text.Contains("\"StateFlags\"\t\t\"4\"") || text.Contains("\"StateFlags\"\t\t\"6\"")
+                ? 900
+                : 200;
+        }
+        catch { return 0; }
+    }
+
+    private static long SafeFileTime(string path)
+    {
+        try { return File.GetLastWriteTimeUtc(path).Ticks; } catch { return 0; }
+    }
+
+    /// <summary>① 运行中的游戏进程 → 游戏本体 exe 路径（跨提权可读）。</summary>
+    private static string? LocateGameExeFromRunningProcess()
+    {
+        foreach (var name in new[] { IntlGameExeName, "eFootball2024", "efootballsteam" })
+        {
+            try
+            {
+                foreach (var proc in Process.GetProcessesByName(name))
+                {
+                    try
+                    {
+                        var exe = GetProcessImagePath(proc.Id);
+                        if (!string.IsNullOrEmpty(exe) && File.Exists(exe)
+                            && Path.GetFileName(exe).Equals(IntlGameExeName + ".exe", StringComparison.OrdinalIgnoreCase))
+                            return exe;
+                    }
+                    catch { }
+                    finally { proc.Dispose(); }
+                }
+            }
+            catch { }
         }
         return null;
     }

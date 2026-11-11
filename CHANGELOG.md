@@ -3,6 +3,28 @@
 正式版每次发版的内容写在这里，CI 发 Release 时自动把对应版本段落贴进 GitHub Release 正文。
 格式约定：`## v<版本号>` 开头的段落，段内可用 `-` 列点；CI 按 tag 名精确匹配段落。
 
+## v7.0
+
+- 新增「进程内代理」手柄后端（正式构建可用，默认仍是 ViGEmBus 接管）：把 `xinput1_3.dll` 放进目标游戏的 `Binaries\Win64`，Worker 只写共享内存，代理在**游戏进程内**把 XInput 玩家 1 换成 bot 状态。系统 XInput 一点没动 → 前台其他应用（Steam / 浏览器 / 别的游戏 / Xbox Game Bar）收不到 bot 输入，`joy.cpl` 里不会多出手柄，游戏最小化/停靠在虚拟显示器上照常响应
+- 为什么不是 HidHide：实测 XInput 走 XUSB，不经过 HID 过滤层（2026-10-12 实机，v3.3.2 已剔除该链路）；按进程隔离 XInput 只有"进程内代理"这一条路
+- 按键投递的硬事实：eFootball.exe 静态**按序号**导入 `XINPUT1_3.dll` 的 #2（GetState）/ #3（SetState），全文没有 `XInputGetState` 名称字符串 → 代理用 `.def` 锁死序号 1..8 与 #100..#103，只按名字导出会让游戏加载阶段直接退出
+- 安全兜底：共享内存带 1.5s 心跳，Worker 崩溃/停止后代理立即退回透传（游戏立刻回到真实手柄）；停止挂机先写 PANIC 全松手再撤 ACTIVE，不会卡半按下的键；代理未被游戏读取时日志给出明确提示（未投放 / 被 Steam overlay 绕过 / 需换回 ViGEmBus）
+- Steam overlay 兼容：`gameoverlayrenderer.dll` 会把代理导出的 `XInputGetState` 改写成 JMP 直连 System32（绕过过滤），代理每秒自检并把跳转抢回来（`CounterHook=1`，可关）
+- 新增「手柄节点卫生」`PadNodeHygiene`：识别真实手柄是否在用（PnP 节点 + XInput slot0 双证据）；**未在用**时才 `pnputil /remove-device` 卸载 ViGEm 残留节点 → `/scan-devices` 重新枚举 →（可选）`/restart-device` 重启 ViGEmBus 根设备，卸载清单先落盘、幂等、失败不阻断挂机；真实手柄在用则零写操作
+- 后端选择：设置 →「手柄与输入」新增「手柄后端」卡片（之前这一页只有一张隐藏卡片，等于空白）：下拉可在「进程内代理（不占设备）」/「ViGEmBus 接管」之间切换，切换即时落盘、下次开始挂机生效
+- 同一张卡片提供「投放代理到游戏目录」「撤回代理」「重新检测」三个按钮与状态行：自动定位国际服/国服 `Binaries\Win64`，写入 `xinput1_3.dll` + `xinput_proxy.ini`（TargetId 按服自动填 1/2），撤回时删文件并还原 `.bak`；程序目录自带代理 DLL（单文件发布时以 `ExcludeFromSingleFile` 放在 exe 旁边）
+- 代理连接后会校验"游戏真的读到共享内存"，未读到给 WARN 并提示投放路径；代理通道失败自动回退 ViGEm
+- 代理自带工具链：`tools/xinput-proxy`（C 源码 + .def + 共享内存 ABI + C# 写侧 + 本地/CI 构建 + 序号校验器 + 13 项功能自测 + 投放脚本）、`tools/pad-node-hygiene`（PowerShell 勘验脚本 + C# 诊断小工具）
+- 测试：代理自测 13/13（合成状态、槽位透传、能力表、PANIC、心跳过期、目标位隔离、回写判活）、ini 带 BOM 自愈 13/13、非白名单进程不串台 2/2、ABI 偏移 C↔C# 逐项一致；单测新增 23 项（ABI 偏移/seqlock/D-Pad 互斥/闸门/归类/pnputil 参数/后端急停位）
+- 内部：新增 `SharedPadWriter` / `ProxyPad` / `PadNodeHygiene` / `PadBackendKind.XInputProxy`；`PadBackendInfo` 增加 `Normalize`（未知值归 Vigem）与编译期急停位 `ProxyBackendEnabled`
+- 防外泄给 Steam 覆盖层（`CallerScope=1`，默认开）：代理返回状态前用调用栈回溯定位**第一个非本模块的调用方**，只有路径在游戏 `Binaries\Win64` 下的模块（游戏 exe / EF*.dll / SDL2.dll）才喂合成状态；`gameoverlayrenderer64.dll`、RTSS、Discord/NVIDIA 注入模块一律透传真实手柄，并在 `xinput_proxy.log` 记一条「非游戏模块的 XInput 调用已透传」
+- 同时投放 `xinput1_4.dll` 代理（导出序号对齐 System32：2/3/4/5/7/8/10）：`XInput1_3` 只覆盖游戏自身静态导入，SDL2/中间件走 `LoadLibrary("XInput1_4.dll")` 的路径由这份补上
+- 设置页「手柄与输入」解锁「挂机时禁止真实手柄输入（设备级，停止挂机自动恢复）」：代理模式下也会执行，兜底 DirectInput / raw HID（国服客户端 SDL2）；不勾选则只保留 XInput 两层隔离，其他应用挂机时仍可用手柄
+- 修复国际服游戏目录定位：安装嵌套层级不统一（本机实测 `...\common\eFootball\eFootball\Binaries\Win64`），改为候选路径表 + 限深递归；Steam 多库按 `appmanifest_<appid>.acf` 打分选活副本（C 盘有 manifest、D 盘只剩 2024 旧副本），游戏在跑时直接用进程映像路径
+- 修复代理 ini 里 `SharedName` 被写成两个反斜杠（逐字字符串转义未剥）导致代理与 Worker 共享内存名不匹配、永远读不到状态的问题；投放写盘改为普通字符串，并在代理侧对「共享内存不存在」写日志
+- 修复代理模式下仍执行 ViGEm 专属判据导致的误报：驱动安装、真实手柄让位、玩家 1 微码验证、每 5 分钟的 slot0 归属巡检现在只在 ViGEm 主通道运行；代理模式只校验「游戏是否真的读到共享内存」
+- 投放脚本/按钮：游戏运行中替换 DLL 用「改名让位」；程序目录随发布带 `xinput1_3.dll` + `xinput1_4.dll`（单文件发布 `ExcludeFromSingleFile`），设置页一键投放/撤回
+
 ## v6.4.3
 
 - 弹窗按键统一规则（用户 2026-11-10 实机）：先看弹窗上有几个按键——**一个按键** 就直接按下一步（A）；**两个及以上** 先判断白底高亮那枚是不是 确认 / 进行 / OK / 下一步 / 进入 / 继续 / 领取 这类推进键，是 → 直接 A，不是（高光停在 取消 / 返回 / 关闭 上）→ 按两枚按钮的上下关系把光标往上或往下挪一格再按 A。新增共享判定 `PopupBrain`（纯函数 + 按钮底色像素探针），五个场景（周活动 / 我的联赛 / AI 天梯 / 天梯巅峰赛 / 国服周活动）共用同一套动作，并新增「下移确认」动作
