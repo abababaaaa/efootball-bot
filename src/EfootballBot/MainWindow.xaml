@@ -517,6 +517,8 @@
                                      Tag="NetworkPanel:0" Checked="SecTab_Checked"/>
                         <RadioButton x:Name="NetTabMonitor" GroupName="NetNav" Content="游戏内监控"
                                      Tag="NetworkPanel:1" Checked="SecTab_Checked"/>
+                        <RadioButton x:Name="NetTabLine" GroupName="NetNav" Content="对战线路"
+                                     Tag="NetworkPanel:2" Checked="SecTab_Checked"/>
                     </StackPanel>
 
                     <StackPanel x:Name="SubMenuGithub" Orientation="Horizontal" Visibility="Collapsed">
@@ -2895,7 +2897,9 @@
             <ScrollViewer x:Name="NetworkPanel" Grid.Row="2" Visibility="Collapsed"
                           Style="{StaticResource PageScroll}">
                 <Grid Margin="0,2,0,0">
-                    <Grid.RowDefinitions><RowDefinition Height="*"/><RowDefinition Height="Auto"/></Grid.RowDefinitions>
+                    <!-- 三个分段共用同一行：同一时刻只有一段可见（ShowSection 切段），因此不需要行定义。
+                         旧实现用 Grid.Row=0/1/2 + 行定义，折叠掉的两行若含 * 会把剩下的一段顶到页面底部并截断
+                         （就是 v7.0.1 修复前「游戏内监控 / 对战线路」半个卡片的现象）。 -->
 
                     <!-- ===== 国际服网络监测 ===== -->
                     <Border Style="{StaticResource Card}" Margin="0,0,0,0" VerticalAlignment="Stretch">
@@ -3007,94 +3011,109 @@
                         </Grid>
                     </Border>
 
-                    <!-- ===== 游戏内连接监控（Npcap 抓真实 UDP 连接 + 每秒 ping，可开悬浮窗） ===== -->
-                    <Border Grid.Row="1" Style="{StaticResource Card}" Margin="0,0,0,0">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Style="{StaticResource H2}">游戏内连接监控</TextBlock>
-                                <Ellipse x:Name="DotInGame" Width="8" Height="8" Margin="12,0,6,0"
-                                         VerticalAlignment="Center" Fill="{DynamicResource EnvDotIdle}"/>
-                                <TextBlock x:Name="TxtInGameState" Text="未启动" FontSize="12"
-                                           VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"/>
+                    <StackPanel VerticalAlignment="Top">
+                        <!-- ===== 游戏内连接监控（Npcap 抓真实 UDP 连接 + 每秒 ping，可开悬浮窗） ===== -->
+                        <Border Style="{StaticResource Card}" Margin="0,0,0,0">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                    <TextBlock Style="{StaticResource H2}">游戏内连接监控</TextBlock>
+                                    <Ellipse x:Name="DotInGame" Width="8" Height="8" Margin="12,0,6,0"
+                                             VerticalAlignment="Center" Fill="{DynamicResource EnvDotIdle}"/>
+                                    <TextBlock x:Name="TxtInGameState" Text="未启动" FontSize="12"
+                                               VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"/>
+                                </StackPanel>
+                                <TextBlock FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
+                                           Text="只统计属于 eFootball.exe 的 UDP 流（含加速器隧道，按 PID 取端口白名单），远端不会再认错。延迟只显示游戏客户端自己算的值（读内存，需先在 gameping.json 里定位偏移；国际服带进程保护，实测读不到，读不到就显示「—」，不再拿节点/ICMP 的数冒充）。抖动与上下行 pps 来自抓包实测，是当场体验的硬指标。"/>
+                                <WrapPanel Margin="0,10,0,0">
+                                    <Button x:Name="BtnInGameMonitor" Content="启动监控" Style="{StaticResource GhostBtn}"
+                                            Padding="14,7" Click="BtnInGameMonitor_Click"/>
+                                    <Button x:Name="BtnInGameOverlay" Content="显示悬浮窗" Style="{StaticResource GhostBtn}"
+                                            Padding="14,7" Margin="10,0,0,0" Click="BtnInGameOverlay_Click"/>
+                                    <Button x:Name="BtnFixFullscreen" Content="全屏兼容（切无边框）" Style="{StaticResource GhostBtn}"
+                                            Padding="14,7" Margin="10,0,0,0" ToolTip="独占全屏时置顶悬浮窗一定会被游戏画面盖掉：点这里把游戏切成无边框全屏（只改窗口样式，Alt+Enter 可切回）"
+                                            Click="BtnFixFullscreen_Click"/>
+                                </WrapPanel>
+                                <Grid Margin="0,12,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Style="{StaticResource StatTile}" Margin="0,0,5,0">
+                                        <StackPanel>
+                                            <TextBlock x:Name="TxtIgDelay" Text="—" FontSize="19" FontWeight="Bold"
+                                                       Foreground="{DynamicResource TextPrimary}"/>
+                                            <TextBlock x:Name="TxtIgDelayCap" Text="延迟" Foreground="{DynamicResource TextMuted}" FontSize="9.5" Margin="0,1,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="1" Style="{StaticResource StatTile}" Margin="5,0,5,0">
+                                        <StackPanel>
+                                            <TextBlock x:Name="TxtIgLoss" Text="—" FontSize="19" FontWeight="Bold"
+                                                       Foreground="{DynamicResource TextPrimary}"/>
+                                            <TextBlock Text="丢包" Foreground="{DynamicResource TextMuted}" FontSize="9.5" Margin="0,1,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="2" Style="{StaticResource StatTile}" Margin="5,0,5,0">
+                                        <StackPanel>
+                                            <TextBlock x:Name="TxtIgRemote" Text="—" FontSize="13" FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource TextPrimary}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="远端地址" Foreground="{DynamicResource TextMuted}" FontSize="9.5" Margin="0,3,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                    <Border Grid.Column="3" Style="{StaticResource StatTile}" Margin="5,0,0,0">
+                                        <StackPanel>
+                                            <TextBlock x:Name="TxtIgRegion" Text="—" FontSize="13" FontWeight="SemiBold"
+                                                       Foreground="{DynamicResource TextPrimary}" TextTrimming="CharacterEllipsis"/>
+                                            <TextBlock Text="区域" Foreground="{DynamicResource TextMuted}" FontSize="9.5" Margin="0,3,0,0"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                                <Canvas x:Name="CvIgSpark" Height="64" Margin="0,10,0,4" ClipToBounds="True"/>
+                                <TextBlock x:Name="TxtIgDetail" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"
+                                           Margin="0,2,0,0" TextWrapping="Wrap" Text="点「启动监控」后，进比赛会自动认出服务器连接；每场结束自动追加 data\network\matchlog.csv。"/>
+                                <TextBlock Text="最近对局（结束一把就出一条：最低/平均/最高、P95、抖动、丢包、评级）"
+                                           FontSize="10.5" Foreground="{DynamicResource TextMuted}" Margin="0,10,0,4"/>
+                                <ScrollViewer MaxHeight="150" VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled">
+                                    <StackPanel x:Name="SpRecentMatches"/>
+                                </ScrollViewer>
                             </StackPanel>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
-                                       Text="从游戏进程的真实 UDP 流量里认出比赛连接（Npcap 抓包，与 ETK 同一思路），每秒 ping 一次远端。开悬浮窗后可放在游戏画面上边打边看——延迟飙高/连续丢包就是这局要卡了。"/>
-                            <WrapPanel Margin="0,10,0,0">
-                                <Button x:Name="BtnInGameMonitor" Content="启动监控" Style="{StaticResource GhostBtn}"
-                                        Padding="14,7" Click="BtnInGameMonitor_Click"/>
-                                <Button x:Name="BtnInGameOverlay" Content="显示悬浮窗" Style="{StaticResource GhostBtn}"
-                                        Padding="14,7" Margin="10,0,0,0" Click="BtnInGameOverlay_Click"/>
-                            </WrapPanel>
-                            <Grid Margin="0,12,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Border Grid.Column="0" Style="{StaticResource StatTile}" Margin="0,0,5,0">
-                                    <StackPanel>
-                                        <TextBlock x:Name="TxtIgDelay" Text="—" FontSize="19" FontWeight="Bold"
-                                                   Foreground="{DynamicResource TextPrimary}"/>
-                                        <TextBlock Text="延迟" Foreground="{DynamicResource TextMuted}" FontSize="9.5" Margin="0,1,0,0"/>
-                                    </StackPanel>
-                                </Border>
-                                <Border Grid.Column="1" Style="{StaticResource StatTile}" Margin="5,0,5,0">
-                                    <StackPanel>
-                                        <TextBlock x:Name="TxtIgLoss" Text="—" FontSize="19" FontWeight="Bold"
-                                                   Foreground="{DynamicResource TextPrimary}"/>
-                                        <TextBlock Text="丢包" Foreground="{DynamicResource TextMuted}" FontSize="9.5" Margin="0,1,0,0"/>
-                                    </StackPanel>
-                                </Border>
-                                <Border Grid.Column="2" Style="{StaticResource StatTile}" Margin="5,0,5,0">
-                                    <StackPanel>
-                                        <TextBlock x:Name="TxtIgRemote" Text="—" FontSize="13" FontWeight="SemiBold"
-                                                   Foreground="{DynamicResource TextPrimary}" TextTrimming="CharacterEllipsis"/>
-                                        <TextBlock Text="远端地址" Foreground="{DynamicResource TextMuted}" FontSize="9.5" Margin="0,3,0,0"/>
-                                    </StackPanel>
-                                </Border>
-                                <Border Grid.Column="3" Style="{StaticResource StatTile}" Margin="5,0,0,0">
-                                    <StackPanel>
-                                        <TextBlock x:Name="TxtIgRegion" Text="—" FontSize="13" FontWeight="SemiBold"
-                                                   Foreground="{DynamicResource TextPrimary}" TextTrimming="CharacterEllipsis"/>
-                                        <TextBlock Text="区域" Foreground="{DynamicResource TextMuted}" FontSize="9.5" Margin="0,3,0,0"/>
-                                    </StackPanel>
-                                </Border>
-                            </Grid>
-                            <Canvas x:Name="CvIgSpark" Height="64" Margin="0,10,0,4" ClipToBounds="True"/>
-                            <TextBlock x:Name="TxtIgDetail" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"
-                                       Margin="0,2,0,0" TextWrapping="Wrap" Text="点「启动监控」后，进比赛会自动认出服务器连接；每场结束自动追加 data\network\matchlog.csv。"/>
-                        </StackPanel>
-                    </Border>
+                        </Border>
+                    </StackPanel>
 
-                    <!-- ===== 对战线路（强制 P2P / 更新服加速，均需管理员） ===== -->
-                    <Border Style="{StaticResource Card}" Margin="0,12,0,0">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
-                                <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Style="{StaticResource H2}">对战线路</TextBlock>
-                                <Ellipse x:Name="DotP2P" Width="8" Height="8" Margin="12,0,6,0"
-                                         VerticalAlignment="Center" Fill="{DynamicResource EnvDotIdle}"/>
-                                <TextBlock x:Name="TxtP2PState" Text="未启用" FontSize="12"
-                                           VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"/>
+                    <StackPanel VerticalAlignment="Top">
+                        <!-- ===== 对战线路（强制 P2P / 更新服加速，均需管理员）
+                             独立分段（NetworkPanel:2）：v6.3 三级导航重构时这里被留在网格里成了第 3 个子元素，
+                             而 ShowSection 只显示被切到的那一段 → 整张卡片永远折叠，强制 P2P 从界面上消失。 ===== -->
+                        <Border Style="{StaticResource Card}" Margin="0,12,0,0" VerticalAlignment="Top">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                    <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                    <TextBlock Style="{StaticResource H2}">对战线路</TextBlock>
+                                    <Ellipse x:Name="DotP2P" Width="8" Height="8" Margin="12,0,6,0"
+                                             VerticalAlignment="Center" Fill="{DynamicResource EnvDotIdle}"/>
+                                    <TextBlock x:Name="TxtP2PState" Text="未启用" FontSize="12"
+                                               VerticalAlignment="Center" Foreground="{DynamicResource TextSecondary}"/>
+                                </StackPanel>
+                                <TextBlock FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
+                                           Text="强制 P2P：屏蔽游戏到测速服务器的 UDP 端口（5521 / 10000 / 30000 / 50000），让匹配走点对点。匹配等待会明显变长，不想用随时关闭。规则写在 Windows 防火墙并绑定 eFootball.exe，删除即还原；游戏卡在「检查连接状态」转圈时点「关闭强制 P2P」即可恢复。开着加速器（UU/迅游等）时不要启用——这些端口上的加速通道会被一起屏蔽，界面上会直接提示并拒绝启用。更新服加速：给科乐美更新 CDN 选最快边缘 IP 写 hosts（可一键还原）。两项都需要以管理员身份运行本程序。"/>
+                                <WrapPanel Margin="0,10,0,0">
+                                    <Button x:Name="BtnP2PToggle" Content="启用强制 P2P" Style="{StaticResource GhostBtn}"
+                                            Padding="14,7" Click="BtnP2PToggle_Click"/>
+                                    <CheckBox x:Name="ChkP2PTcp" Content="同时屏蔽 TCP 服务器模式" VerticalAlignment="Center"
+                                              Margin="14,0,0,0" FontSize="11.5"/>
+                                    <Button x:Name="BtnUpdateHosts" Content="更新服测速加速" Style="{StaticResource GhostBtn}"
+                                            Padding="14,7" Margin="18,0,0,0" Click="BtnUpdateHosts_Click"/>
+                                    <Button x:Name="BtnUpdateHostsRestore" Content="还原 hosts" Style="{StaticResource GhostBtn}"
+                                            Padding="12,5" Margin="10,0,0,0" Click="BtnUpdateHostsRestore_Click"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtLineDetail" FontSize="11.5" Foreground="{DynamicResource TextMuted}"
+                                           Margin="0,8,0,0" TextWrapping="Wrap"/>
                             </StackPanel>
-                            <TextBlock FontSize="11.5" Foreground="{DynamicResource TextSecondary}" TextWrapping="Wrap"
-                                       Text="强制 P2P：屏蔽游戏到测速服务器的 UDP 端口（5521 / 10000 / 30000 / 50000），让匹配走点对点。匹配等待会明显变长，不想用随时关闭。规则写在 Windows 防火墙并绑定 eFootball.exe，删除即还原。更新服加速：给科乐美更新 CDN 选最快边缘 IP 写 hosts（可一键还原）。两项都需要以管理员身份运行本程序。"/>
-                            <WrapPanel Margin="0,10,0,0">
-                                <Button x:Name="BtnP2PToggle" Content="启用强制 P2P" Style="{StaticResource GhostBtn}"
-                                        Padding="14,7" Click="BtnP2PToggle_Click"/>
-                                <CheckBox x:Name="ChkP2PTcp" Content="同时屏蔽 TCP 服务器模式" VerticalAlignment="Center"
-                                          Margin="14,0,0,0" FontSize="11.5"/>
-                                <Button x:Name="BtnUpdateHosts" Content="更新服测速加速" Style="{StaticResource GhostBtn}"
-                                        Padding="14,7" Margin="18,0,0,0" Click="BtnUpdateHosts_Click"/>
-                                <Button x:Name="BtnUpdateHostsRestore" Content="还原 hosts" Style="{StaticResource GhostBtn}"
-                                        Padding="12,5" Margin="10,0,0,0" Click="BtnUpdateHostsRestore_Click"/>
-                            </WrapPanel>
-                            <TextBlock x:Name="TxtLineDetail" FontSize="11.5" Foreground="{DynamicResource TextMuted}"
-                                       Margin="0,8,0,0" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </Border>
+                        </Border>
+                    </StackPanel>
                 </Grid>
             </ScrollViewer>
 

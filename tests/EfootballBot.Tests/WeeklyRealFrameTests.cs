@@ -265,6 +265,24 @@ public class WeeklyRealFrameTests
         }
     }
 
+    [Fact]
+    public void HubTile_RealFrame_ActivityIsSecondTile()
+    {
+        // 2026-11-13 用户实机截图（weekly_hub）：大活动页第一格是「锦标赛」，第二格「活动」。
+        // 用真实 OCR 词表跑磁贴定位，锁定「第一格锦标赛不被按进」这条规则的数据基础。
+        using var ocr = new OcrRecognizer();
+        var data = LoadPngBgra(Path.Combine(WeeklyDir, "weekly_hub.png"), out int w, out int h);
+        var frame = new FrameData(data, w, h, 0);
+        var ocrRes = TestOcr.Run(ocr, frame);
+        foreach (var wd in ocrRes.Words)
+            _out.WriteLine($"  W [{wd.Text}] norm=[{wd.NormText}] @({wd.CenterX:F2},{wd.CenterY:F2}) h={wd.H:F3}");
+        int? offset = WeeklyBrain.FindActivityTileOffset(ocrRes);
+        _out.WriteLine($"activity tile offset = {offset}");
+        Assert.Equal(1, offset);
+        // 该帧保留 hub 描述句「参加锦标赛形制的活动。」→ 误入锦标赛页时必须能被识别
+        Assert.True(WeeklyBrain.IsTournamentPage(ocrRes));
+    }
+
     internal static int CountGreen(FrameData f, double x0, double x1, double y0, double y1)
     {
         var bgra = f.Bgra;

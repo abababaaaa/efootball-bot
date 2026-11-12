@@ -250,15 +250,19 @@ public sealed class CnWeeklyScenario : IScenario
         }
 
         // ---- 国服菜单侧状态机：接管国服周活动界面与阶段内无特征界面 ----
-        // 国服比赛起始页：底栏「设置|球场|RT 下一步」——确认键是 RT 而非 A（国际服为 A）。
-        // 共享决策按 A 无法开赛，且画面不变 _streak≥StuckStreak 后转入静默等待，会死在这里
-        // （实机 2026-10-14 00:53：起始页无人按键卡死 6 分钟）。先于状态机拦截：RT 开赛。
+        // 国服比赛起始页：底栏印「设置|球场|RT 下一步」，但 A 同样生效（用户 2026-11-11 实测：
+        // 国服凡印 RT 的 下一步/确认/确定，按 A 一样推进）。默认 A；同一页连续多轮按 A 画面
+        // 不动才换 RT 兜底。拦截仍先于状态机：画面不变的起始页会让共享决策转静默等待
+        // （实机 2026-10-14 00:53：起始页无人按键卡死 6 分钟）。
         if (ml == MlScreen.MatchStartPage)
         {
             if (_streak < 1) return 800; // 过渡帧防抖
-            _log("[国服周活动] 起始页：RT 下一步开赛（国服确认键为 RT）", LogLevel.Info);
-            await _engine.Pad.RT();
-            return 3400;
+            bool alt = _streak >= 3;
+            _log(alt
+                ? "[国服周活动] 起始页：A 三轮未推进，改按 RT 下一步（底栏所印键）"
+                : "[国服周活动] 起始页：A 下一步开赛（底栏印 RT，A 同样生效）", LogLevel.Info);
+            if (alt) await _engine.Pad.RT(); else await _engine.Pad.Confirm();
+            return alt ? 3400 : 3000;
         }
 
         int? cnWait = await HandleCnAsync(cw, ml, obs);

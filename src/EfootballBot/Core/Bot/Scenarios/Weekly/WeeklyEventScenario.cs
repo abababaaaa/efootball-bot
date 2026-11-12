@@ -434,6 +434,17 @@ public sealed class WeeklyEventScenario : IScenario
         {
             case WkPhase.Flow:
             {
+                // 大活动页第一格「锦标赛」被 A 打开（2026-11-13 用户实机）：该页也有
+                // 「进入 / 详情」两枚按钮，会被 Classify 误判成活动介绍页——旧逻辑随即 A
+                // 打开「活动简介」、再 A 打开详情说明面板、B 回来又 A（反馈包
+                // 20261112_233710 里 23:33 起每 2~3 秒一轮、零场次的那条链）。
+                // 识别出锦标赛特征就 B 退回比赛页，下一轮按磁贴序号改试「活动」格。
+                if (_hubStep > 0 && wk == WkScreen.EventIntro && WeeklyBrain.IsTournamentPage(obs.Ocr))
+                {
+                    _log("[周活动] 打开的是大活动页第 1 格「锦标赛」页面（不是活动介绍页），B 退回比赛页改试下一格", LogLevel.Warn);
+                    await _engine.Pad.Back();
+                    return 2400;
+                }
                 switch (wk)
                 {
                     case WkScreen.EventsList:
@@ -518,6 +529,27 @@ public sealed class WeeklyEventScenario : IScenario
                         _hubStep = 0;
                         await _engine.Pad.Back();
                         return 2500;
+                    }
+                    // ★2026-11-13 用户实机：大活动页第一格改成了「锦标赛」（Round 3 Ranking
+                    // Event / 参加锦标赛形式的活动），活动板块退到第二格。旧逻辑从最左第 1 格
+                    // 盲扫，第一记 A 必进锦标赛页，再被误判成活动介绍页 → 「活动简介 → 详情
+                    // 说明面板」每 2~3 秒一轮、整夜零场次（反馈包 20261112_233710）。
+                    // 磁贴标题词 OCR 能直接给出「活动」在第几格，优先按它定向；读不全再逐格扫。
+                    if (_hubStep == 0)
+                    {
+                        int? activityTile = WeeklyBrain.FindActivityTileOffset(obs.Ocr);
+                        if (activityTile is int offset)
+                        {
+                            _log($"[周活动] 比赛页：磁贴行识别到「活动」在第 {offset + 1} 格" +
+                                 (offset > 0 ? "（第 1 格是锦标赛，跳过不按）" : "") +
+                                 $" → 归位最左后右×{offset} → A", LogLevel.Info);
+                            await _engine.Pad.DpadRepeat(PadDir.Left, 6);
+                            if (offset > 0) await _engine.Pad.DpadRepeat(PadDir.Right, offset);
+                            await _engine.Pad.Confirm();
+                            // 定向失败（弹窗吃掉/仍是比赛页）时从下一格继续扫，绝不重复按同一格
+                            _hubStep = offset + 1;
+                            return 2800;
+                        }
                     }
                     _log($"[周活动] 比赛页：归位最左后右×{_hubStep} → A（试第 {_hubStep + 1}/4 格找活动板块）", LogLevel.Info);
                     await _engine.Pad.DpadRepeat(PadDir.Left, 6);

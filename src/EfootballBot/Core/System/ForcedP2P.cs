@@ -60,6 +60,14 @@ public static class ForcedP2P
         if (string.IsNullOrWhiteSpace(exePath) || !File.Exists(exePath))
             return (false, "未定位到国际服游戏本体（eFootball.exe）。先启动一次游戏，或先点「打开设置工具」形成路径记忆。");
 
+        // 加速器在跑时不能启用：这些端口正是加速器把游戏流量送进加速通道的出口，
+        // 一起屏蔽后游戏会卡在「检查连接状态」转圈（2026-11-12 用户现场，规则实测在
+        // UDP 5521/10000/30000/50000 上 dir=out action=block，删掉即恢复）。
+        var accel = UdpSocketMap.RunningAccelerators();
+        if (accel.Count > 0)
+            return (false, $"检测到加速器正在运行（{string.Join("/", accel)}）：强制 P2P 会把这些端口上的加速通道一起屏蔽，"
+                         + "游戏会卡在「检查连接状态」。先在加速器里关闭加速（或退出加速器）再启用；要用加速器就别开强制 P2P。");
+
         // 先删旧规则（避免重复叠加），失败不影响后续 add
         Disable();
         var sb = new StringBuilder();
@@ -91,6 +99,40 @@ public static class ForcedP2P
         bool still = RuleExists(UdpRuleName) || RuleExists(TcpRuleName);
         return still ? (false, "规则删除后仍检测到残留，请到防火墙高级设置手工删除。")
                      : (true, "已还原（规则已删除）。");
+    }
+
+    /// <summary>
+    /// 现场自检：规则是否生效、绑的是不是当前这个 eFootball.exe、加速器在不在跑、游戏现在开没开 UDP 端口。
+    /// 强制 P2P 的坑几乎都出在这四件事上（规则绑旧路径 / 加速器抢端口 / 游戏没开 / 规则残留）。
+    /// </summary>
+    public static string Diagnose()
+    {
+        var sb = new StringBuilder();
+        bool on = IsEnabled;
+        sb.Append(on ? "强制 P2P 规则：已生效（UDP " + UdpPorts + " 出站已屏蔽）。" : "强制 P2P 规则：未启用。");
+
+        string? exe = ResolveGameExe();
+        if (exe is null) sb.Append("\n游戏本体：没定位到 eFootball.exe（先启动一次游戏）。");
+        else
+        {
+            bool running = UdpSocketMap.GamePids().Count > 0;
+            sb.Append($"\n游戏本体：{exe}{(running ? "（正在运行）" : "（未运行）")}");
+        }
+
+        var accel = UdpSocketMap.RunningAccelerators();
+        sb.Append(accel.Count == 0
+            ? "\n加速器：未检测到。"
+            : $"\n加速器：{string.Join("/", accel)} 正在运行——它会占用 UDP 通道，和强制 P2P 互相打架。");
+
+        var ports = UdpSocketMap.GamePorts(out var pids);
+        sb.Append(pids.Count == 0
+            ? "\n游戏 UDP 端口：无（游戏没开）。"
+            : ports.Count == 0
+                ? "\n游戏 UDP 端口：游戏在跑但还没开端口（在检查连接状态/主菜单时会这样）。"
+                : "\n游戏 UDP 端口：" + string.Join(",", ports.OrderBy(p => p)));
+
+        if (on) sb.Append("\n如果游戏卡在「检查连接状态」转圈：点「关闭强制 P2P」还原，规则删掉即可恢复。");
+        return sb.ToString();
     }
 
     // ---------------- 进程调用 ----------------

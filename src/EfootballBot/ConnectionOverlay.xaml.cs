@@ -37,6 +37,8 @@ public partial class ConnectionOverlay : Window
     private bool _userHidden;
     /// <summary>因游戏最小化而自动隐藏（游戏还原时要自动恢复）。</summary>
     private bool _autoHidden;
+    /// <summary>true = 鼠标穿透（WS_EX_TRANSPARENT），HUD 不挡游戏操作。</summary>
+    private bool _clickThrough;
 
     public ConnectionOverlay()
     {
@@ -44,7 +46,11 @@ public partial class ConnectionOverlay : Window
         SourceInitialized += (_, _) => ApplyFusionStyles();
         Loaded += (_, _) =>
         {
-            MoveToDefault();
+            EnsureUsable();
+            // 第一次出现摆在主屏正中偏上：多屏/超宽屏（3440×1440）下贴右上角容易正好落在
+            // 别的内容上，用户找不到窗口就以为没弹出来
+            if (!_placedOnce) { CenterOnPrimary(); _placedOnce = true; }
+            else MoveToDefault();
             _followTimer.Tick += (_, _) => FollowTick();
             _followTimer.Start();
         };
@@ -54,9 +60,64 @@ public partial class ConnectionOverlay : Window
         {
             if (!IsVisible) return;
             _userHidden = false;
+            EnsureUsable();
+            ClampToScreen();
+            ApplyClickThrough();
             if (_followGame && ResolveGameWindow() is var h && h != nint.Zero) SnapToGame(h);
         };
         Closed += (_, _) => _followTimer.Stop();
+    }
+
+    /// <summary>
+    /// 兜底自检：SizeToContent="Height" 会把宽度压成 2px（WPF 实测 Loaded 时 Width 已经是 2），
+    /// 窗口就成了一条看不见的竖线——这是「点了显示悬浮窗但根本没有」的真因。
+    /// 这里在 Loaded / 重新显示 / 尺寸异常时统一修一次，并把结果记进日志，下次不用再猜。
+    /// </summary>
+    private bool _placedOnce;
+
+    private void EnsureUsable()
+    {
+        try
+        {
+            if (double.IsNaN(Width) || Width < 120) Width = 300;
+            if (MinWidth < 120) MinWidth = 300;
+            if (!(Height > 60)) Height = 150;
+            if (ActualWidth < 120 || ActualHeight < 60)
+            {
+                Width = 300;
+                Height = 150;
+                UpdateLayout();
+            }
+            if (Topmost) Topmost = false;
+            Topmost = true;
+            Log($"自检 {Width:0}x{Height:0}（实际 {ActualWidth:0}x{ActualHeight:0}）at {Left:0},{Top:0} topmost={Topmost}");
+        }
+        catch (Exception ex) { Log("自检失败：" + ex.Message); }
+    }
+
+    /// <summary>悬浮窗自己的诊断日志：data\overlay.log（「点了没有窗口」时先看这里）。</summary>
+    private static void Log(string msg)
+    {
+        try
+        {
+            string dir = AppPaths.DataDir;
+            System.IO.Directory.CreateDirectory(dir);
+            System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "overlay.log"),
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss}] {msg}\r\n");
+        }
+        catch { }
+    }
+
+    /// <summary>主屏工作区正中偏上（保证一出现就在视野里）。</summary>
+    private void CenterOnPrimary()
+    {
+        try
+        {
+            var wa = SystemParameters.WorkArea;
+            Left = wa.Left + (wa.Width - Width) / 2;
+            Top = wa.Top + Math.Max(40, (wa.Height - Height) / 3);
+        }
+        catch { }
     }
 
     // ---------------- 与游戏窗口的融合 ----------------
@@ -101,6 +162,8 @@ public partial class ConnectionOverlay : Window
 
     private void FollowTick()
     {
+        // 置顶保持：无边框全屏下游戏抢前台时，Topmost 偶尔被系统重置，每 250ms 补一次
+        if (!Topmost) Topmost = true;
         if (!_followGame || _userHidden) return;
         nint hwnd = ResolveGameWindow();
         if (hwnd == nint.Zero) return;
@@ -138,6 +201,14 @@ public partial class ConnectionOverlay : Window
 
             double left = clientLeft + clientWidth - ActualWidth - 12;
             double top = clientTop + 12;
+
+            // 游戏被「屏外停靠」（BackgroundParker 会把窗口挪到负坐标）时，跟着算出来的位置
+            // 也在屏幕外——悬浮窗就"凭空消失"了。落在所有显示器之外就不跟，保持当前位置。
+            if (left + ActualWidth < 0 || top + ActualHeight < 0
+                || left > SystemParameters.VirtualScreenWidth - 40
+                || top > SystemParameters.VirtualScreenHeight - 40)
+                return;
+
             if (Math.Abs(Left - left) > 0.5 || Math.Abs(Top - top) > 0.5)
             {
                 Left = left;
@@ -179,18 +250,66 @@ public partial class ConnectionOverlay : Window
         Hide();
     }
 
+    /// <summary>中键走这里（左键拖动、右键关闭各走各的处理器）。</summary>
+    private void OnAnyMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton == MouseButton.Middle) OnToggleClickThrough(sender, e);
+    }
+
+    /// <summary>鼠标穿透（中键切换）：穿透后悬浮窗只显示不接鼠标，点击直接落到游戏上。</summary>
+    private void OnToggleClickThrough(object sender, MouseButtonEventArgs e)
+    {
+        _clickThrough = !_clickThrough;
+        ApplyClickThrough();
+        TxtHint.Text = _clickThrough
+            ? "已穿透（点击直达游戏） · 中键恢复 · 右键关闭"
+            : "拖动移位 · 双击贴回 · 中键穿透 · 右键关闭";
+        e.Handled = true;
+    }
+
+    private void ApplyClickThrough()
+    {
+        try
+        {
+            nint hwnd = new WindowInteropHelper(this).Handle;
+            if (hwnd == nint.Zero) return;
+            long ex = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
+            ex = _clickThrough ? ex | WS_EX_TRANSPARENT : ex & ~(long)WS_EX_TRANSPARENT;
+            SetWindowLongPtr(hwnd, GWL_EXSTYLE, new nint(ex));
+        }
+        catch { }
+    }
+
+    /// <summary>把窗口拉回可见区域（换分辨率/副屏拔掉后不至于飘到屏幕外，看得见却没反应）。</summary>
+    private void ClampToScreen()
+    {
+        try
+        {
+            var wa = SystemParameters.WorkArea;
+            if (double.IsNaN(Left) || Left < wa.Left - ActualWidth + 60 || Left > wa.Right - 60) Left = wa.Right - Width - 24;
+            if (double.IsNaN(Top) || Top < wa.Top - 10 || Top > wa.Bottom - 40) Top = wa.Top + 24;
+        }
+        catch { }
+    }
+
     // ---------------- 数据刷新 ----------------
 
     public void Update(ConnSnapshot s)
     {
         TxtState.Text = s.State;
         Dot.Fill = s.DelayMs < 0 ? Idle : s.DelayMs < 60 ? Ok : s.DelayMs < 150 ? Warn : Bad;
-        TxtDelay.Text = s.DelayMs < 0 ? "—" : s.DelayMs + " ms";
-        TxtDelay.Foreground = Dot.Fill;
-        TxtLoss.Text = s.LossPct <= 0.05 ? "0%" : $"{s.LossPct:0.#}%";
-        TxtLoss.Foreground = s.LossPct < 1 ? (Brush)Ok : s.LossPct < 5 ? Warn : Bad;
+        int shownMs = s.DelayMs;
+        TxtDelay.Text = shownMs < 0 ? "—" : shownMs + " ms";
+        TxtDelay.Foreground = shownMs < 0 ? Idle : shownMs < 60 ? Ok : shownMs < 110 ? Warn : Bad;
+        bool lossKnown = s.LossPct >= 0;
+        TxtLoss.Text = !lossKnown ? "—" : s.LossPct <= 0.05 ? "0%" : $"{s.LossPct:0.#}%";
+        TxtLoss.Foreground = !lossKnown ? Idle : s.LossPct < 1 ? (Brush)Ok : s.LossPct < 5 ? Warn : Bad;
         TxtRegion.Text = s.Region;
-        TxtRemote.Text = $"远端 {s.Remote}   最小/平均/最大 {Fmt(s.MinMs)}/{Fmt(s.AvgMs)}/{Fmt(s.MaxMs)}";
+        string tail = s.DelaySource.Length > 0 ? s.DelaySource : (s.DelayMs < 0 && s.PingStatus.Length > 0 ? s.PingStatus : "");
+        tail += $"   最小/平均/最大 {Fmt(s.MinMs)}/{Fmt(s.AvgMs)}/{Fmt(s.MaxMs)}";
+        if (s.JitterMs >= 0) tail += $"   抖动 {s.JitterMs}ms";
+        if (s.UpPps + s.DownPps > 0) tail += $"   ↑{s.UpPps}/↓{s.DownPps}pps";
+        TxtRemote.Text = $"远端 {s.Remote}   {tail}";
         DrawSpark(s.Curve);
     }
 
@@ -227,6 +346,7 @@ public partial class ConnectionOverlay : Window
     private const int GWL_EXSTYLE = -20;
     private const long WS_EX_TOOLWINDOW = 0x00000080;
     private const long WS_EX_NOACTIVATE = 0x08000000;
+    private const long WS_EX_TRANSPARENT = 0x00000020;
     private const uint WDA_MONITOR = 0x00000001;
     private const uint WDA_EXCLUDEFROMCAPTURE = 0x00000011;
 

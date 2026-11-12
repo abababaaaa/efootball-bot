@@ -599,4 +599,55 @@ public class WeeklyBrainTests
         Assert.Equal(WkPickAction.PressRandom, WeeklyBrain.DecidePickStep(false, 0, 0, 0));
         Assert.Equal(WkPickAction.PressRandom, WeeklyBrain.DecidePickStep(false, 5, 3, 3));
     }
+
+    // ---------------- 大活动页磁贴识别（2026-11-13 用户实机：第一格改成「锦标赛」） ----------------
+
+    [Fact]
+    public void FindActivityTileOffset_TournamentFirst_ReturnsSecondTile()
+    {
+        // 实机新 UI 比赛页（用户 2026-11-13 截图）：卡内大字「锦标赛 / 活动 / eFootball™联赛 /
+        // 我的联赛」，下一行是描述句。第一格是锦标赛 → 活动磁贴 index=1
+        var ocr = Ocr(
+            W("比赛", 0.10, 0.11),
+            W("锦标赛", 0.20, 0.53), W("参加锦标赛形式的活动", 0.21, 0.57),
+            W("活动", 0.50, 0.53), W("参加活动以获得丰厚奖励", 0.51, 0.57),
+            W("eFootball™联赛", 0.80, 0.53), W("争取升级至更高组别", 0.81, 0.57),
+            W("我的联赛", 0.97, 0.53));
+        Assert.Equal(1, WeeklyBrain.FindActivityTileOffset(ocr));
+    }
+
+    [Fact]
+    public void FindActivityTileOffset_ActivityFirst_ReturnsZero()
+    {
+        // 赛季换版后活动回到第一格：仍按磁贴词定向，不能写死右移一格
+        var ocr = Ocr(W("活动", 0.20, 0.53), W("eFootball™联赛", 0.50, 0.53), W("我的联赛", 0.80, 0.53));
+        Assert.Equal(0, WeeklyBrain.FindActivityTileOffset(ocr));
+    }
+
+    [Fact]
+    public void FindActivityTileOffset_IncompleteTileRow_ReturnsNull()
+    {
+        // 磁贴行 OCR 漏读（只剩描述句 + 一枚标题）时不得猜格位，交回逐格扫描
+        var ocr = Ocr(W("比赛", 0.10, 0.11), W("活动", 0.50, 0.53),
+            W("参加活动以获得丰厚奖励", 0.51, 0.57));
+        Assert.Null(WeeklyBrain.FindActivityTileOffset(ocr));
+    }
+
+    [Fact]
+    public void IsTournamentPage_ByDescriptionOrCustomTournament()
+    {
+        // 反馈包 20261112_233710 里被误判成介绍页的页面：保留 hub 的「参加锦标赛形式的活动」
+        var byDesc = Ocr(W("锦标赛", 0.10, 0.12), W("参加锦标赛形式的活动", 0.5, 0.6),
+            W("进入", 0.20, 0.80), W("详情", 0.20, 0.86));
+        Assert.True(WeeklyBrain.IsTournamentPage(byDesc));
+
+        // 锦标赛子页（自定义锦标赛入口 + 页首标题）
+        var byCustom = Ocr(W("锦标赛", 0.10, 0.10), W("自定义锦标赛", 0.50, 0.70),
+            W("进入", 0.20, 0.82));
+        Assert.True(WeeklyBrain.IsTournamentPage(byCustom));
+
+        // 正常活动介绍页（进入 + 详情）不得被判成锦标赛页，否则每轮 B 退回、永远进不了活动
+        var intro = Ocr(W("巡回活动", 0.20, 0.26), W("进入", 0.20, 0.80), W("详情", 0.20, 0.86));
+        Assert.False(WeeklyBrain.IsTournamentPage(intro));
+    }
 }

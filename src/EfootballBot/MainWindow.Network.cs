@@ -125,6 +125,29 @@ public partial class MainWindow
         InitFastGithubPage();
         UpdateServerSummary();
         RefreshLineState();
+        CheckSectionCoverage();
+    }
+
+    /// <summary>
+    /// 段签覆盖自检：NetworkPanel 的每个直接子元素都必须有对应的「服务器测速 / 游戏内监控 / 对战线路」页签，
+    /// 否则那段内容永远折叠——v6.3 三级导航重构时「对战线路」卡片就是这样被漏掉的（强制 P2P 从界面消失，
+    /// 用户 2026-11-12 反馈）。索引口径 = MainWindow.xaml 里 NetworkPanel 子元素的书写顺序。
+    /// </summary>
+    private void CheckSectionCoverage()
+    {
+        if (NetworkPanel?.Content is not Panel content) return;
+        var covered = new HashSet<int>();
+        foreach (var tab in new[] { NetTabPing, NetTabMonitor, NetTabLine })
+        {
+            if (tab?.Tag is not string tag) continue;
+            var parts = tag.Split(':');
+            if (parts.Length == 2 && parts[0] == "NetworkPanel" && int.TryParse(parts[1], out var idx))
+                covered.Add(idx);
+        }
+        for (var k = 0; k < content.Children.Count; k++)
+            if (!covered.Contains(k))
+                AppendLog($"网络页第 {k} 段没有页签（永远不会显示）：核对 MainWindow.xaml 的 NetworkPanel 子元素顺序与 SubMenuNetwork 的 Tag。",
+                    LogLevel.Warn);
     }
 
     // ---------------- 对战线路（强制 P2P / 更新服加速） ----------------
@@ -136,22 +159,35 @@ public partial class MainWindow
     private void RefreshLineState()
     {
         if (_lineBusy) return;
-        _ = Task.Run(() => (P2P: ForcedP2P.IsEnabled, Tcp: ForcedP2P.TcpEnabled,
-                Hosts: UpdateHostsOptimizer.IsApplied, Ip: UpdateHostsOptimizer.CurrentIp))
-            .ContinueWith(t => Dispatcher.BeginInvoke(() =>
+        _ = Task.Run(() =>
+        {
+            try
             {
-                var r = t.Result;
-                BtnP2PToggle.Content = r.P2P ? "关闭强制 P2P" : "启用强制 P2P";
-                DotP2P.Fill = r.P2P ? BrushOk : BrushIdle;
-                if (r.P2P) ChkP2PTcp.IsChecked = r.Tcp;   // 规则已启用时回填实际状态
-                TxtP2PState.Text = r.P2P
-                    ? (r.Tcp ? "已启用（UDP + TCP）" : "已启用（仅 UDP）")
-                    : "未启用";
-                string status = r.Hosts
-                    ? $"更新服加速：hosts 已指向 {r.Ip ?? "—"}。"
-                    : "更新服加速：未应用。";
-                TxtLineDetail.Text = _lineNotice.Length == 0 ? status : _lineNotice + "\n" + status;
-            }));
+                return (ok: true, P2P: ForcedP2P.IsEnabled, Tcp: ForcedP2P.TcpEnabled,
+                        Hosts: UpdateHostsOptimizer.IsApplied, Ip: UpdateHostsOptimizer.CurrentIp,
+                        Diag: ForcedP2P.Diagnose());
+            }
+            catch
+            {
+                // netsh / hosts 读失败不该影响界面：保持上一次显示
+                return (ok: false, P2P: false, Tcp: false, Hosts: false, Ip: (string?)null, Diag: "");
+            }
+        }).ContinueWith(t => Dispatcher.BeginInvoke(() =>
+        {
+            if (t.IsFaulted || t.IsCanceled || !t.Result.ok) return;
+            var r = t.Result;
+            BtnP2PToggle.Content = r.P2P ? "关闭强制 P2P" : "启用强制 P2P";
+            DotP2P.Fill = r.P2P ? BrushOk : BrushIdle;
+            if (r.P2P) ChkP2PTcp.IsChecked = r.Tcp;   // 规则已启用时回填实际状态
+            TxtP2PState.Text = r.P2P
+                ? (r.Tcp ? "已启用（UDP + TCP）" : "已启用（仅 UDP）")
+                : "未启用";
+            string status = r.Hosts
+                ? $"更新服加速：hosts 已指向 {r.Ip ?? "—"}。"
+                : "更新服加速：未应用。";
+            string head = _lineNotice.Length == 0 ? "" : _lineNotice + "\n";
+            TxtLineDetail.Text = head + status + (r.Diag.Length == 0 ? "" : "\n" + r.Diag);
+        }));
     }
 
     private async void BtnP2PToggle_Click(object sender, RoutedEventArgs e)
@@ -161,19 +197,29 @@ public partial class MainWindow
         BtnP2PToggle.IsEnabled = false;
         try
         {
+            // 控件必须在 UI 线程读：以前把 ChkP2PTcp.IsChecked 写在 Task.Run 里，
+            // 后台线程碰 DependencyObject 会抛 InvalidOperationException（调用线程无法访问此对象），
+            // async void 处理器没人接这个异常 → 整个进程当场闪退（用户 2026-11-12 点「启用强制 P2P」实测）
+            bool tcpToo = ChkP2PTcp.IsChecked == true;
+            string? hint = SettingsToolDir();
             bool on = await Task.Run(() => ForcedP2P.IsEnabled);
-            string? hint = global::System.IO.Path.GetDirectoryName(_cfg.GamePaths.IntlSettingsTool ?? "");
             var (ok, msg) = await Task.Run(() =>
             {
                 if (on) return ForcedP2P.Disable();
                 string? exe = ForcedP2P.ResolveGameExe(hint);
                 if (exe is null)
                     return (false, "未定位到国际服游戏本体（eFootball.exe）：先启动一次游戏，或先点「打开设置工具」形成路径记忆。");
-                return ForcedP2P.Enable(exe, ChkP2PTcp.IsChecked == true);
+                return ForcedP2P.Enable(exe, tcpToo);
             });
             _lineNotice = msg;
             AppendLog(ok ? $"强制 P2P：{msg}" : $"强制 P2P 失败：{msg}",
                 ok ? LogLevel.Success : LogLevel.Warn);
+        }
+        catch (Exception ex)
+        {
+            // async void 里漏出去的异常直接终结进程：这里一律接住，界面留话、日志留证
+            _lineNotice = "强制 P2P 操作异常：" + ex.Message;
+            AppendLog($"强制 P2P 异常：{ex.Message}", LogLevel.Error);
         }
         finally
         {
@@ -181,6 +227,17 @@ public partial class MainWindow
             BtnP2PToggle.IsEnabled = true;
             RefreshLineState();
         }
+    }
+
+    /// <summary>国际服设置工具所在目录（用来猜游戏本体路径）。路径为空时返回 null——Path.GetDirectoryName("") 会抛。</summary>
+    private string? SettingsToolDir()
+    {
+        try
+        {
+            string? tool = _cfg.GamePaths.IntlSettingsTool;
+            return string.IsNullOrWhiteSpace(tool) ? null : global::System.IO.Path.GetDirectoryName(tool);
+        }
+        catch { return null; }
     }
 
     private async void BtnUpdateHosts_Click(object sender, RoutedEventArgs e)
@@ -196,6 +253,12 @@ public partial class MainWindow
             TxtLineDetail.Text = _lineNotice;
             AppendLog("更新服加速：" + (result.Split('\n').LastOrDefault(l => l.Length > 0) ?? ""),
                 result.Contains("失败") || result.Contains("未修改") ? LogLevel.Warn : LogLevel.Success);
+        }
+        catch (Exception ex)
+        {
+            _lineNotice = "更新服加速异常：" + ex.Message;
+            TxtLineDetail.Text = _lineNotice;
+            AppendLog(_lineNotice, LogLevel.Error);
         }
         finally
         {
@@ -215,6 +278,11 @@ public partial class MainWindow
             var (ok, msg) = await Task.Run(UpdateHostsOptimizer.Restore);
             _lineNotice = msg;
             AppendLog(msg, ok ? LogLevel.Info : LogLevel.Warn);
+        }
+        catch (Exception ex)
+        {
+            _lineNotice = "还原 hosts 异常：" + ex.Message;
+            AppendLog(_lineNotice, LogLevel.Error);
         }
         finally
         {
@@ -616,7 +684,21 @@ public partial class MainWindow
             return;
         }
 
-        _inGame ??= new InGameConnectionMonitor { RegionLookup = ip => Probe.RegionFor(ip) };
+        if (_inGame is null)
+        {
+            _inGame = new InGameConnectionMonitor
+            {
+                RegionLookup = ip => Probe.RegionFor(ip),
+                // 真延迟测的候选：页面上标成「游戏服」的目标（种子表里就是 Konami 各地域服务器）
+                ServerTargetsProvider = () => Probe.Targets
+                    .Where(t => t.Kind == "game" && t.Ip.Length > 0)
+                    .Select(t => (t.Ip, t.Label))
+                    .ToList(),
+            };
+            // 事件只挂一次：停止监控不清订阅，否则第二次启动会重复出行
+            _inGame.MatchEnded += OnMatchEnded;
+            RenderRecentMatches();
+        }
         if (!_inGame.Start(out var err))
         {
             DotInGame.Fill = (Brush)Application.Current.Resources["Danger"];
@@ -631,20 +713,125 @@ public partial class MainWindow
         BtnInGameMonitor.Content = "停止监控";
         TxtIgDetail.Text = "正在抓包：进比赛后会自动认出服务器连接。";
         AppendLog("游戏内连接监控已启动（Npcap 抓包）。", LogLevel.Info);
+        // 起监控就把 HUD 摆出来：以前要点「显示悬浮窗」，而那个窗口被 SizeToContent 压成 2px，
+        // 用户以为按钮坏了（2026-11-12 反馈）
+        try { EnsureFullscreenCompatible(log: false); ShowOverlay(); }
+        catch (Exception ex) { AppendLog($"悬浮窗自动显示失败：{ex.Message}", LogLevel.Warn); }
     }
 
     private void BtnInGameOverlay_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            EnsureFullscreenCompatible(log: true);
+            ShowOverlay();
+        }
+        catch (Exception ex)
+        {
+            // 悬浮窗是 UI 线程上的独立窗口：抛出来会顺着消息循环带走整个进程，这里一律接住
+            AppendLog($"显示悬浮窗失败：{ex.Message}", LogLevel.Error);
+            TxtIgDetail.Text = "悬浮窗显示失败：" + ex.Message;
+        }
+    }
+
+    /// <summary>创建/显示悬浮窗（已存在就重新置顶并拉回屏内）。</summary>
+    private void ShowOverlay()
     {
         if (_overlay is null)
         {
             _overlay = new ConnectionOverlay();
             _overlay.Closed += (_, _) => _overlay = null;
         }
-        _overlay.Show();
         _overlay.Topmost = true;
+        _overlay.Show();
+        if (_inGame?.Last is { } last) _overlay.Update(last);
+    }
+
+    /// <summary>
+    /// 独占全屏下任何置顶窗口都会被游戏画面盖掉（DWM 不参与合成）。
+    /// 显示悬浮窗前先把游戏切成无边框全屏；已经是窗口/无边框就什么都不做。
+    /// </summary>
+    private void EnsureFullscreenCompatible(bool log)
+    {
+        string proc = RbCn.IsChecked == true ? BotEngine.CnProcessName : GameWindow.GlobalProcessName;
+        var win = GameWindow.FindFirst(proc);
+        if (win is null) return;
+        var mode = GameWindowMode.Detect(win.Handle, out var detail);
+        if (mode != GameDisplayMode.ExclusiveFullscreen) return;
+        var (ok, msg) = GameWindowMode.ForceBorderless(win.Handle);
+        if (log) AppendLog((ok ? "全屏兼容：" : "全屏兼容失败：") + msg, ok ? LogLevel.Info : LogLevel.Warn);
+    }
+
+    private void BtnFixFullscreen_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string proc = RbCn.IsChecked == true ? BotEngine.CnProcessName : GameWindow.GlobalProcessName;
+            var win = GameWindow.FindFirst(proc);
+            if (win is null) { TxtIgDetail.Text = "没找到游戏窗口：先启动游戏。"; return; }
+            var (ok, msg) = GameWindowMode.ForceBorderless(win.Handle);
+            AppendLog((ok ? "全屏兼容：" : "全屏兼容失败：") + msg, ok ? LogLevel.Success : LogLevel.Warn);
+            TxtIgDetail.Text = msg;
+            if (ok) ShowOverlay();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"全屏兼容异常：{ex.Message}", LogLevel.Error);
+        }
     }
 
     private void OnInGameUpdated(ConnSnapshot s) => Dispatcher.BeginInvoke(() => ApplyInGame(s));
+
+    private void OnMatchEnded(MatchSummary m) => Dispatcher.BeginInvoke(() =>
+    {
+        AppendLog("本场网络：" + m.Line, LogLevel.Info);
+        RenderRecentMatches();
+    });
+
+    /// <summary>把最近几场小结铺到卡片里（新的在最上面，最多 10 条；评级决定左侧色条）。</summary>
+    private void RenderRecentMatches()
+    {
+        if (SpRecentMatches is null) return;
+        SpRecentMatches.Children.Clear();
+        var list = _inGame?.RecentMatches;
+        if (list is null || list.Count == 0)
+        {
+            SpRecentMatches.Children.Add(new TextBlock
+            {
+                Text = "还没有结束的对局。打一把，比赛结束（对手切换/数据停止）时会自动出一条。",
+                FontSize = 11,
+                Foreground = (Brush)Application.Current.Resources["TextMuted"],
+                TextWrapping = TextWrapping.Wrap,
+                Margin = new Thickness(0, 2, 0, 0),
+            });
+            return;
+        }
+        foreach (var m in list)
+        {
+            Brush color = m.Grade.StartsWith("优秀", StringComparison.Ordinal) ? BrushOk
+                : m.Grade.StartsWith("良好", StringComparison.Ordinal) ? BrushOk
+                : m.Grade.StartsWith("一般", StringComparison.Ordinal) ? (Brush)Application.Current.Resources["Warning"]
+                : (Brush)Application.Current.Resources["Danger"];
+            var row = new Grid { Margin = new Thickness(0, 1, 0, 1) };
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            var bar = new Border { Background = color, CornerRadius = new CornerRadius(2), Width = 3, Margin = new Thickness(0, 2, 0, 2) };
+            Grid.SetColumn(bar, 0);
+            row.Children.Add(bar);
+            var text = new TextBlock
+            {
+                Text = m.Line,
+                FontSize = 11,
+                Foreground = (Brush)Application.Current.Resources["TextSecondary"],
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                Margin = new Thickness(8, 1, 0, 1),
+            };
+            Grid.SetColumn(text, 1);
+            row.Children.Add(text);
+            row.ToolTip = m.Line;
+            SpRecentMatches.Children.Add(row);
+        }
+    }
 
     private void ApplyInGame(ConnSnapshot s)
     {
@@ -653,17 +840,53 @@ public partial class MainWindow
             : s.DelayMs < 150 ? (Brush)Application.Current.Resources["Warning"]
             : (Brush)Application.Current.Resources["Danger"];
 
-        TxtIgDelay.Text = s.DelayMs < 0 ? "—" : s.DelayMs + " ms";
-        TxtIgDelay.Foreground = DotInGame.Fill;
-        TxtIgLoss.Text = s.LossPct <= 0.05 ? "0%" : $"{s.LossPct:0.#}%";
-        TxtIgLoss.Foreground = s.LossPct < 1 ? BrushOk
+        // 「延迟」这一格显示真延迟（到对局地域服务器的实测 RTT，与游戏内天线格同口径）；
+        // 拿不到服务器实测时退回链路 RTT，并在明细里注明口径
+        // 只显示游戏客户端自己算的延迟（读内存）；拿不到就「—」，不再用节点/ICMP 的数冒充
+        int shownMs = s.DelayMs;
+        // 标题跟着来源走：加速器下我们只测得到「你↔节点」这一段，别让 9ms 看着像对局延迟
+        TxtIgDelayCap.Text = s.DelaySource switch
+        {
+            "游戏内" => "延迟（游戏内）",
+            "tcping" => "延迟（tcping）",
+            "STUN" => "延迟（STUN）",
+            "链路(节点)" => "延迟（节点段）",
+            "链路ICMP" => "延迟（链路）",
+            _ => "延迟",
+        };
+        TxtIgDelay.Text = shownMs < 0 ? "—" : shownMs + " ms";
+        TxtIgDelay.Foreground = shownMs < 0 ? BrushIdle : shownMs < 60 ? BrushOk
+            : shownMs < 110 ? (Brush)Application.Current.Resources["Warning"]
+            : (Brush)Application.Current.Resources["Danger"];
+
+        // LossPct < 0 = 不可测（对端从不回 ICMP / 还没探测）：显示「—」而不是 0%，更不是 100%
+        bool lossKnown = s.LossPct >= 0;
+        TxtIgLoss.Text = !lossKnown ? "—" : s.LossPct <= 0.05 ? "0%" : $"{s.LossPct:0.#}%";
+        TxtIgLoss.Foreground = !lossKnown ? BrushIdle
+            : s.LossPct < 1 ? BrushOk
             : s.LossPct < 5 ? (Brush)Application.Current.Resources["Warning"]
             : (Brush)Application.Current.Resources["Danger"];
+
         TxtIgRemote.Text = s.Remote;
         TxtIgRegion.Text = s.Region;
-        TxtIgDetail.Text = $"最小/平均/最大 {(s.MinMs < 0 ? "—" : s.MinMs + "ms")} / "
-            + $"{(s.AvgMs < 0 ? "—" : s.AvgMs + "ms")} / {(s.MaxMs <= 0 ? "—" : s.MaxMs + "ms")}"
-            + $" · 样本 {s.Curve.Count}";
+
+        // 抓包实测的三个数（pps 与抖动不受 ICMP 影响，是对局链路的硬指标）
+        string stats = $"最小/平均/最大 {(s.MinMs < 0 ? "—" : s.MinMs + "ms")} / "
+            + $"{(s.AvgMs < 0 ? "—" : s.AvgMs + "ms")} / {(s.MaxMs <= 0 ? "—" : s.MaxMs + "ms")}";
+        if (s.DelaySource.Length > 0)
+            stats = "延迟来源：" + s.DelaySource + (s.PingStatus.Length > 0 ? "（" + s.PingStatus + "）" : "") + "\n" + stats;
+        else if (s.PingStatus.Length > 0)
+            stats = "游戏内延迟：" + s.PingStatus + "\n" + stats;
+        if (s.StunRttMs >= 0) stats += $" · 对局 RTT {s.StunRttMs}ms（STUN 实测）";
+        if (s.TcpingMs >= 0) stats += $" · tcping {s.TcpingMs}ms";
+        if (s.BarsEstimate > 0) stats += $" · 估算 ≈{s.BarsEstimate:0.0} 格";
+        if (s.JitterMs >= 0) stats += $" · 抖动 {s.JitterMs}ms";
+        if (s.Peers > 1 || s.UpPps + s.DownPps > 0)
+            stats += $" · ↑{s.UpPps}/↓{s.DownPps} pps · ↑{s.UpKbps}/↓{s.DownKbps} kbps · 对端 {s.Peers}";
+        stats += $" · 样本 {s.Curve.Count}";
+        if (s.Direction.Length > 0) stats += "\n双向 " + s.Direction.Replace(' ', '·') + "（. 双向通 / _ 只收到 / X 只发出）";
+        if (s.SpeedTests.Length > 0) stats += "\n游戏测速：" + s.SpeedTests;
+        TxtIgDetail.Text = s.Note.Length == 0 ? stats : stats + "\n" + s.Note;
 
         DrawIgSpark(s.Curve);
         if (_overlay is { IsVisible: true }) _overlay.Update(s);

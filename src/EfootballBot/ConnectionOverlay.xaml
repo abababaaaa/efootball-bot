@@ -3,17 +3,18 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         WindowStyle="None" AllowsTransparency="True" Background="Transparent"
         Topmost="True" ShowInTaskbar="False" ShowActivated="False"
-        ResizeMode="NoResize" SizeToContent="Height" Width="286"
+        ResizeMode="NoResize" SizeToContent="Height" Width="300" MinWidth="300"
         FontFamily="Microsoft YaHei UI" Foreground="#FFE6E9EF">
     <Border Background="#E6111720" CornerRadius="12" BorderBrush="#33FFFFFF" BorderThickness="1"
             Padding="14,11" Cursor="SizeAll"
-            MouseLeftButtonDown="OnDrag" MouseRightButtonUp="OnClose">
+            MouseLeftButtonDown="OnDrag" MouseRightButtonUp="OnClose"
+            MouseDown="OnAnyMouseDown">
         <StackPanel>
             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                 <Ellipse x:Name="Dot" Width="7" Height="7" Fill="#FF7B8696" VerticalAlignment="Center"/>
                 <TextBlock x:Name="TxtState" Text="未启动" FontSize="11" Margin="6,0,0,0"
                            Foreground="#FF9AA4B2" VerticalAlignment="Center"/>
-                <TextBlock Text="拖我挪位置 · 双击贴回游戏 · 右键关闭" FontSize="9.5" Margin="10,0,0,0"
+                <TextBlock x:Name="TxtHint" Text="拖动移位 · 双击贴回 · 中键穿透 · 右键关闭" FontSize="9.5" Margin="10,0,0,0"
                            Foreground="#FF6C7686" VerticalAlignment="Center"/>
             </StackPanel>
             <StackPanel Orientation="Horizontal">

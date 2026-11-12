@@ -1,3 +1,4 @@
+using EfootballBot.Core.Bot.Scenarios;
 using EfootballBot.Core.Bot.Scenarios.CnMyLeague;
 using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Bot.Scenarios.PeakLadder;
@@ -78,6 +79,66 @@ public class CnMyLeagueEntryTests
             W("下一步", 0.85, 0.9));
         Assert.Equal(MlScreen.MatchStartPage,
             MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    // ---------------- 回归 2026-11-11：国服关键比赛弹窗（按钮=确定/取消，A 落在取消上）----------------
+
+    [Fact]
+    public void CnKeyMatchPopup_RecognizedOnRealFrame()
+    {
+        // 实机帧 bot-20261111-150430-1716.yml 1793 行（16:20:48）：弹窗盖在联赛主页上，
+        // 正文「即将进行的是关键比赛」+「下一场比赛有固定的赛事等级…」，按钮「确定」y0.59 /
+        // 「取消」y0.69。国际服同款弹窗是 OK（HasOkButton）→ KeyMatchDialog→上移+A；
+        // 国服换成 确定/取消 后 HasOkButton 判不中，落 HasConfirm 被 PopupBrain 的
+        // 「白底=焦点」判成「高光在确定→直接 A」，而实际 A 落在下方取消 → 弹窗关掉回主页，
+        // 前往比赛↔弹窗死循环 60+ 轮零场次（用户 2026-11-11 反馈）。
+        var ocr = Ocr(W("实况足球在线", 0.5, 0.03), W("前往比赛", 0.14, 0.24),
+            W("即将进行的是关键比赛", 0.42, 0.42),
+            W("下一场比赛有固定的赛事等级。你将获得额外的我的联赛积分和经验值。", 0.42, 0.50),
+            W("传奇：3,640", 0.55, 0.55), W("确定", 0.50, 0.59), W("取消", 0.50, 0.69),
+            W("赛事信息", 0.14, 0.66), W("返回", 0.07, 0.94));
+
+        // 实机同帧 YOLO：btn_confirm 0.81（弹窗确认按钮）+ btn_back 0.92
+        var dets = new[]
+        {
+            new YoloDetection("btn_confirm", 1, 0.81f, 0.44, 0.56, 0.12, 0.06),
+            new YoloDetection("btn_back", 2, 0.92f, 0.03, 0.90, 0.06, 0.05),
+        };
+
+        Assert.True(CnMyLeagueScenario.IsCnKeyMatchPopup(ocr));   // 修复后的判定
+        Assert.False(MyLeagueBrain.HasOkButton(ocr));             // 漏接事实：没有 OK 词
+        Assert.Equal(MlScreen.HasConfirm,                         // 旧分类落 HasConfirm
+            MyLeagueBrain.Classify(dets, ocr));
+
+        // 按钮布局锁定：确定在上、取消在下 → 阶梯第 1 招「上×1+A」方向正确
+        var buttons = PopupBrain.FindButtons(null, ocr);
+        Assert.Equal(new[] { "确定", "取消" }, buttons.Select(b => b.Label).ToArray());
+        Assert.True(buttons[0].IsConfirm);
+        Assert.True(buttons[0].CenterY < buttons[1].CenterY);
+    }
+
+    [Fact]
+    public void LeagueHome_NotMistakenForKeyMatchPopup()
+    {
+        // 联赛主页（含「确定」这类底栏词也不得误判成关键比赛弹窗）：无「关键比赛」字样
+        var ocr = Ocr(W("前往比赛", 0.14, 0.24), W("赛程表", 0.14, 0.38),
+            W("兑换积分", 0.14, 0.52), W("赛事信息", 0.14, 0.66),
+            W("比赛记录", 0.55, 0.40), W("确定", 0.50, 0.59), W("返回", 0.07, 0.94));
+        Assert.False(CnMyLeagueScenario.IsCnKeyMatchPopup(ocr));
+    }
+
+    [Fact]
+    public void KeyMatchHint_WithoutButton_NotPopup()
+    {
+        // 主页预告只印「关键比赛」一词（无弹窗正文/按钮）：不按弹窗处置
+        var ocr = Ocr(W("前往比赛", 0.14, 0.24), W("关键比赛", 0.55, 0.40),
+            W("赛程表", 0.14, 0.38), W("返回", 0.07, 0.94));
+        Assert.False(CnMyLeagueScenario.IsCnKeyMatchPopup(ocr));
+
+        // 正文整句漏读时靠按钮词兜底（仍要求 关键比赛 字样）
+        var jitter = Ocr(W("前往比赛", 0.14, 0.24), W("关键比赛", 0.55, 0.40),
+            W("确定", 0.50, 0.59), W("取消", 0.50, 0.69));
+        Assert.True(CnMyLeagueScenario.IsCnKeyMatchPopup(jitter));
     }
 
     // ---------------- 配置：国服独立配置段 ----------------

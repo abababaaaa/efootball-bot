@@ -202,6 +202,65 @@ public static class WeeklyBrain
                (w.NormText.Contains("对阵AI", StringComparison.OrdinalIgnoreCase) ||
                 w.NormText.Contains("对阵玩家")));
 
+    // ---------------- 比赛页（大活动页）磁贴定位（2026-11-13 用户实机） ----------------
+
+    /// <summary>比赛页磁贴行里可作为格位锚点的标题词（新 UI 实机 2026-11-13 用户截图：
+    /// 最左「锦标赛」/ 第二「活动」/ 第三「eFootball™联赛」/ 第四「我的联赛」；
+    /// 标题是大字印在卡片下半部，描述句在下一行）。</summary>
+    private static readonly string[] HubTileTitles = { "锦标赛", "活动", "我的联赛" };
+
+    /// <summary>
+    /// 比赛页（大活动页）磁贴行里「活动」磁贴是第几格（0 起）。
+    /// 用户 2026-11-13 实机：大活动页第一格已改成「锦标赛」（Round 3 Ranking Event /
+    /// 参加锦标赛形式的活动），活动板块退到第二格——旧逻辑「归位最左后从第 1 格开始扫」
+    /// 必然先按进锦标赛，随后被当成活动介绍页，整夜在「活动简介 / 详情说明面板」里打转
+    /// （反馈包 20261112_233710：23:33 起同一条警告每 2~3 秒一轮、零场次）。
+    /// 判定只用磁贴标题词本身：y 落在卡片下半部、按 x 排序取「活动」的序号；
+    /// 描述句「参加活动以获得丰厚奖励!」不是整词，不参与排序。
+    /// 磁贴行读不全（OCR 漏读/只读到一枚）返回 null，调用方退回原来的逐格扫描。
+    /// </summary>
+    public static int? FindActivityTileOffset(OcrResult ocr)
+    {
+        var tiles = new List<(double X, string Title)>();
+        foreach (var w in ocr.Words)
+        {
+            if (w.CenterY is < 0.40 or > 0.90 || w.CenterX > 0.99) continue;
+            string? title = HubTileTitle(w.NormText);
+            if (title is null) continue;
+            // 同一格的碎词/合并整行（MergeLines 会追加一条整行词）只保留第一次命中
+            if (tiles.Any(t => Math.Abs(t.X - w.CenterX) < 0.02)) continue;
+            tiles.Add((w.CenterX, title));
+        }
+        if (tiles.Count < 2) return null; // 读不全不猜格位：宁可走原扫描
+        tiles.Sort((a, b) => a.X.CompareTo(b.X));
+        int idx = tiles.FindIndex(t => t.Title == "活动");
+        return idx >= 0 ? idx : null;
+    }
+
+    /// <summary>磁贴标题词归一：优先级为整词精确；「eFootball™联赛」被 OCR 拆写时按
+    /// 含 eFootball + 联赛 兜底（™/空格已被 Norm 去掉）。</summary>
+    private static string? HubTileTitle(string norm)
+    {
+        if (HubTileTitles.Contains(norm)) return norm;
+        if (norm.Contains("eFootball", StringComparison.OrdinalIgnoreCase) && norm.Contains("联赛"))
+            return "eFootball联赛";
+        return null;
+    }
+
+    /// <summary>
+    /// A 落在大活动页第一格「锦标赛」磁贴上时打开的页面（不是活动介绍页）：
+    /// 页内保留比赛 hub 的固定描述句「参加锦标赛形制的活动」（实机 OCR 原文），
+    /// 或锦标赛子页的「自定义锦标赛」。
+    /// 命中即判定误入，场景层 B 退回比赛页改试下一格——绝不在这页按 A（会一路点开
+    /// 「活动简介 → 详情说明面板」，正是反馈包 20261112_233710 里整夜打转的那条链）。
+    /// </summary>
+    public static bool IsTournamentPage(OcrResult ocr)
+        // 实机 OCR 读到的是「参加锦标赛形制的活动。」（形制/形式都可能被 OCR 认错），
+        // 故只认「参加锦标赛」这半句固定文案，后半句不作判据。
+        => ocr.ContainsJoined("参加锦标赛")
+           || (ocr.ContainsJoined("自定义锦标赛") &&
+               ocr.Words.Any(w => w.CenterY < 0.25 && w.NormText.Contains("锦标赛")));
+
     /// <summary>
     /// 「建议」面板是否盖在活动主页上。只用固定 UI 文案，建议正文/日期/球员名是可变内容，不作判定点：
     /// 列表视图＝标题「建议列表」或副标题「显示最近5场比赛的建议。」；

@@ -119,17 +119,14 @@ public partial class MainWindow
         if (!IsLoaded) return;
         if (sender is not RadioButton { Tag: string target }) return;
 
-        // 形如 "UpdatePanel:1" → 按索引切段
+        // 形如 "UpdatePanel:1" → 按索引切段（统一走 ShowSection：可见性、滚动条策略、切页动效一处决定）
         if (target.Contains(':'))
         {
             var parts = target.Split(':');
-            if (FindName(parts[0]) is ScrollViewer sv && sv.Content is Panel content
-                && int.TryParse(parts[1], out var idx) && idx < content.Children.Count)
-            {
-                for (var k = 0; k < content.Children.Count; k++)
-                    content.Children[k].Visibility = k == idx ? Visibility.Visible : Visibility.Collapsed;
-                sv.ScrollToTop();
-            }
+            if (!int.TryParse(parts[1], out var idx)) return;
+            ShowSection(parts[0], idx);
+            // 对战线路段：每次切进来都实读一次状态（防火墙规则 / hosts 可能被别的软件或上一次会话改过）
+            if (parts[0] == "NetworkPanel" && idx == 2) RefreshLineState();
             return;
         }
 
@@ -554,11 +551,13 @@ public partial class MainWindow
             _devMode = false;
         }
 
-        // 进入工具页先落到第一段，避免整页一次性铺开
-        if (showUpd) ShowSection("UpdatePanel", 0);
-        if (showNet) ShowSection("NetworkPanel", 0);
-        if (showGh) ShowSection("GitHubPanel", 0);
-        if (showFb) ShowSection("FeedbackPanel", 0);
+        // 进入工具页先落到第一段，避免整页一次性铺开；页签同步回第一段
+        // （否则上次停在「对战线路」再进来时，界面显示的是测速段、页签却亮着对战线路，
+        //   再点那个已选中的页签不会有 Checked 事件 = 看着点不动）
+        if (showUpd) { ShowSection("UpdatePanel", 0); UpTabAuto.IsChecked = true; }
+        if (showNet) { ShowSection("NetworkPanel", 0); NetTabPing.IsChecked = true; }
+        if (showGh) { ShowSection("GitHubPanel", 0); GhTabPort.IsChecked = true; }
+        if (showFb) { ShowSection("FeedbackPanel", 0); FbTabDiag.IsChecked = true; }
         SyncSubTabs();
 
         bool isGame = mode == NavMode.Game;
