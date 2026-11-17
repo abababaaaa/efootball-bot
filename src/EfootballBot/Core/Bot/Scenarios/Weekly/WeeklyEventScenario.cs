@@ -215,11 +215,17 @@ public sealed class WeeklyEventScenario : IScenario
             _focusMissAtAdvice = false;
             _log("[周活动] 比赛开始：挂机等待比赛结束（按节奏随机点击）", LogLevel.Info);
         }
-        if (matchEnded)
+        if (matchEnded && !_matchSession.LastEndTrusted)
+        {
+            // 超时收尾：5 分钟没再见到比赛特征（赛后回放/结算页卡住，或画面判定丢了）。
+            // 不外计场次——用户 2026-11-13 反馈「哪儿来的 76 场」，虚高就是这么来的。
+            _log($"[周活动] 5 分钟没再出现比赛特征，关闭本场（用时 {_matchSession.LastDurationText}）但未计入场次——没见到终场页，请带这份日志反馈", LogLevel.Warn);
+        }
+        else if (matchEnded)
         {
             _engine.Stats.MatchesDone++;
             if (_matchSession.WasKeyMatch) _engine.Stats.KeyMatches++;
-            _log($"[周活动] 一场比赛结束（{(_matchSession.WasKeyMatch ? "关键比赛，" : "")}累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
+            _log($"[周活动] 一场比赛结束（{(_matchSession.WasKeyMatch ? "关键比赛，" : "")}用时 {_matchSession.LastDurationText}，累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
             _engine.ReportMatchDone(_matchSession.WasKeyMatch);
 
             var wkCfg = _engine.Config.Weekly;
@@ -448,6 +454,8 @@ public sealed class WeeklyEventScenario : IScenario
                 switch (wk)
                 {
                     case WkScreen.EventsList:
+                        // 活动列表 = 本模块的"菜单"：解禁下一场（结算链里的比赛帧误判不算新场）
+                        _matchSession.MarkAtMenu();
                         return await EnterNextEventAsync(obs);
                     case WkScreen.EventIntro:
                     case WkScreen.EntryPopup:

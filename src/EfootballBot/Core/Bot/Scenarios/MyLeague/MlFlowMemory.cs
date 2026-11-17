@@ -43,17 +43,69 @@ internal sealed class MlFlowMemory
 /// （LeaguePage/MatchHub/MainMenu）或连续 5 分钟无比赛特征视为一场结束（供统计计数）。
 /// Unknown/HasConfirm（重播、结算弹窗）不会误关场次。
 /// </summary>
+/// <summary>一场比赛是怎么收尾的。</summary>
+internal enum MatchEndReason
+{
+    /// <summary>还没结束过。</summary>
+    None,
+    /// <summary>见到终场页（比分 + 球员评价）——权威信号。</summary>
+    FullTime,
+    /// <summary>直接回到比赛页/主菜单——没看到终场页也算结束（弹窗链被跳过的场景）。</summary>
+    Menu,
+    /// <summary>连续 5 分钟没再出现比赛特征：可能是赛后回放/结算页卡住，也可能画面判定丢了。
+    /// 这种「结束」不可靠，调用方不得计入完成场次。</summary>
+    Timeout,
+}
+
 internal sealed class MatchSessionTracker
 {
     private bool _active;
     private DateTime _lastInMatchAt;
+    private DateTime _lastEndAt = DateTime.MinValue;
     private bool _sawKeyMatch;
+
+    /// <summary>
+    /// 关场后的重开冷却：结算页/回放页偶尔会被角区兜底误判成 InMatch，关场后一两秒就
+    /// "又开一场"，一场比赛被反复计数。真实流程里两场之间必然要回主页/选难度/加载，
+    /// 远不止这么多秒——见用户 2026-11-13 反馈「完成场次 76、游戏战绩 29 场」。
+    /// </summary>
+    internal static readonly TimeSpan RestartCooldown = TimeSpan.FromSeconds(90);
+
+    /// <summary>
+    /// 关场后必须先见到菜单/主页，才允许开下一场。结算链（回放、统计、奖励弹窗）里
+    /// 角区探针经常把某一帧判成 InMatch，靠时间冷却挡不住——结算可以拖好几分钟。
+    /// 真实流程里两场之间必然回到主页/比赛页，所以这个门是可靠的。
+    /// 场景层在识别到自己的主页时调 <see cref="MarkAtMenu"/>（AiLadder 的组别主页
+    /// 传 isHome:false，Observe 内部判不出来）。
+    /// </summary>
+    private bool _needMenuBeforeRestart; // 会话开始时（可能半途接管在比赛中）允许直接开赛
+    private DateTime _needMenuSince = DateTime.MinValue;
+
+    /// <summary>「须见菜单」的门最多挡这么久：某些场景（国服周活动/天梯巅峰赛）没有显式的
+    /// 主页回调，死守会变成永远不开赛。结算链一般 1~3 分钟，5 分钟足够兜住。</summary>
+    internal static readonly TimeSpan MenuGateMaxWait = TimeSpan.FromMinutes(5);
 
     internal bool Active => _active;
     /// <summary>本场首次被判为 InMatch 的时间（null = 未开赛）。只打关键比赛用它算时钟走了多久。</summary>
     internal DateTime? StartedAt { get; private set; }
     /// <summary>刚结束的这场是否关键比赛（会话期间见过 KeyMatchDialog/关键比赛字样）。</summary>
     internal bool WasKeyMatch { get; private set; }
+
+    /// <summary>最近一场的实际用时（首次 InMatch → 关场）。诊断「一场 20 分钟」这类反馈用：
+    /// 日志里直接给 mm:ss，不用再从几百行时间戳里倒推。</summary>
+    internal TimeSpan? LastDuration { get; private set; }
+
+    /// <summary>最近一场是怎么判「结束」的。超时（游戏画面里一直没再出现比赛特征）
+    /// 不等于真打完——用户 2026-11-13 反馈「哪儿来的 76 场」，多出来的场次必须靠这条区分。</summary>
+    internal MatchEndReason LastEndReason { get; private set; } = MatchEndReason.None;
+
+    /// <summary>这次「结束」是否可信（见到终场页或直接回到菜单）。超时不算——
+    /// 调用方据此决定要不要计入完成场次。</summary>
+    internal bool LastEndTrusted => LastEndReason is MatchEndReason.FullTime or MatchEndReason.Menu;
+
+    /// <summary>最近一场用时的 mm:ss 文本（无记录时 --:--）。</summary>
+    internal string LastDurationText =>
+        LastDuration is TimeSpan d ? $"{d.Minutes:00}:{d.Seconds:00}" : "--:--";
 
     /// <summary>观察一轮；返回 true 表示本轮判定一场比赛结束。
     /// isHome：LeaguePage 是否为真主页（OCR 含前往比赛/下个赛季）——开场过渡帧会被
@@ -62,9 +114,21 @@ internal sealed class MatchSessionTracker
     internal bool Observe(MlScreen screen, DateTime now, bool sawKeyMatchHint = false, bool isHome = true)
     {
         if (sawKeyMatchHint) _sawKeyMatch = true;
+        // 回到菜单/主页：解除「必须先见菜单才能开下一场」的门
+        bool atMenu = screen == MlScreen.MatchHub || screen == MlScreen.MainMenu ||
+                      (screen == MlScreen.LeaguePage && isHome);
+        if (atMenu) _needMenuBeforeRestart = false;
+
         if (screen == MlScreen.InMatch)
         {
-            if (!_active) StartedAt = now;
+            if (!_active)
+            {
+                // 结算链里的"比赛帧"（回放/统计/奖励页误判）：没回菜单、或还在冷却期内，
+                // 都不是新的一场——用户 2026-11-13「76 场 vs 战绩 29 场」就是这么来的
+                if (_needMenuBeforeRestart && now - _needMenuSince < MenuGateMaxWait) return false;
+                if (now - _lastEndAt < RestartCooldown) return false;
+                StartedAt = now;
+            }
             _lastInMatchAt = now;
             _active = true;
             return false;
@@ -79,8 +143,14 @@ internal sealed class MatchSessionTracker
         if (matchOver || backToMenus || timedOut)
         {
             _active = false;
+            _needMenuBeforeRestart = true;
+            _needMenuSince = now;
             WasKeyMatch = _sawKeyMatch;
-            Finish();
+            LastEndReason = matchOver ? MatchEndReason.FullTime
+                : backToMenus ? MatchEndReason.Menu
+                : MatchEndReason.Timeout;
+            _lastEndAt = now;
+            Finish(now);
             return true;
         }
         return false;
@@ -91,17 +161,23 @@ internal sealed class MatchSessionTracker
     /// 让下一场从干净状态重新计数——否则重启后回到联赛主页会被误判成「一场比赛结束」，
     /// 凭空多算一场完成场次。
     /// </summary>
+    /// <summary>场景层识别到自己的主页/菜单时调用：解除「须先见菜单」的门。</summary>
+    internal void MarkAtMenu() => _needMenuBeforeRestart = false;
+
     internal void Abort()
     {
         _active = false;
+        _lastEndAt = DateTime.MinValue;
+        _needMenuBeforeRestart = false;
         StartedAt = null;
         _lastInMatchAt = DateTime.MinValue;
         _sawKeyMatch = false;
         WasKeyMatch = false;
     }
 
-    private void Finish()
+    private void Finish(DateTime now)
     {
+        if (StartedAt is DateTime started) LastDuration = now - started;
         StartedAt = null;
         _sawKeyMatch = false;
     }

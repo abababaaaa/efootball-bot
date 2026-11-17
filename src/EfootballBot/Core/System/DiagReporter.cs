@@ -227,6 +227,9 @@ if ($steam) {
         Head("SECTION 16 - APP FOLDER (bot logs/config copied; onnxruntime versions)");
         report.AppendLine(CopyAppFiles(dir, report));
 
+        Head("SECTION 16b - LIVE FRAMES (unrecognized screens, copied from data\\dump)");
+        report.AppendLine(CopyLiveFrames(dir, report));
+
         Head("SECTION 17 - RECENT CRASH DUMPS (auto-captured by CrashReporter)");
         progress?.Invoke("附带最近崩溃记录…");
         report.AppendLine(CopyCrashDumps(dir, report));
@@ -291,6 +294,53 @@ if ($steam) {
                 : $"{n} | not present");
         }
         return $"app files copied: {copied}";
+    }
+
+    /// <summary>
+    /// 附带最近「认不出的界面」实机帧（data\dump，2026-11-18 识别走查起由场景层在
+    /// 连续 Unknown / 难度页卡住时转存）：最多 12 张、单张 ≤6MB、总量 ≤40MB。
+    /// 这是识别走查最关键的一份证据——此前用户反馈「不自动开始比赛」，包里只有一行
+    /// 「界面：Unknown」，既看不到那一屏长什么样、也不知道 OCR 读成了什么，远程只能猜。
+    /// </summary>
+    private static string CopyLiveFrames(string dir, StringBuilder report)
+    {
+        try
+        {
+            var dumpDir = Path.Combine(AppPaths.DataDir, "dump");
+            if (!Directory.Exists(dumpDir))
+                return "(no live frames — no unrecognized screens recorded yet)";
+            var frames = Directory.GetFiles(dumpDir, "*.png")
+                .Select(f => new FileInfo(f))
+                .OrderByDescending(f => f.LastWriteTime)
+                .Take(12)
+                .ToList();
+            if (frames.Count == 0) return "(no live frames)";
+
+            string dst = Path.Combine(dir, "app_frames");
+            Directory.CreateDirectory(dst);
+            long total = 0;
+            int copied = 0;
+            foreach (var f in frames)
+            {
+                if (f.Length > 6 * 1024 * 1024) continue;
+                if (total + f.Length > 40L * 1024 * 1024) break;
+                try
+                {
+                    File.Copy(f.FullName, Path.Combine(dst, f.Name), true);
+                    total += f.Length;
+                    copied++;
+                }
+                catch { /* 单张失败不影响整体 */ }
+            }
+            report.AppendLine($"live frames on disk: {frames.Count} newest under data\\dump" +
+                              $" (newest {frames[0].LastWriteTime:yyyy-MM-dd HH:mm})");
+            report.AppendLine($"live frames copied: {copied} -> app_frames\\");
+            return $"live frames copied: {copied}";
+        }
+        catch (Exception ex)
+        {
+            return $"(live frame copy failed: {ex.Message})";
+        }
     }
 
     /// <summary>附带最近崩溃 dump（最多 2 份，单份 ≤100MB——QQ 群文件友好），返回结果说明。</summary>

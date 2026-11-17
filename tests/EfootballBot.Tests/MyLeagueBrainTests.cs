@@ -304,6 +304,35 @@ public class MyLeagueBrainTests
     }
 
     [Fact]
+    public void Decide_InMatch_SkipOverlay_PressesFast()
+    {
+        // 用户 2026-11-13 国际服反馈：一场 20 分钟、动画基本都看完了，把挂机节奏改成
+        // 1~2 秒也没用。进球回放出现「跳过」提示时必须快按 A（300ms），而不是等挂机节奏
+        var ocr = Ocr(("0:57", 0.2, 0.06), ("跳过", 0.88, 0.86));
+        var action = MyLeagueBrain.Decide(MlScreen.InMatch, ocr, 5);
+        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        Assert.Equal(300, action.WaitMs);
+    }
+
+    [Fact]
+    public void Decide_InMatch_SkipBanner_NotTreatedAsSkipOverlay()
+    {
+        // 国服「跳过比赛」横幅仍是暂停链路（PadStartPress），不能被过场快按吃掉
+        var ocr = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.86, 0.055));
+        Assert.False(MyLeagueBrain.IsSkipOverlay(ocr));
+        Assert.Equal(MlActionKind.PadStartPress, MyLeagueBrain.Decide(MlScreen.InMatch, ocr, 5).Kind);
+    }
+
+    [Fact]
+    public void IsSkipOverlay_EnglishSkipNeedsLowerHalf()
+    {
+        // 国际服英文界面：SKIP 只在画面下半部（按钮区）才算，顶部菜单同词不触发
+        Assert.True(MyLeagueBrain.IsSkipOverlay(Ocr(("SKIP", 0.90, 0.88))));
+        Assert.False(MyLeagueBrain.IsSkipOverlay(Ocr(("SKIP", 0.50, 0.08))));
+        Assert.True(MyLeagueBrain.IsSkipOverlay(Ocr(("重播", 0.88, 0.86))));
+    }
+
+    [Fact]
     public void Decide_InMatch_TimeoutEscapes()
     {
         // 远超一场比赛时长（~30 分钟）仍停留才 B 逃生（重播暂停等卡死兜底）
@@ -608,7 +637,11 @@ public class MyLeagueBrainTests
         // 周期性（每 5 轮）按 B 逃生，其余轮继续导航
         Assert.Equal(MlActionKind.PadEnterMatch,
             MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
+        // 比赛页例外（识别走查 2026-11-18）：焦点词读不到时右移是空转，连续
+        // MatchHubFocusBlindStreak 轮还读不到就按 A 试进当前卡，别等到 NavEscapeStreak
         Assert.Equal(MlActionKind.PadMoveRight,
+            MyLeagueBrain.Decide(MlScreen.MatchHub, OcrResult.Empty, MyLeagueBrain.MatchHubFocusBlindStreak - 1).Kind);
+        Assert.Equal(MlActionKind.PadConfirm,
             MyLeagueBrain.Decide(MlScreen.MatchHub, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
         Assert.Equal(MlActionKind.PadConfirm,
             MyLeagueBrain.Decide(MlScreen.ItemList, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);

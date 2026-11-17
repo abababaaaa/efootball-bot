@@ -106,6 +106,8 @@ public sealed class AiLadderScenario : IScenario
 
         // ---- 共用比赛流程：场次计数。不回我的联赛主页（isHome 恒 false），
         //      终场 FullTime 是权威关场信号，超时兜底 5 分钟
+        // 组别主页是本模块的"菜单"：到这里才允许开下一场——结算链里的比赛帧误判不算新场
+        if (al == AlScreen.DivisionHome || al == AlScreen.CategorySelect) _matchSession.MarkAtMenu();
         bool wasActive = _matchSession.Active;
         bool matchEnded = _matchSession.Observe(ml, now, sawKeyMatchHint: false, isHome: false);
         if (!wasActive && _matchSession.Active)
@@ -113,10 +115,14 @@ public sealed class AiLadderScenario : IScenario
             _log("[AI天梯联赛] 比赛开始：挂机等待比赛结束（按节奏随机点击）", LogLevel.Info);
             _homeRound = 0; // 开赛成功=盲试配方有效，重置主页重试轮数
         }
-        if (matchEnded)
+        if (matchEnded && !_matchSession.LastEndTrusted)
+        {
+            _log($"[AI天梯联赛] 5 分钟没再出现比赛特征，关闭本场（用时 {_matchSession.LastDurationText}）但未计入场次——没见到终场页，请带这份日志反馈", LogLevel.Warn);
+        }
+        else if (matchEnded)
         {
             _engine.Stats.MatchesDone++;
-            _log($"[AI天梯联赛] 一场比赛结束（累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
+            _log($"[AI天梯联赛] 一场比赛结束（用时 {_matchSession.LastDurationText}，累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
             _engine.ReportMatchDone(_matchSession.WasKeyMatch);
 
             var cfg = _engine.Config.AiLadder;

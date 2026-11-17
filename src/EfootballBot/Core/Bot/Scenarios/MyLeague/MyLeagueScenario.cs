@@ -59,6 +59,9 @@ public class MyLeagueScenario : IScenario
     private DateTime? _titleSince;
     /// <summary>关键比赛预告是否已提示（离开预告状态后复位）。</summary>
     private bool _keyMatchAnnounced;
+    /// <summary>连续「认不出的界面」轮数 + 上次转存时间（识别走查：新版改版的症状取证）。</summary>
+    private int _unknownStreak;
+    private DateTime _lastUnknownDumpAt = DateTime.MinValue;
     /// <summary>球员满级提示节流。</summary>
     private DateTime _lastMaxLevelAt = DateTime.MinValue;
     /// <summary>经验值页「大部分球员已满级」日志节流（页面停留多帧只报一次）。</summary>
@@ -146,6 +149,25 @@ public class MyLeagueScenario : IScenario
 
         _memory.Record(screen, now);
 
+        // 识别走查（2026-11-18）：连续多轮认不出的界面把实机帧 + OCR 摘要落 datadump。
+        // 新版改版后「哪一屏认不出来」只能靠用户口述，反馈包里没有那一帧，远程只能猜；
+        // 现在用户下次反馈直接带图。节流 120s、要求帧里确实有字（黑帧/加载帧不转存）。
+        if (screen == MlScreen.Unknown)
+        {
+            _unknownStreak++;
+            if (_unknownStreak >= 2 && obs.Ocr.Words.Count > 0 &&
+                (now - _lastUnknownDumpAt).TotalSeconds > 120)
+            {
+                _lastUnknownDumpAt = now;
+                DumpLiveFrame(obs.Frame, "unknown_live");
+                _log($"[我的联赛] 认不出的界面已转存（连续 {_unknownStreak} 轮），OCR：{OcrDigest(obs.Ocr)}", LogLevel.Warn);
+            }
+        }
+        else
+        {
+            _unknownStreak = 0;
+        }
+
         // 主页无响应自愈计数：只在流程真正推进（开赛/比赛中/关键比赛弹窗被识别）或
         // 离开联赛（回主菜单/比赛页）时复位。此前"画面离开主页即复位"会被「弹窗被盲按 A
         // 取消 → 回主页」的循环每圈清零（用户 2026-10-15 实测：传奇级关键比赛弹窗不识别，
@@ -197,7 +219,11 @@ public class MyLeagueScenario : IScenario
             isHome: isLeagueHome);
         if (!wasActive && _matchSession.Active)
             _log("[我的联赛] 比赛开始：挂机等待比赛结束（不按键）", LogLevel.Info);
-        if (matchEnded)
+        if (matchEnded && !_matchSession.LastEndTrusted)
+        {
+            _log($"[我的联赛] 5 分钟没再出现比赛特征，关闭本场（用时 {_matchSession.LastDurationText}）但未计入场次——没见到终场页，请带这份日志反馈", LogLevel.Warn);
+        }
+        else if (matchEnded)
         {
             _engine.Stats.MatchesDone++;
             if (_matchSession.WasKeyMatch)
@@ -206,7 +232,7 @@ public class MyLeagueScenario : IScenario
                 _log($"[我的联赛] 一场关键比赛结束（已完成 {_engine.Stats.MatchesDone} 场，关键 {_engine.Stats.KeyMatches} 场）", LogLevel.Success);
             }
             else
-                _log($"[我的联赛] 一场比赛结束，已完成 {_engine.Stats.MatchesDone} 场", LogLevel.Success);
+                _log($"[我的联赛] 一场比赛结束（用时 {_matchSession.LastDurationText}），已完成 {_engine.Stats.MatchesDone} 场", LogLevel.Success);
             _engine.ReportMatchDone(_matchSession.WasKeyMatch);
 
             // 每场比赛结束后复位购买状态机（用户要求）：下一轮回联赛主页必定重新右拨

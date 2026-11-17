@@ -57,6 +57,38 @@ public class MlFlowMemoryTests
     }
 
     [Fact]
+    public void MatchSession_Timeout_EndsButNotTrusted()
+    {
+        // 用户 2026-11-13「哪儿来的 76 场」：赛后回放/结算页卡住 → 连续 5 分钟没再出现
+        // 比赛特征就被当成一场结束。这种收尾不可信，不得计入完成场次；用时仍记下来给日志
+        var t = new MatchSessionTracker();
+        t.Observe(MlScreen.InMatch, T0);
+        t.Observe(MlScreen.Unknown, T0.AddMinutes(1));
+        Assert.True(t.Observe(MlScreen.Unknown, T0.AddMinutes(6)));
+        Assert.False(t.Active);
+        Assert.Equal(MatchEndReason.Timeout, t.LastEndReason);
+        Assert.False(t.LastEndTrusted);
+        Assert.Equal(TimeSpan.FromMinutes(6), t.LastDuration);
+    }
+
+    [Fact]
+    public void MatchSession_FullTimeAndMenu_AreTrusted()
+    {
+        var a = new MatchSessionTracker();
+        a.Observe(MlScreen.InMatch, T0);
+        a.Observe(MlScreen.FullTime, T0.AddMinutes(9));
+        Assert.True(a.LastEndTrusted);
+        Assert.Equal(MatchEndReason.FullTime, a.LastEndReason);
+        Assert.Equal(TimeSpan.FromMinutes(9), a.LastDuration);
+
+        var b = new MatchSessionTracker();
+        b.Observe(MlScreen.InMatch, T0);
+        b.Observe(MlScreen.MatchHub, T0.AddMinutes(8));
+        Assert.True(b.LastEndTrusted);
+        Assert.Equal(MatchEndReason.Menu, b.LastEndReason);
+    }
+
+    [Fact]
     public void MatchSession_KeyMatchHint_CountedAsKey()
     {
         // 关键比赛预告/弹窗（sawKeyMatchHint）→ 关场时 WasKeyMatch=true
@@ -217,6 +249,36 @@ public class MlFlowMemoryTests
         Assert.False(t.Observe(MlScreen.MainMenu, T0.AddMinutes(2))); // 关场只报一次
         Assert.False(t.Observe(MlScreen.InMatch, T0.AddMinutes(10))); // 第二场开赛
         Assert.True(t.Observe(MlScreen.MatchHub, T0.AddMinutes(35))); // 第二场结束
+    }
+
+    [Fact]
+    public void MatchSession_RestartWithinCooldown_NotANewMatch()
+    {
+        // 用户 2026-11-13「完成场次 76、游戏战绩 29 场」：结算/回放页被角区兜底误判成
+        // InMatch 时，关场后一两秒就"又开一场"，一场被打成两三场。冷却期内不开新场。
+        var t = new MatchSessionTracker();
+        t.Observe(MlScreen.InMatch, T0);
+        Assert.True(t.Observe(MlScreen.FullTime, T0.AddMinutes(9)));
+        Assert.False(t.Observe(MlScreen.InMatch, T0.AddMinutes(9).AddSeconds(20))); // 结算残留帧
+        Assert.False(t.Active);
+        // 结算链里反复出现的比赛帧都不开新场：必须先回主页（门 5 分钟才自动解除）
+        Assert.False(t.Observe(MlScreen.InMatch, T0.AddMinutes(12)));
+        Assert.False(t.Active);
+        Assert.False(t.Observe(MlScreen.MainMenu, T0.AddMinutes(15)));            // 回菜单解除门
+        Assert.False(t.Observe(MlScreen.InMatch, T0.AddMinutes(16)));             // 真·下一场
+        Assert.True(t.Active);
+    }
+
+    [Fact]
+    public void MatchSession_PlayAgainFromMenu_CountsAgain()
+    {
+        // 正常的「回主页 → 再开一场」：菜单解除门后立即开赛（不必等冷却）
+        var t = new MatchSessionTracker();
+        t.Observe(MlScreen.InMatch, T0);
+        Assert.True(t.Observe(MlScreen.FullTime, T0.AddMinutes(9)));
+        Assert.False(t.Observe(MlScreen.MatchHub, T0.AddMinutes(10)));   // 已关场：菜单不再报结束
+        Assert.False(t.Observe(MlScreen.InMatch, T0.AddMinutes(11)));
+        Assert.True(t.Active);
     }
 
     // ---------------- 比赛上下文决策 ----------------

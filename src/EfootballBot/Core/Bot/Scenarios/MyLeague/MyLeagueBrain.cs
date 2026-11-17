@@ -136,6 +136,25 @@ public static class MyLeagueBrain
     /// <summary>无特征界面（比赛/过场）连续该轮数后按 B 逃生。</summary>
     public const int UnknownEscapeStreak = 6;
 
+    /// <summary>比赛页连续该轮数读不到焦点词（磁贴标签被裁/OCR 漏读）就按 A 试进当前卡，
+    /// 不再无限右移（见 Decide 的 MatchHub 分支，识别走查 2026-11-18）。</summary>
+    public const int MatchHubFocusBlindStreak = 6;
+
+    /// <summary>
+    /// 高光挪格（上/下×1 + A）连续该轮数画面仍不变 → 判定高光读反，改用「直接 A」。
+    /// 为什么需要（2026-11-18 走查）：挪格方向来自 **亮度** 判据（PopupBrain 的按钮底色探针），
+    /// HDR 开启 / 显卡色彩配置 / 低对比主题下亮度会整体抬升或压暗，高光可能读反——读反时
+    /// 「挪一格 + A」正好落在「取消」上，弹窗关掉又重开，画面一动不动。玩家看到的现象就是
+    /// 「卡在同一屏、下一步不点」。同一个无效动作最多重复这么多轮，之后退回历史行为直接 A。
+    /// </summary>
+    public const int ConfirmRepositionRounds = 2;
+
+    /// <summary>
+    /// 认不出的界面连续该轮数后按一次 A 试探。A 在各页都是「选中/推进」，比空等到 B 逃生
+    /// 更接近人手；按下后画面若推进，下一轮自然换判定，若没推进由 B 逃生收尾。
+    /// </summary>
+    public const int UnknownProbeAStreak = 3;
+
     /// <summary>eFootball 2027 标题页前几轮走「下→右→A」登录序列的轮数上限：超过后改
     /// 持续按 A（页面提示按「确认」按钮）。用户实机序列（2026-10-19）：下、右、A=登录。</summary>
     public const int BootLoginNavRounds = 3;
@@ -215,9 +234,15 @@ public static class MyLeagueBrain
             return MlScreen.LeagueSquadPage;
 
         // 比赛起始页（实机 match_start_page）：底部行「设置|球场|下一步」+ 队名/球场名
-        // （eFootball™ Stadium）。先于通用 btn_confirm：判定为起始页可带上"即将开赛"上下文
-        if (ocr.Lines.Any(l => l.CenterY > 0.85 && l.Text.Contains("下一步")) &&
-            (ocr.ContainsJoined("球场") || ocr.ContainsJoined("Stadium")))
+        // （eFootball™ Stadium）。先于通用 btn_confirm：判定为起始页可带上"即将开赛"上下文。
+        // 2026-11-18 识别走查：旧判定「y>0.85 且含下一步」两个条件都写死——底栏键名换成
+        // 开始比赛/开赛、或整行被并读下移到 y≈0.83，任一处不合就整页漏判，帧随即落
+        // HasConfirm（上移再按）或 Unknown（等待→B 逃生），用户看到的就是「不自动开始比赛」。
+        // 现在：底栏任一推进键（词表见 PushWords）+ 球场/Stadium/体育场 即判起始页。
+        if ((ocr.ContainsJoined("球场") || ocr.ContainsJoined("Stadium") ||
+             ocr.ContainsJoined("体育场")) &&
+            (FindBottomPushWord(ocr) is not null ||
+             ocr.Lines.Any(l => l.CenterY > 0.80 && l.Text.Contains("下一步"))))
             return MlScreen.MatchStartPage;
 
         // ---- 防掉线重登链（eFootball 2027 v6.1.0 实机 8 帧，2026-10-19）：----
@@ -304,7 +329,19 @@ public static class MyLeagueBrain
         // 全场结束（FullTime）终场判定：顶部「全场」+ 比分/球员评价页（实机 2026-10-10 截图：
         // "全场"@(0.62,0.074)、比分 2-2、下一步按钮）。优先于一切比赛判定——
         // 该页右上角有内容、且可能残留比分形态词，不先判会被误归 InMatch 继续随机点击
-        if (ocr.Words.Any(w => w.CenterY < 0.35 && w.Text.Replace(" ", "").Contains("全场")))
+        // 2026-11-18 识别走查：新版终场页/结算首屏会写成「比赛结束 / 终场 / MATCH END」，
+        // 标题行也可能落到 y≈0.40（旧阈值 0.35 直接漏）。漏判后果最重——结算链没有 A 推进，
+        // 场次只能靠 MatchSessionTracker 的 5 分钟超时收尾，日志里就是「一把挂机很久」。
+        // 「全场」保留原 0.35 阈值（比赛转播 HUD 也印"全场"，只在顶部时才当终场）。
+        // 「比赛历史」列表页里的「比赛已结束 / 终场比分」不算终场——那一页的处理方式是 B 退回
+        if (!ocr.ContainsJoined("比赛历史") &&
+            ocr.Lines.Any(l =>
+                (l.CenterY < 0.35 && l.Text.Contains("全场")) ||
+                (l.CenterY < 0.45 &&
+                 (l.Text.Contains("比赛结束") || l.Text.Contains("终场") ||
+                  l.Text.Contains("赛事结束") ||
+                  l.Text.Replace(" ", "").Contains("MATCHEND", StringComparison.OrdinalIgnoreCase) ||
+                  l.Text.Replace(" ", "").Contains("FULLTIME", StringComparison.OrdinalIgnoreCase)))))
             return MlScreen.FullTime;
 
         // 国服比赛暂停菜单（Start 键打开）：「跳过比赛」+ (比赛回放|重新开始|放弃) 左列词同屏。
@@ -404,8 +441,11 @@ public static class MyLeagueBrain
     /// </summary>
     private static bool IsMatchHub(OcrResult ocr)
     {
+        // 2026-11-18 识别走查：磁贴行文案随赛季轮换（eFootball™联赛 / 友谊赛 等），
+        // 旧词表只有四个词，全换掉时整页判不出 → 右移/等待僵局。补两个同行的稳定词。
         bool hasTileWords = ocr.ContainsJoined("锦标赛") || ocr.ContainsJoined("自定义")
-            || ocr.ContainsJoined("活动") || ocr.ContainsJoined("我的联赛");
+            || ocr.ContainsJoined("活动") || ocr.ContainsJoined("我的联赛")
+            || ocr.ContainsJoined("友谊") || ocr.ContainsJoined("联赛");
         if (!hasTileWords) return false;
 
         if (ocr.ContainsJoined("锦标赛") && ocr.ContainsJoined("争取升级至更高组别"))
@@ -437,6 +477,89 @@ public static class MyLeagueBrain
             .Equals("OK", StringComparison.OrdinalIgnoreCase));
 
     /// <summary>难度选择页特征（标题行或 ≥2 难度名列表）：确认键是默认焦点，不上移改难度。</summary>
+    /// <summary>
+    /// 比赛中的过场动画提示（进球回放 / 庆祝 / 入场）：出现「跳过」就算。
+    /// 排除「跳过比赛」——那是国服右上角横幅（PadStartPress→暂停菜单，见 InMatch 分支），
+    /// 两者语义不同，混在一起会把跳过链路打断。「重播/回放」是国际服过场页的固定字，
+    /// 「SKIP」按整词（避免球员名含 skip 子串）。
+    /// 2026-11-18 识别走查补三处漏判：
+    /// ① 「回放」（旧版只认「重播」，新版过场提示写「回放/观看回放」）——但排除暂停菜单的
+    ///    「比赛回放」（那是菜单项，按 A 会重开比赛）；
+    /// ② 「快进 / 跳过动画 / 按任意键（跳过）」等同类提示；
+    /// ③ SKIP 的位置阈值从 y&gt;0.55 放宽到 y&gt;0.45——新版提示贴在画面右中偏上，
+    ///    旧阈值直接漏判，整段动画照播（用户 2026-11-13「一场 20 分钟」的另一半）。
+    /// </summary>
+    public static bool IsSkipOverlay(OcrResult ocr)
+    {
+        if (ocr.ContainsJoined("跳过比赛") || ocr.ContainsJoined("比赛回放")) return false;
+        if (ocr.ContainsJoined("跳过") || ocr.ContainsJoined("重播") || ocr.ContainsJoined("回放") ||
+            ocr.ContainsJoined("快进") || ocr.ContainsJoined("按任意键"))
+            return true;
+        return ocr.Words.Any(w =>
+            w.CenterY > 0.45 && w.NormText.Equals("SKIP", StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ---------------- 通用推进键（识别走查 2026-11-18） ----------------
+    //
+    // 背景：比赛流程里「按 A 推进」的语义是稳定的，但按钮文案随版本变
+    // （下一步 → 开始比赛 / 开赛 / 进入比赛；继续 → 继续比赛 / 进入下一轮）。
+    // 旧逻辑把「下一步」写死在每个判定点里，新版换文案后整条链一起失效：
+    // 起始页判不出 → 不开赛；终场页判不出 → 结算链靠 5 分钟超时收尾（"一把很久"）。
+    // 下面这份词表只作为「页面上确实有一枚推进键」的证据，命中后执行的动作仍是 A，
+    // 不引入任何新按键语义；不含 返回/关闭/取消/详情/位置（那是 B/X/Y 的说明）。
+
+    /// <summary>底部推进键词表（页面底栏/dialog 底部的按钮行）。拉丁词按整词匹配（见下）。</summary>
+    public static readonly IReadOnlyList<string> PushWords = new[]
+    {
+        "下一步", "下一步骤", "点击继续", "继续比赛", "继续", "确认", "确定",
+        "开始比赛", "开赛", "开始", "进入比赛", "进入", "前往比赛", "前往",
+        "领取", "接受", "跳过",
+        "NEXT", "START", "CONTINUE", "CONFIRM", "PLAY", "ENTER", "SKIP",
+    };
+
+    /// <summary>比赛中覆盖层上的推进键（语义确定、误按无副作用：比赛中 A 是传球/逼抢）。</summary>
+    private static readonly string[] InMatchPushWords =
+    {
+        "下一步", "下一步骤", "继续比赛", "继续", "确认", "确定", "领取",
+    };
+
+    /// <summary>
+    /// 拉丁词整词匹配（避免 Opoku 含 ok、Koke 含 ok 之类的子串误判），中文走子串包含
+    /// （OCR 常把图标记成词尾杂字，如「跳过參」）。
+    /// </summary>
+    private static bool PushWordHit(string normLine, string word) =>
+        word.All(char.IsAsciiLetter)
+            ? normLine.Split(' ', StringSplitOptions.RemoveEmptyEntries)
+                .Any(t => t.Equals(word, StringComparison.OrdinalIgnoreCase))
+              || normLine.Equals(word, StringComparison.OrdinalIgnoreCase)
+            : normLine.Contains(word, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// 底栏（y ≥ <paramref name="yMin"/>）里命中的第一枚推进键，没有则 null。
+    /// 用途：词表变了也能「看见按钮就按」，而不是干等到 B 逃生。
+    /// </summary>
+    public static string? FindBottomPushWord(OcrResult ocr, double yMin = 0.80)
+    {
+        foreach (var line in ocr.Lines)
+        {
+            if (line.CenterY < yMin) continue;
+            foreach (var word in PushWords)
+                if (PushWordHit(line.Text, word)) return word;
+        }
+        return null;
+    }
+
+    /// <summary>
+    /// 比赛中覆盖层/小弹窗上的推进键（下一步/继续/确认/OK）。命中即快按 A。
+    /// OK 走整词 O/0 归一（白底白字小字常读成 0K），不用拼接子串——球员名 Koke/Opoku 会误命中。
+    /// </summary>
+    public static bool IsInMatchAdvance(OcrResult ocr)
+    {
+        if (InMatchPushWords.Any(ocr.ContainsJoined)) return true;
+        return ocr.Words.Any(w => w.NormText.Replace("0", "O")
+            .Equals("OK", StringComparison.OrdinalIgnoreCase));
+    }
+
     private static bool IsDifficultyChoice(OcrResult ocr) =>
         ocr.Lines.Any(l => l.Text.Replace(" ", "").Contains("选择赛事等级")) || HasDifficultyList(ocr);
 
@@ -482,11 +605,18 @@ public static class MyLeagueBrain
                 if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
                     return new MlAction(MlActionKind.GamepadBack, 2400, "比赛页导航失效，B 回主菜单重导航");
                 bool focused = ocr.Lines.Any(l => l.Text.Contains("我的联赛"));
-                return focused
-                    ? new MlAction(MlActionKind.PadConfirm,
-                        screenStreak >= StuckStreak ? 5000 : 2500, "比赛页→我的联赛")
-                    : new MlAction(MlActionKind.PadMoveRight,
-                        screenStreak >= StuckStreak ? 5000 : 1500, "比赛页右移→我的联赛");
+                if (focused)
+                    return new MlAction(MlActionKind.PadConfirm,
+                        screenStreak >= StuckStreak ? 5000 : 2500, "比赛页→我的联赛");
+                // 焦点词读不到就一直右移 → 到最右也不换动作，只有 20 轮后的 B 逃生兜着，
+                // 用户看到的是「比赛页来回晃、永远不开赛」（识别走查 2026-11-18 的主要僵局之一）：
+                // 新 UI 未聚焦时磁贴标签被右缘裁成碎片（我/自），OCR 读不出整词。
+                // 连续 6 轮（≈10s）仍读不到 → 按 A 试进当前焦点卡；进错板块的分类不会是
+                // MatchHub，B 逃生自愈，最坏是绕一次，好过无限右移。
+                if (screenStreak >= MatchHubFocusBlindStreak)
+                    return new MlAction(MlActionKind.PadConfirm, 2500, "比赛页焦点词读不到，按 A 试进当前卡");
+                return new MlAction(MlActionKind.PadMoveRight,
+                    screenStreak >= StuckStreak ? 5000 : 1500, "比赛页右移→我的联赛");
             }
             case MlScreen.ItemList:
             {
@@ -515,6 +645,11 @@ public static class MyLeagueBrain
                 if (!IsDifficultyChoice(ocr) && !IsGameSettingsDialog(ocr))
                 {
                     var popup = PopupBrain.Decide(frame, ocr, out var popupNote);
+                    // 画面不变 → 换招：挪格失效就退回「直接 A」（见 ConfirmRepositionRounds 的说明）
+                    if (popup is PopupAction.UpThenConfirm or PopupAction.DownThenConfirm &&
+                        screenStreak >= ConfirmRepositionRounds)
+                        return new MlAction(MlActionKind.PadConfirm, slow ? 5000 : 2000,
+                            $"高光挪格 {ConfirmRepositionRounds} 轮以上画面未变，改用直接 A（{popupNote}）");
                     switch (popup)
                     {
                         case PopupAction.DownThenConfirm:
@@ -534,9 +669,15 @@ public static class MyLeagueBrain
             {
                 // 「前往比赛」= 联赛主页主按钮；「下个赛季」= 赛季结束替换词（实机 next_season：
                 // 前往比赛位置变为"下个赛季"，另有"前往下个赛季"，含"下个赛季"即覆盖）
-                var go = FindLine(ocr, "下一步", "开始比赛", "继续", "前往比赛", "下个赛季");
+                var go = FindLine(ocr, "下一步", "开始比赛", "开赛", "继续", "前往比赛",
+                    "进入比赛", "下个赛季", "开始");
                 if (go is not null)
                     return new MlAction(MlActionKind.PadConfirm, 2500, go);
+                // 关键词里没有、但底栏确实印着一枚推进键（新版换了文案/整行被并读成本页
+                // 识别不出的词）：看见按钮就按，别干等到 B 逃生——这一步就是「不自动开始比赛」
+                // 最常见的僵局（主页停在原地，A 一次也没发出去）。
+                if (FindBottomPushWord(ocr) is { } push)
+                    return new MlAction(MlActionKind.PadConfirm, 2500, $"主页底部推进键「{push}」");
                 // 无任何可推进关键词（赛程表/联赛子页等，实机 2026-10-10 21:18 卡死 4 分钟）：
                 // 连续多轮无关键词 → 按 B 返回上一页自愈，绝不无限等待
                 return screenStreak >= StuckStreak
@@ -627,6 +768,18 @@ public static class MyLeagueBrain
                 if (allowMatchSkip && ocr.ContainsJoined("跳过比赛") && !ocr.ContainsJoined("累计进球") &&
                     SkipBannerHasCheck(frame))
                     return new MlAction(MlActionKind.PadStartPress, 3000, "跳过比赛✅→暂停菜单");
+                // 过场动画（进球回放 / 庆祝 / 入场）：屏幕出现「跳过」提示就快节奏连按 A。
+                // 用户 2026-11-13 国际服反馈：一场要 20 分钟、动画基本都看完了、把挂机节奏
+                // 改成 1~2 秒也没用——旧逻辑始终按挂机节奏（1~4 秒）点 A，过场提示在两次
+                // 点击之间一闪就过，等于整段播完。这里把提示出现时的节奏压到 300ms，
+                // 提示消失立即回到原节奏（见 IsSkipOverlay 的排除项，不碰国服「跳过比赛」链路）。
+                if (IsSkipOverlay(ocr))
+                    return new MlAction(MlActionKind.PadConfirm, 300, "过场回放：快按 A 跳过");
+                // 比赛中覆盖层上的推进键（下一步/继续/确认/OK）：新版把回放/中场提示做成
+                // 带「下一步」的小弹窗，旧逻辑只在 Unknown 分支认这些词、节奏 2.5s，
+                // 用户报的「比赛中下一步不会点击」正是这一层——按 A 也快一拍（400ms）
+                if (IsInMatchAdvance(ocr))
+                    return new MlAction(MlActionKind.PadConfirm, 400, "比赛中推进键：快按 A");
                 // 比赛中挂机：按 A + 用户设定的随机间隔（设置→挂机节奏），
                 // 拟人化避免全程零输入；A 在比赛中是传球/逼抢，不会暂停或退出
                 return new MlAction(MlActionKind.MatchIdleTap, 0, "比赛中随机点击");
@@ -715,15 +868,22 @@ public static class MyLeagueBrain
             {
                 // 比赛上下文中的弹窗（用户实测 2026-10-10：右上角通知/满级提示等带
                 // 「下一步/OK/确认」按钮）→ 直接按 A 推进，不等待
-                if (inMatchRecently &&
-                    (ocr.ContainsJoined("下一步") || ocr.ContainsJoined("OK") || ocr.ContainsJoined("确认")))
-                    return new MlAction(MlActionKind.PadConfirm, 2500, "比赛弹窗→下一步");
+                // 2026-11-18：词表扩到 InMatchPushWords + 整词 OK，节奏 2500→1500ms。
+                // 覆盖层只闪一瞬，旧节奏下这一拍经常落在两次点击之间（"下一步不会点击"）。
+                if (inMatchRecently && IsInMatchAdvance(ocr))
+                    return new MlAction(MlActionKind.PadConfirm, 1500, "比赛弹窗→下一步");
 
                 // 比赛/过场/加载：连续多轮无特征时按 B 逃生。
                 // 完全无感知（OCR 0 词，典型：捕获黑屏/驱动异常）时绝不盲按 B
                 // （2026-10-10 15:48 实机：黑帧下盲按 B 9 次），只等待。
                 // 比赛上下文（最近见过比赛特征）：多为镜头切换丢时钟，延长逃生耐心防铲球。
                 int escapeAt = inMatchRecently ? UnknownEscapeStreakInMatch : UnknownEscapeStreak;
+                // 认不出的普通界面（非比赛上下文）：等 UnknownProbeAStreak 轮还认不出，就按一次 A
+                // 试探。此前只等到 B 逃生，若 B 这条链路也被吞（国服网页层常见），画面就永远不动；
+                // A 是各页共有的"选中/推进"，先动一下比空等更接近人手，误进由 B 逃生收尾。
+                if (!inMatchRecently && screenStreak >= UnknownProbeAStreak &&
+                    screenStreak < escapeAt && ocr.Words.Count > 0)
+                    return new MlAction(MlActionKind.PadConfirm, 2000, "认不出的界面：按 A 试探");
                 if (screenStreak >= escapeAt && ocr.Words.Count > 0)
                     return new MlAction(MlActionKind.GamepadBack, 3000, "B 键逃生");
                 return MlAction.Wait(4000);

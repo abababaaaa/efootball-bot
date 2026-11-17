@@ -203,12 +203,16 @@ public sealed class CnWeeklyScenario : IScenario
             _skipBlockedThisMatch = false; // 新一场：重新给一次跳过机会
             _log("[国服周活动] 比赛开始：挂机等待比赛结束（按节奏随机点击）", LogLevel.Info);
         }
-        if (matchEnded)
+        if (matchEnded && !_matchSession.LastEndTrusted)
+        {
+            _log($"[国服周活动] 5 分钟没再出现比赛特征，关闭本场（用时 {_matchSession.LastDurationText}）但未计入场次——没见到终场页，请带这份日志反馈", LogLevel.Warn);
+        }
+        else if (matchEnded)
         {
             _skipBlockedThisMatch = false;
             _engine.Stats.MatchesDone++;
             if (_matchSession.WasKeyMatch) _engine.Stats.KeyMatches++;
-            _log($"[国服周活动] 一场比赛结束（累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
+            _log($"[国服周活动] 一场比赛结束（用时 {_matchSession.LastDurationText}，累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
             _engine.ReportMatchDone(_matchSession.WasKeyMatch);
 
             // 主要奖励进度只在比赛后变化：解除「未拿满」门控，下次回主页再核验一次
