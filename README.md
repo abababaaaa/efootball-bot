@@ -21,6 +21,8 @@
 - [快速开始](#快速开始)
 - [系统要求](#系统要求)
 - [常见问题](#常见问题)
+- [开发与界面](#开发与界面)
+- [挂机模块化（开发者）](#挂机模块化开发者)
 - [反馈](#反馈)
 - [声明](#声明)
 
@@ -243,6 +245,37 @@
 > 国服相关功能可能仍有问题：本次国服改动只在模拟帧与少量实机帧上验证过，实际对局中若出现卡住、误判、乱按，请带上反馈包进群反馈。
 
 ---
+
+## 开发与界面
+
+界面结构、设计系统与「改一个东西只动一个文件」的施工规则见 [DESIGN.md](DESIGN.md)。
+
+- `src/EfootballBot/Themes/` —— 样式字典：`Tokens`（颜色）/ `Surfaces`（容器与字体）/ `Controls`（控件）/ `Templates`（页面局部样式）
+- `src/EfootballBot/MainWindow.Shell.cs` —— 导航路由表：加一个页面 = 一行数据 + 一个 UserControl
+- `src/EfootballBot/Views/` —— 独立页面（`AboutPage` 是新页面的样板）
+- `src/EfootballBot/Core/UI/ThemePalette.cs` —— 三套主题的 token 值（启动自带完整性自检）
+
+自测界面：`EfootballBot.exe --page settings:display` 可把任意页面直接开到指定状态（应用需要管理员权限，
+模拟点击不可靠），配合 `tools/ui-shots.ps1` 批量截图、`tools/ui-crop.ps1` 局部放大看细节。
+
+## 挂机模块化（开发者）
+
+挂机逻辑按「国服 / 国际服」分区，每个模块只认自己的界面与状态机；跨模块要用的东西一律下沉到共享层。
+完整分层、模块清单、加模块配方见 **[docs/MODULES.md](docs/MODULES.md)**。
+
+| 层 | 位置 | 一句话 |
+|---|---|---|
+| 模块注册表 | `Core/Bot/Modules/` | 加模块 = 表里加一条（id + 服 + 场景/工具 + 工厂 + 是否可接力），引擎与界面自动跟着变 |
+| 共享层 | `Core/Bot/Match/` | 界面分类 / 共享决策 / **赛中匹配 `MatchPlay`** / 流程记忆 / 像素探针；谁都可以调，谁都不拥有 |
+| 模块层 | `Core/Bot/Scenarios/<模块>/` | 只管自己的菜单流程与私有状态机 |
+| 工具层 | `Core/Tools/` | 赛前设置 / 打开路径 / 窗口防卡死：一个工具一个文件 + `ToolCatalog` 注册表；界面只派发、不起进程 |
+
+- **国服**：赛前设置（工具页）/ 天梯赛 / 周活动 / 我的联赛
+- **国际服**：赛前设置（工具页）/ 我的联赛 / 周活动 / AI天梯联赛 / 种马（购买·培训）/ 满级换人测试
+- 现场核对：`EfootballBot.exe --worker --list-modules` 打印按服分组的模块表与注册表自检结果
+- 架构护栏（自动跑）：`ModuleCatalogTests` / `ToolCatalogTests` / `ArchitectureTests` / `SharedMatchLayerTests`——
+  共享层反向依赖模块、模块互相引用场景、注册表之外写模块 id 字面量、工具层依赖挂机、界面层直接起进程，
+  都会直接测试失败；同样的规则在**构建期**由 `tools/arch-guard/arch-guard.ps1`（11 条）强制执行，违反即编译失败
 
 ## 声明
 
