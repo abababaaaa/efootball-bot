@@ -1,0 +1,71 @@
+<UserControl x:Class="EfootballBot.Views.AboutPage"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+             mc:Ignorable="d"
+             d:DesignHeight="600" d:DesignWidth="900">
+    <!-- ==================================================================
+         关于页（声明）：独立 UserControl。
+         页面自己的样式回调、事件处理、命名元素全部留在本目录，主窗口只登记一行路由。
+         新增页面照此建 Views/XxxPage.xaml + .xaml.cs，见 docs/界面结构.md。
+         ================================================================== -->
+    <ScrollViewer Style="{StaticResource PageScroll}">
+        <StackPanel Margin="0,2,0,0" MaxWidth="760" HorizontalAlignment="Left">
+            <TextBlock Text="关于" Style="{StaticResource PageTitle}"/>
+            <TextBlock Style="{StaticResource PageSub}" Margin="0,6,0,18"
+                       Text="使用建议、风险提示与版权信息。"/>
+
+            <StackPanel Margin="0,2,0,0">
+                <!-- ===== 声明 ===== -->
+                <Border Style="{StaticResource Card}" Margin="0,0,0,0">
+                    <StackPanel>
+                        <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                            <Rectangle Style="{StaticResource CardTitleBar}"/>
+                            <TextBlock Text="声明" Style="{StaticResource H2}"/>
+                        </StackPanel>
+
+                        <TextBlock Text="分辨率建议" Style="{StaticResource SubHead}"/>
+                                                    <Grid Margin="0,3,0,11">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                        <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="理论支持全分辨率，强烈建议游戏以"/><Run Text="「窗口化 720p」"/><Run Text="运行：分辨率过高会拖慢后台捕获与 OCR，影响稳定性"/></TextBlock>
+                        </Grid>
+
+                        <TextBlock Text="封号风险" Style="{StaticResource SubHead}"/>
+                                                    <Grid Margin="0,3,0,11">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                        <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="仅供学习交流与个人使用；使用自动化工具"/><Run Text="存在被官方封号的风险" Foreground="{DynamicResource Warning}"/><Run Text="，后果自负，与作者无关"/></TextBlock>
+                        </Grid>
+
+                        <TextBlock Text="版权与分发" Style="{StaticResource SubHead}"/>
+                                                    <Grid Margin="0,3,0,2">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="Auto"/>
+                                <ColumnDefinition Width="*"/>
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            </Grid.RowDefinitions>
+                        <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="本软件无偿免费，"/><Run Text="禁止二次售卖、付费分发" Foreground="{DynamicResource Warning}"/><Run Text="，禁止篡改或移除作者信息后重新发布；转载请注明作者 Dabao#1392"/></TextBlock>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+            </StackPanel>
+        </StackPanel>
+    </ScrollViewer>
+</UserControl>

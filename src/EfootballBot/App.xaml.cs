@@ -15,6 +15,9 @@ namespace EfootballBot;
 
 public partial class App : Application
 {
+    /// <summary>命令行 --page 指定的初始页面（如 settings:display / network / about），未指定为 null。</summary>
+    public static string? StartupPage { get; private set; }
+
     public App()
     {
         var args = Environment.GetCommandLineArgs().Skip(1).ToArray();
@@ -25,6 +28,14 @@ public partial class App : Application
             if (args[i] == "--profile" && i + 1 < args.Length) AppPaths.SetProfile(args[i + 1]);
             else if (args[i].StartsWith("--profile=", StringComparison.Ordinal))
                 AppPaths.SetProfile(args[i]["--profile=".Length..]);
+        }
+        // --page <页面>：启动即停在指定页面（截图回归 / QA 复现 / 调试用，见 MainWindow.ShowPage）。
+        // 只影响初始导航，不参与任何单实例或模式分流。
+        for (int i = 0; i < args.Length; i++)
+        {
+            if (args[i] == "--page" && i + 1 < args.Length) StartupPage = args[i + 1];
+            else if (args[i].StartsWith("--page=", StringComparison.Ordinal))
+                StartupPage = args[i]["--page=".Length..];
         }
         if (args.Length > 0 && args[0] is "--dump" or "--cn-dump")
         {

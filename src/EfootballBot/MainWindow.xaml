@@ -2,224 +2,28 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+        xmlns:views="clr-namespace:EfootballBot.Views"
         ExtendsContentIntoTitleBar="True"
-        WindowBackdropType="None"
+        WindowBackdropType="Acrylic"
         Title="eFootball 挂机助手（手柄后台版）" Height="800" Width="1280"
         Icon="app.ico"
         MinHeight="640" MinWidth="1140"
         Background="{DynamicResource WindowBg}" Foreground="{DynamicResource TextPrimary}"
         FontFamily="Microsoft YaHei UI"
         TextOptions.TextFormattingMode="Ideal" TextOptions.TextRenderingMode="ClearType">
-    <Window.Resources>
-        <!-- 横幅白色按钮 -->
-        <Style x:Key="BannerBtn" TargetType="Button">
-            <Setter Property="Background" Value="White"/>
-            <Setter Property="Foreground" Value="#FF0B7A4E"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="17,7"/>
-            <Setter Property="FontSize" Value="12.5"/>
-            <Setter Property="FontWeight" Value="Bold"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="Button">
-                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8"
-                                Padding="{TemplateBinding Padding}" RenderTransformOrigin="0.5,0.5">
-                            <Border.RenderTransform>
-                                <ScaleTransform ScaleX="1" ScaleY="1"/>
-                            </Border.RenderTransform>
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#FFE7FAF1"/>
-                            </Trigger>
-                            <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bd" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.97" ScaleY="0.97"/></Setter.Value></Setter>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <!-- 主题选择卡片（悬停轻微放大） -->
-        <Style x:Key="ThemePickCard" TargetType="Border">
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
-            <Setter Property="RenderTransform">
-                <Setter.Value><ScaleTransform ScaleX="1" ScaleY="1"/></Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="RenderTransform">
-                        <Setter.Value><ScaleTransform ScaleX="1.03" ScaleY="1.03"/></Setter.Value>
-                    </Setter>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-        <!-- 卡片标题前的绿色小竖条 -->
-        <Style x:Key="CardTitleBar" TargetType="Rectangle">
-            <Setter Property="Width" Value="3.5"/>
-            <Setter Property="Height" Value="15"/>
-            <Setter Property="RadiusX" Value="1.7"/>
-            <Setter Property="Fill" Value="{DynamicResource AccentGlow}"/>
-            <Setter Property="VerticalAlignment" Value="Center"/>
-            <Setter Property="Margin" Value="0,0,9,0"/>
-        </Style>
-        <!-- 设置页一级分类标签：横向紧凑版 ModuleRadio（选中=绿条+高亮底） -->
-        <Style x:Key="SettingsTabRadio" TargetType="RadioButton" BasedOn="{StaticResource ModuleRadio}">
-            <Setter Property="Margin" Value="5,0"/>
-            <Setter Property="FontSize" Value="12.5"/>
-        </Style>
 
-        <!-- 网络页表格行：自绘模板，悬停/选中都用主题色（默认 Aero 模板在暗色主题下悬停变白底、
-             文字跟着隐身——用户实测"鼠标放上去啥也看不见"） -->
-        <Style x:Key="NetRowStyle" TargetType="ListViewItem">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
-            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="ListViewItem">
-                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="4" Padding="0,1">
-                            <GridViewRowPresenter Content="{TemplateBinding Content}"
-                                                  Columns="{TemplateBinding GridView.ColumnCollection}"/>
-                        </Border>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource Surface2}"/>
-                            </Trigger>
-                            <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentLight}"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <!-- 表头：暗色主题用面板底色，避免默认浅灰条 -->
-        <Style x:Key="NetHeaderStyle" TargetType="GridViewColumnHeader">
-            <Setter Property="Background" Value="{DynamicResource Surface2}"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
-            <Setter Property="FontSize" Value="11.5"/>
-            <Setter Property="FontWeight" Value="Normal"/>
-            <Setter Property="BorderThickness" Value="0,0,0,1"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource Divider}"/>
-            <Setter Property="Padding" Value="8,5"/>
-            <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="GridViewColumnHeader">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="{TemplateBinding BorderThickness}"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-        <!-- 上栏一级菜单：选中 = 绿色文字 + 底部指示条 -->
-        <Style x:Key="TopNavTab" TargetType="RadioButton">
-            <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
-            <Setter Property="FontSize" Value="13"/>
-            <Setter Property="FontWeight" Value="SemiBold"/>
-            <Setter Property="Cursor" Value="Hand"/>
-            <Setter Property="MinWidth" Value="78"/>
-            <Setter Property="HorizontalContentAlignment" Value="Center"/>
-            <Setter Property="VerticalContentAlignment" Value="Center"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="RadioButton">
-                        <Grid Background="Transparent">
-                            <Border x:Name="hover" Background="{DynamicResource HoverOverlay}"
-                                    CornerRadius="7" Margin="4,8" Opacity="0"/>
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                            <Border x:Name="bar" Height="2.5" CornerRadius="1.5" VerticalAlignment="Bottom"
-                                    Margin="10,0" Background="{DynamicResource AccentGlow}" Opacity="0"/>
-                        </Grid>
-                        <ControlTemplate.Triggers>
-                            <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="hover" Property="Opacity" Value="1"/>
-                                <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
-                            </Trigger>
-                            <Trigger Property="IsChecked" Value="True">
-                                <Setter Property="Foreground" Value="{DynamicResource AccentGlow}"/>
-                                <Setter TargetName="bar" Property="Opacity" Value="1"/>
-                            </Trigger>
-                        </ControlTemplate.Triggers>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <!-- 服务器表（DataGrid）：铺满宽度 + 暗色 -->
-        <Style x:Key="NetDataHeader" TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="{DynamicResource Surface2}"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
-            <Setter Property="FontSize" Value="11.5"/>
-            <Setter Property="FontWeight" Value="Normal"/>
-            <Setter Property="Padding" Value="8,6"/>
-            <Setter Property="HorizontalContentAlignment" Value="Left"/>
-            <Setter Property="SeparatorBrush" Value="{DynamicResource Divider}"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="DataGridColumnHeader">
-                        <Border Background="{TemplateBinding Background}"
-                                BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,1,1"
-                                Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Left" VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-        </Style>
-
-        <Style x:Key="NetDataCell" TargetType="DataGridCell">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="BorderThickness" Value="0"/>
-            <Setter Property="Padding" Value="0"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
-            <Setter Property="Template">
-                <Setter.Value>
-                    <ControlTemplate TargetType="DataGridCell">
-                        <Border Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter VerticalAlignment="Center"/>
-                        </Border>
-                    </ControlTemplate>
-                </Setter.Value>
-            </Setter>
-            <Style.Triggers>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource AccentLight}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-        <Style x:Key="NetDataRow" TargetType="DataGridRow">
-            <Setter Property="Background" Value="Transparent"/>
-            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
-            <Style.Triggers>
-                <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource Surface2}"/>
-                </Trigger>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="{DynamicResource AccentLight}"/>
-                </Trigger>
-            </Style.Triggers>
-        </Style>
-
-    </Window.Resources>
-
+    <!-- 根容器铺 WindowBg：运行时它会被换成 95% 不透明版本 + 系统亚克力底，
+         于是「外框玻璃 + 内容可读」同时成立（Win11 第一方应用就是这个做法）。
+         左栏/右栏/卡片再叠各自的半透明层，材质在层级之间露出来。 -->
     <Grid Background="{DynamicResource WindowBg}">
         <Grid.RowDefinitions>
             <RowDefinition Height="52"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <Border x:Name="TopBar" Grid.Row="0" Background="{DynamicResource SideLeftBg}"
-                BorderThickness="0" MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
+        <Border x:Name="TopBar" Grid.Row="0" Background="Transparent"
+                BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,0,1"
+                MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
             <Grid Margin="14,0,0,0">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -229,24 +33,18 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,26,0">
-                    <Border Width="26" Height="26" CornerRadius="7">
-                        <Border.Background>
-                            <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                <GradientStop Color="#FF1ACB82" Offset="0"/>
-                                <GradientStop Color="#FF03603E" Offset="1"/>
-                            </LinearGradientBrush>
-                        </Border.Background>
+                    <Border Width="26" Height="26" CornerRadius="4" Background="{DynamicResource Accent}">
                         <Grid Width="15" Height="15">
-                            <Path Data="M7.5,0.6 V3.3 M7.5,11.7 V14.4" Stroke="White" StrokeThickness="1.2"
+                            <Path Data="M7.5,0.6 V3.3 M7.5,11.7 V14.4" Stroke="{DynamicResource TextOnAccent}" StrokeThickness="1.2"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
-                            <Ellipse Width="10.8" Height="10.8" Stroke="White" StrokeThickness="1.2"/>
-                            <Path Data="M6.2,4.7 L10.2,7.5 L6.2,10.3 Z" Fill="White" StrokeLineJoin="Round"/>
+                            <Ellipse Width="10.8" Height="10.8" Stroke="{DynamicResource TextOnAccent}" StrokeThickness="1.2"/>
+                            <Path Data="M6.2,4.7 L10.2,7.5 L6.2,10.3 Z" Fill="{DynamicResource TextOnAccent}" StrokeLineJoin="Round"/>
                         </Grid>
                     </Border>
                     <StackPanel VerticalAlignment="Center" Margin="9,0,0,0">
                         <TextBlock Text="eFootball 挂机助手" FontSize="12.5" FontWeight="Bold"
                                    Foreground="{DynamicResource TextPrimary}"/>
-                        <TextBlock Text="Pitch Console" FontSize="9.5" Margin="0,1,0,0"
+                        <TextBlock Text="Windows 11 · 控制台" FontSize="10" Margin="0,1,0,0"
                                    Foreground="{DynamicResource TextMuted}"/>
                     </StackPanel>
                 </StackPanel>
@@ -277,8 +75,8 @@
             </Grid.ColumnDefinitions>
 
         <!-- ============ 左栏：导航轨道 ============ -->
-        <Border Grid.Column="0" Background="{DynamicResource SideLeftBg}"
-                BorderBrush="{DynamicResource CardBorder}" BorderThickness="0,0,1,0">
+        <Border Grid.Column="0" Background="Transparent"
+                BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,1,0">
             <DockPanel Margin="14,16">
                 <!-- 底部：主题切换 -->
                 <StackPanel DockPanel.Dock="Bottom">
@@ -393,8 +191,7 @@
                                   Stroke="{Binding Foreground,RelativeSource={RelativeSource AncestorType=Button}}"
                                   Data="M21 11.5a8.5 8.5 0 0 1-8.5 8.5c-1.5 0-2.9-.35-4.1-1L4 20.2l1.2-4.3A8.5 8.5 0 1 1 21 11.5Z M8.8 9.6h6.4 M8.8 13h4.2"/>
                             <TextBlock Text="反馈" VerticalAlignment="Center" Margin="10,0,0,0"/>
-                            <TextBlock Text="★" Foreground="{DynamicResource Warning}" FontWeight="Bold"
-                                       VerticalAlignment="Center" Margin="6,0,0,0" FontSize="11.5"/>
+                            
                         </StackPanel>
                     </Button>
 
@@ -410,53 +207,75 @@
                         </StackPanel>
                     </Button>
 
-                    <!-- 环境检测 -->
-                    <TextBlock Text="环境检测" Style="{StaticResource SectionLabel}" Margin="4,16,0,8"/>
-                    <Border Background="{DynamicResource Surface2}" BorderBrush="{DynamicResource Divider}"
-                            BorderThickness="1" CornerRadius="10" Padding="10,9">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,3">
-                                <Ellipse x:Name="DotPad" Width="7" Height="7" Fill="{DynamicResource ModuleDot}"
-                                         Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                <TextBlock x:Name="TxtPad" Text="虚拟手柄驱动" FontSize="11.5"
-                                           Foreground="{DynamicResource TextSecondary}"/>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,3">
-                                <Ellipse x:Name="DotWgc" Width="7" Height="7" Fill="{DynamicResource ModuleDot}"
-                                         Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                <TextBlock Text="后台画面捕获" FontSize="11.5" Foreground="{DynamicResource TextSecondary}"/>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,3">
-                                <Ellipse x:Name="DotOcr" Width="7" Height="7" Fill="{DynamicResource ModuleDot}"
-                                         Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                <TextBlock x:Name="TxtOcr" Text="OCR 语言" FontSize="11.5"
-                                           Foreground="{DynamicResource TextSecondary}"/>
-                            </StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,3">
-                                <Ellipse x:Name="DotGame" Width="7" Height="7" Fill="{DynamicResource ModuleDot}"
-                                         Margin="0,0,8,0" VerticalAlignment="Center"/>
-                                <TextBlock x:Name="TxtGame" Text="游戏窗口（国际服）" FontSize="11.5"
-                                           Foreground="{DynamicResource TextSecondary}"/>
-                            </StackPanel>
-                            <Rectangle Style="{StaticResource Hairline}" Margin="0,8,0,6"/>
-                            <Button x:Name="BtnRecheck" Content="重新检测" Style="{StaticResource LinkBtn}"
-                                    HorizontalAlignment="Left" Click="BtnRecheck_Click"/>
-                        </StackPanel>
-                    </Border>
+                    <!-- 环境检测：左栏里最贵的是垂直空间——不做卡片，只用发丝线 + 状态行 -->
+                    <Rectangle Style="{StaticResource Hairline}" Margin="2,18,2,14"/>
+                    <TextBlock Text="环境检测" Style="{StaticResource SectionLabel}" Margin="12,0,0,10"/>
+
+                    <Grid Margin="12,0,10,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Ellipse x:Name="DotPad" Width="6" Height="6" Fill="{DynamicResource ModuleDot}"
+                                 Margin="0,6,8,0" VerticalAlignment="Top"/>
+                        <TextBlock x:Name="TxtPad" Grid.Column="1" Text="虚拟手柄驱动" FontSize="12"
+                                   TextWrapping="Wrap" LineHeight="17"
+                                   Foreground="{DynamicResource TextSecondary}"/>
+                    </Grid>
+                    <Grid Margin="12,7,10,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Ellipse x:Name="DotWgc" Width="6" Height="6" Fill="{DynamicResource ModuleDot}"
+                                 Margin="0,6,8,0" VerticalAlignment="Top"/>
+                        <TextBlock Grid.Column="1" Text="后台画面捕获" FontSize="12"
+                                   TextWrapping="Wrap" LineHeight="17"
+                                   Foreground="{DynamicResource TextSecondary}"/>
+                    </Grid>
+                    <Grid Margin="12,7,10,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Ellipse x:Name="DotOcr" Width="6" Height="6" Fill="{DynamicResource ModuleDot}"
+                                 Margin="0,6,8,0" VerticalAlignment="Top"/>
+                        <TextBlock x:Name="TxtOcr" Grid.Column="1" Text="OCR 语言" FontSize="12"
+                                   TextWrapping="Wrap" LineHeight="17"
+                                   Foreground="{DynamicResource TextSecondary}"/>
+                    </Grid>
+                    <Grid Margin="12,7,10,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
+                        <Ellipse x:Name="DotGame" Width="6" Height="6" Fill="{DynamicResource ModuleDot}"
+                                 Margin="0,6,8,0" VerticalAlignment="Top"/>
+                        <TextBlock x:Name="TxtGame" Grid.Column="1" Text="游戏窗口（国际服）" FontSize="12"
+                                   TextWrapping="Wrap" LineHeight="17"
+                                   Foreground="{DynamicResource TextSecondary}"/>
+                    </Grid>
+
+                    <Button x:Name="BtnRecheck" Content="重新检测" Style="{StaticResource LinkBtn}"
+                            HorizontalAlignment="Left" Margin="8,8,0,0" Click="BtnRecheck_Click"/>
+
                 </StackPanel>
                 </ScrollViewer>
             </DockPanel>
         </Border>
 
-        <!-- ============ 中栏：功能卡 + 日志卡 ============ -->
+        <!-- ============ 中栏：功能卡 + 日志卡 ============
+             内容层近实色（Win11 的「外框玻璃 + 内容层实色」）：材质留在顶栏与左右栏，
+             正文区域保持可读——壁纸不会从字缝里透出来。 -->
                 <Grid Grid.Column="1">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
             </Grid.RowDefinitions>
 
-            <Border x:Name="SubMenuHost" Grid.Row="0" Background="{DynamicResource SideLeftBg}"
-                    BorderThickness="0" Padding="20,8,20,8" Visibility="Collapsed">
+            <Border x:Name="SubMenuHost" Grid.Row="0" Background="Transparent"
+                    BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,0,1"
+                    Padding="20,8,20,8" Visibility="Collapsed">
                 <Grid>
                     <StackPanel x:Name="SubMenuIntl" Orientation="Horizontal" Visibility="Collapsed">
                         <StackPanel.Resources>
@@ -468,7 +287,7 @@
                             </Style>
                         </StackPanel.Resources>
                         <RadioButton x:Name="SubRbPreMatch" GroupName="IntlModule" Tag="RbPreMatch"
-                                     Checked="SubTab_Checked" Content="★ 赛前快捷设置"/>
+                                     Checked="SubTab_Checked" Content="赛前快捷设置"/>
                         <RadioButton x:Name="SubRbMyLeague" GroupName="IntlModule" Tag="RbMyLeague"
                                      Checked="SubTab_Checked" Content="我的联赛" IsChecked="True"/>
                         <RadioButton x:Name="SubRbWeekly" GroupName="IntlModule" Tag="RbWeekly"
@@ -489,7 +308,7 @@
                             </Style>
                         </StackPanel.Resources>
                         <RadioButton x:Name="SubRbCnPreMatch" GroupName="CnModule" Tag="RbCnPreMatch"
-                                     Checked="SubTab_Checked" Content="★ 赛前快捷设置"/>
+                                     Checked="SubTab_Checked" Content="赛前快捷设置"/>
                         <RadioButton x:Name="SubRbCnLeague" GroupName="CnModule" Tag="RbCnLeague"
                                      Checked="SubTab_Checked" Content="天梯巅峰赛" IsChecked="True"/>
                         <RadioButton x:Name="SubRbCnWeekly" GroupName="CnModule" Tag="RbCnWeekly"
@@ -550,11 +369,12 @@
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
                         </WrapPanel.Resources>
-                        <RadioButton x:Name="SubRbImp1" GroupName="SettingsNav" Tag="Imp1" Checked="SecTab_Checked" Content="★ 防检测"/>
+                        <RadioButton x:Name="SubRbImp1" GroupName="SettingsNav" Tag="Imp1" Checked="SecTab_Checked"
+                                     Content="防检测" IsChecked="True"/>
                         <RadioButton x:Name="SubRbImp2" GroupName="SettingsNav" Tag="Imp2" Checked="SecTab_Checked" Content="赛后活动任务"/>
                         <RadioButton x:Name="SubRbImp3" GroupName="SettingsNav" Tag="Imp3" Checked="SecTab_Checked" Content="挂机节奏"/>
                         <RadioButton x:Name="SubRbSetImportant" GroupName="SettingsNav" Tag="RbSetImportant"
-                                     Checked="SubTab_Checked" Content="★ 重要设定" Visibility="Collapsed"/>
+                                     Checked="SubTab_Checked" Content="重要设定" Visibility="Collapsed"/>
                         <RadioButton x:Name="SubRbSetDisplay" GroupName="SettingsNav" Tag="RbSetDisplay"
                                      Checked="SubTab_Checked" Content="画面与性能"/>
                         <RadioButton x:Name="SubRbSetInput" GroupName="SettingsNav" Tag="RbSetInput"
@@ -576,132 +396,202 @@
             </Grid.RowDefinitions>
 
             <!-- ===== 首页（开屏页） ===== -->
-            <ScrollViewer x:Name="HomePanel" Grid.Row="2" Visibility="Collapsed" VerticalContentAlignment="Center"
-                          HorizontalContentAlignment="Center"
-                          Style="{StaticResource PageScroll}" HorizontalScrollBarVisibility="Disabled">
-                <Grid HorizontalAlignment="Center">
-                    <Border Width="720" Height="300" VerticalAlignment="Top" Margin="0,6,0,0"
-                            HorizontalAlignment="Center" IsHitTestVisible="False">
-                        <Border.Background>
-                            <RadialGradientBrush>
-                                <GradientStop Color="#2A0FA968" Offset="0"/>
-                                <GradientStop Color="#000FA968" Offset="1"/>
-                            </RadialGradientBrush>
-                        </Border.Background>
-                    </Border>
+            <!-- ===== 首页（开屏页）：一句话定位 + 两个动作 + 两栏模块目录 ===== -->
+            <ScrollViewer x:Name="HomePanel" Grid.Row="2" Visibility="Collapsed"
+                          Style="{StaticResource PageScroll}" HorizontalScrollBarVisibility="Disabled"
+                          VerticalContentAlignment="Center">
+                <StackPanel MaxWidth="900" HorizontalAlignment="Stretch" Margin="0,0,0,0">
+                    <TextBlock Text="把比赛跑完，剩下的交给它" TextWrapping="Wrap"
+                               FontSize="26" FontWeight="SemiBold" LineHeight="34"
+                               Foreground="{DynamicResource TextPrimary}"/>
+                    <TextBlock Style="{StaticResource PageSub}" MaxWidth="600" FontSize="13" LineHeight="21"
+                               Margin="0,10,0,0"
+                               Text="手柄模拟 + 后台挂机：我的联赛、周活动、AI 天梯、种马培训自动跑完，游戏窗口不用置顶。"/>
 
-                    <StackPanel MaxWidth="780" HorizontalAlignment="Center" Margin="0,24,0,32">
-                        <Border HorizontalAlignment="Center" CornerRadius="20" Padding="12,5"
-                                Background="{DynamicResource AccentSoft}" BorderBrush="{DynamicResource AccentBorder}"
-                                BorderThickness="1">
-                            <TextBlock Text="PITCH CONSOLE · v6.2" FontSize="10.5" FontWeight="SemiBold"
-                                       Foreground="{DynamicResource AccentGlow}"/>
-                        </Border>
+                    <StackPanel Orientation="Horizontal" Margin="0,20,0,0">
+                        <Button Content="开始挂机" Style="{StaticResource PrimaryBtn}" MinWidth="132"
+                                Click="BtnHomeStart_Click"/>
+                        <Button Content="加群与反馈" Style="{StaticResource GhostBtn}" MinWidth="118"
+                                Margin="10,0,0,0" Click="BtnHomeFeedback_Click"/>
+                    </StackPanel>
 
-                        <TextBlock TextAlignment="Center" FontSize="34" FontWeight="Bold" Margin="0,16,0,0"
-                                   Text="eFootball 挂机助手">
-                            <TextBlock.Foreground>
-                                <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                                    <GradientStop Color="#FFFFFFFF" Offset="0"/>
-                                    <GradientStop Color="#FF8FF0C4" Offset="0.55"/>
-                                    <GradientStop Color="#FF35D392" Offset="1"/>
-                                </LinearGradientBrush>
-                            </TextBlock.Foreground>
-                        </TextBlock>
+                    <!-- 模块目录：两栏分组（国际服 / 国服 + 工具），一行一个去处 -->
+                    <Grid Margin="0,30,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="28"/>
+                            <ColumnDefinition Width="*"/>
+                        </Grid.ColumnDefinitions>
 
-                        <TextBlock TextAlignment="Center" FontSize="13" Margin="0,10,0,0" TextWrapping="Wrap"
-                                   MaxWidth="560" Foreground="{DynamicResource TextSecondary}"
-                                   Text="手柄模拟 + 后台挂机。联赛、周活动、AI 天梯、种马培训自动跑完，游戏窗口不用置顶。"/>
-
-                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" Margin="0,22,0,0">
-                            <Button Content="开始挂机" Style="{StaticResource PrimaryBtn}" Width="148" Height="40"
-                                    FontSize="13" Click="BtnHomeStart_Click"/>
-                            <Button Content="加群与反馈" Style="{StaticResource GhostBtn}" Width="128" Height="40"
-                                    FontSize="12.5" Margin="12,0,0,0" Click="BtnHomeFeedback_Click"/>
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="国际服" Style="{StaticResource GroupLabel}"/>
+                            <Border Style="{StaticResource HomeRow}" Tag="League"
+                                    MouseLeftButtonUp="BtnHomeTile_Click">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ui:SymbolIcon Symbol="Trophy24" FontSize="16" Margin="2,0,12,0"
+                                                   Foreground="{DynamicResource AccentGlow}" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="我的联赛" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="核对难度 → 开赛 → 满级自动换人" FontSize="11.5"
+                                                   Margin="0,2,0,0" Foreground="{DynamicResource TextMuted}"/>
+                                    </StackPanel>
+                                    <Path Grid.Column="2" Data="M9 6l6 6-6 6" StrokeThickness="1.6"
+                                          Stroke="{DynamicResource TextMuted}" Width="12" Height="12"
+                                          Stretch="Uniform" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource HomeRow}" Tag="Weekly"
+                                    MouseLeftButtonUp="BtnHomeTile_Click">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ui:SymbolIcon Symbol="CalendarLtr24" FontSize="16" Margin="2,0,12,0"
+                                                   Foreground="{DynamicResource AccentGlow}" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="周活动" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="按活动地图推进，刷满自动换活动" FontSize="11.5"
+                                                   Margin="0,2,0,0" Foreground="{DynamicResource TextMuted}"/>
+                                    </StackPanel>
+                                    <Path Grid.Column="2" Data="M9 6l6 6-6 6" StrokeThickness="1.6"
+                                          Stroke="{DynamicResource TextMuted}" Width="12" Height="12"
+                                          Stretch="Uniform" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource HomeRow}" Tag="AiLadder"
+                                    MouseLeftButtonUp="BtnHomeTile_Click">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ui:SymbolIcon Symbol="ArrowTrendingLines24" FontSize="16" Margin="2,0,12,0"
+                                                   Foreground="{DynamicResource AccentGlow}" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="AI 天梯联赛" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="组别循环冲级，可设达到组别停止" FontSize="11.5"
+                                                   Margin="0,2,0,0" Foreground="{DynamicResource TextMuted}"/>
+                                    </StackPanel>
+                                    <Path Grid.Column="2" Data="M9 6l6 6-6 6" StrokeThickness="1.6"
+                                          Stroke="{DynamicResource TextMuted}" Width="12" Height="12"
+                                          Stretch="Uniform" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                            <Border Style="{StaticResource HomeRow}" Tag="Stud"
+                                    MouseLeftButtonUp="BtnHomeTile_Click">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ui:SymbolIcon Symbol="Person24" FontSize="16" Margin="2,0,12,0"
+                                                   Foreground="{DynamicResource AccentGlow}" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="种马培训" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="批量买入 0GP 种马或筛人练技巧" FontSize="11.5"
+                                                   Margin="0,2,0,0" Foreground="{DynamicResource TextMuted}"/>
+                                    </StackPanel>
+                                    <Path Grid.Column="2" Data="M9 6l6 6-6 6" StrokeThickness="1.6"
+                                          Stroke="{DynamicResource TextMuted}" Width="12" Height="12"
+                                          Stretch="Uniform" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
                         </StackPanel>
 
-                        <UniformGrid Columns="3" Margin="0,28,0,0">
-                            <Border Style="{StaticResource StatTile}" Margin="7" Padding="14,12"
-                                    Cursor="Hand" Tag="League" MouseLeftButtonUp="BtnHomeTile_Click">
-                                <StackPanel HorizontalAlignment="Center">
-                                    <ui:SymbolIcon Symbol="Trophy24" FontSize="18"
-                                                   Foreground="{DynamicResource AccentGlow}" HorizontalAlignment="Center"/>
-                                    <TextBlock Text="我的联赛" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,7,0,0"/>
-                                    <TextBlock Text="自动核对难度后开赛" FontSize="10" TextAlignment="Center"
-                                               Margin="0,3,0,0" Foreground="{DynamicResource TextMuted}"/>
-                                </StackPanel>
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="国服" Style="{StaticResource GroupLabel}"/>
+                            <Border Style="{StaticResource HomeRow}" Tag="CnLeague"
+                                    MouseLeftButtonUp="BtnHomeTile_Click">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ui:SymbolIcon Symbol="Shield24" FontSize="16" Margin="2,0,12,0"
+                                                   Foreground="{DynamicResource AccentGlow}" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="天梯巅峰赛" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="教练模式单场循环，场次用尽自动停" FontSize="11.5"
+                                                   Margin="0,2,0,0" Foreground="{DynamicResource TextMuted}"/>
+                                    </StackPanel>
+                                    <Path Grid.Column="2" Data="M9 6l6 6-6 6" StrokeThickness="1.6"
+                                          Stroke="{DynamicResource TextMuted}" Width="12" Height="12"
+                                          Stretch="Uniform" VerticalAlignment="Center"/>
+                                </Grid>
                             </Border>
-                            <Border Style="{StaticResource StatTile}" Margin="7" Padding="14,12"
-                                    Cursor="Hand" Tag="Weekly" MouseLeftButtonUp="BtnHomeTile_Click">
-                                <StackPanel HorizontalAlignment="Center">
-                                    <ui:SymbolIcon Symbol="CalendarLtr24" FontSize="18"
-                                                   Foreground="{DynamicResource AccentGlow}" HorizontalAlignment="Center"/>
-                                    <TextBlock Text="周活动" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,7,0,0"/>
-                                    <TextBlock Text="按活动地图自动推进" FontSize="10" TextAlignment="Center"
-                                               Margin="0,3,0,0" Foreground="{DynamicResource TextMuted}"/>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource StatTile}" Margin="7" Padding="14,12"
-                                    Cursor="Hand" Tag="AiLadder" MouseLeftButtonUp="BtnHomeTile_Click">
-                                <StackPanel HorizontalAlignment="Center">
-                                    <ui:SymbolIcon Symbol="ArrowTrendingLines24" FontSize="18"
-                                                   Foreground="{DynamicResource AccentGlow}" HorizontalAlignment="Center"/>
-                                    <TextBlock Text="AI 天梯联赛" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,7,0,0"/>
-                                    <TextBlock Text="组别循环冲级" FontSize="10" TextAlignment="Center"
-                                               Margin="0,3,0,0" Foreground="{DynamicResource TextMuted}"/>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource StatTile}" Margin="7,7,7,0" Padding="14,12"
-                                    Cursor="Hand" Tag="Stud" MouseLeftButtonUp="BtnHomeTile_Click">
-                                <StackPanel HorizontalAlignment="Center">
-                                    <ui:SymbolIcon Symbol="Person24" FontSize="18"
-                                                   Foreground="{DynamicResource AccentGlow}" HorizontalAlignment="Center"/>
-                                    <TextBlock Text="种马培训" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,7,0,0"/>
-                                    <TextBlock Text="批量购买与筛选培训" FontSize="10" TextAlignment="Center"
-                                               Margin="0,3,0,0" Foreground="{DynamicResource TextMuted}"/>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource StatTile}" Margin="7,7,7,0" Padding="14,12"
-                                    Cursor="Hand" Tag="CnLeague" MouseLeftButtonUp="BtnHomeTile_Click">
-                                <StackPanel HorizontalAlignment="Center">
-                                    <ui:SymbolIcon Symbol="Shield24" FontSize="18"
-                                                   Foreground="{DynamicResource AccentGlow}" HorizontalAlignment="Center"/>
-                                    <TextBlock Text="天梯巅峰赛" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,7,0,0"/>
-                                    <TextBlock Text="国服教练模式循环" FontSize="10" TextAlignment="Center"
-                                               Margin="0,3,0,0" Foreground="{DynamicResource TextMuted}"/>
-                                </StackPanel>
-                            </Border>
-                            <Border Style="{StaticResource StatTile}" Margin="7,7,7,0" Padding="14,12"
-                                    Cursor="Hand" Tag="Network" MouseLeftButtonUp="BtnHomeTile_Click">
-                                <StackPanel HorizontalAlignment="Center">
-                                    <ui:SymbolIcon Symbol="Globe24" FontSize="18"
-                                                   Foreground="{DynamicResource AccentGlow}" HorizontalAlignment="Center"/>
-                                    <TextBlock Text="网络监测" FontSize="12" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,7,0,0"/>
-                                    <TextBlock Text="测速与连接监控" FontSize="10" TextAlignment="Center"
-                                               Margin="0,3,0,0" Foreground="{DynamicResource TextMuted}"/>
-                                </StackPanel>
-                            </Border>
-                        </UniformGrid>
 
-                        <Rectangle Style="{StaticResource Hairline}" Width="360" HorizontalAlignment="Center" Margin="0,26,0,0"/>
-                        <TextBlock TextAlignment="Center" Margin="0,16,0,0" FontSize="12"
-                                   Foreground="{DynamicResource TextSecondary}" Text="QQ 群 1128646247"/>
-                        <TextBlock TextAlignment="Center" Margin="0,6,0,0" FontSize="11" MaxWidth="560"
-                                   TextWrapping="Wrap" Foreground="{DynamicResource TextMuted}"
-                                   Text="反馈走「工具 → 反馈 → 诊断报告」一键打包；挂机中出问题点「发现问题手动停止」，会自动截取游戏画面一起打包。"/>
-                    </StackPanel>
-                </Grid>
+                            <TextBlock Text="工具" Style="{StaticResource GroupLabel}" Margin="0,18,0,10"/>
+                            <Border Style="{StaticResource HomeRow}" Tag="Network"
+                                    MouseLeftButtonUp="BtnHomeTile_Click">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="Auto"/>
+                                    </Grid.ColumnDefinitions>
+                                    <ui:SymbolIcon Symbol="Globe24" FontSize="16" Margin="2,0,12,0"
+                                                   Foreground="{DynamicResource AccentGlow}" VerticalAlignment="Center"/>
+                                    <StackPanel Grid.Column="1" VerticalAlignment="Center">
+                                        <TextBlock Text="网络监测" FontSize="13" FontWeight="SemiBold"
+                                                   Foreground="{DynamicResource TextPrimary}"/>
+                                        <TextBlock Text="服务器测速 + 游戏内连接监控" FontSize="11.5"
+                                                   Margin="0,2,0,0" Foreground="{DynamicResource TextMuted}"/>
+                                    </StackPanel>
+                                    <Path Grid.Column="2" Data="M9 6l6 6-6 6" StrokeThickness="1.6"
+                                          Stroke="{DynamicResource TextMuted}" Width="12" Height="12"
+                                          Stretch="Uniform" VerticalAlignment="Center"/>
+                                </Grid>
+                            </Border>
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- 页脚：群号 + 反馈入口 + 版本（版本号仍由代码写入 TxtVersionChip） -->
+                    <Rectangle Style="{StaticResource Hairline}" Margin="0,26,0,0"/>
+                    <Grid Margin="0,12,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <StackPanel>
+                            <TextBlock FontSize="12" Foreground="{DynamicResource TextSecondary}"
+                                       Text="QQ 群 1128646247"/>
+                            <TextBlock FontSize="11.5" Margin="0,3,0,0" TextWrapping="Wrap"
+                                       Foreground="{DynamicResource TextMuted}"
+                                       Text="反馈走「工具 → 反馈 → 诊断报告」一键打包；挂机中出问题点「发现问题手动停止」，会自动截取游戏画面一起打包。"/>
+                        </StackPanel>
+                        <TextBlock x:Name="TxtVersionChip" Grid.Column="1" Text="PITCH CONSOLE"
+                                   FontSize="11" VerticalAlignment="Bottom" Margin="16,0,0,2"
+                                   Foreground="{DynamicResource TextMuted}"/>
+                    </Grid>
+                </StackPanel>
             </ScrollViewer>
+
+
 
             <!-- 更新提醒横幅（有新版本时显示） -->
             <Border x:Name="UpdateBanner" Grid.Row="0" Visibility="Collapsed"
                     CornerRadius="12" Padding="16,12" Margin="0,0,0,12"
-                    BorderBrush="#5535D392" BorderThickness="1"
+                    BorderBrush="{DynamicResource AccentBorderStrong}" BorderThickness="1"
                     Effect="{StaticResource FloatShadow}">
                 <Border.Background>
                     <LinearGradientBrush StartPoint="0,0" EndPoint="1,1">
-                        <GradientStop Color="#FF12B072" Offset="0"/>
-                        <GradientStop Color="#FF0B8A58" Offset="1"/>
+                        <GradientStop Color="{DynamicResource BannerFromColor}" Offset="0"/>
+                        <GradientStop Color="{DynamicResource BannerToColor}" Offset="1"/>
                     </LinearGradientBrush>
                 </Border.Background>
                 <Grid>
@@ -710,13 +600,13 @@
                         <ColumnDefinition Width="Auto"/>
                     </Grid.ColumnDefinitions>
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Width="30" Height="30" CornerRadius="15" Background="#33FFFFFF"
+                        <Border Width="30" Height="30" CornerRadius="15" Background="{DynamicResource HairlineStrong}"
                                 VerticalAlignment="Center" Margin="0,0,11,0">
                             <TextBlock Text="🎉" FontSize="15" HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <StackPanel>
                             <TextBlock x:Name="TxtUpdateBannerTitle" Text="发现新版本" FontWeight="Bold" Foreground="White" FontSize="13"/>
-                            <TextBlock x:Name="TxtUpdateBannerDesc" Text="" Foreground="#E6F8EF" FontSize="11.5" Margin="0,2,0,0"/>
+                            <TextBlock x:Name="TxtUpdateBannerDesc" Text="" Foreground="{DynamicResource TextOnBanner}" FontSize="11.5" Margin="0,2,0,0"/>
                         </StackPanel>
                     </StackPanel>
                     <Button Grid.Column="1" x:Name="BtnBannerUpdate" Content="立即更新"
@@ -742,8 +632,7 @@
                                              Checked="RbPreMatch_Checked"
                                              ToolTip="开赛前一键打开游戏自带的设置工具，调整画质、分辨率、键位">
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="★" Foreground="{DynamicResource Warning}" FontWeight="Bold"
-                                                   VerticalAlignment="Center" Margin="0,0,4,1" FontSize="11.5"/>
+                                        
                                         <TextBlock Text="赛前快捷设置" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </RadioButton>
@@ -859,14 +748,14 @@
                                         <ColumnDefinition Width="*"/>
                                     </Grid.ColumnDefinitions>
                                     <Button Grid.Row="0" Grid.Column="0" x:Name="BtnStartMyLeague" Content="开始"
-                                            Style="{StaticResource PrimaryBtn}" FontSize="12" Height="32" Margin="0,0,6,0"
+                                            Style="{StaticResource PrimaryBtn}" FontSize="12.5" Height="36" Margin="0,0,6,0"
                                             Click="BtnStartMyLeague_Click"/>
                                     <Button Grid.Row="0" Grid.Column="1" x:Name="BtnPauseMyLeague" Content="暂停 (F10)"
-                                            Style="{StaticResource GhostBtn}" FontSize="12" Height="32" Margin="6,0,0,0"
+                                            Style="{StaticResource GhostBtn}" FontSize="12.5" Height="36" Margin="6,0,0,0"
                                             IsEnabled="False" Click="BtnPause_Click"/>
                                     <Button Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="2" x:Name="BtnManualMyLeague"
                                             Content="发现问题手动停止" Style="{StaticResource DangerOutlineBtn}"
-                                            FontSize="12" Height="32" Margin="0,8,0,0" IsEnabled="False"
+                                            FontSize="12.5" Height="36" Margin="0,8,0,0" IsEnabled="False"
                                             Click="BtnManualStop_Click"/>
                                     <CheckBox Grid.Row="2" Grid.ColumnSpan="2" x:Name="ChkMuteMyLeague"
                                               Content="挂机时静音游戏" Margin="0,12,0,0" FontSize="11.5"
@@ -940,8 +829,7 @@
                         <StackPanel Orientation="Horizontal">
                             <CheckBox x:Name="ChkOnlyKeyMatches" FontSize="11.5" VerticalAlignment="Center">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="★ " Foreground="{DynamicResource Warning}" FontWeight="Bold"
-                                               VerticalAlignment="Center" FontSize="11.5"/>
+                                    
                                     <TextBlock Text="只打关键比赛" VerticalAlignment="Center" FontSize="11.5"/>
                                 </StackPanel>
                             </CheckBox>
@@ -979,8 +867,7 @@
                             <CheckBox x:Name="ChkAutoSwapMaxLevel" FontSize="11.5" VerticalAlignment="Center"
                                       Checked="ChkAutoSwapMaxLevel_Checked">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="★ " Foreground="{DynamicResource Warning}" FontWeight="Bold"
-                                               VerticalAlignment="Center" FontSize="11.5"/>
+                                    
                                     <TextBlock Text="满级自动换人" VerticalAlignment="Center" FontSize="11.5"/>
                                 </StackPanel>
                             </CheckBox>
@@ -1143,7 +1030,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal">
-                                    <Ellipse Width="8" Height="8" Fill="#FF4CA6E0"
+                                    <Ellipse Width="8" Height="8" Fill="{DynamicResource Info}"
                                              VerticalAlignment="Center" Margin="0,0,9,0"/>
                                     <TextBlock Text="AI天梯联赛挂机" Style="{StaticResource PageTitle}"/>
                                     <Border Style="{StaticResource Chip}" Margin="10,2,0,0">
@@ -1272,7 +1159,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal">
-                                    <Ellipse Width="8" Height="8" Fill="#FFE0B23C"
+                                    <Ellipse Width="8" Height="8" Fill="{DynamicResource Amber}"
                                              VerticalAlignment="Center" Margin="0,0,9,0"/>
                                     <TextBlock Text="种马球员培训（购买）" Style="{StaticResource PageTitle}"/>
                                     <Border Style="{StaticResource Chip}" Margin="10,2,0,0">
@@ -1489,8 +1376,7 @@
                                              Checked="RbCnPreMatch_Checked"
                                              ToolTip="开赛前一键打开游戏自带的设置工具，调整画质、分辨率、键位">
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBlock Text="★" Foreground="{DynamicResource Warning}" FontWeight="Bold"
-                                                   VerticalAlignment="Center" Margin="0,0,4,1" FontSize="11.5"/>
+                                        
                                         <TextBlock Text="赛前快捷设置" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </RadioButton>
@@ -1576,7 +1462,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal">
-                                    <Ellipse Width="8" Height="8" Fill="#FFE0A14C"
+                                    <Ellipse Width="8" Height="8" Fill="{DynamicResource Orange}"
                                              VerticalAlignment="Center" Margin="0,0,9,0"/>
                                     <TextBlock Text="天梯巅峰赛挂机" Style="{StaticResource PageTitle}"/>
                                     <Border Style="{StaticResource Chip}" Margin="10,2,0,0">
@@ -1808,7 +1694,7 @@
                             </Grid.ColumnDefinitions>
                             <StackPanel>
                                 <StackPanel Orientation="Horizontal">
-                                    <Ellipse Width="8" Height="8" Fill="#FF4CC9A6"
+                                    <Ellipse Width="8" Height="8" Fill="{DynamicResource Teal}"
                                              VerticalAlignment="Center" Margin="0,0,9,0"/>
                                     <TextBlock Text="我的联赛挂机" Style="{StaticResource PageTitle}"/>
                                     <Border Style="{StaticResource Chip}" Margin="10,2,0,0">
@@ -1998,8 +1884,7 @@
                             <RadioButton x:Name="RbSetImportant" GroupName="SettingsNav" Style="{StaticResource SegTab}"
                                          IsChecked="True" Checked="SettingsTab_Checked">
                                 <StackPanel Orientation="Horizontal">
-                                    <TextBlock Text="★" Foreground="{DynamicResource Warning}" FontWeight="Bold"
-                                               VerticalAlignment="Center" Margin="0,0,4,1" FontSize="11.5"/>
+                                    
                                     <TextBlock Text="重要设定" VerticalAlignment="Center"/>
                                 </StackPanel>
                             </RadioButton>
@@ -2015,13 +1900,13 @@
                         </WrapPanel>
                     </Border>
 
-                    <!-- ============ 二级页：★ 重要设定（防检测 + 热键） ============ -->
+                    <!-- ============ 二级页： 重要设定（防检测 + 热键） ============ -->
                     <StackPanel x:Name="SetTabImportant">
                     <Border Style="{StaticResource Card}" Tag="Imp1" Margin="0,0,0,12">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Style="{StaticResource H2}"><Run Text="★ " Foreground="{DynamicResource Warning}"/>防检测保护</TextBlock>
+                                <TextBlock Style="{StaticResource H2}">防检测保护</TextBlock>
                             </StackPanel>
                                                         <Grid Margin="0,6,0,0" MaxWidth="520" HorizontalAlignment="Left">
                                 <Grid.ColumnDefinitions>
@@ -2092,17 +1977,17 @@
                                 <StackPanel Grid.Column="0" Margin="0,0,24,0">
                                     <TextBlock Text="活跃时段" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"/>
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBox x:Name="TxtScheduleStart" Width="56" Text="09:00"
+                                        <TextBox x:Name="TxtScheduleStart" Width="72" Text="09:00"
                                                  TextChanged="ScheduleField_TextChanged"/>
                                         <TextBlock Text="至" Style="{StaticResource FieldLabel}" Margin="7,0,7,0"/>
-                                        <TextBox x:Name="TxtScheduleEnd" Width="56" Text="23:30"
+                                        <TextBox x:Name="TxtScheduleEnd" Width="72" Text="23:30"
                                                  TextChanged="ScheduleField_TextChanged"/>
                                     </StackPanel>
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Margin="0,0,24,0">
                                     <TextBlock Text="每日上限" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"/>
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBox x:Name="TxtScheduleCap" Width="46" Text="6"
+                                        <TextBox x:Name="TxtScheduleCap" Width="58" Text="6"
                                                  TextChanged="ScheduleField_TextChanged"/>
                                         <TextBlock Text="小时" Style="{StaticResource FieldLabel}" Margin="7,0,0,0"/>
                                     </StackPanel>
@@ -2110,7 +1995,7 @@
                                 <StackPanel Grid.Column="2">
                                     <TextBlock Text="启停漂移" Style="{StaticResource FieldLabel}" Margin="0,0,0,5"/>
                                     <StackPanel Orientation="Horizontal">
-                                        <TextBox x:Name="TxtScheduleDrift" Width="46" Text="20"
+                                        <TextBox x:Name="TxtScheduleDrift" Width="58" Text="20"
                                                  TextChanged="ScheduleField_TextChanged"/>
                                         <TextBlock Text="分钟" Style="{StaticResource FieldLabel}" Margin="7,0,0,0"/>
                                     </StackPanel>
@@ -2135,12 +2020,12 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- 赛后活动任务页（全屏活动地图，仅国际服）：★重要设定 -->
+                    <!-- 赛后活动任务页（全屏活动地图，仅国际服）：重要设定 -->
                     <Border Style="{StaticResource Card}" Tag="Imp2" Margin="0,0,0,12">
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Style="{StaticResource H2}"><Run Text="★ " Foreground="{DynamicResource Warning}"/>赛后活动任务（仅国际服）</TextBlock>
+                                <TextBlock Style="{StaticResource H2}">赛后活动任务（仅国际服）</TextBlock>
                             </StackPanel>
                             <TextBlock Style="{StaticResource SmallText}" Margin="0,6,0,0" MaxWidth="520"><Run Text="比赛结束后 / 开始前会出现的全屏活动地图（活动名与图标每周随服务器推送变化）。"/><Run Text="仅国际服独享" Foreground="{DynamicResource Warning}"/></TextBlock>
                             <CheckBox x:Name="ChkPmAutoAdvance" FontWeight="SemiBold" Margin="0,10,0,0"
@@ -2460,7 +2345,7 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- （挂机节奏已移至「★重要设定」页） -->
+                    <!-- （挂机节奏已移至「重要设定」页） -->
 
                     <Border Style="{StaticResource Card}">
                         <StackPanel>
@@ -2647,7 +2532,7 @@
                         <StackPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Style="{StaticResource H2}"><Run Text="★ " Foreground="{DynamicResource Warning}"/>诊断报告</TextBlock>
+                                <TextBlock Style="{StaticResource H2}">诊断报告</TextBlock>
                             </StackPanel>
                             <Grid Margin="0,6,0,0" MaxWidth="520" HorizontalAlignment="Left">
                                 <Grid.ColumnDefinitions>
@@ -2668,7 +2553,7 @@
                             <TextBox x:Name="TxtDiagNote" Height="48" Margin="0,4,0,0" Padding="6,4"
                                      VerticalScrollBarVisibility="Auto" MaxLength="500"
                                      TextWrapping="Wrap" FontSize="11.5"
-                                     Background="{DynamicResource Surface2}" BorderBrush="#33FFFFFF"/>
+                                     Background="{DynamicResource Surface2}" BorderBrush="{DynamicResource HairlineStrong}"/>
                             <StackPanel Orientation="Horizontal" Margin="0,10,0,0">
                                 <Button x:Name="BtnDiagReport" Content="生成反馈包" Style="{StaticResource GhostBtn}"
                                         Padding="14,7" Click="BtnDiagReport_Click"/>
@@ -2703,60 +2588,8 @@
                 </StackPanel>
             </ScrollViewer>
 
-            <!-- ===== 关于面板（声明） ===== -->
-            <ScrollViewer x:Name="AboutPanel" Grid.Row="2" Visibility="Collapsed"
-                          Style="{StaticResource PageScroll}">
-                <StackPanel Margin="0,2,0,0">
-                    <!-- ===== 声明 ===== -->
-                    <Border Style="{StaticResource Card}" Margin="0,0,0,0">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Text="声明" Style="{StaticResource H2}"/>
-                            </StackPanel>
-
-                            <TextBlock Text="分辨率建议" Style="{StaticResource SubHead}"/>
-                                                        <Grid Margin="0,3,0,11">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                            <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="理论支持全分辨率，强烈建议游戏以"/><Run Text="「窗口化 720p」"/><Run Text="运行：分辨率过高会拖慢后台捕获与 OCR，影响稳定性"/></TextBlock>
-                            </Grid>
-
-                            <TextBlock Text="封号风险" Style="{StaticResource SubHead}"/>
-                                                        <Grid Margin="0,3,0,11">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                            <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="仅供学习交流与个人使用；使用自动化工具"/><Run Text="存在被官方封号的风险" Foreground="{DynamicResource Warning}"/><Run Text="，后果自负，与作者无关"/></TextBlock>
-                            </Grid>
-
-                            <TextBlock Text="版权与分发" Style="{StaticResource SubHead}"/>
-                                                        <Grid Margin="0,3,0,2">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                            <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="本软件无偿免费，"/><Run Text="禁止二次售卖、付费分发" Foreground="{DynamicResource Warning}"/><Run Text="，禁止篡改或移除作者信息后重新发布；转载请注明作者 Dabao#1392"/></TextBlock>
-                            </Grid>
-                        </StackPanel>
-                    </Border>
-                </StackPanel>
-            </ScrollViewer>
+            <!-- ===== 关于面板（声明）：视图本体见 Views/AboutPage.xaml ===== -->
+            <views:AboutPage x:Name="PageAbout" Grid.Row="2" Visibility="Collapsed"/>
 
             <!-- ===== GitHub 面板（FastGithub 访问加速 / 镜像下载加速 / 域名测速） ===== -->
             <ScrollViewer x:Name="GitHubPanel" Grid.Row="2" Visibility="Collapsed"
@@ -2924,18 +2757,18 @@
                                 <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"
                                            Margin="16,0,6,0" Text="只看 ≤"/>
                                 <TextBox x:Name="TxtFilterMs" Width="52" Padding="4,3" FontSize="11.5" Text="150"
-                                         Background="{DynamicResource Surface2}" BorderBrush="#33FFFFFF"
+                                         Background="{DynamicResource Surface2}" BorderBrush="{DynamicResource HairlineStrong}"
                                          TextChanged="TxtFilterMs_TextChanged"/>
                                 <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"
                                            Margin="4,0,12,0" Text="ms"/>
                                 <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"
                                            Margin="0,0,6,0" Text="筛选"/>
                                 <TextBox x:Name="TxtServerFilter" Width="150" Padding="4,3" FontSize="11.5"
-                                         Background="{DynamicResource Surface2}" BorderBrush="#33FFFFFF"
+                                         Background="{DynamicResource Surface2}" BorderBrush="{DynamicResource HairlineStrong}"
                                          TextChanged="TxtServerFilter_TextChanged"/>
                             </WrapPanel>
                             <StackPanel Orientation="Horizontal" Margin="0,8,0,6">
-                                <Ellipse Width="7" Height="7" Fill="#FF3DDC84" VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                <Ellipse Width="7" Height="7" Fill="{DynamicResource Success}" VerticalAlignment="Center" Margin="0,0,4,0"/>
                                 <TextBlock Text="&lt;60" FontSize="11" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center" Margin="0,0,10,0"/>
                                 <Ellipse Width="7" Height="7" Fill="{DynamicResource Warning}" VerticalAlignment="Center" Margin="0,0,4,0"/>
                                 <TextBlock Text="&lt;150" FontSize="11" Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center" Margin="0,0,10,0"/>
@@ -2998,7 +2831,7 @@
                             <StackPanel Grid.Row="2">
                             <WrapPanel Margin="0,8,0,0">
                                 <TextBox x:Name="TxtAddTarget" Width="200" Padding="4,3" FontSize="11.5"
-                                         Background="{DynamicResource Surface2}" BorderBrush="#33FFFFFF"
+                                         Background="{DynamicResource Surface2}" BorderBrush="{DynamicResource HairlineStrong}"
                                          KeyDown="TxtAddTarget_KeyDown"/>
                                 <Button x:Name="BtnAddTarget" Content="添加 IP / 域名" Style="{StaticResource GhostBtn}"
                                         Padding="12,5" Margin="10,0,0,0" Click="BtnAddTarget_Click"/>
@@ -3243,7 +3076,7 @@
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
 
-                    <!-- 工具栏两行（★必须包在同一个行容器里：两行都直接放 Grid 会都落在 Row 0 叠在一起） -->
+                    <!-- 工具栏两行（必须包在同一个行容器里：两行都直接放 Grid 会都落在 Row 0 叠在一起） -->
                     <StackPanel Grid.Row="0">
                     <Grid>
                         <StackPanel Orientation="Horizontal">
@@ -3384,8 +3217,8 @@
                         </StackPanel>
                         <!-- 当前画面状态芯片 -->
                         <Border HorizontalAlignment="Left" VerticalAlignment="Bottom"
-                                Margin="8,0,8,8" Background="#CC0B0F14" CornerRadius="6" Padding="8,3.5">
-                            <TextBlock x:Name="TxtScreen" Text="当前画面：—" Foreground="#FFDCE3EC"
+                                Margin="8,0,8,8" Background="{DynamicResource ScrimSoft}" CornerRadius="6" Padding="8,3.5">
+                            <TextBlock x:Name="TxtScreen" Text="当前画面：—" Foreground="{DynamicResource TextPrimary}"
                                        FontSize="10.5"/>
                         </Border>
                     </Grid>
@@ -3635,3 +3468,5 @@
     </Grid>
     </Grid>
 </ui:FluentWindow>
+
+

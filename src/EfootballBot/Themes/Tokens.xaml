@@ -1,0 +1,114 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+    <!-- ==================================================================
+         Tokens.xaml —— 颜色 / 阴影：全应用唯一的颜色真相（v7.3 · Windows 11 Fluent 世界）
+         改配色只动这里 + Core/UI/ThemePalette.cs（亮色/深蓝两组同名列）。
+         世界定义：Win11 浅色/深色 Fluent 材质 —— 云母/亚克力透底 + 半透明层 + 1px 描边，
+         主色是系统强调色（深色 #60CDFF / 浅色 #0067C0），圆角 4（控件）/8（卡片），
+         字体 Segoe UI Variable。页面里只准引用 token，不写十六进制。
+         ================================================================== -->
+    <!-- ===== 底层：窗口与三栏（都带透明度，让材质从后面透出来） ===== -->
+    <SolidColorBrush x:Key="WindowBg" Color="#FF1F1F1F"/>
+    <SolidColorBrush x:Key="ContentBg" Color="#F21F1F1F"/>
+    <SolidColorBrush x:Key="CardBg" Color="#14FFFFFF"/>
+    <SolidColorBrush x:Key="CardBorder" Color="#1FFFFFFF"/>
+    <SolidColorBrush x:Key="SideLeftBg" Color="#66000000"/>
+    <SolidColorBrush x:Key="SideRightBg" Color="#4D000000"/>
+    <SolidColorBrush x:Key="Surface2" Color="#1FFFFFFF"/>
+    <SolidColorBrush x:Key="InsetBg" Color="#0F000000"/>
+    <SolidColorBrush x:Key="TrackBg" Color="#4D000000"/>
+    <SolidColorBrush x:Key="GlassBg" Color="#CC262626"/>
+    <SolidColorBrush x:Key="GlassStroke" Color="#1FFFFFFF"/>
+    <SolidColorBrush x:Key="ControlFill" Color="#0FFFFFFF"/>
+    <SolidColorBrush x:Key="ControlStroke" Color="#26FFFFFF"/>
+
+    <!-- ===== 文字（Win11 三级：主 白 / 次 #C7C7C7 / 弱 #9A9A9A） ===== -->
+    <SolidColorBrush x:Key="TextPrimary" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="TextSecondary" Color="#FFC7C7C7"/>
+    <SolidColorBrush x:Key="TextMuted" Color="#FF9A9A9A"/>
+    <SolidColorBrush x:Key="NavLabelFg" Color="#FF9A9A9A"/>
+    <SolidColorBrush x:Key="NavDescFg" Color="#FFB4B4B4"/>
+    <SolidColorBrush x:Key="SegTabFg" Color="#FFC7C7C7"/>
+    <SolidColorBrush x:Key="SegTabHover" Color="#14FFFFFF"/>
+    <SolidColorBrush x:Key="SegTabHoverFg" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="LogInfo" Color="#FFD6D6D6"/>
+
+    <!-- ===== 强调色（Win11 深色 = 浅蓝 #60CDFF，上面压深色字） ===== -->
+    <SolidColorBrush x:Key="Accent" Color="#FF60CDFF"/>
+    <SolidColorBrush x:Key="AccentHover" Color="#FF7EDBFF"/>
+    <SolidColorBrush x:Key="AccentGlow" Color="#FF9BEBFF"/>
+    <SolidColorBrush x:Key="AccentLight" Color="#3360CDFF"/>
+    <SolidColorBrush x:Key="AccentBorder" Color="#5560CDFF"/>
+    <SolidColorBrush x:Key="AccentSoft" Color="#1F60CDFF"/>
+    <SolidColorBrush x:Key="AccentBorderStrong" Color="#8060CDFF"/>
+    <SolidColorBrush x:Key="TextOnAccent" Color="#FF003544"/>
+
+    <!-- ===== 语义色（Win11 状态色） ===== -->
+    <SolidColorBrush x:Key="Danger" Color="#FFFF99A4"/>
+    <SolidColorBrush x:Key="DangerHover" Color="#FFFFB3BC"/>
+    <SolidColorBrush x:Key="DangerText" Color="#FFFF99A4"/>
+    <SolidColorBrush x:Key="DangerBorder" Color="#66FF99A4"/>
+    <SolidColorBrush x:Key="DangerSoft" Color="#26FF99A4"/>
+    <SolidColorBrush x:Key="Warning" Color="#FFFCE100"/>
+    <SolidColorBrush x:Key="Success" Color="#FF6CCB5F"/>
+    <SolidColorBrush x:Key="Info" Color="#FF60CDFF"/>
+    <SolidColorBrush x:Key="Amber" Color="#FFFCE100"/>
+    <SolidColorBrush x:Key="Orange" Color="#FFFFB900"/>
+    <SolidColorBrush x:Key="Teal" Color="#FF6CCB5F"/>
+
+    <!-- ===== 输入 / 轨道 / 滚动 ===== -->
+    <SolidColorBrush x:Key="InputBg" Color="#0FFFFFFF"/>
+    <SolidColorBrush x:Key="InputBorder" Color="#26FFFFFF"/>
+    <SolidColorBrush x:Key="HoverOverlay" Color="#14FFFFFF"/>
+    <SolidColorBrush x:Key="ScrollThumb" Color="#66FFFFFF"/>
+    <SolidColorBrush x:Key="ToggleOff" Color="#66FFFFFF"/>
+    <SolidColorBrush x:Key="ToggleOn" Color="#FF60CDFF"/>
+    <SolidColorBrush x:Key="ModuleDot" Color="#FF7A7A7A"/>
+    <SolidColorBrush x:Key="EnvDotIdle" Color="#FF8A8A8A"/>
+
+    <!-- ===== 描边 / 遮罩 / 预览 ===== -->
+    <SolidColorBrush x:Key="Divider" Color="#17FFFFFF"/>
+    <SolidColorBrush x:Key="HairlineStrong" Color="#33FFFFFF"/>
+    <SolidColorBrush x:Key="Scrim" Color="#F00A0A0A"/>
+    <SolidColorBrush x:Key="ScrimSoft" Color="#CC0A0A0A"/>
+    <SolidColorBrush x:Key="PreviewBg" Color="#FF000000"/>
+    <SolidColorBrush x:Key="NavSectionBg" Color="#33FFFFFF"/>
+    <SolidColorBrush x:Key="NavSectionBorder" Color="#1FFFFFFF"/>
+    <SolidColorBrush x:Key="TabTrackBg" Color="#4D000000"/>
+    <SolidColorBrush x:Key="IntlTabBg" Color="#4D000000"/>
+    <SolidColorBrush x:Key="IntlTabBorder" Color="#1FFFFFFF"/>
+
+    <!-- ===== 品牌 / 横幅（Win11 用系统强调色，不做渐变堆叠） ===== -->
+    <SolidColorBrush x:Key="BrandFrom" Color="#FF60CDFF"/>
+    <SolidColorBrush x:Key="BrandTo" Color="#FF0F6CBD"/>
+    <SolidColorBrush x:Key="BannerFrom" Color="#FF0F6CBD"/>
+    <SolidColorBrush x:Key="BannerTo" Color="#FF0B4F8A"/>
+    <SolidColorBrush x:Key="TextOnBanner" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="HeroGlowFrom" Color="#1A60CDFF"/>
+    <SolidColorBrush x:Key="HeroGlowFade" Color="#0060CDFF"/>
+    <SolidColorBrush x:Key="HeroTitleFrom" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="HeroTitleMid" Color="#FFCFEFFF"/>
+    <SolidColorBrush x:Key="HeroTitleTo" Color="#FF9BEBFF"/>
+
+    <!-- ===== 浮层 ===== -->
+    <SolidColorBrush x:Key="TooltipBg" Color="#F22B2B2B"/>
+    <SolidColorBrush x:Key="TooltipBorder" Color="#2EFFFFFF"/>
+    <SolidColorBrush x:Key="TooltipFg" Color="#FFFFFFFF"/>
+
+    <!-- ===== Win11 阴影：小半径、低不透明度（Fluent 的浮层很"轻"） ===== -->
+    <DropShadowEffect x:Key="FloatShadow" Color="#FF000000" BlurRadius="16"
+                      ShadowDepth="2" Opacity="0.28"/>
+    <DropShadowEffect x:Key="AccentShadow" Color="#660F6CBD" BlurRadius="14"
+                      ShadowDepth="2" Opacity="0.35"/>
+
+    <!-- ===== 渐变停点专用 Color 版（GradientStop.Color 只吃 Color） ===== -->
+    <Color x:Key="BrandFromColor">#FF60CDFF</Color>
+    <Color x:Key="BrandToColor">#FF0F6CBD</Color>
+    <Color x:Key="HeroGlowFromColor">#1A60CDFF</Color>
+    <Color x:Key="HeroGlowFadeColor">#0060CDFF</Color>
+    <Color x:Key="HeroTitleFromColor">#FFFFFFFF</Color>
+    <Color x:Key="HeroTitleMidColor">#FFCFEFFF</Color>
+    <Color x:Key="HeroTitleToColor">#FF9BEBFF</Color>
+    <Color x:Key="BannerFromColor">#FF0F6CBD</Color>
+    <Color x:Key="BannerToColor">#FF0B4F8A</Color>
+</ResourceDictionary>

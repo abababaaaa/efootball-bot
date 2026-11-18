@@ -13,6 +13,8 @@ public static class ThemeManager
     public const string DeepBlue = "DeepBlue";
     public static readonly string[] All = { Dark, Light, DeepBlue };
 
+    private static bool _validated;
+
     public static string DisplayName(string key) => key switch
     {
         Light => "亮色",
@@ -23,22 +25,40 @@ public static class ThemeManager
     /// <summary>把指定主题的所有 Token 颜色写入 Application.Current.Resources。</summary>
     public static void ApplyTheme(string themeName)
     {
-        var source = themeName switch
-        {
-            Light => LightColors,
-            DeepBlue => DeepBlueColors,
-            _ => DarkColors,
-        };
+        var source = ThemePalette.For(themeName);
 
-        // 统一底色：窗口 / 左栏 / 右栏 / 卡片用同一个值，
-        // 否则三栏交界处会出现深浅不一的接缝（用户反馈「露出一块底色」）。
+        // v7.3 Win11 世界：分层是刻意的（云母透底 + 半透明栏 + 卡片层），
+        // 不再把三栏/卡片压成同一个颜色——那样材质就透不出来了。
+        // 只把「同一层」的轨道类 token 对齐，避免滚动条轨道与栏底出现色差接缝。
         var colors = new Dictionary<string, string>(source);
-        foreach (var key in new[] { "SideLeftBg", "SideRightBg", "CardBg", "NavSectionBg", "TrackBg" })
-            colors[key] = colors["WindowBg"];
+        foreach (var key in new[] { "NavSectionBg", "TrackBg", "TabTrackBg" })
+            colors[key] = colors["TrackBg"];
+
+        // 三套主题 Token 名必须齐全：漏一个就是「该主题下某块区域仍用暗色值」，
+        // 这种 bug 只在切换主题后肉眼可见，所以启动时先点名（结果进 data\app.log）。
+        if (!_validated && ThemePalette.Validate() is { Length: > 0 } problems)
+        {
+            _validated = true;
+            var msg = "主题 Token 不完整：" + string.Join("；", problems);
+            global::System.Diagnostics.Debug.WriteLine(msg);
+            try
+            {
+                // LogLevel 在 Core.Bot 命名空间下（不是 Core.Logging）
+                global::EfootballBot.Core.Logging.FileLogger.Instance
+                    .Write(msg, global::EfootballBot.Core.LogLevel.Warn);
+            }
+            catch { /* 日志未初始化：忽略 */ }
+        }
 
         var app = Application.Current.Resources;
         foreach (var (key, hex) in colors)
-            app[key] = new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex));
+        {
+            var color = (Color)ColorConverter.ConvertFromString(hex);
+            app[key] = new SolidColorBrush(color);
+            // 同一份颜色再以 Color 形式发布一份：渐变停点（GradientStop.Color）只能用 Color，
+            // 否则页面里的渐变只能写死十六进制 —— 那正是「换个主题就有一块不跟」的老问题。
+            app[key + "Color"] = color;
+        }
 
         // WPF-UI（Fluent 2）控件随自定义主题同步：亮色→Light，暗色/深蓝→Dark
         try
@@ -84,11 +104,11 @@ public static class ThemeManager
 
             WindowBackdrop.ApplyBackdrop(window, want);
 
-            // 外壳底色 0xE6（90%）不透明：材质透得出来，同时在没有 Mica 的机器上
-            // 与原来的纯色观感几乎没有差别。
+            // 外壳底色留 60% 不透明度（v7.3）：云母/亚克力的磨砂透出来才是「毛玻璃」；
+            // 不支持材质的机器会退回纯色外壳（见上面的 None 分支），观感仍然完整。
             if (Application.Current.Resources["WindowBg"] is SolidColorBrush cur)
             {
-                var glass = new SolidColorBrush(Color.FromArgb(0xE6, cur.Color.R, cur.Color.G, cur.Color.B));
+                var glass = new SolidColorBrush(Color.FromArgb(0xF2, cur.Color.R, cur.Color.G, cur.Color.B));
                 glass.Freeze();
                 Application.Current.Resources["WindowBg"] = glass;
                 window.Background = glass;
@@ -104,158 +124,10 @@ public static class ThemeManager
     /// <summary>获取某主题下某个 Token 的颜色（用于主题选择预览卡片）。</summary>
     public static Brush GetBrush(string themeName, string token)
     {
-        var colors = themeName switch
-        {
-            Light => LightColors,
-            DeepBlue => DeepBlueColors,
-            _ => DarkColors,
-        };
+        var colors = ThemePalette.For(themeName);
         return colors.TryGetValue(token, out var hex)
             ? new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex))
             : Brushes.Transparent;
     }
 
-    // ---------------- 暗色 · Pitch Console（默认） ----------------
-    private static readonly Dictionary<string, string> DarkColors = new()
-    {
-        ["WindowBg"] = "#FF0C1015",
-        ["CardBg"] = "#FF151B23",
-        ["CardBorder"] = "#FF242D3A",
-        ["SideLeftBg"] = "#FF080B0F",
-        ["SideRightBg"] = "#FF0F141B",
-        ["TextPrimary"] = "#FFECF1F7",
-        ["TextSecondary"] = "#FFA6B1C0",
-        ["TextMuted"] = "#FF6C7686",
-        ["Accent"] = "#FF0FA968",
-        ["AccentHover"] = "#FF14C07A",
-        ["AccentGlow"] = "#FF35D392",
-        ["AccentLight"] = "#FF1C3128",
-        ["AccentBorder"] = "#550FA968",
-        ["Danger"] = "#FFE5484D",
-        ["DangerHover"] = "#FFF2595E",
-        ["Warning"] = "#FFF2B13E",
-        ["HoverOverlay"] = "#14FFFFFF",
-        ["InputBg"] = "#FF0F141B",
-        ["InputBorder"] = "#FF2A3442",
-        ["ScrollThumb"] = "#FF33404F",
-        ["ModuleDot"] = "#FF454F5E",
-        ["SegTabFg"] = "#FF94A0B1",
-        ["SegTabHover"] = "#16FFFFFF",
-        ["SegTabHoverFg"] = "#FFDCE3EC",
-        ["LogInfo"] = "#FFC4CDD9",
-        ["NavSectionBg"] = "#FF101722",
-        ["NavSectionBorder"] = "#FF222C3A",
-        ["NavLabelFg"] = "#FF6C7686",
-        ["NavDescFg"] = "#FF818C9D",
-        ["EnvDotIdle"] = "#FF5E6878",
-        ["IntlTabBg"] = "#FF111823",
-        ["IntlTabBorder"] = "#FF283242",
-        ["PreviewBg"] = "#FF000000",
-        // 新增 Token
-        ["Surface2"] = "#FF1B222C",
-        ["InsetBg"] = "#FF0A0E13",
-        ["TrackBg"] = "#FF101722",
-        ["Scrim"] = "#F00B0F14",
-        ["TextOnAccent"] = "#FFFFFFFF",
-        ["Divider"] = "#FF1E2633",
-        ["TabTrackBg"] = "#FF0B1016",
-        ["DangerSoft"] = "#2AE5484D",
-        ["AccentSoft"] = "#1F0FA968",
-    };
-
-    // ---------------- 亮色 ----------------
-    private static readonly Dictionary<string, string> LightColors = new()
-    {
-        ["WindowBg"] = "#FFEDF0F4",
-        ["CardBg"] = "#FFFFFFFF",
-        ["CardBorder"] = "#FFDDE3EA",
-        ["SideLeftBg"] = "#FFF7F9FB",
-        ["SideRightBg"] = "#FFF2F5F8",
-        ["TextPrimary"] = "#FF151A21",
-        ["TextSecondary"] = "#FF55606E",
-        ["TextMuted"] = "#FF8C97A6",
-        ["Accent"] = "#FF0B8F5B",
-        ["AccentHover"] = "#FF0CA86A",
-        ["AccentGlow"] = "#FF0C9A61",
-        ["AccentLight"] = "#1F0B8F5B",
-        ["AccentBorder"] = "#550B8F5B",
-        ["Danger"] = "#FFDC3B3B",
-        ["DangerHover"] = "#FFC92F2F",
-        ["Warning"] = "#FFC77C0A",
-        ["HoverOverlay"] = "#12000000",
-        ["InputBg"] = "#FFF4F7FA",
-        ["InputBorder"] = "#FFC6CED8",
-        ["ScrollThumb"] = "#FFB9C2CD",
-        ["ModuleDot"] = "#FFB8C0CB",
-        ["SegTabFg"] = "#FF55606E",
-        ["SegTabHover"] = "#12000000",
-        ["SegTabHoverFg"] = "#FF39434F",
-        ["LogInfo"] = "#FF151A21",
-        ["NavSectionBg"] = "#FFEDF1F5",
-        ["NavSectionBorder"] = "#FFDDE3EA",
-        ["NavLabelFg"] = "#FF8C97A6",
-        ["NavDescFg"] = "#FF8C97A6",
-        ["EnvDotIdle"] = "#FF97A2B0",
-        ["IntlTabBg"] = "#FFF4F7FA",
-        ["IntlTabBorder"] = "#FFDDE3EA",
-        ["PreviewBg"] = "#FF000000",
-        // 新增 Token
-        ["Surface2"] = "#FFF4F7FA",
-        ["InsetBg"] = "#FFE9EEF3",
-        ["TrackBg"] = "#FFE6EBF0",
-        ["Scrim"] = "#CCEDF0F4",
-        ["TextOnAccent"] = "#FFFFFFFF",
-        ["Divider"] = "#FFE6EBF1",
-        ["TabTrackBg"] = "#FFEDF1F5",
-        ["DangerSoft"] = "#1ADC3B3B",
-        ["AccentSoft"] = "#180B8F5B",
-    };
-
-    // ---------------- 深蓝 ----------------
-    private static readonly Dictionary<string, string> DeepBlueColors = new()
-    {
-        ["WindowBg"] = "#FF081221",
-        ["CardBg"] = "#FF101F33",
-        ["CardBorder"] = "#FF1E3350",
-        ["SideLeftBg"] = "#FF060D19",
-        ["SideRightBg"] = "#FF0B1828",
-        ["TextPrimary"] = "#FFDFE9F4",
-        ["TextSecondary"] = "#FF8AA6C6",
-        ["TextMuted"] = "#FF5D7EA3",
-        ["Accent"] = "#FF2F94C9",
-        ["AccentHover"] = "#FF43A6DA",
-        ["AccentGlow"] = "#FF6EC2E8",
-        ["AccentLight"] = "#FF17324A",
-        ["AccentBorder"] = "#552F94C9",
-        ["Danger"] = "#FFEF6464",
-        ["DangerHover"] = "#FFF57878",
-        ["Warning"] = "#FFF6BC53",
-        ["HoverOverlay"] = "#16FFFFFF",
-        ["InputBg"] = "#FF0B1829",
-        ["InputBorder"] = "#FF26415F",
-        ["ScrollThumb"] = "#FF2A4461",
-        ["ModuleDot"] = "#FF3F5570",
-        ["SegTabFg"] = "#FF82A0C0",
-        ["SegTabHover"] = "#16FFFFFF",
-        ["SegTabHoverFg"] = "#FFD5E3F0",
-        ["LogInfo"] = "#FFC8D7E8",
-        ["NavSectionBg"] = "#FF0A1A2D",
-        ["NavSectionBorder"] = "#FF1C314B",
-        ["NavLabelFg"] = "#FF5D7EA3",
-        ["NavDescFg"] = "#FF6E8DAE",
-        ["EnvDotIdle"] = "#FF56748F",
-        ["IntlTabBg"] = "#FF0B1A2C",
-        ["IntlTabBorder"] = "#FF233B58",
-        ["PreviewBg"] = "#FF000000",
-        // 新增 Token
-        ["Surface2"] = "#FF15283F",
-        ["InsetBg"] = "#FF060E1A",
-        ["TrackBg"] = "#FF0D1C2E",
-        ["Scrim"] = "#F007101C",
-        ["TextOnAccent"] = "#FFFFFFFF",
-        ["Divider"] = "#FF1B2E45",
-        ["TabTrackBg"] = "#FF071120",
-        ["DangerSoft"] = "#2AEF6464",
-        ["AccentSoft"] = "#222F94C9",
-    };
 }
