@@ -9,6 +9,7 @@ using System.Windows.Documents;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
@@ -213,7 +214,7 @@ public partial class MainWindow
         try
         {
             Directory.CreateDirectory(FileLogger.LogDir);
-            Process.Start(new ProcessStartInfo(FileLogger.LogDir) { UseShellExecute = true });
+            _ = OpenPathAsync(FileLogger.LogDir);
         }
         catch (Exception ex)
         {
@@ -456,3 +457,5 @@ public partial class MainWindow
         }
     }
 }
+
+

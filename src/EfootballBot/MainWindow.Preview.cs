@@ -9,6 +9,7 @@ using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
@@ -258,3 +259,4 @@ public partial class MainWindow
         _dwmUnhealthyTicks = 0;
     }
 }
+

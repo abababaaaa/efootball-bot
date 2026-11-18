@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Controls;
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Input;
@@ -154,3 +155,4 @@ public partial class MainWindow
         }
     }
 }
+

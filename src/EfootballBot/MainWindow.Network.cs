@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
 using System.Windows.Threading;
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.System;
 
@@ -923,3 +924,4 @@ public partial class MainWindow
         });
     }
 }
+
