@@ -4,6 +4,7 @@ using EfootballBot.Core.Vision;
 using OpenCvSharp;
 using Xunit;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 关键比赛回归：P1 受限难度页（2 选项）/ P2 预告弹窗 / P3 固定难度弹窗
@@ -33,13 +34,13 @@ public class KeyMatchPageTests
     public void Classify_P2_P3_KeyMatchDialog()
     {
         // 含「关键比赛」+「OK」→ KeyMatchDialog（此前被"我的联赛积分"字样误判 MatchHub）
-        Assert.Equal(MlScreen.KeyMatchDialog, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.KeyMatchDialog, MatchBrain.Classify(
             Array.Empty<Core.Vision.Yolo.YoloDetection>(), LoadOcr("keymatch_p2.png"), true));
-        Assert.Equal(MlScreen.KeyMatchDialog, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.KeyMatchDialog, MatchBrain.Classify(
             Array.Empty<Core.Vision.Yolo.YoloDetection>(), LoadOcr("keymatch_p3.png"), true));
 
-        var action = MyLeagueBrain.Decide(MlScreen.KeyMatchDialog, LoadOcr("keymatch_p2.png"), 0);
-        Assert.Equal(MlActionKind.PadUpConfirm, action.Kind); // 上移点 OK
+        var action = MatchBrain.Decide(MatchScreen.KeyMatchDialog, LoadOcr("keymatch_p2.png"), 0);
+        Assert.Equal(MatchActionKind.PadUpConfirm, action.Kind); // 上移点 OK
     }
 
     [Fact]
@@ -50,8 +51,8 @@ public class KeyMatchPageTests
         // 词级 O/0 归一后须仍判 KeyMatchDialog。
         var ocr = Ocr(("即将进行的是关键比赛", 0.5, 0.3), ("下一场比赛有固定的赛事等级", 0.5, 0.4),
                       ("0K", 0.5, 0.58), ("取消", 0.5, 0.66));
-        Assert.Equal(MlScreen.KeyMatchDialog,
-            MyLeagueBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr, true));
+        Assert.Equal(MatchScreen.KeyMatchDialog,
+            MatchBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr, true));
     }
 
     [Fact]
@@ -59,8 +60,8 @@ public class KeyMatchPageTests
     {
         // 「重要比赛」为关键比赛同义别名（用户反馈用词，防游戏文案改版）
         var ocr = Ocr(("下一场是重要比赛", 0.5, 0.4), ("OK", 0.5, 0.6));
-        Assert.Equal(MlScreen.KeyMatchDialog,
-            MyLeagueBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr, true));
+        Assert.Equal(MatchScreen.KeyMatchDialog,
+            MatchBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr, true));
     }
 
     [Fact]
@@ -69,9 +70,9 @@ public class KeyMatchPageTests
         // P1 受限难度页副标题含「关键比赛」，但全页无 OK 类词——不得被误判成关键比赛弹窗
         // （否则上移进难度列表改难度）。真实帧守：标题判 DifficultyPage + 无 OK 证据。
         var p1 = LoadOcr("keymatch_p1.png");
-        Assert.False(MyLeagueBrain.HasOkButton(p1));
-        Assert.Equal(MlScreen.DifficultyPage,
-            MyLeagueBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), p1, true));
+        Assert.False(MatchBrain.HasOkButton(p1));
+        Assert.Equal(MatchScreen.DifficultyPage,
+            MatchBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), p1, true));
     }
 
     [Fact]
@@ -79,8 +80,8 @@ public class KeyMatchPageTests
     {
         // 带「取消」的弹窗默认焦点在取消（P3/购买弹窗实测）：盲按 A 会关掉弹窗，须上移再确认
         var ocr = Ocr(("取消", 0.35, 0.66), ("确认", 0.65, 0.58));
-        var action = MyLeagueBrain.Decide(MlScreen.HasConfirm, ocr, 0);
-        Assert.Equal(MlActionKind.PadUpConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.HasConfirm, ocr, 0);
+        Assert.Equal(MatchActionKind.PadUpConfirm, action.Kind);
     }
 
     [Fact]
@@ -88,7 +89,7 @@ public class KeyMatchPageTests
     {
         // 普通推进页（结算/下一步）无取消词：保持盲按 A
         var ocr = Ocr(("下一步", 0.5, 0.9));
-        Assert.Equal(MlActionKind.PadConfirm, MyLeagueBrain.Decide(MlScreen.HasConfirm, ocr, 0).Kind);
+        Assert.Equal(MatchActionKind.PadConfirm, MatchBrain.Decide(MatchScreen.HasConfirm, ocr, 0).Kind);
     }
 
     [Fact]
@@ -97,16 +98,16 @@ public class KeyMatchPageTests
         // 难度选择页（分类失败落到 HasConfirm 时）：确认键是默认焦点，不上移进列表改难度。
         // 标题命中 / 难度名列表命中 两种形态都要守住（关键比赛 2026-10-12 用户要求不改选）。
         var byTitle = Ocr(("选择赛事等级", 0.3, 0.1), ("取消", 0.3, 0.95), ("确认", 0.65, 0.95));
-        Assert.Equal(MlActionKind.PadConfirm, MyLeagueBrain.Decide(MlScreen.HasConfirm, byTitle, 0).Kind);
+        Assert.Equal(MatchActionKind.PadConfirm, MatchBrain.Decide(MatchScreen.HasConfirm, byTitle, 0).Kind);
         var byList = Ocr(("超级球星", 0.5, 0.35), ("传奇", 0.5, 0.5), ("取消", 0.3, 0.95), ("确认", 0.65, 0.95));
-        Assert.Equal(MlActionKind.PadConfirm, MyLeagueBrain.Decide(MlScreen.HasConfirm, byList, 0).Kind);
+        Assert.Equal(MatchActionKind.PadConfirm, MatchBrain.Decide(MatchScreen.HasConfirm, byList, 0).Kind);
     }
 
     [Fact]
     public void Classify_P1_RestrictedDifficultyPage()
     {
         // 关键比赛受限难度页：同「选择赛事等级」标题 → 仍是 DifficultyPage
-        Assert.Equal(MlScreen.DifficultyPage, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.DifficultyPage, MatchBrain.Classify(
             Array.Empty<Core.Vision.Yolo.YoloDetection>(), LoadOcr("keymatch_p1.png"), true));
     }
 
@@ -155,3 +156,5 @@ public class KeyMatchPageTests
         Assert.False(MyLeagueBrain.RespectGameDifficulty(false, LoadOcr("difficulty_2.png")));
     }
 }
+
+

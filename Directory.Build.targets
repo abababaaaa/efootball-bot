@@ -1,0 +1,25 @@
+<Project>
+
+  <!--
+    ================== 架构锁（v7.2） ==================
+    挂机代码按「注册表 / 共享层 / 模块层」三层组织，写法是硬约束，不是建议：
+      · Core/Bot/Modules   模块清单（唯一来源）
+      · Core/Bot/Match     共享层（界面判定、共享决策、赛中匹配 MatchPlay、流程记忆）
+      · Core/Bot/Scenarios 模块层（各模块自己的菜单流程）
+    规则实现在 tools/arch-guard/arch-guard.ps1（7 条），单测 ArchitectureTests 覆盖同一批规则。
+    违反任意一条，编译直接失败——这是刻意的：改一个模块不该牵动其他模块。
+
+    只有用户明确要求更换写法时，才可：
+      1) 改 tools/arch-guard/arch-guard.ps1 的规则表，或
+      2) 单次构建跳过：dotnet build -p:SkipArchGuard=true（仅限排障，不要提交带这个参数的脚本）
+    两种情况都要同步更新 docs/MODULES.md 与 AGENTS.md。
+  -->
+  <Target Name="ArchGuard"
+          BeforeTargets="CoreCompile"
+          Condition="'$(MSBuildProjectName)' == 'EfootballBot' and '$(SkipArchGuard)' != 'true'">
+    <Exec Command="pwsh -NoProfile -ExecutionPolicy Bypass -File &quot;$(MSBuildThisFileDirectory)tools\arch-guard\arch-guard.ps1&quot; -SourceRoot &quot;$(MSBuildThisFileDirectory)src\EfootballBot&quot;"
+          StandardOutputImportance="high"
+          StandardErrorImportance="high" />
+  </Target>
+
+</Project>

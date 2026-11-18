@@ -7,6 +7,7 @@ using OpenCvSharp;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 实机 2026-10-17：赛后「经验值」页（4 名球员获得经验，2×2 网格，底部「Y 查看经验值」+「下一步」）。
@@ -41,9 +42,9 @@ public class ExpResultPageRealFrameTests
         var dets = det.Detect(frame);
         var ocrRes = TestOcr.Run(ocr, frame);
 
-        var ml = MyLeagueBrain.Classify(dets, ocrRes,
-            MyLeagueScenario.CornerHasContent(frame), false, MyLeagueScenario.IsMostlyLightPage(frame));
-        _out.WriteLine($"MlScreen={ml}");
+        var ml = MatchBrain.Classify(dets, ocrRes,
+            ScreenProbe.CornerHasContent(frame), false, ScreenProbe.IsMostlyLightPage(frame));
+        _out.WriteLine($"MatchScreen={ml}");
         _out.WriteLine("-- OCR lines --");
         foreach (var l in ocrRes.Lines)
             _out.WriteLine($"  \"{l.Text}\" @({l.CenterX:F3},{l.CenterY:F3})");
@@ -58,3 +59,5 @@ public class ExpResultPageRealFrameTests
         Assert.Equal(4, n);
     }
 }
+
+

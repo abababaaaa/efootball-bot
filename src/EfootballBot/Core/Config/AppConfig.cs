@@ -592,8 +592,8 @@ public sealed class MonitorConfig
 /// </summary>
 public sealed class AppearanceConfig
 {
-    /// <summary>窗口材质：Auto（Win11 用 Mica，Win10 自动回退纯色）/ Mica / Acrylic / Tabbed / None。</summary>
-    public string Backdrop { get; set; } = "Auto";
+    /// <summary>窗口材质：Acrylic（默认，毛玻璃）/ Mica / Tabbed / Auto（Win11 用 Mica）/ None。Win10 自动回退纯色。</summary>
+    public string Backdrop { get; set; } = "Acrylic";
 
     /// <summary>切页动效：180 ms 淡入 + 4 px 上浮。关闭后页面瞬时切换。</summary>
     public bool PageTransition { get; set; } = true;

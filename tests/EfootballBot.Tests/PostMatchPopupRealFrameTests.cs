@@ -7,6 +7,7 @@ using OpenCvSharp;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 分析/回归：赛后弹窗（今天的进球 / 比赛回放）截图 → OCR + YOLO → 当前分类行为
@@ -53,10 +54,12 @@ public class PostMatchPopupRealFrameTests
             foreach (var l in ocrRes.Lines)
                 _out.WriteLine($"  \"{l.Text}\" @({l.CenterX:F3},{l.CenterY:F3})");
             _out.WriteLine("-- Classify(无角区) / Classify(角区有内容) --");
-            _out.WriteLine($"  {MyLeagueBrain.Classify(dets, ocrRes)} / {MyLeagueBrain.Classify(dets, ocrRes, true)}");
+            _out.WriteLine($"  {MatchBrain.Classify(dets, ocrRes)} / {MatchBrain.Classify(dets, ocrRes, true)}");
 
             // 回归：两种弹窗即使背景是球场（角区有内容）也必须立刻判 HasConfirm → 按 A 下一步
-            Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(dets, ocrRes, topRightHasContent: true));
+            Assert.Equal(MatchScreen.HasConfirm, MatchBrain.Classify(dets, ocrRes, topRightHasContent: true));
         }
     }
 }
+
+

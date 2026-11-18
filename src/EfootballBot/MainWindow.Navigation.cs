@@ -9,6 +9,8 @@ using System.Windows.Media;
 using System.Windows.Media.Animation;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using EfootballBot.Core.Tools;
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
@@ -17,18 +19,15 @@ using EfootballBot.Core.System;
 using EfootballBot.Core.Logging;
 using EfootballBot.Core.UI;
 using EfootballBot.Core.Vision;
+using EfootballBot.Shell;
 
 namespace EfootballBot;
 
 public partial class MainWindow
 {
-    // 左栏导航模式：游戏模块 / 设置 / 更新 / GitHub / 网络监测 / 日志历史 / 反馈 / 关于
-    private enum NavMode { Home, Game, Settings, Update, GitHub, Network, LogViewer, Feedback, About }
     // 用户要求：每次开启软件默认停在「更新」页（不再默认游戏模块）。
     private NavMode _currentNav = NavMode.Home;
 
-    // ---------------- 三级导航 ----------------
-    private enum TopSection { Home, Game, Tools, About }
     private NavMode _lastToolNav = NavMode.Settings;
     private bool _suppressTopNav;
     private bool _suppressSubTab;
@@ -430,10 +429,10 @@ public partial class MainWindow
 
     private void BtnRecheck_Click(object sender, RoutedEventArgs e) => RunEnvChecks();
 
-    /// <summary>窗口防卡死：把被留在屏幕外的游戏窗口一键拉回（先按停靠记录还原原位置，否则主屏居中）。</summary>
-    private void BtnWindowRescue_Click(object sender, RoutedEventArgs e)
-        => EfootballBot.Core.System.BackgroundParker.RescueGameWindow(
-            (msg, lv) => Dispatcher.BeginInvoke(() => AppendLog(msg, lv)));
+    /// <summary>窗口防卡死：把被留在屏幕外的游戏窗口一键拉回（先按停靠记录还原原位置，否则主屏居中）。
+    /// 实现在工具层（Core/Tools/WindowRescueTool → BackgroundParker），界面只派发。</summary>
+    private async void BtnWindowRescue_Click(object sender, RoutedEventArgs e)
+        => await RunToolAsync(ToolIds.WindowRescue, ToolAction.RescueWindow, ServerRegion.Intl);
 
     // ---------------- 左栏导航切换 ----------------
 
@@ -469,160 +468,6 @@ public partial class MainWindow
         SetRightPanelCollapsed(false);
     }
 
-    private void NavigateTo(NavMode mode)
-    {
-        _currentNav = mode;
-
-        // ---------- 一级分区 ----------
-        var section = mode == NavMode.Home ? TopSection.Home
-                    : mode == NavMode.Game ? TopSection.Game
-                    : mode == NavMode.About ? TopSection.About
-                    : TopSection.Tools;
-        if (section == TopSection.Tools) _lastToolNav = mode;
-
-        _suppressTopNav = true;
-        TopNavHome.IsChecked = section == TopSection.Home;
-        TopNavGame.IsChecked = section == TopSection.Game;
-        TopNavTools.IsChecked = section == TopSection.Tools;
-        TopNavAbout.IsChecked = section == TopSection.About;
-        _suppressTopNav = false;
-
-        bool homeSection = section == TopSection.Home;
-        NavLabelGame.Visibility = homeSection ? Visibility.Collapsed : NavLabelGame.Visibility;
-        bool gameSection = section == TopSection.Game;
-        bool toolsSection = section == TopSection.Tools;
-        bool aboutSection = section == TopSection.About;
-
-        NavLabelGame.Visibility = gameSection ? Visibility.Visible : Visibility.Collapsed;
-        RbCn.Visibility = gameSection ? Visibility.Visible : Visibility.Collapsed;
-        RbIntl.Visibility = gameSection ? Visibility.Visible : Visibility.Collapsed;
-        BtnWindowRescue.Visibility = gameSection ? Visibility.Visible : Visibility.Collapsed;
-
-        NavLabelTools.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
-        BtnSettings.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
-        BtnDevTools.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
-        BtnUpdate.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
-        BtnGitHub.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
-        BtnNetwork.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
-        BtnLogViewer.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
-        BtnFeedback.Visibility = toolsSection ? Visibility.Visible : Visibility.Collapsed;
-
-        NavLabelAbout.Visibility = aboutSection ? Visibility.Visible : Visibility.Collapsed;
-        BtnAbout.Visibility = aboutSection ? Visibility.Visible : Visibility.Collapsed;
-
-        bool showIntl = mode == NavMode.Game && !IsCnSelected;
-        bool showCn = mode == NavMode.Game && IsCnSelected;
-        bool showSet = mode == NavMode.Settings;
-        SubMenuIntl.Visibility = showIntl ? Visibility.Visible : Visibility.Collapsed;
-        SubMenuCn.Visibility = showCn ? Visibility.Visible : Visibility.Collapsed;
-        SubMenuSettings.Visibility = showSet ? Visibility.Visible : Visibility.Collapsed;
-        bool showUpd = mode == NavMode.Update;
-        bool showNet = mode == NavMode.Network;
-        bool showGh = mode == NavMode.GitHub;
-        bool showFb = mode == NavMode.Feedback;
-
-        SubMenuUpdate.Visibility = showUpd ? Visibility.Visible : Visibility.Collapsed;
-        SubMenuNetwork.Visibility = showNet ? Visibility.Visible : Visibility.Collapsed;
-        SubMenuGithub.Visibility = showGh ? Visibility.Visible : Visibility.Collapsed;
-        SubMenuFeedback.Visibility = showFb ? Visibility.Visible : Visibility.Collapsed;
-
-        SubMenuHost.Visibility = (showIntl || showCn || showSet || showUpd || showNet || showGh || showFb)
-            ? Visibility.Visible : Visibility.Collapsed;
-        if (mode == NavMode.Home) SubMenuHost.Visibility = Visibility.Collapsed;
-
-        // 开发者页：隐藏设置的三级页签，只显示开发者内容
-        if (mode == NavMode.Settings && _devMode)
-        {
-            SubMenuSettings.Visibility = Visibility.Collapsed;
-            SubMenuHost.Visibility = Visibility.Collapsed;
-            SetTabImportant.Visibility = Visibility.Collapsed;
-            SetTabDisplay.Visibility = Visibility.Collapsed;
-            SetTabInput.Visibility = Visibility.Collapsed;
-            SetTabDaily.Visibility = Visibility.Collapsed;
-            SetTabDev.Visibility = Visibility.Visible;
-        }
-        else if (mode == NavMode.Settings)
-        {
-            SetTabDev.Visibility = Visibility.Collapsed;
-            SetTabImportant.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            _devMode = false;
-        }
-
-        // 进入工具页先落到第一段，避免整页一次性铺开；页签同步回第一段
-        // （否则上次停在「对战线路」再进来时，界面显示的是测速段、页签却亮着对战线路，
-        //   再点那个已选中的页签不会有 Checked 事件 = 看着点不动）
-        if (showUpd) { ShowSection("UpdatePanel", 0); UpTabAuto.IsChecked = true; }
-        if (showNet) { ShowSection("NetworkPanel", 0); NetTabPing.IsChecked = true; }
-        if (showGh) { ShowSection("GitHubPanel", 0); GhTabPort.IsChecked = true; }
-        if (showFb) { ShowSection("FeedbackPanel", 0); FbTabDiag.IsChecked = true; }
-        SyncSubTabs();
-
-        bool isGame = mode == NavMode.Game;
-        bool isSettings = mode == NavMode.Settings;
-        bool isUpdate = mode == NavMode.Update;
-        bool isGitHub = mode == NavMode.GitHub;
-        bool isNetwork = mode == NavMode.Network;
-        bool isLog = mode == NavMode.LogViewer;
-        bool isFeedback = mode == NavMode.Feedback;
-        bool isAbout = mode == NavMode.About;
-
-        // 首页面板
-        bool isHome = mode == NavMode.Home;
-        HomePanel.Visibility = isHome ? Visibility.Visible : Visibility.Collapsed;
-        if (isHome) ApplyHomeLayout();
-        else if (!isGame) SetRightPanelCollapsed(true);   // 工具页默认收起实时画面，保留右侧展开条
-        else SetRightPanelCollapsed(_rightUserCollapsed);
-
-        // 游戏模块面板
-        PanelIntl.Visibility = isGame && !IsCnSelected ? Visibility.Visible : Visibility.Collapsed;
-        PanelCn.Visibility = isGame && IsCnSelected ? Visibility.Visible : Visibility.Collapsed;
-
-        // 设置面板
-        SettingsPanel.Visibility = isSettings ? Visibility.Visible : Visibility.Collapsed;
-        if (!isSettings) BtnDevTools.Tag = null;
-
-        // 更新面板
-        UpdatePanel.Visibility = isUpdate ? Visibility.Visible : Visibility.Collapsed;
-
-        // GitHub 优化面板
-        GitHubPanel.Visibility = isGitHub ? Visibility.Visible : Visibility.Collapsed;
-
-        // 网络监测面板
-        NetworkPanel.Visibility = isNetwork ? Visibility.Visible : Visibility.Collapsed;
-
-        // 日志查看器
-        LogViewerPanel.Visibility = isLog ? Visibility.Visible : Visibility.Collapsed;
-
-        // 反馈面板
-        FeedbackPanel.Visibility = isFeedback ? Visibility.Visible : Visibility.Collapsed;
-
-        // 关于面板
-        AboutPanel.Visibility = isAbout ? Visibility.Visible : Visibility.Collapsed;
-
-        // 底部实时日志卡：仅在游戏模块显示
-        LogCard.Visibility = isGame && _cfg.ShowRuntimeLog ? Visibility.Visible : Visibility.Collapsed;
-
-        // 切换到日志查看器时刷新文件列表
-        if (isLog) RefreshLogFileList();
-        if (isGitHub || isNetwork) { InitNetworkPage(); RefreshFastGithubState(); }
-
-        // 左栏工具按钮激活高亮（NavToolBtn 样式识别 Tag=Active）
-        BtnSettings.Tag = isSettings ? "Active" : null;
-        BtnUpdate.Tag = isUpdate ? "Active" : null;
-        BtnGitHub.Tag = isGitHub ? "Active" : null;
-        BtnNetwork.Tag = isNetwork ? "Active" : null;
-        BtnLogViewer.Tag = isLog ? "Active" : null;
-        BtnFeedback.Tag = isFeedback ? "Active" : null;
-        BtnAbout.Tag = isAbout ? "Active" : null;
-
-        // 模块胶囊同一套 Tag=Active 门控：只有正在看游戏模块时才亮，否则会和工具按钮同时亮
-        // （ModuleRadio 模板要求 IsChecked && Tag==Active，见 App.xaml）
-        RbCn.Tag = isGame && IsCnSelected ? "Active" : null;
-        RbIntl.Tag = isGame && !IsCnSelected ? "Active" : null;
-    }
 
     /// <summary>
     /// 点击模块胶囊：已选中的那一项再点一次也能回到游戏模块页。
@@ -645,21 +490,16 @@ public partial class MainWindow
 
     private bool _devMode;
 
-    /// <summary>左栏「开发者」：进入开发者页（与设置并列，不显示设置的三级页签）。</summary>
+    /// <summary>
+    /// 左栏「开发者」：进开发者页。只负责置位 _devMode 再交给 NavigateTo ——
+    /// 页签显隐、页签条显隐、左栏高亮全部由路由表决定，这里不再手写一遍
+    /// （旧写法有 8 行 Visibility 镜像逻辑，和 NavigateTo 里那份必须永远保持一致）。
+    /// </summary>
     private void BtnDevTools_Click(object sender, RoutedEventArgs e)
     {
         SaveUiToConfig();
         _devMode = true;
         NavigateTo(NavMode.Settings);
-        SubMenuSettings.Visibility = Visibility.Collapsed;
-        SubMenuHost.Visibility = Visibility.Collapsed;
-        SetTabImportant.Visibility = Visibility.Collapsed;
-        SetTabDisplay.Visibility = Visibility.Collapsed;
-        SetTabInput.Visibility = Visibility.Collapsed;
-        SetTabDaily.Visibility = Visibility.Collapsed;
-        SetTabDev.Visibility = Visibility.Visible;
-        BtnDevTools.Tag = "Active";
-        BtnSettings.Tag = null;
     }
 
     private void BtnUpdate_Click(object sender, RoutedEventArgs e)
@@ -697,3 +537,5 @@ public partial class MainWindow
         NavigateTo(NavMode.About);
     }
 }
+
+

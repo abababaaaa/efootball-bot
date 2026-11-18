@@ -7,6 +7,7 @@ using OpenCvSharp;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 分析/回归：用户实机比赛中截图 → OCR + YOLO → InMatch 判定
@@ -49,10 +50,10 @@ public class InMatchRealFrameTests
         foreach (var w in ocrRes.Words)
             _out.WriteLine($"  \"{w.Text}\" @({w.CenterX:F3},{w.CenterY:F3})");
         _out.WriteLine("-- Classify --");
-        _out.WriteLine($"  {MyLeagueBrain.Classify(dets, ocrRes)}");
+        _out.WriteLine($"  {MatchBrain.Classify(dets, ocrRes)}");
 
         // 回归：真实比赛帧（左上比分框 AME/GS/0:31）必须判为比赛中
-        Assert.Equal(MlScreen.InMatch, MyLeagueBrain.Classify(dets, ocrRes));
+        Assert.Equal(MatchScreen.InMatch, MatchBrain.Classify(dets, ocrRes));
 
         // 右上角角区像素签名：比赛帧 vs 菜单帧（x 0.80~1.0，y 0.04~0.18）
         foreach (var name in new[] { "inmatch_user_1.png", "matchhub_user_1.png", "matchhub_user_2.png" })
@@ -97,3 +98,5 @@ public class InMatchRealFrameTests
         o.WriteLine(sb.ToString());
     }
 }
+
+

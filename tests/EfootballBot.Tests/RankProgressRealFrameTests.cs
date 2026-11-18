@@ -7,6 +7,7 @@ using EfootballBot.Core.Vision.Yolo;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 回归：2026-11-07 反馈包「右下角的下一步点不到」的实机卡死帧
@@ -44,7 +45,7 @@ public class RankProgressRealFrameTests
         foreach (var word in ocrRes.Words)
             _out.WriteLine($"  \"{word.Text}\" @({word.CenterX:F3},{word.CenterY:F3})");
         _out.WriteLine("-- Classify --");
-        _out.WriteLine($"  pl={PeakLadderBrain.Classify(ocrRes, dets)}  ml={MyLeagueBrain.Classify(dets, ocrRes)}");
+        _out.WriteLine($"  pl={PeakLadderBrain.Classify(ocrRes, dets)}  ml={MatchBrain.Classify(dets, ocrRes)}");
 
         // 必须判成段位积分页（鼠标点击分支），不能再落回 HasConfirm 的盲按 A
         Assert.Equal(PlScreen.RankProgress, PeakLadderBrain.Classify(ocrRes, dets));
@@ -65,3 +66,5 @@ public class RankProgressRealFrameTests
         }
     }
 }
+
+

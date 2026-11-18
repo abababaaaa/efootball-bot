@@ -6,6 +6,7 @@ using EfootballBot.Core.Vision.Yolo;
 using OpenCvSharp;
 using Xunit;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 端到端模拟：真实 val 截图 → YOLO 检测 → MyLeagueBrain 分类/决策（训练数据缺失时自动跳过）
@@ -17,7 +18,7 @@ public class MyLeagueRealFrameTests
     private static bool ValDataExists =>
         File.Exists(Path.Combine(RepoDir, "training", "dataset", "images", "val", "225603_680.jpg"));
 
-    private static (MlScreen Screen, IReadOnlyList<YoloDetection> Dets) ClassifyFrame(
+    private static (MatchScreen Screen, IReadOnlyList<YoloDetection> Dets) ClassifyFrame(
         YoloDetector det, string fileName)
     {
         string imgPath = Path.Combine(RepoDir, "training", "dataset", "images", "val", fileName);
@@ -29,7 +30,7 @@ public class MyLeagueRealFrameTests
         var data = new byte[byteCount];
         System.Runtime.InteropServices.Marshal.Copy(bgra.Data, data, 0, byteCount);
         var dets = det.Detect(new FrameData(data, mat.Width, mat.Height, 0));
-        return (MyLeagueBrain.Classify(dets, OcrResult.Empty), dets);
+        return (MatchBrain.Classify(dets, OcrResult.Empty), dets);
     }
 
     private static YoloDetector CreateDetector() => new(
@@ -43,10 +44,10 @@ public class MyLeagueRealFrameTests
         if (!ValDataExists) return;
         using var det = CreateDetector();
         var (screen, _) = ClassifyFrame(det, "225603_680.jpg");
-        Assert.Equal(MlScreen.ItemList, screen);
+        Assert.Equal(MatchScreen.ItemList, screen);
 
-        var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(screen, OcrResult.Empty, 0);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
     }
 
     [Fact]
@@ -55,11 +56,11 @@ public class MyLeagueRealFrameTests
         if (!ValDataExists) return;
         using var det = CreateDetector();
         var (screen, _) = ClassifyFrame(det, "224710_125.jpg");
-        Assert.Equal(MlScreen.MainMenu, screen);
+        Assert.Equal(MatchScreen.MainMenu, screen);
 
         // 全手柄版：主菜单直接执行 复合导航（下×2→左×6→A）
-        var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.PadEnterMatch, action.Kind);
+        var action = MatchBrain.Decide(screen, OcrResult.Empty, 0);
+        Assert.Equal(MatchActionKind.PadEnterMatch, action.Kind);
     }
 
     [Fact]
@@ -68,10 +69,10 @@ public class MyLeagueRealFrameTests
         if (!ValDataExists) return;
         using var det = CreateDetector();
         var (screen, _) = ClassifyFrame(det, "233412_804.jpg");
-        Assert.Equal(MlScreen.HasConfirm, screen);
+        Assert.Equal(MatchScreen.HasConfirm, screen);
 
-        var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(screen, OcrResult.Empty, 0);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
     }
 
     [Fact]
@@ -96,9 +97,11 @@ public class MyLeagueRealFrameTests
         var dets = det.Detect(frame);
         var ocrRes = TestOcr.Run(ocr, frame);
 
-        Assert.Contains(dets, d => d.ClassName == "btn_confirm" && d.Score >= MyLeagueBrain.MinScore);
-        Assert.Equal(MlScreen.MatchHistory, MyLeagueBrain.Classify(dets, ocrRes));
-        Assert.Equal(MlActionKind.GamepadBack,
-            MyLeagueBrain.Decide(MlScreen.MatchHistory, OcrResult.Empty, 1).Kind);
+        Assert.Contains(dets, d => d.ClassName == "btn_confirm" && d.Score >= MatchBrain.MinScore);
+        Assert.Equal(MatchScreen.MatchHistory, MatchBrain.Classify(dets, ocrRes));
+        Assert.Equal(MatchActionKind.GamepadBack,
+            MatchBrain.Decide(MatchScreen.MatchHistory, OcrResult.Empty, 1).Kind);
     }
 }
+
+

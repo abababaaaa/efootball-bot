@@ -4,6 +4,7 @@ using EfootballBot.Core.Vision;
 using OpenCvSharp;
 using Xunit;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 比赛起始页回归（实机截图）：分类 + 决策 + 非起始页不误判
@@ -31,11 +32,11 @@ public class MatchStartPageTests
         using var ocr = new OcrRecognizer();
         var ocrRes = TestOcr.Run(ocr, frame);
 
-        Assert.Equal(MlScreen.MatchStartPage, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.MatchStartPage, MatchBrain.Classify(
             Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocrRes, true));
 
-        var action = MyLeagueBrain.Decide(MlScreen.MatchStartPage, ocrRes, 0);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.MatchStartPage, ocrRes, 0);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
         Assert.Contains("开赛", action.Target);
     }
 
@@ -44,7 +45,9 @@ public class MatchStartPageTests
     {
         // 球衣选择页（val 帧 231320_759）：底部也有「下一步」，但无「球场」——不是起始页
         var ocr = Ocr(("返回主场球衣客场球衣下一步", 0.50, 0.93));
-        Assert.NotEqual(MlScreen.MatchStartPage,
-            MyLeagueBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
+        Assert.NotEqual(MatchScreen.MatchStartPage,
+            MatchBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
     }
 }
+
+

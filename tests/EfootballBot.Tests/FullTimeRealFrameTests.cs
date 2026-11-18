@@ -7,6 +7,7 @@ using OpenCvSharp;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 分析/回归：全场结束（FullTime）界面截图 → OCR + YOLO → 终场判定
@@ -51,12 +52,14 @@ public class FullTimeRealFrameTests
         foreach (var l in ocrRes.Lines)
             _out.WriteLine($"  \"{l.Text}\" @({l.CenterX:F3},{l.CenterY:F3})");
         _out.WriteLine("-- Classify(角区有内容) --");
-        _out.WriteLine($"  {MyLeagueBrain.Classify(dets, ocrRes, true)}");
+        _out.WriteLine($"  {MatchBrain.Classify(dets, ocrRes, true)}");
 
         // 回归：全场结束页必须判 FullTime（脱离比赛中），即使右上角有内容/残留比分词
-        Assert.Equal(MlScreen.FullTime, MyLeagueBrain.Classify(dets, ocrRes, topRightHasContent: true));
+        Assert.Equal(MatchScreen.FullTime, MatchBrain.Classify(dets, ocrRes, topRightHasContent: true));
         // 决策：立即按 A（下一步）
-        var action = MyLeagueBrain.Decide(MlScreen.FullTime, ocrRes, 0);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.FullTime, ocrRes, 0);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
     }
 }
+
+

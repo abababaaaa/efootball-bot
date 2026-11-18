@@ -2,6 +2,17 @@ using System.Text.RegularExpressions;
 using EfootballBot.Core.Vision;
 using EfootballBot.Core.Vision.Yolo;
 
+// ===========================================================================
+// 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
+// 本层职责：单个挂机模块自己的菜单流程与私有状态机（只认自己的界面）。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 不许引用别的模块的 *Scenario（只读借用别人的 *Brain.Classify 认残留页面是允许的）
+//   · 不许自己写场次记账 / 比赛内挂机节奏 —— 一律走 MatchPlay.Tick / IdleTapAsync
+//   · 共享界面判定与决策一律用 Core/Bot/Match 的 MatchBrain，不要复制一份
+// 新增模块：ModuleIds 加常量 + BotModuleCatalog 加一条记录，再写本目录的状态机。
+// 除非用户明确要求更换写法，否则按本层约定写。
+// ===========================================================================
+
 namespace EfootballBot.Core.Bot.Scenarios.PeakLadder;
 
 /// <summary>国服天梯巅峰赛界面（PeakLadderBrain 判定）。None = 非本模块界面，交给 MyLeagueBrain 分类。</summary>
@@ -37,25 +48,24 @@ public enum PlScreen
 public static class PeakLadderBrain
 {
     // ---------------- 兜底点击坐标（实机 1280×720 校准，2026-10-14） ----------------
-
     /// <summary>模式选择页右下「天梯巅峰赛-教练」卡中心（鼠标点入教练模式活动）。</summary>
     public const double CoachCardFallbackX = 0.720;
-    public const double CoachCardFallbackY = 0.703;
 
+    public const double CoachCardFallbackY = 0.703;
     /// <summary>活动主页左上「前往比赛」卡中心。</summary>
     public const double GoMatchFallbackX = 0.143;
-    public const double GoMatchFallbackY = 0.244;
 
+    public const double GoMatchFallbackY = 0.244;
     /// <summary>段位积分页右下「下一步」按钮（2026-11-07 实机截图量取：蓝条横跨 x 0.78~0.96，
     /// 文字「下一步」在 x≈0.91 / y≈0.925）。只在 OCR 与 YOLO 都定位不到按钮时兜底用，
     /// 取蓝条中部——含/不含标题栏两种归一化口径下都落在按钮内。</summary>
     public const double RankNextFallbackX = 0.870;
+
     public const double RankNextFallbackY = 0.920;
 
     private static readonly Regex Digits = new(@"\d+", RegexOptions.Compiled);
 
     // ---------------- 界面分类 ----------------
-
     /// <summary>
     /// 界面分类。判定顺序：参赛模式弹窗 → 赛后小结弹窗 → 段位积分页 → 活动主页 → 模式选择页
     /// → 主页（比赛页签/推荐页签）。活动主页标题「教练天梯巅峰赛」与模式选择页四卡都含
@@ -72,13 +82,11 @@ public static class PeakLadderBrain
         if (ocr.ContainsJoined("请选择参赛模式") ||
             (ocr.ContainsJoined("单场比赛") && ocr.ContainsJoined("连续比赛")))
             return PlScreen.ModeDialog;
-
         // 赛后小结弹窗：只认固定标签词「本次段位分」（+ 最佳球员/连续比赛已完成 兜底）。
         // 段位分数字、球员名每场都变，不作判定点。
         if (ocr.ContainsJoined("本次段位分") ||
             (ocr.ContainsJoined("最佳球员") && ocr.ContainsJoined("连续比赛已完成")))
             return PlScreen.MatchSummary;
-
         // 段位积分页：天梯积分 + (下一步 | 升级 | 右下确认框)，且不含活动主页任何特征词。
         // 活动主页也印着「天梯积分：1200」「1500(升级)」，靠 前往比赛/比赛记录/本周可参赛场次
         // 排他；反过来若 OCR 把主页这三行全漏读，误判后点的也是右下角空处，不会误推进
@@ -89,16 +97,13 @@ public static class PeakLadderBrain
             (ocr.ContainsJoined("下一步") || ocr.ContainsJoined("升级") ||
              FindBottomConfirm(dets) is not null))
             return PlScreen.RankProgress;
-
         // 活动主页：「本周可参赛场次」独有；前往比赛+比赛记录 兜底（OCR 漏读数字行时）
         if (ocr.ContainsJoined("本周可参赛场次") ||
             (ocr.ContainsJoined("前往比赛") && ocr.ContainsJoined("比赛记录")))
             return PlScreen.ActivityHome;
-
         // 模式选择页：页头「剩余时间:18天」+ 天梯巅峰赛（活动主页已先行排除）
         if (ocr.ContainsJoined("剩余时间") && ocr.ContainsJoined("天梯巅峰赛"))
             return PlScreen.ModeSelect;
-
         // 主页：顶部页签行（同一行 y<0.15 含 推荐/签约/商店），按内容词分页签
         if (HasTopTabs(ocr))
         {
@@ -108,7 +113,6 @@ public static class PeakLadderBrain
             if (ocr.ContainsJoined("活动中心") || ocr.ContainsJoined("我的球队"))
                 return PlScreen.HomeRecommended;
         }
-
         return PlScreen.None;
     }
 
@@ -116,7 +120,6 @@ public static class PeakLadderBrain
     public static bool HasTopTabs(OcrResult ocr) => RegionProbe.HasTopTabs(ocr);
 
     // ---------------- 场次解析 ----------------
-
     /// <summary>
     /// 解析本周可参赛场次：活动主页「本周可参赛场次: 40」行，或弹窗「当前剩余参赛场次: 40」行
     /// （点开前往比赛后的弹窗二次确认用）。取行内最后一串数字；无行/无数字返回 null（绝不猜）。
@@ -135,7 +138,6 @@ public static class PeakLadderBrain
     }
 
     // ---------------- 鼠标点击锚定 ----------------
-
     /// <summary>
     /// 在模式选择页 OCR 中找右下「天梯巅峰赛-教练」卡标题词：取含「天梯巅峰赛」且
     /// CenterX&gt;0.5（排除左侧「-手动」卡）、y 在卡区（0.45~0.88）的词。整行合并词会横跨
@@ -219,3 +221,7 @@ public static class PeakLadderBrain
         return best;
     }
 }
+
+
+
+

@@ -7,6 +7,7 @@ using EfootballBot.Core.Vision.Yolo;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 回归：2026-11-08 国际服周活动新子内容（「Road to CAF AFCON 2027」球队选择前置流程）。
@@ -41,8 +42,8 @@ public class WkTeamPickRealFrameTests
         var dets = det.Detect(frame);
         var ocrRes = TestOcr.Run(ocr, frame);
         var wk = WeeklyBrain.Classify(dets, ocrRes,
-            MyLeagueScenario.CornerHasContent(frame), matchContext: false,
-            MyLeagueScenario.IsMostlyLightPage(frame));
+            ScreenProbe.CornerHasContent(frame), matchContext: false,
+            ScreenProbe.IsMostlyLightPage(frame));
 
         _out.WriteLine($"==== {file} ({w}x{h}) -> wk={wk}（期望 {expected}） ====");
         foreach (var wd in ocrRes.Words)
@@ -71,3 +72,5 @@ public class WkTeamPickRealFrameTests
         Assert.Equal(WkScreen.TeamConfirm, wk);
     }
 }
+
+

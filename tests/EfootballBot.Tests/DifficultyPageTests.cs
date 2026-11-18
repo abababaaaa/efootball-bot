@@ -5,6 +5,7 @@ using EfootballBot.Core.Vision.Yolo;
 using OpenCvSharp;
 using Xunit;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 难度选择页回归：分类（置顶判定）+ 蓝勾检测 + 行号映射（实机 difficulty_2~4）
@@ -39,7 +40,7 @@ public class DifficultyPageTests
     {
         // 该页覆盖在联赛主页上（画面含前往比赛/赛程表等词），必须置顶判为 DifficultyPage
         var (frame, ocr, dets) = Load(file);
-        Assert.Equal(MlScreen.DifficultyPage, MyLeagueBrain.Classify(dets, ocr, true));
+        Assert.Equal(MatchScreen.DifficultyPage, MatchBrain.Classify(dets, ocr, true));
     }
 
     [Theory]
@@ -61,3 +62,5 @@ public class DifficultyPageTests
         Assert.Equal(1, MyLeagueBrain.DifficultyRowNumber("未知难度")); // 未知名兜底第 1 行
     }
 }
+
+

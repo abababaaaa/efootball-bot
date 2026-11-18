@@ -8,7 +8,10 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using EfootballBot.Core.Tools;
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
+using EfootballBot.Core.Bot.Modules;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Input;
@@ -17,6 +20,7 @@ using EfootballBot.Core.System;
 using EfootballBot.Core.UI;
 using EfootballBot.Core.Vision;
 using EfootballBot.Ipc;
+using EfootballBot.Shell;
 
 namespace EfootballBot;
 
@@ -83,6 +87,10 @@ public partial class MainWindow
 
         // 初始化文件日志（早于 BotEngine 创建，否则第一条日志会丢失）
         FileLogger.Instance.Initialize(_cfg.FileLogEnabled, _cfg.FileLogLevel, _cfg.MaxLogFiles, _cfg.LogRetentionDays);
+        // 首页版本芯片：版本号只有一个来源（程序集版本），不再在 XAML 里写死（曾长期停在 v6.2）
+        // 页脚版本：Win11 世界的界面不再挂旧品牌名，只留版本号本身
+        TxtVersionChip.Text = $"v{Updater.FormatVersion(typeof(MainWindow).Assembly.GetName().Version)}";
+
         AppendLog($"应用启动：v{Updater.FormatVersion(typeof(MainWindow).Assembly.GetName().Version)}，" +
             $"{Environment.OSVersion.VersionString}", LogLevel.Info);
 
@@ -112,7 +120,9 @@ public partial class MainWindow
             // 左栏初始选中态：模块胶囊高亮由 Tag=Active 门控（见 App.xaml ModuleRadio），
             // 构造期走不到 NavigateTo，必须在这里补一次，否则启动后国际服胶囊不高亮
             ApplyCaptionChrome();
-            NavigateTo(_currentNav);
+            // --page 深链：启动即停在指定页面（截图回归 / QA 复现）；未指定则回默认页
+            if (App.StartupPage is { Length: > 0 } startupPage) ShowPage(startupPage);
+            else NavigateTo(_currentNav);
             // 上代异常退出遗留的 Worker 先清理（它会占着玩家 1，导致开始挂机抢不到手柄）
             WorkerHost.KillOrphanedWorkers((lv, msg) =>
                 AppendLog(msg, Enum.TryParse<LogLevel>(lv, out var l) ? l : LogLevel.Info));
@@ -252,171 +262,36 @@ public partial class MainWindow
         CnMyLeagueContent.Visibility = RbCnMyLeague.IsChecked == true ? Visibility.Visible : Visibility.Collapsed;
     }
 
-    // ---------------- 赛前快捷设置（一键打开游戏自带设置工具） ----------------
+    // ---------------- 赛前快捷设置（工具层：Core/Tools/PreMatchTool） ----------------
+    // 界面只派发（工具 id + 动作 + 分区 + 状态行），定位路径/起进程全在工具层；
+    // 两服差异由 ServerRegion 参数化，界面里不再有 intl ? … : … 分支。
 
-    private void BtnOpenGameSettings_Click(object sender, RoutedEventArgs e)
-        => OpenGameSettingsTool(TxtPreMatchPath, intl: true, "国际服");
+    private async void BtnOpenGameSettings_Click(object sender, RoutedEventArgs e)
+        => await RunToolAsync(ToolIds.PreMatch, ToolAction.OpenSettingsTool, ServerRegion.Intl, TxtPreMatchPath);
 
-    private void BtnOpenCnGameSettings_Click(object sender, RoutedEventArgs e)
-        => OpenGameSettingsTool(TxtCnPreMatchPath, intl: false, "国服");
+    private async void BtnOpenCnGameSettings_Click(object sender, RoutedEventArgs e)
+        => await RunToolAsync(ToolIds.PreMatch, ToolAction.OpenSettingsTool, ServerRegion.Cn, TxtCnPreMatchPath);
 
-    private void BtnOpenGameDir_Click(object sender, RoutedEventArgs e)
-        => OpenGameDirectory(TxtPreMatchPath, intl: true, "国际服");
+    private async void BtnOpenGameDir_Click(object sender, RoutedEventArgs e)
+        => await RunToolAsync(ToolIds.PreMatch, ToolAction.OpenGameDirectory, ServerRegion.Intl, TxtPreMatchPath);
 
-    private void BtnOpenCnGameDir_Click(object sender, RoutedEventArgs e)
-        => OpenGameDirectory(TxtCnPreMatchPath, intl: false, "国服");
+    private async void BtnOpenCnGameDir_Click(object sender, RoutedEventArgs e)
+        => await RunToolAsync(ToolIds.PreMatch, ToolAction.OpenGameDirectory, ServerRegion.Cn, TxtCnPreMatchPath);
 
-    private void BtnLaunchGame_Click(object sender, RoutedEventArgs e)
-        => LaunchGame(TxtPreMatchPath, intl: true, "国际服");
+    private async void BtnLaunchGame_Click(object sender, RoutedEventArgs e)
+        => await RunToolAsync(ToolIds.PreMatch, ToolAction.LaunchGame, ServerRegion.Intl, TxtPreMatchPath);
 
-    private void BtnLaunchCnGame_Click(object sender, RoutedEventArgs e)
-        => LaunchGame(TxtCnPreMatchPath, intl: false, "国服");
-
-    /// <summary>
-    /// 快速启动游戏本体：已在运行只提示不重复拉起。国际服优先走 Steam 正规链路
-    /// （steam://rungameid/1665460，与 Steam 库内快捷方式等效，Steam 未启动会自动带起，
-    /// 不依赖安装位置），Steam 不在时回退定位到的 eFootball.exe 直启；国服定位
-    /// eFootballOnline.exe 直启（定位链路与 Steam 严格隔离，见 GameSettingsLocator）。
-    /// </summary>
-    private void LaunchGame(TextBlock status, bool intl, string label)
-    {
-        try
-        {
-            string procName = intl ? GameWindow.GlobalProcessName : BotEngine.CnProcessName;
-            if (Process.GetProcessesByName(procName).Length > 0)
-            {
-                status.Text = $"{label}游戏已在运行，无需重复启动。";
-                AppendLog($"[赛前快捷设置] {label}游戏已在运行，未重复启动。", LogLevel.Info);
-                return;
-            }
-
-            if (intl)
-            {
-                try
-                {
-                    Process.Start(new ProcessStartInfo
-                    {
-                        FileName = $"steam://rungameid/{GameSettingsLocator.IntlSteamAppId}",
-                        UseShellExecute = true,
-                    });
-                    status.Text = "已通过 Steam 启动国际服游戏（eFootball），窗口出现需等待片刻。";
-                    AppendLog("[赛前快捷设置] 已通过 Steam 启动国际服游戏（eFootball）。", LogLevel.Success);
-                    return;
-                }
-                catch
-                {
-                    // 无 Steam（URI 协议未注册）→ 回退定位 exe 直启
-                }
-            }
-
-            // 定位游戏本体：上次定位的 Settings.exe 所在目录向上找（两服各自的路径记忆）
-            var settingsPath = intl ? _cfg.GamePaths.IntlSettingsTool : _cfg.GamePaths.CnSettingsTool;
-            string? exe = GameSettingsLocator.LocateGameExe(intl, Path.GetDirectoryName(settingsPath));
-            if (exe is null)
-            {
-                status.Text = intl
-                    ? "未定位到国际服游戏本体（eFootball.exe）——请确认已安装 Steam 版 eFootball。"
-                    : "未找到国服游戏本体（eFootballOnline.exe）——请先点一次「打开设置工具」形成路径记忆（或启动国服游戏）后再试。";
-                AppendLog($"[赛前快捷设置] 未定位到{label}游戏本体，未启动。", LogLevel.Warn);
-                return;
-            }
-
-            status.Text = exe;
-            Process.Start(new ProcessStartInfo
-            {
-                FileName = exe,
-                UseShellExecute = true,
-                WorkingDirectory = Path.GetDirectoryName(exe),
-            });
-            AppendLog($"[赛前快捷设置] 已启动{label}游戏：{exe}", LogLevel.Success);
-        }
-        catch (Exception ex)
-        {
-            status.Text = $"启动失败：{ex.Message}";
-            AppendLog($"[赛前快捷设置] 启动{label}游戏失败：{ex.Message}", LogLevel.Error);
-        }
-    }
-
-    /// <summary>
-    /// 定位某服的 Settings.exe：运行中的游戏进程锚定 → 上次定位记忆（GamePaths）兜底，
-    /// 成功后写入记忆。两服严格隔离：国服不走 Steam 回退——Steam 库里是国际服的安装，
-    /// 国服游戏未启动时跌进去会打开国际服的设置工具（实机 2026-10-13 用户报告）。
-    /// </summary>
-    private string? LocateSettingsTool(bool intl)
-    {
-        var path = GameSettingsLocator.Locate(
-            intl ? GameWindow.GlobalProcessName : BotEngine.CnProcessName,
-            allowSteamFallback: intl);
-        if (path is null)
-        {
-            var saved = intl ? _cfg.GamePaths.IntlSettingsTool : _cfg.GamePaths.CnSettingsTool;
-            if (saved.Length > 0 && File.Exists(saved)) path = saved;
-        }
-        if (path is not null)
-        {
-            if (intl) _cfg.GamePaths.IntlSettingsTool = path;
-            else _cfg.GamePaths.CnSettingsTool = path;
-            _cfg.Save();
-        }
-        return path;
-    }
-
-    /// <summary>定位并启动游戏目录下的 Settings.exe，结果显示在模块内状态行并记日志。</summary>
-    private void OpenGameSettingsTool(TextBlock status, bool intl, string label)
-    {
-        try
-        {
-            var exe = LocateSettingsTool(intl);
-            if (exe is null)
-            {
-                status.Text = intl
-                    ? "未找到 Settings.exe——请先启动国际服游戏（保持运行）再点一次，或到游戏安装目录手动打开。"
-                    : "未找到国服 Settings.exe——请先启动国服游戏（保持运行）再点一次；定位成功一次后会记住路径，之后无需游戏在运行。";
-                AppendLog($"[赛前快捷设置] 未定位到{label}游戏设置工具（Settings.exe）：请先启动游戏再试，或到游戏安装目录手动打开。", LogLevel.Warn);
-                return;
-            }
-            status.Text = exe;
-            Process.Start(new ProcessStartInfo { FileName = exe, UseShellExecute = true });
-            AppendLog($"[赛前快捷设置] 已打开{label}游戏设置工具：{exe}", LogLevel.Success);
-        }
-        catch (Exception ex)
-        {
-            status.Text = $"打开失败：{ex.Message}";
-            AppendLog($"[赛前快捷设置] 打开{label}设置工具失败：{ex.Message}", LogLevel.Error);
-        }
-    }
-
-    /// <summary>在资源管理器中打开游戏本体安装目录（借 Settings.exe 定位）。</summary>
-    private void OpenGameDirectory(TextBlock status, bool intl, string label)
-    {
-        try
-        {
-            string? dir = Path.GetDirectoryName(LocateSettingsTool(intl));
-            if (dir is null)
-            {
-                status.Text = $"未定位到{label}游戏安装目录——请先启动游戏再点一次。";
-                AppendLog($"[赛前快捷设置] 未定位到{label}游戏安装目录：请先启动游戏再试。", LogLevel.Warn);
-                return;
-            }
-            status.Text = dir;
-            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
-            AppendLog($"[赛前快捷设置] 已打开{label}游戏目录：{dir}", LogLevel.Success);
-        }
-        catch (Exception ex)
-        {
-            status.Text = $"打开失败：{ex.Message}";
-            AppendLog($"[赛前快捷设置] 打开{label}游戏目录失败：{ex.Message}", LogLevel.Error);
-        }
-    }
+    private async void BtnLaunchCnGame_Click(object sender, RoutedEventArgs e)
+        => await RunToolAsync(ToolIds.PreMatch, ToolAction.LaunchGame, ServerRegion.Cn, TxtCnPreMatchPath);
 
     private async void BtnStartMyLeague_Click(object sender, RoutedEventArgs e)
-        => await ToggleScenarioAsync(BtnStartMyLeague, "intl");
+        => await ToggleScenarioAsync(BtnStartMyLeague, ModuleIds.IntlMyLeague);
 
     private async void BtnStartWeekly_Click(object sender, RoutedEventArgs e)
-        => await ToggleScenarioAsync(BtnStartWeekly, "intlweekly");
+        => await ToggleScenarioAsync(BtnStartWeekly, ModuleIds.IntlWeekly);
 
     private async void BtnStartAiLadder_Click(object sender, RoutedEventArgs e)
-        => await ToggleScenarioAsync(BtnStartAiLadder, "intlladder");
+        => await ToggleScenarioAsync(BtnStartAiLadder, ModuleIds.IntlAiLadder);
 
     /// <summary>
     /// 种马模块的「开始」按当前子页签决定模式：购买 = intlstudbuy，培训 = intlstudtrain。
@@ -437,17 +312,18 @@ public partial class MainWindow
                 return;
             }
         }
-        await ToggleScenarioAsync(BtnStartStud, training ? "intlstudtrain" : "intlstudbuy");
+        await ToggleScenarioAsync(BtnStartStud, training ? ModuleIds.IntlStudTrain : ModuleIds.IntlStudBuy);
     }
 
+    // 国服三个挂机模块：id 唯一来源在 BotModuleCatalog（这里只引用常量，不写字符串）
     private async void BtnStartCn_Click(object sender, RoutedEventArgs e)
-        => await ToggleScenarioAsync(BtnStartCn, "cndaily");
+        => await ToggleScenarioAsync(BtnStartCn, ModuleIds.CnLadder);
 
     private async void BtnStartCnWeekly_Click(object sender, RoutedEventArgs e)
-        => await ToggleScenarioAsync(BtnStartCnWeekly, "cnweekly");
+        => await ToggleScenarioAsync(BtnStartCnWeekly, ModuleIds.CnWeekly);
 
     private async void BtnStartCnMyLeague_Click(object sender, RoutedEventArgs e)
-        => await ToggleScenarioAsync(BtnStartCnMyLeague, "cnmyleague");
+        => await ToggleScenarioAsync(BtnStartCnMyLeague, ModuleIds.CnMyLeague);
 
     private async Task ToggleScenarioAsync(Button btn, string? mode)
     {
@@ -673,7 +549,7 @@ public partial class MainWindow
     /// 巡检结束或中途「一键结束」后自动停止。运行中受暂停/一键结束热键与按钮控制。
     /// </summary>
     private async void BtnTestSwap_Click(object sender, RoutedEventArgs e)
-        => await ToggleScenarioAsync(BtnTestSwap, "intlswaptest");
+        => await ToggleScenarioAsync(BtnTestSwap, ModuleIds.IntlSwapTest);
 
     /// <summary>
     /// 开启「满级自动换人」时弹确认窗（SwapGuideWindow）：展示巡检路径图，要求用户先手动
@@ -772,3 +648,6 @@ public partial class MainWindow
         base.OnClosing(e);
     }
 }
+
+
+

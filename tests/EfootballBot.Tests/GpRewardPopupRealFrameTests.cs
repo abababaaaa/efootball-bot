@@ -9,6 +9,7 @@ using OpenCvSharp;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 回归（实机 2026-10-16）：我的联赛主页「物品已送到收件箱（30,000 GP 我的联赛奖励）」OK 弹窗。
@@ -43,8 +44,8 @@ public class GpRewardPopupRealFrameTests
         var dets = det.Detect(frame);
         var ocrRes = TestOcr.Run(ocr, frame);
 
-        bool corner = MyLeagueScenario.CornerHasContent(frame);
-        bool light = MyLeagueScenario.IsMostlyLightPage(frame);
+        bool corner = ScreenProbe.CornerHasContent(frame);
+        bool light = ScreenProbe.IsMostlyLightPage(frame);
         _out.WriteLine($"corner={corner} mostlyLight={light}");
         _out.WriteLine("-- YOLO --");
         foreach (var d in dets.Where(d => d.Score >= 0.2).OrderByDescending(d => d.Score))
@@ -57,15 +58,17 @@ public class GpRewardPopupRealFrameTests
         var al = AiLadderBrain.Classify(ocrRes);
         var wk = al == AlScreen.None ? WeeklyBrain.Classify(dets, ocrRes, corner, false, light) : WkScreen.None;
         var ml = (al == AlScreen.None && wk == WkScreen.None)
-            ? MyLeagueBrain.Classify(dets, ocrRes, corner, false, light)
-            : MlScreen.Unknown;
+            ? MatchBrain.Classify(dets, ocrRes, corner, false, light)
+            : MatchScreen.Unknown;
         _out.WriteLine($"Classify: Al={al} Wk={wk} Ml={ml}");
-        Assert.Equal(MlScreen.HasConfirm, ml);
+        Assert.Equal(MatchScreen.HasConfirm, ml);
 
         // 卡死关键断言：退避轮数之后动作仍是按 A（放慢不停手），绝不是 Wait
-        var stuck = MyLeagueBrain.Decide(ml, ocrRes, MyLeagueBrain.StuckStreak);
-        _out.WriteLine($"Decide(streak={MyLeagueBrain.StuckStreak}) → {stuck.Kind} \"{stuck.Target}\" wait={stuck.WaitMs}");
-        Assert.Equal(MlActionKind.PadConfirm, stuck.Kind);
+        var stuck = MatchBrain.Decide(ml, ocrRes, MatchBrain.StuckStreak);
+        _out.WriteLine($"Decide(streak={MatchBrain.StuckStreak}) → {stuck.Kind} \"{stuck.Target}\" wait={stuck.WaitMs}");
+        Assert.Equal(MatchActionKind.PadConfirm, stuck.Kind);
         Assert.True(stuck.WaitMs >= 5000, "退避后应放慢节奏");
     }
 }
+
+

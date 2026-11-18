@@ -3,6 +3,7 @@ using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Vision;
 using Xunit;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 国服周活动·挑战 误判通关与禁跳回归（用户 2026-10-31 反馈包 v5.1.4）：
@@ -58,22 +59,22 @@ public class CnWeeklyChallengeGuardTests
         Assert.True(CnWeeklyBrain.ChallengeScoreBehind(ocr));
     }
 
-    // ---------------- MyLeagueBrain.Decide allowMatchSkip：挑战赛禁跳 ----------------
+    // ---------------- MatchBrain.Decide allowMatchSkip：挑战赛禁跳 ----------------
 
     [Fact]
     public void Decide_ChallengeMode_SkipBannerIgnored()
     {
         var ocr = Ocr(("跳过比赛", 0.85, 0.06));
-        var action = MyLeagueBrain.Decide(MlScreen.InMatch, ocr, 5, allowMatchSkip: false);
-        Assert.Equal(MlActionKind.MatchIdleTap, action.Kind); // 继续正常挂机，不开暂停菜单
+        var action = MatchBrain.Decide(MatchScreen.InMatch, ocr, 5, allowMatchSkip: false);
+        Assert.Equal(MatchActionKind.MatchIdleTap, action.Kind); // 继续正常挂机，不开暂停菜单
     }
 
     [Fact]
     public void Decide_ChallengeMode_PauseMenuNeverSkips()
     {
         var win = Ocr(("跳过比赛", 0.6, 0.3), ("对局获胜", 0.6, 0.4));
-        Assert.Equal(MlActionKind.GamepadBack,
-            MyLeagueBrain.Decide(MlScreen.CnMatchPause, win, 1, allowMatchSkip: false).Kind);
+        Assert.Equal(MatchActionKind.GamepadBack,
+            MatchBrain.Decide(MatchScreen.CnMatchPause, win, 1, allowMatchSkip: false).Kind);
     }
 
     [Fact]
@@ -81,8 +82,8 @@ public class CnWeeklyChallengeGuardTests
     {
         // 禁跳下误开过一次菜单后弹「确认跳过」：B 关闭（默认焦点在关闭），绝不确认
         var popup = Ocr(("确认跳过", 0.6, 0.4), ("关闭", 0.6, 0.55));
-        Assert.Equal(MlActionKind.GamepadBack,
-            MyLeagueBrain.Decide(MlScreen.CnMatchPause, popup, 1, allowMatchSkip: false).Kind);
+        Assert.Equal(MatchActionKind.GamepadBack,
+            MatchBrain.Decide(MatchScreen.CnMatchPause, popup, 1, allowMatchSkip: false).Kind);
     }
 
     [Fact]
@@ -90,7 +91,9 @@ public class CnWeeklyChallengeGuardTests
     {
         // 默认 allowMatchSkip=true：联赛/天梯等胜负制行为不变
         var win = Ocr(("跳过比赛", 0.6, 0.3), ("对局获胜", 0.6, 0.4));
-        Assert.Equal(MlActionKind.PadConfirm,
-            MyLeagueBrain.Decide(MlScreen.CnMatchPause, win, 1).Kind);
+        Assert.Equal(MatchActionKind.PadConfirm,
+            MatchBrain.Decide(MatchScreen.CnMatchPause, win, 1).Kind);
     }
 }
+
+

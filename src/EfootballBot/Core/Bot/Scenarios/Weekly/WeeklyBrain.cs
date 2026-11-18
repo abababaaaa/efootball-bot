@@ -2,6 +2,18 @@ using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Vision;
 using EfootballBot.Core.Vision.Yolo;
+using EfootballBot.Core.Bot.Match;
+
+// ===========================================================================
+// 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
+// 本层职责：单个挂机模块自己的菜单流程与私有状态机（只认自己的界面）。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 不许引用别的模块的 *Scenario（只读借用别人的 *Brain.Classify 认残留页面是允许的）
+//   · 不许自己写场次记账 / 比赛内挂机节奏 —— 一律走 MatchPlay.Tick / IdleTapAsync
+//   · 共享界面判定与决策一律用 Core/Bot/Match 的 MatchBrain，不要复制一份
+// 新增模块：ModuleIds 加常量 + BotModuleCatalog 加一条记录，再写本目录的状态机。
+// 除非用户明确要求更换写法，否则按本层约定写。
+// ===========================================================================
 
 namespace EfootballBot.Core.Bot.Scenarios.Weekly;
 
@@ -51,7 +63,6 @@ public enum WkScreen
 /// <summary>挑战清单里一张可见卡的解析结果。Index 为卡上大字编号（1 起）；
 /// Slot 为屏幕卡位（0=左卡 1=右卡，翻页时同一卡位的卡会换）；Locked/Checked 为该卡位的像素探针。</summary>
 public sealed record WkChallengeCard(int Index, int Slot, bool Locked, bool Checked);
-
 /// <summary>活动设置浮层的解析结果。null = 该项 OCR 未读出（保守：读不到就不动）。</summary>
 public sealed record WkActivitySettings(string? Level, bool? AutoControl, bool? FlexibleAutoControl)
 {
@@ -67,9 +78,8 @@ public sealed record WkActivitySettings(string? Level, bool? AutoControl, bool? 
 public static class WeeklyBrain
 {
     // ---------------- 界面分类 ----------------
-
     /// <summary>
-    /// 周活动界面分类。先于 MyLeagueBrain.Classify 执行——活动主页也含「前往比赛」，
+    /// 周活动界面分类。先于 MatchBrain.Classify 执行——活动主页也含「前往比赛」，
     /// 不先判会被误归 LeaguePage（与关键比赛弹窗被 MatchHub 兜底抢判同一坑）。
     /// 判定顺序：挑战解锁弹窗 → 挑战清单 → 建议面板 → 比赛历史 → 盖层弹窗 → 活动设置 →
     /// 入场弹窗 → 活动主页 → 活动列表 → 活动介绍。
@@ -83,14 +93,12 @@ public static class WeeklyBrain
         // 卡位锁探针还被弹窗浅灰底误判成「锁定」→ 回撤退 B → B 退不掉 → 死循环。
         if (IsChallengeUnlockPopup(ocr))
             return WkScreen.ChallengeUnlockPopup;
-
         // 挑战清单弹窗（挑战活动进入后的卡片列表）：标题「挑战清单」为强特征，最先判定。
         // 无标题兜底：卡位行两枚 H≥0.08 的大字卡号（普通文字 H≈0.04，只有卡编号这么高）
         // 分布在左右两卡位 + 底栏「返回」词。不先判会被共享分类兜成 LeaguePage（页面只有
         // btn_back，无可推进词 → 死等/瞎退）。标题词漏读时卡号特征防僵局。
         if (ocr.ContainsJoined("挑战清单") || HasChallengeListCardNumbers(ocr))
             return WkScreen.ChallengeList;
-
         // 建议面板（活动主页左列「建议」被 A 点开，实机 2026-10-28 反馈包）：浅色大卡盖住
         // 主页中部，但左列「前往比赛/比赛历史」「建议 有未读建议」与右栏「胜场积分」全部
         // 仍然可见 → 旧逻辑一直被 eventHomeBody 抢判成 EventHome，随后按 A（面板吃掉，或
@@ -100,7 +108,6 @@ public static class WeeklyBrain
         // 落到弹窗门控会变 EntryPopup 继续盲按 A。
         if (IsAdvicePanel(ocr))
             return WkScreen.AdvicePanel;
-
         // 比赛历史页（活动主页左列「比赛历史」面板点开后）：页首大标题「比赛历史」+ 底栏「返回」。
         // ★必须在任何弹窗/主页判定之前——该页只有列表行与返回，没有推进词，落到共享分类会
         // 被 YOLO 误检的 btn_confirm（实机 2026-10-26 反馈包：0.63 @列表行）判成 HasConfirm，
@@ -111,7 +118,6 @@ public static class WeeklyBrain
         if (!ocr.ContainsJoined("前往比赛") && ocr.ContainsJoined("返回") &&
             ocr.Words.Any(w => w.CenterY < 0.22 && w.NormText.Contains("比赛历史")))
             return WkScreen.MatchHistory;
-
         // 挑战活动新增前置流程（2026-11-08 国际服「Road to CAF AFCON 2027」子内容）：
         // 介绍页按进入 → 「选择地区」→「选择球队」→ 确认弹窗「要使用<队名>吗？」→ 挑战清单。
         // 前两页只有底栏「B 返回 / Y 随机」，没有任何推进词，落共享分类会被判 Unknown 原地干等；
@@ -123,7 +129,6 @@ public static class WeeklyBrain
             return WkScreen.RegionSelect;
         if (IsTeamSelectPage(ocr))
             return WkScreen.TeamSelect;
-
         // 单场周活动「选择赛事等级」整页（2026-10-30 用户三张截图 + GitHub issue #1 手机照：
         // 该页 wk=None、ml=DifficultyPage，周活动状态机无人接管 → 日志只刷「界面：DifficultyPage」
         // 原地干等，选不了难度）。★先于盖层弹窗门控——入场说明弹窗（请选择赛事等级+OK）盖在
@@ -132,7 +137,6 @@ public static class WeeklyBrain
         // 靠 x 区分避免抢 LevelDropdown 阶段的下拉样式。
         if (IsEventDifficultyPage(ocr))
             return WkScreen.EventDifficulty;
-
         // 盖层弹窗探测（赛后结算/奖励领取等多步弹窗，用户 2026-10-12 实机教训）：
         // 主页词透过暗化背景仍会被 OCR 读到，误判 EventHome 后按 X/前往比赛全部无效
         //（弹窗挡着，被误判"设置打不开/开赛未生效"）。弹窗自带推进词或确认按钮，
@@ -146,7 +150,7 @@ public static class WeeklyBrain
         bool popupOnTop =
             ocr.ContainsJoined("下一步") || ocr.ContainsJoined("确认") ||
             ocr.FindButton("OK") is not null ||
-            dets.Any(d => d.ClassName == "btn_confirm" && d.Score >= MyLeagueBrain.MinScore && d.CenterY < 0.85);
+            dets.Any(d => d.ClassName == "btn_confirm" && d.Score >= MatchBrain.MinScore && d.CenterY < 0.85);
         bool settingsTitle = ocr.Words.Any(w => w.CenterY < 0.2 && w.Text.Replace(" ", "").Contains("活动设置"));
         bool eventHomeBody = ocr.ContainsJoined("前往比赛") &&
             (ocr.ContainsJoined("总活动积分") || ocr.ContainsJoined("胜场积分") ||
@@ -157,36 +161,30 @@ public static class WeeklyBrain
         // 而介绍页无论有无弹窗按 A 都是正确动作（光标默认在进入）
         if (popupOnTop && (settingsTitle || eventHomeBody || eventsListTabs))
             return WkScreen.EntryPopup;
-
         // 活动设置浮层（按 X 呼出，盖在活动主页右半屏）：标题「活动设置」在顶部（y<0.2）。
         // 必须先于活动主页——浮层打开时「前往比赛」仍在左侧可见。
         // 【实测坑】活动主页底栏有「X 活动设置」按钮词（y≈0.93），不限 y 会把主页误判成设置浮层
         if (settingsTitle)
             return WkScreen.EventSettings;
-
         // 入场弹窗（「设置专用比赛计划」+ OK；可能连续多枚）：先于活动主页——
         // 弹窗背后「前往比赛」仍可见，不先判会被 EventHome 抢走漏点确认
         if (ocr.ContainsJoined("专用比赛计划"))
             return WkScreen.EntryPopup;
-
         // 活动主页：左上「前往比赛」+ 右栏固定词（总活动积分/胜场积分/球员加分/主要奖励）。
         // 我的联赛主页没有这组词，与 LeaguePage 区分开
         if (eventHomeBody)
             return WkScreen.EventHome;
-
         // 活动列表页：顶部「对阵AI / 对阵玩家」页签（进入比赛 hub 的活动板块后默认页签为对阵AI）
         // ★页签词必须限定在顶部页签行（实机 y≈0.08）：介绍页正文写着「这是一个对阵AI活动…」
         // （实机 2026-10-29 反馈视频，y≈0.26），不限位置会让介绍页被判成列表页 → 场景层每轮
         // 「进入槽位 → ↓ 把焦点从进入挪到详情 → ←×6 → A」打开详情面板，活动永远进不去。
         if (eventsListTabs)
             return WkScreen.EventsList;
-
         // 活动介绍页（巡回活动大图 / 挑战活动大图）：「进入」+「详情」两枚按钮同屏。
         // ★只用「进入」+「详情」做判据，不用「巡回活动」——列表卡上也印着「巡回活动」标签
         //（实机列表帧 y≈0.23 三张卡各一枚），单靠该词会把列表页误判成介绍页。
         if (introMark)
             return WkScreen.EventIntro;
-
         return WkScreen.None;
     }
 
@@ -201,14 +199,11 @@ public static class WeeklyBrain
         => ocr.Words.Any(w => w.CenterY < 0.16 &&
                (w.NormText.Contains("对阵AI", StringComparison.OrdinalIgnoreCase) ||
                 w.NormText.Contains("对阵玩家")));
-
     // ---------------- 比赛页（大活动页）磁贴定位（2026-11-13 用户实机） ----------------
-
     /// <summary>比赛页磁贴行里可作为格位锚点的标题词（新 UI 实机 2026-11-13 用户截图：
     /// 最左「锦标赛」/ 第二「活动」/ 第三「eFootball™联赛」/ 第四「我的联赛」；
     /// 标题是大字印在卡片下半部，描述句在下一行）。</summary>
     private static readonly string[] HubTileTitles = { "锦标赛", "活动", "我的联赛" };
-
     /// <summary>
     /// 比赛页（大活动页）磁贴行里「活动」磁贴是第几格（0 起）。
     /// 用户 2026-11-13 实机：大活动页第一格已改成「锦标赛」（Round 3 Ranking Event /
@@ -260,7 +255,6 @@ public static class WeeklyBrain
         => ocr.ContainsJoined("参加锦标赛")
            || (ocr.ContainsJoined("自定义锦标赛") &&
                ocr.Words.Any(w => w.CenterY < 0.25 && w.NormText.Contains("锦标赛")));
-
     /// <summary>
     /// 「建议」面板是否盖在活动主页上。只用固定 UI 文案，建议正文/日期/球员名是可变内容，不作判定点：
     /// 列表视图＝标题「建议列表」或副标题「显示最近5场比赛的建议。」；
@@ -278,15 +272,13 @@ public static class WeeklyBrain
     /// 左列（x&lt;0.25）至少 2 个难度名。右栏同句「请选择赛事等级」在 y≈0.31、弹窗版在
     /// y≈0.40，都不入 y&lt;0.18 标题带，不冲突（实机三帧校准：标题 @(0.18,0.11)）。
     /// 标题被 OCR 漏读/遮挡（issue #1 手机照：GUI 覆盖层盖住列表）时本判定落空，
-    /// 由共享分类兜成 MlScreen.DifficultyPage——场景层对两个信号都接管。
+    /// 由共享分类兜成 MatchScreen.DifficultyPage——场景层对两个信号都接管。
     /// </summary>
     public static bool IsEventDifficultyPage(OcrResult ocr) =>
         ocr.Words.Any(w => w.CenterY < 0.18 && w.Text.Replace(" ", "").Contains("选择赛事等级")) &&
-        MyLeagueBrain.Difficulties.Count(d => ocr.Words.Any(w =>
+        MatchBrain.Difficulties.Count(d => ocr.Words.Any(w =>
             w.CenterX < 0.25 && w.Text.Replace(" ", "").Contains(d))) >= 2;
-
     // ---------------- 球队选择前置流程（2026-11-08 用户四张实机帧） ----------------
-
     /// <summary>
     /// 球队确认弹窗「要使用&lt;队名&gt;吗？」（选好球队按 A/进入后弹出）：
     /// 副标题「活动期间，可在[活动设置] &gt; [选择的球队]更改选择的球队。」
@@ -296,27 +288,22 @@ public static class WeeklyBrain
     public static bool IsTeamConfirmPopup(OcrResult ocr) =>
         ocr.ContainsJoined("更改选择的球队") ||
         (ocr.ContainsJoined("要使用") && ocr.ContainsJoined("取消"));
-
     /// <summary>
     /// 「选择地区」页（球队选择前置流程第一步）：右侧提示词「选择地区」+ 底栏「Y 随机」胶囊。
     /// 两个条件都要——只认提示词会被别处同名文案误触发，只认「随机」会被任何带随机按钮的页吃掉。
     /// </summary>
     public static bool IsRegionSelectPage(OcrResult ocr) =>
         HasRandomChip(ocr) && ocr.Words.Any(w => w.NormText.Contains("选择地区"));
-
     /// <summary>
     /// 「选择球队」页（同流程第二步）：右侧固定框提示词「选择球队」+ 底栏「Y 随机」。
     /// 该框在用户描述里恒在（右侧一定有这个框），左侧国旗网格/球队名每轮变，一律不作判定点。
     /// </summary>
     public static bool IsTeamSelectPage(OcrResult ocr) =>
         HasRandomChip(ocr) && ocr.Words.Any(w => w.NormText.Contains("选择球队"));
-
     /// <summary>底栏「Y 随机」胶囊：词「随机」落在屏幕底部（y&gt;0.85，实机 y≈0.94）。</summary>
     private static bool HasRandomChip(OcrResult ocr) =>
         ocr.Words.Any(w => w.CenterY > 0.85 && w.NormText.Contains("随机"));
-
     // ---------------- 介绍页按钮聚焦（2026-11-09 国际服实机反馈） ----------------
-
     /// <summary>活动介绍页（进入/详情 纵排按钮）当前焦点落在哪个按钮上。</summary>
     public enum WkIntroFocus
     {
@@ -340,13 +327,10 @@ public static class WeeklyBrain
     /// <summary>介绍页直接 A 连续这么多次都没推进 → 不论探针怎么说都先上移归位（自愈兜底：
     /// 探针误读成「进入」而实际光标在「详情」时，绝不能永远重复同一个无效动作）。</summary>
     public const int IntroEnterTriesBeforeNudge = 4;
-
     /// <summary>聚焦按钮判定阈值：聚焦行是白底（实机中位亮度 242），未聚焦是深色半透明（实机 49）。</summary>
     private const int IntroFocusedLuma = 120;
-
     /// <summary>两个按钮都偏亮/偏暗时，靠亮度差判胜出（实机差值 &gt;150，留足余量）。</summary>
     private const int IntroFocusedLumaGap = 40;
-
     /// <summary>
     /// 活动介绍页（「巡回活动 / 挑战活动」大图 + 纵排「进入 / 详情」两枚按钮）的焦点检测。
     /// 用户 2026-11-09 国际服实机：进介绍页时光标默认在「进入」，直接按 A（下一步）即可，
@@ -362,7 +346,6 @@ public static class WeeklyBrain
         var enter = IntroButtonWord(ocr, "进入");
         var detail = IntroButtonWord(ocr, "详情");
         if (enter is null || detail is null) return WkIntroFocus.Unknown;
-
         int lumaEnter = IntroButtonBandLuma(frame, enter);
         int lumaDetail = IntroButtonBandLuma(frame, detail);
         bool enterLit = lumaEnter >= IntroFocusedLuma;
@@ -396,14 +379,12 @@ public static class WeeklyBrain
         => ocr.Words.Count >= 8
            && !ocr.Words.Any(w => w.NormText.Contains("进入"))
            && ocr.Words.Any(w => w.CenterY < 0.16 && w.NormText.Contains("关闭"));
-
     /// <summary>介绍页按钮词：取纵向按钮区（y&gt;0.55）里最像按钮的那枚（字高最大）。</summary>
     private static OcrWord? IntroButtonWord(OcrResult ocr, string keyword)
         => ocr.Words.Concat(ocr.MergedWords)
             .Where(w => w.CenterY > 0.55 && w.CenterX < 0.55 && w.NormText.Contains(keyword))
             .OrderByDescending(w => w.H)
             .FirstOrDefault();
-
     /// <summary>
     /// 按钮底色亮度（中位亮度）：以按钮文字为中心取一条横向亮带（文字左右各 5% 宽，
     /// 上下各半个字高）——聚焦按钮是白底（中位亮度 ~242），未聚焦是深色半透明（~49）。
@@ -419,17 +400,13 @@ public static class WeeklyBrain
     }
 
     // ---------------- 选择页推进规则（用户 2026-11-08 实机规则） ----------------
-
     /// <summary>随机按完后的过渡宽限帧数：同页连续观测满这么多帧才认「随机没把页面带走」
     /// （地区 → 球队的转场约 1~2s，一帧就判会抢在转场前把 A 按掉）。</summary>
     public const int PickConfirmGraceFrames = 2;
-
     /// <summary>随机按过之后最多再按几次 A（下一步）；超了 B 退出该子流程，绝不在同一页来回按。</summary>
     public const int MaxPickNextAttempts = 3;
-
     /// <summary>子流程内 B 退出累计上限；超了停止挂机（退出受阻，交人工看游戏状态）。</summary>
     public const int MaxPickEscapes = 3;
-
     /// <summary>选择页（选择地区 / 选择球队）每轮的动作。</summary>
     public enum WkPickAction
     {
@@ -468,10 +445,9 @@ public static class WeeklyBrain
     {
         var (w, h, bgra) = (frame.Width, frame.Height, frame.Bgra);
         if (w < 100 || h < 100 || bgra.Length < w * h * 4) return null;
-
         string? best = null;
         int bestBright = 0;
-        foreach (var diff in MyLeagueBrain.Difficulties)
+        foreach (var diff in MatchBrain.Difficulties)
         {
             var word = ocr.Words.FirstOrDefault(x =>
                 x.CenterX < 0.25 && x.Text.Replace(" ", "").Contains(diff));
@@ -505,7 +481,6 @@ public static class WeeklyBrain
                             w.NormText.Contains("取消")) &&
          ocr.Words.Any(w => w.CenterX is > 0.4 and < 0.6 && w.CenterY is > 0.45 and < 0.62 &&
                             w.NormText.Contains("进入")));
-
     /// <summary>
     /// 挑战解锁弹窗「挑战N已解锁」判定（用户 2026-11-08 国际服实机帧）：
     /// 标题行固定文案「已解锁」（挑战序号每周变，不作判定点）+ 屏中部白色 OK 按钮
@@ -545,11 +520,9 @@ public static class WeeklyBrain
     }
 
     // ---------------- 挑战清单卡片扫描 ----------------
-
     /// <summary>卡位右缘 x 坐标（与活动列表卡行同几何；实机 challenge_list 帧：
     /// 卡1 右缘≈0.351、卡2 右缘≈0.637，锁定图标在卡右下角）。</summary>
     private static readonly double[] ChallengeSlotRights = { 0.352, 0.645 };
-
     /// <summary>
     /// 解析挑战清单当前可见卡：OCR 大字卡号给出「哪张卡在哪个卡位」，再对该卡位做
     /// 锁（右下角灰锁图标）/勾（右上角绿勾）像素探针。返回按卡号升序的可见卡列表；
@@ -598,7 +571,6 @@ public static class WeeklyBrain
     /// <summary>区域内灰色像素计数（共享实现见 <see cref="RegionProbe.CountGray"/>）。</summary>
     private static int CountGray(FrameData f, double x0, double x1, double y0, double y1)
         => RegionProbe.CountGrayRef(f, x0, x1, y0, y1);
-
     /// <summary>
     /// 挑战卡详情页（活动主页样式）通关判定：右栏「胜场」计分器读满——
     /// 右上区（x&gt;0.65、y&lt;0.35）出现各位数字全等的纯数字词（"1/1" 经 Norm 去标点成 "11"，
@@ -607,17 +579,14 @@ public static class WeeklyBrain
     /// </summary>
     public static bool ChallengeProgressDone(OcrResult ocr)
         => ocr.Words.Any(w => w.CenterX > 0.65 && w.CenterY < 0.35 && IsFullProgress(w.NormText));
-
     private static bool IsFullProgress(string norm)
         => norm.Length is >= 2 and <= 4 && norm.All(char.IsDigit) &&
            norm.All(c => c == norm[0]) && norm[0] != '0';
-
     /// <summary>
     /// 是否挑战卡详情页（「完成的条件」标题行，正常周活动主页没有该词——实机两帧对照验证）。
     /// 用于半途启动时的挑战模式识别（直接落在卡详情页，没经过挑战清单）。
     /// </summary>
     public static bool IsChallengeCardHome(OcrResult ocr) => ocr.ContainsJoined("完成的条件");
-
     /// <summary>挑战清单扫描中，游标卡号从屏上消失后的处置决策。</summary>
     public enum ChVanishDecision
     {
@@ -646,14 +615,11 @@ public static class WeeklyBrain
         return ChVanishDecision.Rescan;
     }
 
-
-
     /// <summary>在右半屏（x&gt;0.45）找标签词下方的值词（值在标签下一行，y 偏移 0.015~0.13）。</summary>
     private static OcrWord? ValueBelow(OcrResult ocr, double labelY, Func<string, bool> match)
         => ocr.Words.FirstOrDefault(w =>
             w.CenterX > 0.45 && w.CenterY > labelY + 0.015 && w.CenterY < labelY + 0.13 &&
             match(w.Text.Replace(" ", "")));
-
     /// <summary>
     /// 解析活动设置浮层当前值：赛事等级（难度词）/ 自动控制（开/关）/ 弹性自动控制（开/关）。
     /// 任何一项读不到返回 null——调用方保守处理（绝不盲按，防误翻转）。
@@ -670,22 +636,19 @@ public static class WeeklyBrain
         double? autoY = autoLabel?.CenterY ?? LabelWordY(ocr, "自动控制", exact: true);
         double? flexY = flexLabel?.CenterY ?? LabelWordY(ocr, "弹性", exact: false);
         double? levelY = levelLabel?.CenterY ?? LabelWordY(ocr, "赛事等级", exact: false);
-
         string? level = null;
         if (levelY is not null)
         {
-            var v = ValueBelow(ocr, levelY.Value, t => MyLeagueBrain.Difficulties.Any(d => t.Contains(d)));
+            var v = ValueBelow(ocr, levelY.Value, t => MatchBrain.Difficulties.Any(d => t.Contains(d)));
             if (v is not null)
-                level = MyLeagueBrain.Difficulties.First(d => v.Text.Replace(" ", "").Contains(d));
+                level = MatchBrain.Difficulties.First(d => v.Text.Replace(" ", "").Contains(d));
         }
-
         bool? ParseSwitch(double? labelY)
         {
             if (labelY is null) return null;
             var v = ValueBelow(ocr, labelY.Value, t => t == "开" || t == "关");
             return v is null ? null : v.Text.Replace(" ", "") == "开";
         }
-
         return new WkActivitySettings(level, ParseSwitch(autoY), ParseSwitch(flexY));
     }
 
@@ -697,17 +660,13 @@ public static class WeeklyBrain
                 ? w.NormText == keyword
                 : w.NormText.Contains(keyword))
             ?.CenterY;
-
     // ---------------- 完成态探针（2026-10-13 用户实机截图校准） ----------------
-
     /// <summary>活动卡右缘 x 坐标（槽位 0~3；实机 weekly_list_greencheck 帧：卡1 右缘≈0.351）。
     /// 第 4 卡大部分在屏幕外，勾区采样不到自然返回 false（进入后由主页完成态判定兜底）。</summary>
     private static readonly double[] CardRightEdges = { 0.352, 0.643, 0.946, 1.24 };
-
     /// <summary>区域内绿色像素计数（共享实现见 <see cref="RegionProbe.CountGreen"/>）。</summary>
     private static int CountGreen(FrameData f, double x0, double x1, double y0, double y1)
         => RegionProbe.CountGreenRef(f, x0, x1, y0, y1);
-
     /// <summary>
     /// 活动列表卡右上角绿色勾（该活动主要奖励已完成，不进入）：勾形徽章固定在卡右上角。
     /// 实机 weekly_list_greencheck 帧：卡1 勾区 157 绿像素，未完成卡 0——阈值 50。
@@ -729,10 +688,12 @@ public static class WeeklyBrain
     public static bool IsMainRewardDone(OcrResult ocr, FrameData frame)
         => ocr.ContainsJoined("获得的主要奖励") ||
            CountGreen(frame, 0.920, 0.965, 0.635, 0.715) >= 50;
-
     /// <summary>右栏是否显示「离获得主要奖励还差…」（进行中，可继续刷）——仅用于日志与守卫。</summary>
     public static bool MainRewardPending(OcrResult ocr) => ocr.ContainsJoined("离获得主要奖励");
-
     /// <summary>难度档位（与我的联赛「选择赛事等级」共用一套词，周活动赛事等级下拉一致）。</summary>
-    public static string[] Levels => MyLeagueBrain.Difficulties;
+    public static string[] Levels => MatchBrain.Difficulties;
 }
+
+
+
+

@@ -6,6 +6,7 @@ using EfootballBot.Core.Vision.Yolo;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 防掉线重登链回归（eFootball 2027 v6.1.0 实机 9 帧）：掉线/重启回落「按确认按钮」标题页
@@ -29,7 +30,7 @@ public class IntlBootRealFrameTests
 
     private static readonly Lazy<OcrRecognizer> OcrRec = new(() => new OcrRecognizer());
 
-    private (MlScreen Screen, OcrResult Ocr) Load(string name, bool loginRecovery)
+    private (MatchScreen Screen, OcrResult Ocr) Load(string name, bool loginRecovery)
     {
         var path = Path.Combine(Dir, name);
         Assert.True(File.Exists(path), $"缺少实机帧: {path}");
@@ -37,14 +38,14 @@ public class IntlBootRealFrameTests
         var frame = new FrameData(data, w, h, 0);
         var dets = Det.Value.Detect(frame);
         var ocrRes = TestOcr.Run(OcrRec.Value, frame);
-        var screen = MyLeagueBrain.Classify(dets, ocrRes,
-            MyLeagueScenario.CornerHasContent(frame),
+        var screen = MatchBrain.Classify(dets, ocrRes,
+            ScreenProbe.CornerHasContent(frame),
             allowCornerInMatch: false,
-            MyLeagueScenario.IsMostlyLightPage(frame),
+            ScreenProbe.IsMostlyLightPage(frame),
             loginRecovery);
 
         _out.WriteLine($"==== {name} (loginRecovery={loginRecovery}) -> {screen} ====");
-        foreach (var d in dets.Where(d => d.Score >= MyLeagueBrain.MinScore))
+        foreach (var d in dets.Where(d => d.Score >= MatchBrain.MinScore))
             _out.WriteLine($"  YOLO {d.ClassName} {d.Score:F2} @({d.CenterX:F2},{d.CenterY:F2})");
         foreach (var l in ocrRes.Lines)
             _out.WriteLine($"  L \"{l.Text}\" @({l.CenterX:F2},{l.CenterY:F2})");
@@ -73,14 +74,14 @@ public class IntlBootRealFrameTests
         // 主判底栏「法律及隐私政策」，副判「确认按钮」+konami/版本。判不出会落旧 TitleScreen
         // 规则按 X，X 在此页无效 → 防掉线恢复从第一步就卡死
         var (screen, _) = Load("boot_splash.png", loginRecovery: false);
-        Assert.Equal(MlScreen.BootSplash, screen);
+        Assert.Equal(MatchScreen.BootSplash, screen);
 
         // 前几轮 下→右→A 登录序列；超过 BootLoginNavRounds 改持续按 A（页面提示按「确认」按钮）
-        var nav = MyLeagueBrain.Decide(MlScreen.BootSplash, OcrResult.Empty, screenStreak: 0);
-        Assert.Equal(MlActionKind.PadLoginNav, nav.Kind);
-        var confirm = MyLeagueBrain.Decide(MlScreen.BootSplash, OcrResult.Empty,
-            screenStreak: MyLeagueBrain.BootLoginNavRounds);
-        Assert.Equal(MlActionKind.PadConfirm, confirm.Kind);
+        var nav = MatchBrain.Decide(MatchScreen.BootSplash, OcrResult.Empty, screenStreak: 0);
+        Assert.Equal(MatchActionKind.PadLoginNav, nav.Kind);
+        var confirm = MatchBrain.Decide(MatchScreen.BootSplash, OcrResult.Empty,
+            screenStreak: MatchBrain.BootLoginNavRounds);
+        Assert.Equal(MatchActionKind.PadConfirm, confirm.Kind);
     }
 
     [Fact]
@@ -89,7 +90,7 @@ public class IntlBootRealFrameTests
         // 转圈加载帧（同页变暗+转圈）：底栏词仍在，同判 BootSplash；加载期按键无效但无害，
         // 绝不能落 Unknown→连续 B 逃生（B 会打开侧边栏/退出登录）
         var (screen, _) = Load("boot_splash_loading.png", loginRecovery: false);
-        Assert.Equal(MlScreen.BootSplash, screen);
+        Assert.Equal(MatchScreen.BootSplash, screen);
     }
 
     [Fact]
@@ -98,9 +99,9 @@ public class IntlBootRealFrameTests
         // 抽取页（Special Player List）：「有限次数抽取」主判、「查看全部+名球员」兜底。
         // 分类与 loginRecovery 无关（判定块先于门控块）。处置=B 退出，绝无确认类动作
         var (screen, _) = Load("gacha_page.png", loginRecovery: false);
-        Assert.Equal(MlScreen.GachaPage, screen);
-        var action = MyLeagueBrain.Decide(MlScreen.GachaPage, OcrResult.Empty, screenStreak: 0);
-        Assert.Equal(MlActionKind.GamepadBack, action.Kind);
+        Assert.Equal(MatchScreen.GachaPage, screen);
+        var action = MatchBrain.Decide(MatchScreen.GachaPage, OcrResult.Empty, screenStreak: 0);
+        Assert.Equal(MatchActionKind.GamepadBack, action.Kind);
     }
 
     [Fact]
@@ -110,13 +111,13 @@ public class IntlBootRealFrameTests
         // ★必须先于抽取页判定；含「取消」也绝不能走 HasConfirm 的「有取消先上移」——
         // 上方是金币付款键。直接按 A = 点默认焦点「取消」
         var (screen, ocr) = Load("payment_confirm.png", loginRecovery: true);
-        Assert.Equal(MlScreen.PaymentConfirmDialog, screen);
-        var action = MyLeagueBrain.Decide(screen, ocr, screenStreak: 0);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
-        Assert.NotEqual(MlActionKind.PadUpConfirm, action.Kind);
+        Assert.Equal(MatchScreen.PaymentConfirmDialog, screen);
+        var action = MatchBrain.Decide(screen, ocr, screenStreak: 0);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
+        Assert.NotEqual(MatchActionKind.PadUpConfirm, action.Kind);
 
         // 判定序守卫（纯构造）：付款确认 + 抽取页词同屏 → 付款确认赢
-        Assert.Equal(MlScreen.PaymentConfirmDialog, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.PaymentConfirmDialog, MatchBrain.Classify(
             Array.Empty<YoloDetection>(),
             Ocr(("付款确认", 0.5, 0.3), ("取消", 0.5, 0.6), ("查看全部", 0.2, 0.6), ("名球员", 0.2, 0.3)),
             loginRecovery: true));
@@ -132,9 +133,9 @@ public class IntlBootRealFrameTests
         foreach (var f in new[] { "login_bonus_popup.png", "inbox_popup.png", "boot_abandoned_popup.png" })
         {
             var (screen, ocr) = Load(f, loginRecovery: true);
-            Assert.Equal(MlScreen.HasConfirm, screen);
-            var action = MyLeagueBrain.Decide(screen, ocr, screenStreak: 0);
-            Assert.True(action.Kind is MlActionKind.PadConfirm or MlActionKind.PadUpConfirm,
+            Assert.Equal(MatchScreen.HasConfirm, screen);
+            var action = MatchBrain.Decide(screen, ocr, screenStreak: 0);
+            Assert.True(action.Kind is MatchActionKind.PadConfirm or MatchActionKind.PadUpConfirm,
                 $"{f}: 应为推进类动作，实际 {action.Kind}:{action.Target}");
         }
     }
@@ -148,20 +149,20 @@ public class IntlBootRealFrameTests
         foreach (var f in new[] { "campaign_grid.png", "playing_style_campaign.png" })
         {
             var (cold, ocr) = Load(f, loginRecovery: false);
-            Assert.Equal(MlScreen.CampaignGridPage, cold);
+            Assert.Equal(MatchScreen.CampaignGridPage, cold);
             var (warm, _) = Load(f, loginRecovery: true);
-            Assert.Equal(MlScreen.CampaignGridPage, warm);
-            var action = MyLeagueBrain.Decide(cold, ocr, screenStreak: 0);
-            Assert.Equal(MlActionKind.PadConfirm, action.Kind);
-            Assert.NotEqual(MlActionKind.PadUpConfirm, action.Kind);
+            Assert.Equal(MatchScreen.CampaignGridPage, warm);
+            var action = MatchBrain.Decide(cold, ocr, screenStreak: 0);
+            Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
+            Assert.NotEqual(MatchActionKind.PadUpConfirm, action.Kind);
         }
 
         // 判定词守卫（纯构造）：标题整行 / 逐词拆开（JoinedText 拼回）+ 推进词 双证据命中
-        Assert.Equal(MlScreen.CampaignGridPage, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.CampaignGridPage, MatchBrain.Classify(
             Array.Empty<YoloDetection>(),
             Ocr(("New Playing Style Campaign", 0.5, 0.19), ("继续", 0.5, 0.93)),
             loginRecovery: false));
-        Assert.Equal(MlScreen.CampaignGridPage, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.CampaignGridPage, MatchBrain.Classify(
             Array.Empty<YoloDetection>(),
             Ocr(("New", 0.35, 0.19), ("Playing", 0.44, 0.19), ("Style", 0.53, 0.19),
                 ("Campaign", 0.63, 0.19), ("继续", 0.5, 0.93)),
@@ -169,11 +170,11 @@ public class IntlBootRealFrameTests
 
         // 负例守卫：标题在而推进词漏读 → 不命中（宁落后续规则也不盲按）；
         // 「继续」词在而标题不在、又无重登窗口 → 不命中（正常流程同名词保护）
-        Assert.NotEqual(MlScreen.CampaignGridPage, MyLeagueBrain.Classify(
+        Assert.NotEqual(MatchScreen.CampaignGridPage, MatchBrain.Classify(
             Array.Empty<YoloDetection>(),
             Ocr(("New Playing Style Campaign", 0.5, 0.19), ("Y详情", 0.1, 0.93)),
             loginRecovery: false));
-        Assert.NotEqual(MlScreen.CampaignGridPage, MyLeagueBrain.Classify(
+        Assert.NotEqual(MatchScreen.CampaignGridPage, MatchBrain.Classify(
             Array.Empty<YoloDetection>(), Ocr(("继续", 0.5, 0.75)), loginRecovery: false));
 
         // 实机负例（2026-10-21 回归）：主菜单横幅同样含整行标题词（收件箱弹窗背后
@@ -181,9 +182,9 @@ public class IntlBootRealFrameTests
         // 否则收件箱弹窗被抢判、OK 漏按（首版不限位置的判定在此帧翻车）
         var bannerUnderPopup = Ocr(("NewPlayingStyleCampaign", 0.5, 0.68),
             ("物品已送到收件箱", 0.5, 0.55), ("OK", 0.5, 0.78));
-        Assert.NotEqual(MlScreen.CampaignGridPage, MyLeagueBrain.Classify(
+        Assert.NotEqual(MatchScreen.CampaignGridPage, MatchBrain.Classify(
             Array.Empty<YoloDetection>(), bannerUnderPopup, loginRecovery: true));
-        Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.HasConfirm, MatchBrain.Classify(
             Array.Empty<YoloDetection>(), bannerUnderPopup, loginRecovery: true));
     }
 
@@ -193,9 +194,9 @@ public class IntlBootRealFrameTests
         // 门控守卫：推进词（继续/OK/下一步/确定）只有在最近见过标题页时才抢判 HasConfirm，
         // 否则正常流程里的同名词（联赛页「继续」等）会被抢走
         var ocr = Ocr(("继续", 0.5, 0.75));
-        Assert.NotEqual(MlScreen.HasConfirm, MyLeagueBrain.Classify(
+        Assert.NotEqual(MatchScreen.HasConfirm, MatchBrain.Classify(
             Array.Empty<YoloDetection>(), ocr, loginRecovery: false));
-        Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.HasConfirm, MatchBrain.Classify(
             Array.Empty<YoloDetection>(), ocr, loginRecovery: true));
     }
 
@@ -204,9 +205,9 @@ public class IntlBootRealFrameTests
     {
         // 抽取页判定词守卫：主判词带价格尾巴（有限次数抽取:150/150）Norm 去标点后可命中；
         // 兜底 查看全部+名球员 双词同屏；付款确认词不存在时不误判付款弹窗
-        Assert.Equal(MlScreen.GachaPage, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.GachaPage, MatchBrain.Classify(
             Array.Empty<YoloDetection>(), Ocr(("有限次数抽取:150/150", 0.8, 0.07)), loginRecovery: false));
-        Assert.Equal(MlScreen.GachaPage, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.GachaPage, MatchBrain.Classify(
             Array.Empty<YoloDetection>(), Ocr(("查看全部", 0.2, 0.6), ("10名球员", 0.2, 0.48)), loginRecovery: false));
     }
 
@@ -218,18 +219,18 @@ public class IntlBootRealFrameTests
         // 下×2 导航落点不可控（最坏按在「退出游戏」上）。分类不依赖 loginRecovery
         // （会话可在挂机任意时刻掉，附近没有标题页）
         var (screen, _) = Load("not_logged_in.png", loginRecovery: false);
-        Assert.Equal(MlScreen.NotLoggedIn, screen);
+        Assert.Equal(MatchScreen.NotLoggedIn, screen);
         // 实机 2026-10-21 用户视频：默认焦点在顶部页签「游戏主菜单」，直接 A 无效、
         // 先按右会切到学院页签；必须 下（友谊赛）→右（登录）→A
-        var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, screenStreak: 0);
-        Assert.Equal(MlActionKind.PadLoginNav, action.Kind);
+        var action = MatchBrain.Decide(screen, OcrResult.Empty, screenStreak: 0);
+        Assert.Equal(MatchActionKind.PadLoginNav, action.Kind);
 
         // 判定词守卫（纯构造）：主判「未登录」；兜底「网络环境」（请检查你的网络环境并登录游戏）
-        Assert.Equal(MlScreen.NotLoggedIn, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.NotLoggedIn, MatchBrain.Classify(
             Array.Empty<YoloDetection>(),
             Ocr(("未登录", 0.6, 0.33), ("登录", 0.65, 0.54), ("退出游戏", 0.65, 0.64)),
             loginRecovery: false));
-        Assert.Equal(MlScreen.NotLoggedIn, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.NotLoggedIn, MatchBrain.Classify(
             Array.Empty<YoloDetection>(),
             Ocr(("请检查你的网络环境并登录游戏", 0.65, 0.43), ("登录", 0.65, 0.54), ("退出游戏", 0.65, 0.64)),
             loginRecovery: false));
@@ -242,19 +243,19 @@ public class IntlBootRealFrameTests
         // ★登录失败重试时焦点可能已停在「登录」甚至「退出游戏」，盲目重跑下→右→A 会把
         // 「下」落到退出游戏上、A 直接退出游戏——探针按焦点状态选择动作，序列幂等
         var none = Frame();
-        Assert.Equal(MyLeagueBrain.LoginButtonFocus.None, MyLeagueBrain.DetectNotLoggedInFocus(none));
-        Assert.Equal(MlActionKind.PadLoginNav, MyLeagueBrain.Decide(
-            MlScreen.NotLoggedIn, OcrResult.Empty, 0, frame: none).Kind);
+        Assert.Equal(MatchBrain.LoginButtonFocus.None, MatchBrain.DetectNotLoggedInFocus(none));
+        Assert.Equal(MatchActionKind.PadLoginNav, MatchBrain.Decide(
+            MatchScreen.NotLoggedIn, OcrResult.Empty, 0, frame: none).Kind);
 
         var login = Frame(band: (0.505, 0.560));
-        Assert.Equal(MyLeagueBrain.LoginButtonFocus.Login, MyLeagueBrain.DetectNotLoggedInFocus(login));
-        Assert.Equal(MlActionKind.PadConfirm, MyLeagueBrain.Decide(
-            MlScreen.NotLoggedIn, OcrResult.Empty, 0, frame: login).Kind);
+        Assert.Equal(MatchBrain.LoginButtonFocus.Login, MatchBrain.DetectNotLoggedInFocus(login));
+        Assert.Equal(MatchActionKind.PadConfirm, MatchBrain.Decide(
+            MatchScreen.NotLoggedIn, OcrResult.Empty, 0, frame: login).Kind);
 
         var exit = Frame(band: (0.600, 0.655));
-        Assert.Equal(MyLeagueBrain.LoginButtonFocus.ExitGame, MyLeagueBrain.DetectNotLoggedInFocus(exit));
-        Assert.Equal(MlActionKind.PadUpConfirm, MyLeagueBrain.Decide(
-            MlScreen.NotLoggedIn, OcrResult.Empty, 0, frame: exit).Kind);
+        Assert.Equal(MatchBrain.LoginButtonFocus.ExitGame, MatchBrain.DetectNotLoggedInFocus(exit));
+        Assert.Equal(MatchActionKind.PadUpConfirm, MatchBrain.Decide(
+            MatchScreen.NotLoggedIn, OcrResult.Empty, 0, frame: exit).Kind);
     }
 
     [Fact]
@@ -266,12 +267,12 @@ public class IntlBootRealFrameTests
         var mainMenuOcr = Ocr(("游戏主菜单", 0.30, 0.06), ("学院", 0.52, 0.06), ("额外选项", 0.72, 0.06),
             ("友谊赛", 0.12, 0.78), ("eFootball联赛", 0.50, 0.80), ("我的联赛", 0.70, 0.80));
         var mainMenuDet = new[] { new YoloDetection("main_menu", 0, 0.90f, 0.10, 0.05, 0.80, 0.90) };
-        Assert.Equal(MlScreen.MainMenu, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.MainMenu, MatchBrain.Classify(
             mainMenuDet, mainMenuOcr, loginRecovery: true));
 
         // 稀疏加载帧（只剩 eFootball 标志词、无主菜单特征）仍由兜底判标题页——
         // 掉线恢复不能因为收紧规则而漏判
-        Assert.Equal(MlScreen.BootSplash, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.BootSplash, MatchBrain.Classify(
             Array.Empty<YoloDetection>(), Ocr(("eFootball", 0.50, 0.50), ("2027", 0.50, 0.60)),
             loginRecovery: true));
     }
@@ -283,14 +284,14 @@ public class IntlBootRealFrameTests
         // 右上角「B 关闭」。白底整幅文档 + YOLO main_menu（底下是主菜单）→ 必须专用判定，
         // 处置 B 关闭；绝不走主菜单导航（下×2 盲走）或 HasConfirm（上移+A）
         var (screen, _) = Load("points_website_popup.png", loginRecovery: true);
-        Assert.Equal(MlScreen.AnnouncementPage, screen);
-        var action = MyLeagueBrain.Decide(screen, OcrResult.Empty, screenStreak: 0);
-        Assert.Equal(MlActionKind.GamepadBack, action.Kind);
-        Assert.Equal(MlActionKind.GamepadBack, MyLeagueBrain.Decide(
-            screen, OcrResult.Empty, screenStreak: MyLeagueBrain.StuckStreak).Kind);
+        Assert.Equal(MatchScreen.AnnouncementPage, screen);
+        var action = MatchBrain.Decide(screen, OcrResult.Empty, screenStreak: 0);
+        Assert.Equal(MatchActionKind.GamepadBack, action.Kind);
+        Assert.Equal(MatchActionKind.GamepadBack, MatchBrain.Decide(
+            screen, OcrResult.Empty, screenStreak: MatchBrain.StuckStreak).Kind);
 
         // 判定词守卫（纯构造）：标题碎裂时正文固定句「深表歉意」兜底
-        Assert.Equal(MlScreen.AnnouncementPage, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.AnnouncementPage, MatchBrain.Classify(
             Array.Empty<YoloDetection>(),
             Ocr(("eFootball积分官方网站问题", 0.50, 0.30), ("我们对此问题造成的不便深表歉意", 0.50, 0.55)),
             loginRecovery: false));
@@ -301,11 +302,11 @@ public class IntlBootRealFrameTests
     {
         // 未登录页与标题页同样武装重登窗口：点「登录」后的奖励弹窗链只认推进词，
         // 不依赖附近是否见过标题页（会话掉线可发生在挂机任意时刻）
-        var m = new EfootballBot.Core.Bot.Scenarios.MyLeague.MlFlowMemory();
+        var m = new EfootballBot.Core.Bot.Match.MatchFlowMemory();
         var t0 = DateTime.Now;
-        m.Record(MlScreen.NotLoggedIn, t0);
-        Assert.True(EfootballBot.Core.Bot.Scenarios.ScenarioShared.LoginRecovery(m, t0.AddSeconds(50)));
-        Assert.False(EfootballBot.Core.Bot.Scenarios.ScenarioShared.LoginRecovery(m, t0.AddSeconds(101)));
+        m.Record(MatchScreen.NotLoggedIn, t0);
+        Assert.True(EfootballBot.Core.Bot.Match.MatchShared.LoginRecovery(m, t0.AddSeconds(50)));
+        Assert.False(EfootballBot.Core.Bot.Match.MatchShared.LoginRecovery(m, t0.AddSeconds(101)));
     }
 
     /// <summary>构造测试帧：默认全黑；band 给出时在未登录页按钮列区域（x 0.52~0.77）
@@ -335,3 +336,6 @@ public class IntlBootRealFrameTests
         return new OcrResult(list, 1280, 720);
     }
 }
+
+
+

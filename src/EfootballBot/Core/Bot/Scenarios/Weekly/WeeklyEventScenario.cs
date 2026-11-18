@@ -3,6 +3,18 @@ using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
+using EfootballBot.Core.Bot.Match;
+
+// ===========================================================================
+// 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
+// 本层职责：单个挂机模块自己的菜单流程与私有状态机（只认自己的界面）。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 不许引用别的模块的 *Scenario（只读借用别人的 *Brain.Classify 认残留页面是允许的）
+//   · 不许自己写场次记账 / 比赛内挂机节奏 —— 一律走 MatchPlay.Tick / IdleTapAsync
+//   · 共享界面判定与决策一律用 Core/Bot/Match 的 MatchBrain，不要复制一份
+// 新增模块：ModuleIds 加常量 + BotModuleCatalog 加一条记录，再写本目录的状态机。
+// 除非用户明确要求更换写法，否则按本层约定写。
+// ===========================================================================
 
 namespace EfootballBot.Core.Bot.Scenarios.Weekly;
 
@@ -50,8 +62,8 @@ public sealed class WeeklyEventScenario : IScenario
     }
 
     private readonly BotEngine _engine;
+
     private readonly Action<string, LogLevel> _log;
-    private readonly Random _rnd = new();
 
     private WkPhase _phase = WkPhase.Flow;
     /// <summary>当前阶段累计行动次数（SetPhase 清零；各阶段超限 B 逃生防死循环）。</summary>
@@ -141,19 +153,24 @@ public sealed class WeeklyEventScenario : IScenario
     /// <summary>「挑战N已解锁」弹窗连续按 A 的累计次数（弹窗消失即清零；超限回屏幕驱动重判，
     /// 防 OCR 误判时对着普通页面无限按 A）。</summary>
     private int _unlockPopupPresses;
-
     /// <summary>同一枚解锁弹窗最多连按几次 A；超限认为弹窗不是 A 能关的（或识别误判），
     /// 回 Flow 让屏幕驱动重判并暂停一拍。</summary>
     private const int MaxUnlockPopupPresses = 6;
 
     private string _lastScreenName = "";
+
     private int _streak;
-    private readonly MlFlowMemory _memory = new();
-    private readonly MatchSessionTracker _matchSession = new();
+
+    private readonly MatchFlowMemory _memory = new();
+    /// <summary>赛中匹配（共享层）：开赛/终场判定 + 场内挂机节奏 + 场次记账，五个模块同一份实现。</summary>
+    private readonly MatchPlay _matchPlay;
+    /// <summary>底层场次跟踪器（模块内读用时/关键比赛等细节用；比赛怎么算由 MatchPlay 决定）。</summary>
+    private MatchSessionTracker _matchSession => _matchPlay.Session;
     /// <summary>赛后活动任务页（全屏活动地图）状态机：比赛结束后/开始前出现，随服务器推送轮换。</summary>
     private readonly PostMatchActivityController _postMatch = new();
-    private DateTime _lastTapLogAt = DateTime.MinValue;
+
     private DateTime _lastMaxLevelAt = DateTime.MinValue;
+
     private bool _takeoverLogged;
     /// <summary>TitleScreen 首次出现时间（比赛上下文中按 X 前 30s 宽限，区分加载画面与真标题）。</summary>
     private DateTime? _titleSince;
@@ -161,7 +178,6 @@ public sealed class WeeklyEventScenario : IScenario
     private bool _probeNoteLogged;
 
     public string Name => "周活动";
-
     /// <summary>比赛中（供引擎把手柄诊断挡在比赛之外）。</summary>
     public bool InMatch => _matchSession.Active;
 
@@ -169,65 +185,47 @@ public sealed class WeeklyEventScenario : IScenario
     {
         _engine = engine;
         _log = log;
+        _matchPlay = new MatchPlay(engine, "周活动", log);
     }
 
     public async Task<int> RunOnceAsync(CancellationToken ct)
     {
         var obs = await _engine.ObserveAsync(ct);
         var now = DateTime.Now;
-
         // 赛后活动任务页（全屏活动地图）优先拦截：不进共享分类（含「下一步」会被判
         // HasConfirm 盲按 A / 活动主页词干扰），由专用状态机按用户规则推进或退出。
         var pmWait = await _postMatch.StepAsync(_engine, obs,
             _engine.Config.PostMatchActivity.AutoAdvanceWeeklyTasks, _log, "周活动", ct);
         if (pmWait is not null) return pmWait.Value;
-
         // 角区探针兜底 InMatch 需比赛上下文（同我的联赛场景）
-        bool corner = MyLeagueScenario.CornerHasContent(obs.Frame);
-        bool light = MyLeagueScenario.IsMostlyLightPage(obs.Frame);
-        bool matchContext = ScenarioShared.MatchContext(_memory, now);
-
+        bool corner = ScreenProbe.CornerHasContent(obs.Frame);
+        bool light = ScreenProbe.IsMostlyLightPage(obs.Frame);
+        bool matchContext = MatchShared.MatchContext(_memory, now);
         // 周活动界面先判：活动主页也含「前往比赛」，不先判会被共享分类误归 LeaguePage。
         // 命中周活动界面时 ml 记 Unknown（由状态机处理，不走共享决策）
         var wk = WeeklyBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light);
         var ml = wk == WkScreen.None
-            ? MyLeagueBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light,
-                ScenarioShared.LoginRecovery(_memory, now))
-            : MlScreen.Unknown;
+            ? MatchBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light,
+                MatchShared.LoginRecovery(_memory, now))
+            : MatchScreen.Unknown;
         _memory.Record(ml, now);
-
         if (!_takeoverLogged)
         {
             _takeoverLogged = true;
             _log($"[周活动] 智能接管：当前界面「{(wk != WkScreen.None ? wk.ToString() : ml.ToString())}」，从该阶段继续", LogLevel.Success);
         }
-
-        // ---- 共用比赛流程：场次/关键比赛计数。周活动流程不回我的联赛主页（isHome 恒 false），
-        //      终场 FullTime 是权威关场信号，超时兜底 5 分钟
-        bool wasActive = _matchSession.Active;
-        bool matchEnded = _matchSession.Observe(ml, now,
-            sawKeyMatchHint: ml == MlScreen.KeyMatchDialog || obs.Ocr.ContainsJoined("关键比赛"),
+        // ---- 赛中匹配（共享层 MatchPlay）：开赛/终场/超时判定 + 场次与关键比赛记账
+        var tick = _matchPlay.Tick(ml, now,
+            sawKeyMatchHint: ml == MatchScreen.KeyMatchDialog || obs.Ocr.ContainsJoined("关键比赛"),
             isHome: false);
-        if (!wasActive && _matchSession.Active)
+        if (tick.Started)
         {
             _launchNudge = 0; // 开赛成功：焦点归位档位不再需要（赛后回主页焦点通常回前往比赛）
             _adviceBacks = 0;
             _focusMissAtAdvice = false;
-            _log("[周活动] 比赛开始：挂机等待比赛结束（按节奏随机点击）", LogLevel.Info);
         }
-        if (matchEnded && !_matchSession.LastEndTrusted)
+        if (tick.Ended && tick.EndedTrusted)
         {
-            // 超时收尾：5 分钟没再见到比赛特征（赛后回放/结算页卡住，或画面判定丢了）。
-            // 不外计场次——用户 2026-11-13 反馈「哪儿来的 76 场」，虚高就是这么来的。
-            _log($"[周活动] 5 分钟没再出现比赛特征，关闭本场（用时 {_matchSession.LastDurationText}）但未计入场次——没见到终场页，请带这份日志反馈", LogLevel.Warn);
-        }
-        else if (matchEnded)
-        {
-            _engine.Stats.MatchesDone++;
-            if (_matchSession.WasKeyMatch) _engine.Stats.KeyMatches++;
-            _log($"[周活动] 一场比赛结束（{(_matchSession.WasKeyMatch ? "关键比赛，" : "")}用时 {_matchSession.LastDurationText}，累计 {_engine.Stats.MatchesDone} 场）", LogLevel.Success);
-            _engine.ReportMatchDone(_matchSession.WasKeyMatch);
-
             var wkCfg = _engine.Config.Weekly;
             if (wkCfg.StopAfterMatches > 0 && _engine.ModuleMatchesDone >= wkCfg.StopAfterMatches)
             {
@@ -236,7 +234,6 @@ public sealed class WeeklyEventScenario : IScenario
                 return 0;
             }
         }
-
         // ---- 共用：球员满级提示（60s 节流，常开） ----
         if (obs.Ocr.ContainsJoined("满级") && (now - _lastMaxLevelAt).TotalSeconds > 60)
         {
@@ -245,35 +242,30 @@ public sealed class WeeklyEventScenario : IScenario
             _log($"[周活动] 球员满级提示（累计 {_engine.Stats.PlayersMaxed} 次）", LogLevel.Success);
             _engine.ReportMaxLevel("比赛中满级提示");
         }
-
         string screenName = wk != WkScreen.None ? $"周活动.{wk}" : ml.ToString();
         if (screenName == _lastScreenName) _streak++;
         else { _streak = 0; _lastScreenName = screenName; _log($"[周活动] 界面：{screenName}", LogLevel.Info); }
-
         // ---- 周活动菜单侧状态机：接管周活动界面与阶段内无特征界面 ----
         int? weeklyWait = await HandleWeeklyAsync(wk, ml, obs);
         if (weeklyWait is > 0) return weeklyWait.Value;
         if (weeklyWait is not null) return 1500;
         // wk==None 且阶段已交回共享流程：走共用决策（比赛中/终场/弹窗/逃生）
-
-        var action = MyLeagueBrain.Decide(ml, obs.Ocr, _streak, matchContext, obs.Frame);
-        ScenarioShared.DecisionSnapshot(_log, "周活动", ml, _streak, action, obs.Ocr);
-
+        var action = MatchBrain.Decide(ml, obs.Ocr, _streak, matchContext, obs.Frame);
+        MatchShared.DecisionSnapshot(_log, "周活动", ml, _streak, action, obs.Ocr);
         // 标题画面宽限（共享实现，含赛后弹窗链 90s 档）：比赛上下文中的「eFootball™+X」帧
         // 多为加载画面；赛后品牌过场会连续 30s+（实机 2026-10-12：全场结束后 33s 处按 X
         // 打断了弹窗链）。真实标题画面停留超宽限期后照常按 X。
-        if (action.Kind != MlActionKind.PadXPress)
+        if (action.Kind != MatchActionKind.PadXPress)
         {
             _titleSince = null;
         }
-        else if (ScenarioShared.TitleGrace(_memory, now, ref _titleSince, _log, "周活动"))
+        else if (MatchShared.TitleGrace(_memory, now, ref _titleSince, _log, "周活动"))
         {
             return 2000;
         }
-
         switch (action.Kind)
         {
-            case MlActionKind.PadEnterMatch:
+            case MatchActionKind.PadEnterMatch:
                 // 主菜单进比赛卡：下×2（新 UI 进底部卡行，用户 2026-10-19 实测）→ 左×6 归位最左 → A
                 _log("[周活动] 主菜单导航：下×2→左×6→A 进比赛页", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Down);
@@ -281,62 +273,43 @@ public sealed class WeeklyEventScenario : IScenario
                 await _engine.Pad.DpadRepeat(PadDir.Left, 6);
                 await _engine.Pad.Confirm();
                 break;
-
-            case MlActionKind.PadConfirm:
+            case MatchActionKind.PadConfirm:
                 _log($"[周活动] 手柄 A：{action.Target}", LogLevel.Info);
                 await _engine.Pad.Confirm();
                 break;
-
-            case MlActionKind.PadUpConfirm:
+            case MatchActionKind.PadUpConfirm:
                 _log($"[周活动] 弹窗上移确认：{action.Target}", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Up);
                 await _engine.Pad.Confirm();
                 break;
-
-            case MlActionKind.PadDownConfirm:
+            case MatchActionKind.PadDownConfirm:
                 _log($"[周活动] 弹窗下移确认：{action.Target}", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Down);
                 await _engine.Pad.Confirm();
                 break;
-
-            case MlActionKind.PadStartPress:
+            case MatchActionKind.PadStartPress:
                 _log($"[周活动] {action.Target}", LogLevel.Info);
                 await _engine.Pad.Start();
                 break;
-
-            case MlActionKind.PadXPress:
+            case MatchActionKind.PadXPress:
                 _log($"[周活动] {action.Target}", LogLevel.Info);
                 await _engine.Pad.X();
                 break;
-
-            case MlActionKind.PadLoginNav:
+            case MatchActionKind.PadLoginNav:
                 // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
                 _log($"[周活动] {action.Target}", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Down);
                 await _engine.Pad.Dpad(PadDir.Right);
                 await _engine.Pad.Confirm();
                 break;
-
-            case MlActionKind.GamepadBack:
+            case MatchActionKind.GamepadBack:
                 _log($"[周活动] {action.Target}", LogLevel.Warn);
                 await _engine.Pad.Back();
                 break;
-
-            case MlActionKind.MatchIdleTap:
-            {
-                await _engine.Pad.Confirm();
-                var t = _engine.Config.Timing;
-                int waitMs = _rnd.Next(Math.Min(t.IdleTapMinMs, t.IdleTapMaxMs),
-                                       Math.Max(t.IdleTapMinMs, t.IdleTapMaxMs) + 1);
-                if ((DateTime.Now - _lastTapLogAt).TotalMinutes >= 1)
-                {
-                    _lastTapLogAt = DateTime.Now;
-                    _log($"[周活动] 比赛挂机中：随机点击 A（{waitMs / 1000.0:F1}s 间隔）", LogLevel.Debug);
-                }
-                return waitMs;
-            }
-
-            case MlActionKind.PadMoveRight:
+            case MatchActionKind.MatchIdleTap:
+                // 比赛中挂机点击：按 A + 用户「挂机节奏」区间随机间隔（共享层 MatchPlay，拟人化）
+                return await _matchPlay.IdleTapAsync(ct);
+            case MatchActionKind.PadMoveRight:
                 await _engine.Pad.Dpad(PadDir.Right);
                 break;
         }
@@ -344,9 +317,8 @@ public sealed class WeeklyEventScenario : IScenario
     }
 
     // ---------------- 菜单侧状态机 ----------------
-
     /// <summary>返回正数/0=本轮已处理（下一轮延时）；null=未接管（走共享决策）。</summary>
-    private async Task<int?> HandleWeeklyAsync(WkScreen wk, MlScreen ml, Observation obs)
+    private async Task<int?> HandleWeeklyAsync(WkScreen wk, MatchScreen ml, Observation obs)
     {
         // 建议面板：任何阶段命中都先关掉（面板是纯展示层，盖在主页上会让主页探针全部失效）。
         // B 每次只退一级：详情视图 → 列表视图 → 活动主页，所以每观测到面板就按一次 B，
@@ -373,14 +345,12 @@ public sealed class WeeklyEventScenario : IScenario
             return 1600;
         }
         _adviceOpen = false;
-
         // 挑战解锁弹窗「挑战N已解锁 / OK」（2026-11-08 国际服实机）：盖在挑战清单上，只有一个
         // OK 键。任何阶段命中都在这里接管——弹窗半透明盖层下清单标题/卡号/底栏仍在，落清单
         // 分支会让归位/移卡全被吃掉，卡位锁探针还会被弹窗浅灰底误判成锁定 → 回撤退 B 退不掉
         // → 清单↔弹窗死循环（用户反馈：识别不到这个弹窗）。
         if (wk == WkScreen.ChallengeUnlockPopup)
             return await HandleChallengeUnlockPopupAsync();
-
         // 比赛历史页：任何阶段误入都先 B 退回活动主页（该页无可推进项，交给共享决策会被
         // 误检的 btn_confirm 拖成「盲按 A 三十轮再 B 逃生」的死循环，实机 2026-10-26 反馈包）。
         // 真正把焦点修好的动作在 LaunchReady 的归位里——退出历史页后游戏把焦点还给
@@ -396,7 +366,6 @@ public sealed class WeeklyEventScenario : IScenario
             await _engine.Pad.Back();
             return 2200;
         }
-
         // 介绍页「详情」说明面板（2026-11-09 国际服实机）：介绍页那记 A 落在「详情」上时打开的是
         // 浅色文档面板（右上只有「关闭」、没有「进入」），面板里没有任何 A 能推进的东西。
         // 旧逻辑把它判成 LeagueInfoPage → 干等 15 帧（约 30s）才 B 退回介绍页，退回来光标还在
@@ -410,7 +379,6 @@ public sealed class WeeklyEventScenario : IScenario
             await _engine.Pad.Back();
             return 2200;
         }
-
         // 挑战活动新增前置流程（2026-11-08 国际服「Road to CAF AFCON 2027」子内容）：
         // 介绍页按进入 → 选择地区 → 选择球队 →「要使用<队名>吗？」确认弹窗 → 正常挑战清单。
         // 三页都没有推进词（只有底栏 B 返回 / Y 随机，弹窗只有 进入 + 取消），落共享决策会被
@@ -427,15 +395,13 @@ public sealed class WeeklyEventScenario : IScenario
         _pickPage = WkScreen.None;
         _pickEscapes = 0;
         _teamConfirmAttempts = 0;
-
         // 单场周活动「选择赛事等级」页（2026-10-30 用户截图 + issue #1）：任何阶段命中都接管，
         // 旧逻辑该页 wk=None/ml=DifficultyPage 无人处理 → 原地干等。半途启动/标题被遮挡
         //（issue #1 手机照：GUI 覆盖层盖住左列）时本判定只剩 ml=DifficultyPage 一个信号，
         // 一并接管；LevelDropdown 阶段的 ml=DifficultyPage 是设置浮层下拉样式，交给原逻辑。
         if (wk == WkScreen.EventDifficulty ||
-            (_phase != WkPhase.LevelDropdown && ml == MlScreen.DifficultyPage))
+            (_phase != WkPhase.LevelDropdown && ml == MatchScreen.DifficultyPage))
             return await HandleEventDifficultyAsync(obs);
-
         switch (_phase)
         {
             case WkPhase.Flow:
@@ -500,10 +466,10 @@ public sealed class WeeklyEventScenario : IScenario
                         _hubRound = 0;
                         return await EnterChallengeListPhaseAsync();
                 }
-                if (ml == MlScreen.MainMenu)
+                if (ml == MatchScreen.MainMenu)
                 {
                     // 导航多轮无效不再永久等待（≥NavEscapeStreak 周期性 B 清盖层，共享决策同款）
-                    if (_streak >= MyLeagueBrain.NavEscapeStreak && (_streak - MyLeagueBrain.NavEscapeStreak) % 5 == 0)
+                    if (_streak >= MatchBrain.NavEscapeStreak && (_streak - MatchBrain.NavEscapeStreak) % 5 == 0)
                     {
                         _log("[周活动] 主菜单导航多轮无效，B 清盖层/回上级重试", LogLevel.Warn);
                         await _engine.Pad.Back();
@@ -516,9 +482,9 @@ public sealed class WeeklyEventScenario : IScenario
                     await _engine.Pad.Confirm();
                     return 3000;
                 }
-                if (ml == MlScreen.MatchHub)
+                if (ml == MatchScreen.MatchHub)
                 {
-                    if (_streak >= MyLeagueBrain.StuckStreak) return 5000;
+                    if (_streak >= MatchBrain.StuckStreak) return 5000;
                     // 【识别重做同款模式】国际服比赛页是 4 卡横排、无预览区，磁贴标签词
                     // 聚焦/非聚焦尺寸几乎无差（实机帧：锦标赛聚焦 H=0.058 vs 活动 0.056），
                     // OCR 判焦点不可行——改为「饱和左移归一起点 → 右×N 试第 N 格 → 按 A 后
@@ -571,7 +537,7 @@ public sealed class WeeklyEventScenario : IScenario
                 // 扫描残留的值，HasConfirm 恰好落进下面那条「其他板块页 → B」规则，而单键弹窗
                 // （「物品已送到收件箱 / OK」）按 B 没有任何反应 → 每 2.2s 一次 B 空转整夜，
                 // 日志「打开的是其他板块页面（HasConfirm）」刷屏 6 小时、零场次。
-                if (wk == WkScreen.None && ml == MlScreen.HasConfirm)
+                if (wk == WkScreen.None && ml == MatchScreen.HasConfirm)
                 {
                     _hubStep = 0;
                     _hubRound = 0;
@@ -580,7 +546,7 @@ public sealed class WeeklyEventScenario : IScenario
                 // 扫描途中按 A 打开了别的板块页面（锦标赛/eFootball联赛/我的联赛子页等）：
                 // 不是活动列表就 B 退回比赛页，下一轮换下一格（不落共享决策乱按）
                 if (_hubStep > 0 && wk == WkScreen.None &&
-                    ml is MlScreen.LeaguePage or MlScreen.PointsPage or MlScreen.ItemList)
+                    ml is MatchScreen.LeaguePage or MatchScreen.PointsPage or MatchScreen.ItemList)
                 {
                     _log($"[周活动] 打开的是其他板块页面（{ml}），B 退回比赛页继续扫描", LogLevel.Info);
                     await _engine.Pad.Back();
@@ -588,7 +554,6 @@ public sealed class WeeklyEventScenario : IScenario
                 }
                 return null; // 其余共享界面（比赛中/弹窗/未知逃生）交给共用决策
             }
-
             case WkPhase.IntroPopups:
             {
                 if (wk == WkScreen.EventHome)
@@ -602,14 +567,14 @@ public sealed class WeeklyEventScenario : IScenario
                 if (wk == WkScreen.EventIntro) return await PressIntroEnterAsync(obs);
                 if (wk == WkScreen.ChallengeList)
                     return await EnterChallengeListPhaseAsync(); // 挑战活动：介绍页按进入后弹的是挑战清单
-                if (wk == WkScreen.EntryPopup || ml == MlScreen.HasConfirm)
+                if (wk == WkScreen.EntryPopup || ml == MatchScreen.HasConfirm)
                     return await HandlePopupAsync(obs, "入场弹窗");
                 if (++_attempts > 15)
                 {
                     // 比赛上下文中的过场（加载/品牌帧）可能连续超过预算：B 在比赛附近危险
                     //（铲球/误退出），只继续等待；菜单上下文才 B 退回列表重试
-                    bool nearMatch = _memory.SawWithin(MlScreen.InMatch, TimeSpan.FromMinutes(2), DateTime.Now) ||
-                                     _memory.SawWithin(MlScreen.MatchStartPage, TimeSpan.FromMinutes(2), DateTime.Now);
+                    bool nearMatch = _memory.SawWithin(MatchScreen.InMatch, TimeSpan.FromMinutes(2), DateTime.Now) ||
+                                     _memory.SawWithin(MatchScreen.MatchStartPage, TimeSpan.FromMinutes(2), DateTime.Now);
                     if (!nearMatch)
                     {
                         _log($"[周活动] 介绍页/入场弹窗长时间未结束（{wk} / {ml}），B 退回列表重试：" +
@@ -633,7 +598,6 @@ public sealed class WeeklyEventScenario : IScenario
                     return await PressConfirmAsync("入场推进");
                 return 1500;
             }
-
             case WkPhase.AtHome:
             {
                 if (_challengeMode || WeeklyBrain.IsChallengeCardHome(obs.Ocr))
@@ -662,13 +626,11 @@ public sealed class WeeklyEventScenario : IScenario
                 _log("[周活动] 按 X 打开活动设置（核验赛事等级/自动控制/弹性）", LogLevel.Info);
                 return 1800;
             }
-
             case WkPhase.Settings:
                 return await HandleSettingsAsync(wk, ml, obs);
-
             case WkPhase.LevelDropdown:
             {
-                if (ml == MlScreen.DifficultyPage)
+                if (ml == MatchScreen.DifficultyPage)
                     return await HandleLevelOptionsAsync(obs.Frame, obs.Ocr);
                 // 下拉展开样式未识别（待实机校准）：B 收起回浮层；改选预算在 Settings 侧
                 if (++_attempts > 3)
@@ -680,7 +642,6 @@ public sealed class WeeklyEventScenario : IScenario
                 }
                 return 1000;
             }
-
             case WkPhase.LaunchReady:
             {
                 if (wk == WkScreen.EventSettings)
@@ -741,7 +702,6 @@ public sealed class WeeklyEventScenario : IScenario
                 SetPhase(WkPhase.Flow);
                 return null;
             }
-
             case WkPhase.Retreating:
             {
                 if (wk == WkScreen.EventsList)
@@ -759,7 +719,7 @@ public sealed class WeeklyEventScenario : IScenario
                 }
                 if (wk == WkScreen.EntryPopup)
                     return await PressConfirmAsync("返回途中弹窗：确认"); // 先清弹窗再回列表
-                if (ml == MlScreen.HasConfirm)
+                if (ml == MatchScreen.HasConfirm)
                 {
                     // 返回途中的确认框：先 B 尝试取消，3 次后按 A（视为确认退出）
                     if (++_attempts <= 3) { await _engine.Pad.Back(); return 2000; }
@@ -769,16 +729,12 @@ public sealed class WeeklyEventScenario : IScenario
                 if (++_attempts > 5) SetPhase(WkPhase.Flow);
                 return 1500;
             }
-
             case WkPhase.ChallengeList:
                 return await HandleChallengeListAsync(wk, ml, obs);
-
             case WkPhase.ChallengeRetreat:
                 return await HandleChallengeRetreatAsync(wk, ml);
-
             case WkPhase.Handoff:
                 return await HandleHandoffAsync(wk, ml);
-
             default:
                 return null;
         }
@@ -795,7 +751,6 @@ public sealed class WeeklyEventScenario : IScenario
         _focusMissAtAdvice = false;
         await _engine.Pad.Dpad(PadDir.Down);          // 页签行→卡行（已在卡行则到头无害）
         await _engine.Pad.DpadRepeat(PadDir.Left, 6); // 饱和到最左第 1 卡（到头多按无害）
-
         // 绿勾探针（已完成活动）或本运行内已拉黑：右移跳过。第 4 卡屏幕外探不到勾，
         // 直接进入后由主页完成态判定兜底（完成→B 返回拉黑），不会重复刷
         while (_slotIndex < 4)
@@ -814,7 +769,6 @@ public sealed class WeeklyEventScenario : IScenario
         if (_slotIndex >= 4)
             return await FinishAllEventsAsync();
         if (_slotIndex > 0) await _engine.Pad.DpadRepeat(PadDir.Right, _slotIndex);
-
         _log($"[周活动] 活动列表：进入槽位 {_slotIndex}", LogLevel.Info);
         SetPhase(WkPhase.IntroPopups);
         await _engine.Pad.Confirm();
@@ -840,9 +794,9 @@ public sealed class WeeklyEventScenario : IScenario
 
     /// <summary>接力准备：B 退出活动链回到比赛页/主菜单，到中性页后把场景换成目标模块。
     /// 退出受阻（预算耗尽）也照样交班——目标模块自带 B 逃生，绝不停在原地。</summary>
-    private async Task<int> HandleHandoffAsync(WkScreen wk, MlScreen ml)
+    private async Task<int> HandleHandoffAsync(WkScreen wk, MatchScreen ml)
     {
-        bool neutral = ml is MlScreen.MainMenu or MlScreen.MatchHub;
+        bool neutral = ml is MatchScreen.MainMenu or MatchScreen.MatchHub;
         if (neutral || ++_attempts > 8)
         {
             if (_engine.HandoffTo(_engine.Config.Weekly.AfterCompleteModule, "周活动"))
@@ -853,7 +807,7 @@ public sealed class WeeklyEventScenario : IScenario
         }
         if (wk == WkScreen.EntryPopup)
             return await PressConfirmAsync("退出途中弹窗：确认");
-        if (ml == MlScreen.HasConfirm)
+        if (ml == MatchScreen.HasConfirm)
         {
             // 返回途中的确认框：先 B 尝试取消，3 次后按 A（视为确认退出）
             if (_attempts <= 3) { await _engine.Pad.Back(); return 2000; }
@@ -867,25 +821,22 @@ public sealed class WeeklyEventScenario : IScenario
 
     /// <summary>活动设置浮层：逐项核验修正。每轮最多一个动作（改完下一轮重新解析再验下一项），
     /// 全部就绪或读不到（保守不按）时 B 返回。改选等级超预算则带 Warn 放弃，绝不卡死。</summary>
-    private async Task<int> HandleSettingsAsync(WkScreen wk, MlScreen ml, Observation obs)
+    private async Task<int> HandleSettingsAsync(WkScreen wk, MatchScreen ml, Observation obs)
     {
         if (wk == WkScreen.EventSettings)
         {
             var cfg = _engine.Config.Weekly;
             var s = WeeklyBrain.ParseActivitySettings(obs.Ocr);
-
             // 挑战活动设置浮层：没有赛事等级行（难度由卡片固定），只核验自动控制/弹性。
             // 2 行布局、光标默认在「自动控制」行——导航计步与普通浮层（3 行、默认在等级行）不同。
             if (_challengeMode || obs.Ocr.ContainsJoined("完成的条件"))
                 return await HandleChallengeSettingsAsync(s);
-
             var unread = new List<string>();
             if (s.Level is null) unread.Add("赛事等级");
             if (s.AutoControl is null) unread.Add("自动控制");
             if (s.FlexibleAutoControl is null) unread.Add("弹性自动控制");
             if (unread.Count > 0)
                 _log($"[周活动] 设置项未读出（{string.Join("、", unread)}），保守跳过不按键", LogLevel.Warn);
-
             if (++_attempts > 6)
             {
                 _log("[周活动] 设置核验多轮未收敛，B 返回直接开赛", LogLevel.Warn);
@@ -893,7 +844,6 @@ public sealed class WeeklyEventScenario : IScenario
                 await _engine.Pad.Back();
                 return 2000;
             }
-
             // 1) 赛事等级（光标默认在等级行：饱和上移归位后直接 A）
             if (s.Level is not null && s.Level != cfg.EventLevel)
             {
@@ -912,7 +862,6 @@ public sealed class WeeklyEventScenario : IScenario
             {
                 _levelAttempts = 0;
             }
-
             // 2) 自动控制强制开：归位后下移 2 次
             if (s.AutoControl == false)
             {
@@ -931,13 +880,11 @@ public sealed class WeeklyEventScenario : IScenario
                 await _engine.Pad.Confirm();
                 return 2000;
             }
-
             _log("[周活动] 设置核验完成，B 返回活动主页", LogLevel.Success);
             SetPhase(WkPhase.LaunchReady);
             await _engine.Pad.Back();
             return 1800;
         }
-
         if (wk == WkScreen.EventHome)
         {
             if (++_attempts <= 2)
@@ -952,7 +899,7 @@ public sealed class WeeklyEventScenario : IScenario
         }
         if (wk == WkScreen.EntryPopup)
             return await PressConfirmAsync("设置层弹窗：确认"); // 盖在设置层上的弹窗先清掉
-        if (ml == MlScreen.HasConfirm)
+        if (ml == MatchScreen.HasConfirm)
         {
             SetPhase(WkPhase.IntroPopups); // 设置层上叠了弹窗：交给入场弹窗推进
             return await PressConfirmAsync("设置层弹窗：确认");
@@ -968,9 +915,7 @@ public sealed class WeeklyEventScenario : IScenario
         string wanted = _engine.Config.Weekly.EventLevel;
         var options = MyLeagueBrain.DetectDifficultyOptions(ocr);
         var selected = MyLeagueBrain.DetectSelectedDifficulty(frame, ocr);
-
         SetPhase(WkPhase.Settings); // 选完（无论是否改选）都回浮层重新核验
-
         // 所选不在列表 / 蓝勾未检出：按游戏默认直接确认（同我的联赛守则，绝不乱按方向）
         if (!options.Contains(wanted) || selected is null)
         {
@@ -1006,13 +951,11 @@ public sealed class WeeklyEventScenario : IScenario
     {
         var ocr = obs.Ocr;
         string wanted = _engine.Config.Weekly.EventLevel;
-
         // ① 入场说明弹窗（OK 在屏中部；底栏 B 返回的蓝框会被 YOLO 判 btn_confirm @y≈0.93，
         //    限定 y<0.85 与弹窗门控同款防误吃）
         var ok = ocr.FindButton("OK");
         if (ok is not null && ok.CenterY < 0.85)
             return await PressConfirmAsync("选择赛事等级·说明弹窗 OK");
-
         // ①' 最终确认弹窗（「是否要选择传奇？」+ 进入/取消，★默认焦点在取消）：
         //     直接 A 会取消回列表，必须 ↑ 移到「进入」再 A（用户 2026-10-30 实机反馈）
         if (WeeklyBrain.IsDifficultyConfirmPopup(ocr))
@@ -1023,11 +966,9 @@ public sealed class WeeklyEventScenario : IScenario
             await _engine.Pad.Confirm();
             return 2600;
         }
-
         string? focus = WeeklyBrain.DetectFocusedDifficulty(obs.Frame, ocr);
         var target = ocr.Words.FirstOrDefault(w =>
             w.CenterX < 0.25 && w.Text.Replace(" ", "").Contains(wanted));
-
         // ④ 焦点已在目标行：A 确认（A 落在高亮行=选定该等级，后续弹窗/开赛由屏幕分类接管）
         if (focus == wanted && target is not null)
         {
@@ -1036,7 +977,6 @@ public sealed class WeeklyEventScenario : IScenario
             await _engine.Pad.Confirm();
             return 2400;
         }
-
         if (++_diffAttempts > 12)
         {
             _diffAttempts = 0;
@@ -1044,7 +984,6 @@ public sealed class WeeklyEventScenario : IScenario
             await _engine.Pad.Confirm();
             return 2400;
         }
-
         // ② 目标不在屏（传奇在列表底，需滚动）或焦点探针失效（弹窗遮挡/OCR 退化）：下×1 试探
         if (target is null || focus is null)
         {
@@ -1052,7 +991,6 @@ public sealed class WeeklyEventScenario : IScenario
             await _engine.Pad.Dpad(PadDir.Down);
             return 1200;
         }
-
         // ③ 焦点与目标都在屏：按行距差值（0.11/行，实机帧校准）一次移到位
         var focusWord = ocr.Words.First(w =>
             w.CenterX < 0.25 && w.Text.Replace(" ", "").Contains(focus));
@@ -1065,7 +1003,6 @@ public sealed class WeeklyEventScenario : IScenario
     }
 
     // ---------------- 球队选择前置流程（挑战活动新子内容） ----------------
-
     /// <summary>
     /// 「选择地区 / 选择球队」页（用户 2026-11-08 实机规则）：每页只按 <b>一次</b> Y 随机，
     /// 随机点完直接下一步，绝不在同一页来回随机。两页都没有确认键（底栏只有 B 返回 / Y 随机），
@@ -1084,10 +1021,8 @@ public sealed class WeeklyEventScenario : IScenario
             _pickRandomPressed = false;
             _pickSamePageFrames = 0;
         }
-
         string page = wk == WkScreen.RegionSelect ? "地区选择" : "球队选择";
         var step = WeeklyBrain.DecidePickStep(_pickRandomPressed, _pickSamePageFrames, _pickAttempts, _pickEscapes);
-
         switch (step)
         {
             case WeeklyBrain.WkPickAction.PressRandom:
@@ -1096,17 +1031,14 @@ public sealed class WeeklyEventScenario : IScenario
                 _log($"[周活动] {page}页：Y 随机×1（随机只按这一次，按完直接下一步）", LogLevel.Info);
                 await _engine.Pad.Y();
                 return 2000;
-
             case WeeklyBrain.WkPickAction.Wait:
                 _pickSamePageFrames++;
                 return 1400;
-
             case WeeklyBrain.WkPickAction.PressNext:
                 _pickAttempts++;
                 _log($"[周活动] {page}页：随机已按过、页面未跳（该页无确认键），A 下一步（第 {_pickAttempts} 次）", LogLevel.Info);
                 await _engine.Pad.Confirm();
                 return 2000;
-
             case WeeklyBrain.WkPickAction.Escape:
                 _pickEscapes++;
                 _pickAttempts = 0;
@@ -1114,7 +1046,6 @@ public sealed class WeeklyEventScenario : IScenario
                 _log($"[周活动] {page}页随机后 A 下一步多次未推进，B 退出该子流程（第 {_pickEscapes} 次，若反复出现请回报日志）", LogLevel.Warn);
                 await _engine.Pad.Back();
                 return 2500;
-
             default: // WeeklyBrain.WkPickAction.Stop
                 _log($"[周活动] {page}页 B 退出受阻（连续 {_pickEscapes} 次仍在原页），停止挂机（请手动检查活动状态）", LogLevel.Error);
                 _engine.StopWithError($"{page}页退出受阻");
@@ -1149,7 +1080,6 @@ public sealed class WeeklyEventScenario : IScenario
     }
 
     // ---------------- 挑战活动子流程 ----------------
-
     /// <summary>
     /// 挑战解锁弹窗处置（用户 2026-11-08 国际服实机帧「挑战2已解锁 / 通过此全新挑战测试自己的
     /// 技巧! / OK」）：弹窗只有一个 OK（默认焦点），A 即关闭；关闭后清单回到「可打第一张无锁
@@ -1221,12 +1151,12 @@ public sealed class WeeklyEventScenario : IScenario
     /// 卡号随翻页变化）。已通关判定先于锁判定：刚通关的卡渲染初期可能同时命中灰锁
     /// 探针（实机 2026-10-17，重启游戏后才显绿勾），已勾卡定义上必已解锁。
     /// </summary>
-    private async Task<int> HandleChallengeListAsync(WkScreen wk, MlScreen ml, Observation obs)
+    private async Task<int> HandleChallengeListAsync(WkScreen wk, MatchScreen ml, Observation obs)
     {
         if (wk == WkScreen.EventHome) { _chReentry = 0; SetPhase(WkPhase.AtHome); return 600; }
         if (wk == WkScreen.EventSettings) { SetPhase(WkPhase.Settings); return 800; }
         if (wk == WkScreen.EventsList) { _challengeMode = false; SetPhase(WkPhase.Flow); return 800; }
-        if (wk == WkScreen.EntryPopup || ml == MlScreen.HasConfirm)
+        if (wk == WkScreen.EntryPopup || ml == MatchScreen.HasConfirm)
         {
             if (++_attempts > 6) { SetPhase(WkPhase.Flow); return 600; }
             return await PressConfirmAsync("挑战清单弹窗：确认");
@@ -1236,9 +1166,7 @@ public sealed class WeeklyEventScenario : IScenario
             if (++_attempts > 10) { SetPhase(WkPhase.Flow); return 600; } // 过场/未知帧超预算：回屏幕驱动自愈
             return 1200;
         }
-
         _unlockPopupPresses = 0; // 清单干净可见：解锁弹窗已关，连按计数归零
-
         if (!_chScanReady)
         {
             _chScanReady = true;
@@ -1249,7 +1177,6 @@ public sealed class WeeklyEventScenario : IScenario
             await _engine.Pad.DpadRepeat(PadDir.Left, 6);
             return 1500;
         }
-
         var cur = WeeklyBrain.ScanChallengeCards(obs.Ocr, obs.Frame)
             .FirstOrDefault(c => c.Index == _chScan);
         if (cur is null)
@@ -1263,7 +1190,6 @@ public sealed class WeeklyEventScenario : IScenario
                 SetPhase(WkPhase.AtHome);
                 return 900;
             }
-
             var verdict = WeeklyBrain.DecideChallengeVanish(++_chMissing, _chCursorDone, _chVanishRescans);
             switch (verdict)
             {
@@ -1299,7 +1225,6 @@ public sealed class WeeklyEventScenario : IScenario
             }
         }
         _chMissing = 0;
-
         // 已通关判定先于锁判定：勾/本运行内通关/已拉黑 → 右移
         if (cur.Checked || _chLocalDone.Contains(cur.Index) || _chBlocked.Contains(cur.Index))
         {
@@ -1312,7 +1237,6 @@ public sealed class WeeklyEventScenario : IScenario
             await _engine.Pad.Dpad(PadDir.Right);
             return 1100;
         }
-
         if (cur.Locked)
         {
             // 撞锁（游标越过已通关卡/首卡锁定）：游戏解锁可能有延迟（通关即打勾、
@@ -1336,7 +1260,6 @@ public sealed class WeeklyEventScenario : IScenario
             await _engine.Pad.Back();
             return 2200;
         }
-
         // 待挑战卡：按 A 进入（重复进入同一卡计数，超 2 次拉黑防死循环）
         _chCursorDone = false; // 游标停在待挑战卡上：此后的卡号消失不得判全完成
         if (_chCurrentCard == cur.Index)
@@ -1400,7 +1323,6 @@ public sealed class WeeklyEventScenario : IScenario
         if (s.FlexibleAutoControl is null) unread.Add("弹性自动控制");
         if (unread.Count > 0)
             _log($"[周活动·挑战] 设置项未读出（{string.Join("、", unread)}），保守跳过不按键", LogLevel.Warn);
-
         if (++_attempts > 6)
         {
             _log("[周活动·挑战] 设置核验多轮未收敛，B 返回直接开赛", LogLevel.Warn);
@@ -1408,7 +1330,6 @@ public sealed class WeeklyEventScenario : IScenario
             await _engine.Pad.Back();
             return 2000;
         }
-
         if (s.AutoControl == false)
         {
             _log("[周活动·挑战] 自动控制为关：上×4 归位 → A 改为开（强制项）", LogLevel.Info);
@@ -1424,7 +1345,6 @@ public sealed class WeeklyEventScenario : IScenario
             await _engine.Pad.Confirm();
             return 2000;
         }
-
         _log("[周活动·挑战] 设置核验完成，B 返回卡详情页开赛", LogLevel.Success);
         SetPhase(WkPhase.LaunchReady);
         await _engine.Pad.Back();
@@ -1433,7 +1353,7 @@ public sealed class WeeklyEventScenario : IScenario
 
     /// <summary>挑战退出/重进：B 到介绍页；重进模式在介绍页按 A 回清单刷新锁态，
     /// 否则继续 B 回活动列表（到达后复位挑战模式、按需拉黑槽位并顺延到下一个活动）。</summary>
-    private async Task<int> HandleChallengeRetreatAsync(WkScreen wk, MlScreen ml)
+    private async Task<int> HandleChallengeRetreatAsync(WkScreen wk, MatchScreen ml)
     {
         if (wk == WkScreen.EventsList)
         {
@@ -1473,7 +1393,7 @@ public sealed class WeeklyEventScenario : IScenario
             SetPhase(WkPhase.Flow);
             return 800;
         }
-        if (wk == WkScreen.EntryPopup || ml == MlScreen.HasConfirm)
+        if (wk == WkScreen.EntryPopup || ml == MatchScreen.HasConfirm)
         {
             // 退出途中的弹窗：先 A 清（可能是通关奖励弹窗），多次不消改 B（退出确认类）
             if (++_attempts <= 5) return await PressConfirmAsync("挑战退出途中弹窗：确认");
@@ -1620,3 +1540,7 @@ public sealed class WeeklyEventScenario : IScenario
         });
     }
 }
+
+
+
+

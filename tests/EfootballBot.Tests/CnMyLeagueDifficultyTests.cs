@@ -3,6 +3,7 @@ using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Vision;
 using Xunit;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 国服我的联赛「选择比赛等级」难度页规划回归（2026-10-18 实机：国服页没有国际服的
@@ -23,7 +24,7 @@ public class CnMyLeagueDifficultyTests
     {
         var plan = CnMyLeagueScenario.PlanCnDifficulty(selected, wanted);
         Assert.NotNull(plan);
-        Assert.Equal(MyLeagueBrain.Difficulties.Length, plan!.UpStrokes); // 饱和归位，与当前位置无关
+        Assert.Equal(MatchBrain.Difficulties.Length, plan!.UpStrokes); // 饱和归位，与当前位置无关
         Assert.Equal(down, plan.DownStrokes);
         Assert.Equal(checkFirst, plan.CheckFirst);
         Assert.Contains(wanted, plan.Summary);
@@ -36,7 +37,7 @@ public class CnMyLeagueDifficultyTests
     {
         var plan = CnMyLeagueScenario.PlanCnDifficulty(selected, "传奇");
         Assert.NotNull(plan);
-        Assert.Equal(MyLeagueBrain.Difficulties.Length, plan!.UpStrokes);
+        Assert.Equal(MatchBrain.Difficulties.Length, plan!.UpStrokes);
         Assert.Equal(6, plan.DownStrokes);
         Assert.False(plan.CheckFirst);
     }
@@ -53,9 +54,9 @@ public class CnMyLeagueDifficultyTests
     public void DifficultyTable_MatchesCnPageRowOrder()
     {
         // 国服页 7 行自上而下与难度表一致（实机 2026-10-18：传奇在第 7 行、新手在第 1 行）
-        Assert.Equal(7, MyLeagueBrain.Difficulties.Length);
-        Assert.Equal("新手", MyLeagueBrain.Difficulties[0]);
-        Assert.Equal("传奇", MyLeagueBrain.Difficulties[^1]);
+        Assert.Equal(7, MatchBrain.Difficulties.Length);
+        Assert.Equal("新手", MatchBrain.Difficulties[0]);
+        Assert.Equal("传奇", MatchBrain.Difficulties[^1]);
     }
 
     // ---------------- 新式难度页（2026-11-04 实机改版：国际服同款 UI） ----------------
@@ -103,3 +104,4 @@ public class CnMyLeagueDifficultyTests
         Assert.Null(MyLeagueBrain.DifficultyLegPlan(4));
     }
 }
+

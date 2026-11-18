@@ -7,6 +7,7 @@ using OpenCvSharp;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 分析/回归：用户实机比赛选择页截图 → OCR + YOLO → Classify/Decide
@@ -43,31 +44,33 @@ public class MatchHubRealFrameTests
 
         // 帧1：进入比赛页默认焦点（不在我的联赛）→ 判 MatchHub，决策右移
         var (screen1, action1, dets1, ocr1) = Run(det, ocr, "matchhub_user_1.png");
-        Assert.Equal(MlScreen.MatchHub, screen1);
-        Assert.Equal(MlActionKind.PadMoveRight, action1.Kind);
+        Assert.Equal(MatchScreen.MatchHub, screen1);
+        Assert.Equal(MatchActionKind.PadMoveRight, action1.Kind);
 
         // 帧2：右移后焦点在我的联赛（预览区文字）→ 判 MatchHub，决策 A 进入
         var (screen2, action2, dets2, ocr2) = Run(det, ocr, "matchhub_user_2.png");
-        Assert.Equal(MlScreen.MatchHub, screen2);
-        Assert.Equal(MlActionKind.PadConfirm, action2.Kind);
+        Assert.Equal(MatchScreen.MatchHub, screen2);
+        Assert.Equal(MatchActionKind.PadConfirm, action2.Kind);
 
         _out.WriteLine($"frame1: {screen1} -> {action1.Kind}");
-        foreach (var d in dets1.Where(d => d.Score >= MyLeagueBrain.MinScore))
+        foreach (var d in dets1.Where(d => d.Score >= MatchBrain.MinScore))
             _out.WriteLine($"  YOLO {d.ClassName} {d.Score:F2}");
         _out.WriteLine($"frame2: {screen2} -> {action2.Kind}");
-        foreach (var d in dets2.Where(d => d.Score >= MyLeagueBrain.MinScore))
+        foreach (var d in dets2.Where(d => d.Score >= MatchBrain.MinScore))
             _out.WriteLine($"  YOLO {d.ClassName} {d.Score:F2}");
     }
 
-    private (MlScreen Screen, MlAction Action, IReadOnlyList<YoloDetection> Dets, OcrResult Ocr) Run(
+    private (MatchScreen Screen, MatchAction Action, IReadOnlyList<YoloDetection> Dets, OcrResult Ocr) Run(
         YoloDetector det, OcrRecognizer ocr, string name)
     {
         var data = LoadPngBgra(Path.Combine(TestDir, "TestData", name), out int w, out int h);
         var frame = new FrameData(data, w, h, 0);
         var dets = det.Detect(frame);
         var ocrRes = TestOcr.Run(ocr, frame);
-        var screen = MyLeagueBrain.Classify(dets, ocrRes);
-        var action = MyLeagueBrain.Decide(screen, ocrRes, 0);
+        var screen = MatchBrain.Classify(dets, ocrRes);
+        var action = MatchBrain.Decide(screen, ocrRes, 0);
         return (screen, action, dets, ocrRes);
     }
 }
+
+

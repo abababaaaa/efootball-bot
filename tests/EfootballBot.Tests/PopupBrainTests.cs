@@ -7,6 +7,7 @@ using EfootballBot.Core.Vision.Yolo;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 /// <summary>
@@ -155,9 +156,11 @@ public class PopupBrainTests
             new("btn_confirm", 0, 0.84f, 0.42, 0.75, 0.10, 0.08), // 实机 YOLO 检出 OK 按钮 0.82~0.85
         };
         var wk = WeeklyBrain.Classify(dets, ocr);
-        var ml = MyLeagueBrain.Classify(dets, ocr);
+        var ml = MatchBrain.Classify(dets, ocr);
         _out.WriteLine($"classify: wk={wk} ml={ml}");
         Assert.Equal(WkScreen.None, wk);
-        Assert.Equal(MlScreen.HasConfirm, ml);
+        Assert.Equal(MatchScreen.HasConfirm, ml);
     }
 }
+
+

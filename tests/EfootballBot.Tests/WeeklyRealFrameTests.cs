@@ -8,6 +8,7 @@ using OpenCvSharp;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 校准/回归：用户提供的国际服周活动 8 张截图 → OCR + YOLO dump + WeeklyBrain 分类。
@@ -68,12 +69,12 @@ public class WeeklyRealFrameTests
             var dets = det.Detect(frame);
             var ocrRes = TestOcr.Run(ocr, frame);
             var screen = WeeklyBrain.Classify(dets, ocrRes,
-                MyLeagueScenario.CornerHasContent(frame),
+                ScreenProbe.CornerHasContent(frame),
                 matchContext: false,
-                MyLeagueScenario.IsMostlyLightPage(frame));
+                ScreenProbe.IsMostlyLightPage(frame));
 
             _out.WriteLine($"==== {name} -> {screen} ====");
-            foreach (var d in dets.Where(d => d.Score >= MyLeagueBrain.MinScore))
+            foreach (var d in dets.Where(d => d.Score >= MatchBrain.MinScore))
                 _out.WriteLine($"  YOLO {d.ClassName} {d.Score:F2} @({d.CenterX:F2},{d.CenterY:F2})");
             foreach (var l in ocrRes.Lines)
                 _out.WriteLine($"  L \"{l.Text}\" @({l.CenterX:F2},{l.CenterY:F2})");
@@ -122,9 +123,9 @@ public class WeeklyRealFrameTests
             var dets = det.Detect(frame);
             var ocrRes = TestOcr.Run(ocr, frame);
             var screen = WeeklyBrain.Classify(dets, ocrRes,
-                MyLeagueScenario.CornerHasContent(frame),
+                ScreenProbe.CornerHasContent(frame),
                 matchContext: false,
-                MyLeagueScenario.IsMostlyLightPage(frame));
+                ScreenProbe.IsMostlyLightPage(frame));
             _out.WriteLine($"{name}: {screen} (want {want})");
             Assert.True(screen == want, $"{name}: got {screen}, want {want}");
         }
@@ -222,7 +223,7 @@ public class WeeklyRealFrameTests
             var ocrRes = TestOcr.Run(ocr, frame);
             var screen = WeeklyBrain.Classify(dets, ocrRes);
             _out.WriteLine($"==== weekly_home_titani_done.png -> {screen} ====");
-            foreach (var d in dets.Where(d => d.Score >= MyLeagueBrain.MinScore))
+            foreach (var d in dets.Where(d => d.Score >= MatchBrain.MinScore))
                 _out.WriteLine($"  YOLO {d.ClassName} {d.Score:F2} @({d.CenterX:F2},{d.CenterY:F2})");
             _out.WriteLine($"  ContainsJoined 下一步={ocrRes.ContainsJoined("下一步")} 确认={ocrRes.ContainsJoined("确认")} " +
                            $"OK按钮={ocrRes.FindButton("OK") is not null}");
@@ -318,3 +319,5 @@ public class WeeklyRealFrameTests
             _out.WriteLine($"  绿簇 cell=({cx / 40.0:F2}-{(cx + 1) / 40.0:F2},{cy / 40.0:F2}-{(cy + 1) / 40.0:F2}) count={c}");
     }
 }
+
+

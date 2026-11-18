@@ -3,6 +3,7 @@ using EfootballBot.Core.Capture;
 using EfootballBot.Core.Vision;
 using Xunit;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 /// <summary>
@@ -28,8 +29,8 @@ public class RecogWalkHardeningTests
             ("皇家马德里", 0.30, 0.42, 0.16, 0.04),
             ("eFootballStadium", 0.32, 0.52, 0.24, 0.04),
             ("开始比赛", 0.48, 0.855, 0.12, 0.04));
-        Assert.Equal(MlScreen.MatchStartPage,
-            MyLeagueBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.MatchStartPage,
+            MatchBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
     }
 
     [Fact]
@@ -39,8 +40,8 @@ public class RecogWalkHardeningTests
         var ocr = Ocr(
             ("下一步", 0.50, 0.815, 0.10, 0.035),
             ("球场", 0.42, 0.815, 0.05, 0.035));
-        Assert.Equal(MlScreen.MatchStartPage,
-            MyLeagueBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.MatchStartPage,
+            MatchBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
     }
 
     [Fact]
@@ -51,8 +52,8 @@ public class RecogWalkHardeningTests
             ("继续", 0.50, 0.86, 0.06, 0.035),
             ("比赛历史", 0.30, 0.10, 0.14, 0.04),
             ("2026-11-01", 0.40, 0.30, 0.12, 0.035));
-        Assert.NotEqual(MlScreen.MatchStartPage,
-            MyLeagueBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
+        Assert.NotEqual(MatchScreen.MatchStartPage,
+            MatchBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
     }
 
     // ---------------- 终场页 ----------------
@@ -64,8 +65,8 @@ public class RecogWalkHardeningTests
             ("比赛结束", 0.44, 0.395, 0.12, 0.04),
             ("2-1", 0.45, 0.47, 0.10, 0.05),
             ("下一步", 0.49, 0.88, 0.10, 0.04));
-        Assert.Equal(MlScreen.FullTime,
-            MyLeagueBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.FullTime,
+            MatchBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
     }
 
     [Fact]
@@ -75,8 +76,8 @@ public class RecogWalkHardeningTests
         var ocr = Ocr(
             ("比赛结束", 0.42, 0.72, 0.14, 0.04),
             ("0:57", 0.09, 0.09, 0.06, 0.03));
-        Assert.NotEqual(MlScreen.FullTime,
-            MyLeagueBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
+        Assert.NotEqual(MatchScreen.FullTime,
+            MatchBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
     }
 
     // ---------------- 过场跳过 ----------------
@@ -85,23 +86,23 @@ public class RecogWalkHardeningTests
     public void SkipOverlay_NewWording_Recognized()
     {
         foreach (var word in new[] { "回放", "快进", "跳过动画", "跳过", "重播" })
-            Assert.True(MyLeagueBrain.IsSkipOverlay(Ocr((word, 0.86, 0.62, 0.08, 0.03))), word);
+            Assert.True(MatchBrain.IsSkipOverlay(Ocr((word, 0.86, 0.62, 0.08, 0.03))), word);
     }
 
     [Fact]
     public void SkipOverlay_PauseMenuEntry_StillExcluded()
     {
         // 暂停菜单的「比赛回放」不是过场提示：按 A 会重开比赛
-        Assert.False(MyLeagueBrain.IsSkipOverlay(Ocr(("比赛回放", 0.12, 0.55, 0.12, 0.035))));
+        Assert.False(MatchBrain.IsSkipOverlay(Ocr(("比赛回放", 0.12, 0.55, 0.12, 0.035))));
         // 国服右上角「跳过比赛」横幅走暂停链路，同样排除
-        Assert.False(MyLeagueBrain.IsSkipOverlay(Ocr(("跳过比赛", 0.80, 0.06, 0.14, 0.035))));
+        Assert.False(MatchBrain.IsSkipOverlay(Ocr(("跳过比赛", 0.80, 0.06, 0.14, 0.035))));
     }
 
     [Fact]
     public void SkipOverlay_SkipMovedUp_Recognized()
     {
         // SKIP 提示在新版贴在右中偏上（y≈0.50）：旧阈值 y>0.55 漏判
-        Assert.True(MyLeagueBrain.IsSkipOverlay(Ocr(("SKIP", 0.89, 0.485, 0.06, 0.03))));
+        Assert.True(MatchBrain.IsSkipOverlay(Ocr(("SKIP", 0.89, 0.485, 0.06, 0.03))));
     }
 
     // ---------------- 比赛中下一步 ----------------
@@ -110,8 +111,8 @@ public class RecogWalkHardeningTests
     public void InMatchAdvance_PushWords()
     {
         foreach (var word in new[] { "下一步", "继续", "确认", "确定", "继续比赛" })
-            Assert.True(MyLeagueBrain.IsInMatchAdvance(Ocr((word, 0.50, 0.78, 0.10, 0.04))), word);
-        Assert.True(MyLeagueBrain.IsInMatchAdvance(Ocr(("0K", 0.50, 0.78, 0.05, 0.04))));
+            Assert.True(MatchBrain.IsInMatchAdvance(Ocr((word, 0.50, 0.78, 0.10, 0.04))), word);
+        Assert.True(MatchBrain.IsInMatchAdvance(Ocr(("0K", 0.50, 0.78, 0.05, 0.04))));
     }
 
     [Fact]
@@ -119,15 +120,15 @@ public class RecogWalkHardeningTests
     {
         // Koke / Opoku 这类球员名含 "ok" 子串，不能当成 OK 按钮
         var ocr = Ocr(("Koke", 0.30, 0.80, 0.07, 0.03), ("Opoku", 0.60, 0.80, 0.08, 0.03));
-        Assert.False(MyLeagueBrain.IsInMatchAdvance(ocr));
+        Assert.False(MatchBrain.IsInMatchAdvance(ocr));
     }
 
     [Fact]
     public void Decide_InMatch_NextStepPressedFast()
     {
         var ocr = Ocr(("下一步", 0.50, 0.78, 0.10, 0.04));
-        var action = MyLeagueBrain.Decide(MlScreen.InMatch, ocr, 0, inMatchRecently: true);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.InMatch, ocr, 0, inMatchRecently: true);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
         Assert.True(action.WaitMs <= 500, $"推进键节奏应压到 500ms 以内，实际 {action.WaitMs}ms");
     }
 
@@ -138,17 +139,17 @@ public class RecogWalkHardeningTests
         var ocr = Ocr(
             ("我的联赛", 0.30, 0.12, 0.14, 0.04),
             ("继续", 0.50, 0.88, 0.06, 0.035));
-        var action = MyLeagueBrain.Decide(MlScreen.LeaguePage, ocr, 0, inMatchRecently: false);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.LeaguePage, ocr, 0, inMatchRecently: false);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
     }
 
     [Fact]
     public void Decide_LeaguePage_NoKeyAtAll_StillWaitsThenEscapes()
     {
         var ocr = Ocr(("赛程表", 0.30, 0.12, 0.10, 0.04), ("第 3 轮", 0.42, 0.30, 0.10, 0.035));
-        Assert.Equal(MlActionKind.Wait, MyLeagueBrain.Decide(MlScreen.LeaguePage, ocr, 0).Kind);
-        Assert.Equal(MlActionKind.GamepadBack,
-            MyLeagueBrain.Decide(MlScreen.LeaguePage, ocr, MyLeagueBrain.StuckStreak).Kind);
+        Assert.Equal(MatchActionKind.Wait, MatchBrain.Decide(MatchScreen.LeaguePage, ocr, 0).Kind);
+        Assert.Equal(MatchActionKind.GamepadBack,
+            MatchBrain.Decide(MatchScreen.LeaguePage, ocr, MatchBrain.StuckStreak).Kind);
     }
 
     // ---------------- 比赛页磁贴焦点 ----------------
@@ -158,9 +159,9 @@ public class RecogWalkHardeningTests
     {
         // 磁贴标签被右缘裁成碎片（我），读不出「我的联赛」
         var ocr = Ocr(("比赛", 0.10, 0.12, 0.08, 0.04), ("我", 0.93, 0.55, 0.03, 0.03));
-        Assert.Equal(MlActionKind.PadMoveRight, MyLeagueBrain.Decide(MlScreen.MatchHub, ocr, 2).Kind);
-        Assert.Equal(MlActionKind.PadConfirm,
-            MyLeagueBrain.Decide(MlScreen.MatchHub, ocr, MyLeagueBrain.MatchHubFocusBlindStreak).Kind);
+        Assert.Equal(MatchActionKind.PadMoveRight, MatchBrain.Decide(MatchScreen.MatchHub, ocr, 2).Kind);
+        Assert.Equal(MatchActionKind.PadConfirm,
+            MatchBrain.Decide(MatchScreen.MatchHub, ocr, MatchBrain.MatchHubFocusBlindStreak).Kind);
     }
 
     [Fact]
@@ -171,8 +172,8 @@ public class RecogWalkHardeningTests
             ("比赛", 0.10, 0.10, 0.08, 0.04),
             ("友谊赛", 0.28, 0.42, 0.10, 0.04),
             ("eFootball联赛", 0.52, 0.42, 0.20, 0.04));
-        Assert.Equal(MlScreen.MatchHub,
-            MyLeagueBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.MatchHub,
+            MatchBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
     }
 
     // ---------------- 画面不变 → 换招 ----------------
@@ -203,23 +204,23 @@ public class RecogWalkHardeningTests
             (0.40, 0.66, 0.60, 0.78, 40));
         var ocr = Ocr(("取消", 0.50, 0.54, 0.05, 0.04), ("确认", 0.50, 0.72, 0.05, 0.04));
 
-        Assert.Equal(MlActionKind.PadDownConfirm,
-            MyLeagueBrain.Decide(MlScreen.HasConfirm, ocr, 0, frame: frame).Kind);
+        Assert.Equal(MatchActionKind.PadDownConfirm,
+            MatchBrain.Decide(MatchScreen.HasConfirm, ocr, 0, frame: frame).Kind);
         // 同一屏连续多轮仍不动 → 判定高光读反，改用直接 A（绝不对同一处重复同一个无效动作）
-        Assert.Equal(MlActionKind.PadConfirm,
-            MyLeagueBrain.Decide(MlScreen.HasConfirm, ocr, MyLeagueBrain.ConfirmRepositionRounds, frame: frame).Kind);
+        Assert.Equal(MatchActionKind.PadConfirm,
+            MatchBrain.Decide(MatchScreen.HasConfirm, ocr, MatchBrain.ConfirmRepositionRounds, frame: frame).Kind);
     }
 
     [Fact]
     public void Decide_Unknown_TriesConfirmBeforeBackEscape()
     {
         var ocr = Ocr(("加载中", 0.5, 0.5, 0.10, 0.04));
-        Assert.Equal(MlActionKind.Wait, MyLeagueBrain.Decide(MlScreen.Unknown, ocr, 0, false).Kind);
-        Assert.Equal(MlActionKind.PadConfirm,
-            MyLeagueBrain.Decide(MlScreen.Unknown, ocr, MyLeagueBrain.UnknownProbeAStreak, false).Kind);
+        Assert.Equal(MatchActionKind.Wait, MatchBrain.Decide(MatchScreen.Unknown, ocr, 0, false).Kind);
+        Assert.Equal(MatchActionKind.PadConfirm,
+            MatchBrain.Decide(MatchScreen.Unknown, ocr, MatchBrain.UnknownProbeAStreak, false).Kind);
         // 到逃生轮数仍先走 B（不把 A 试探变成无限按）
-        Assert.Equal(MlActionKind.GamepadBack,
-            MyLeagueBrain.Decide(MlScreen.Unknown, ocr, MyLeagueBrain.UnknownEscapeStreak, false).Kind);
+        Assert.Equal(MatchActionKind.GamepadBack,
+            MatchBrain.Decide(MatchScreen.Unknown, ocr, MatchBrain.UnknownEscapeStreak, false).Kind);
     }
 
     [Fact]
@@ -230,6 +231,8 @@ public class RecogWalkHardeningTests
             ("B返回", 0.10, 0.93, 0.08, 0.03),
             ("X详情", 0.30, 0.93, 0.08, 0.03),
             ("Y当前位置", 0.50, 0.93, 0.10, 0.03));
-        Assert.Null(MyLeagueBrain.FindBottomPushWord(ocr));
+        Assert.Null(MatchBrain.FindBottomPushWord(ocr));
     }
 }
+
+

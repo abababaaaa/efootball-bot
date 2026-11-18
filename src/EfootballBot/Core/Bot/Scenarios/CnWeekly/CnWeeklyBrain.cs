@@ -4,6 +4,18 @@ using EfootballBot.Core.Bot.Scenarios.Weekly;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Vision;
 using EfootballBot.Core.Vision.Yolo;
+using EfootballBot.Core.Bot.Match;
+
+// ===========================================================================
+// 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
+// 本层职责：单个挂机模块自己的菜单流程与私有状态机（只认自己的界面）。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 不许引用别的模块的 *Scenario（只读借用别人的 *Brain.Classify 认残留页面是允许的）
+//   · 不许自己写场次记账 / 比赛内挂机节奏 —— 一律走 MatchPlay.Tick / IdleTapAsync
+//   · 共享界面判定与决策一律用 Core/Bot/Match 的 MatchBrain，不要复制一份
+// 新增模块：ModuleIds 加常量 + BotModuleCatalog 加一条记录，再写本目录的状态机。
+// 除非用户明确要求更换写法，否则按本层约定写。
+// ===========================================================================
 
 namespace EfootballBot.Core.Bot.Scenarios.CnWeekly;
 
@@ -74,9 +86,8 @@ public enum CwScreen
 public static class CnWeeklyBrain
 {
     // ---------------- 界面分类 ----------------
-
     /// <summary>
-    /// 国服周活动界面分类。先于 MyLeagueBrain.Classify 执行。
+    /// 国服周活动界面分类。先于 MatchBrain.Classify 执行。
     /// 判定顺序：签下确认弹窗 → 盖层弹窗门控 → i 信息弹窗 → 教练选择/教练资料 →
     /// 挑战清单 → 选择比赛难度 → RS 菜单
     /// （盖在阵容页上）→ 阵容页 → 活动设置面板（盖在巡回赛主页右半）→ 巡回赛型活动主页
@@ -120,13 +131,11 @@ public static class CnWeeklyBrain
         bool signConfirmBody = ocr.ContainsJoined("签下确认");
         bool coachSelectBody = ocr.ContainsJoined("请选择您的教练") || HasCoachRatingRow(ocr);
         bool coachDetailBody = ocr.ContainsJoined("确认选择") || ocr.ContainsJoined("球队风格熟练度");
-
         // 签下确认弹窗：盖在教练资料页上（资料页的「确认选择」底栏与球队风格熟练度仍可读），
         // 且自带中部「确认/取消」推进词——必须先于盖层门控判定，否则会被门控成 None
         // 交给共享流程，A 的落点（确认 vs 取消）不确定
         if (signConfirmBody)
             return CwScreen.SignConfirm;
-
         // 盖层弹窗门控（同国际服周活动实机教训）：主页词透过暗化背景仍会被 OCR 读到，
         // 误判回菜单页会把无效按键当"未生效"反复重按。弹窗自带推进词（下一步/确认/整词OK，
         // 或 YOLO 检出确认按钮）且背景有周活动界面证据 → 交共享流程按 A 清弹窗。
@@ -134,75 +143,61 @@ public static class CnWeeklyBrain
         // 自带按钮词在 y≈0.93，不限 y 会把干净的对阵表/主页全门控成弹窗（对阵表会因此
         // 被判 None → 共享流程 Unknown → B 逃生退回介绍页，死循环）。
         bool popupOnTop = CenterPopupWord(ocr) ||
-            dets.Any(d => d.ClassName == "btn_confirm" && d.Score >= MyLeagueBrain.MinScore && d.CenterY < 0.82);
+            dets.Any(d => d.ClassName == "btn_confirm" && d.Score >= MatchBrain.MinScore && d.CenterY < 0.82);
         if (popupOnTop && (squadBody || eventHomeBody || tourHomeBody || settingsBody ||
                            bracketBody || listBody || introBody || challengeBody || difficultyBody ||
                            challengeCardBody || coachSelectBody || coachDetailBody))
             return CwScreen.None;
-
         // i 信息弹窗：盖在巡回赛主页上的白底大面板，先于主页判定（主页左半被盖，
         // 前往比赛 不可见，但保险起见仍先判）
         if (rewardPopupBody)
             return CwScreen.RewardPopup;
-
         // 教练签下链（先选择页后资料页；两页互斥，顺序仅表优先级）：
         // 落 None 会被共享分类当 LeaguePage 盲按/瞎退，教练永远签不下来
         if (coachSelectBody)
             return CwScreen.CoachSelect;
         if (coachDetailBody)
             return CwScreen.CoachDetail;
-
         // 挑战清单选卡页：必须先于其余判定——页面只有底栏「返回」，落 None 会被共享分类
         // 盲等/瞎退（用户 2026-10-17 实机卡死同款）。标题词漏读时卡号特征防僵局
         if (challengeBody)
             return CwScreen.ChallengeList;
-
         // 选择比赛难度页：底栏 B 返回/RT 确定，落 None 会被共享分类当 LeaguePage 卡死
         //（等不到推进词 → B 退回 → 前往比赛 → 本页，死循环）。标题词漏读时难度卡行兜底
         if (difficultyBody)
             return CwScreen.Difficulty;
-
         // RS 自动配置球员菜单：盖在阵容页上（无变更/活动加成 为菜单专属词），必须先于阵容页
         if (ocr.ContainsJoined("无变更") && ocr.ContainsJoined("活动加成"))
             return CwScreen.SquadMenu;
-
         // 球队阵容页：左上「球队阵容列表」或底栏「RS 自动配置球员」（球员加分两页都有，不作主判据）
         if (squadBody)
             return CwScreen.Squad;
-
         // 活动设置面板：盖在巡回赛主页右半，主页词透背景仍可读，先于两个主页判定
         if (settingsBody)
             return CwScreen.EventSettings;
-
         // 挑战卡详情页（2026-10-17 第二周实机 绿茵传奇挑战赛）：巡回赛主页样（前往比赛+
         // 活动设置）+ 挑战专属词「完成挑战」，先于普通巡回赛主页——场景层挑战子流程
         // 靠它把卡页与真巡回赛主页区分开（i 弹窗核验/设置核验都是巡回赛专属）
         if (challengeCardBody)
             return CwScreen.ChallengeCardHome;
-
         // 巡回赛型活动主页：主按钮「前往比赛」+ 底栏「X 活动设置」（杯赛型主页没有这两个词；
         // 我的联赛主页虽有前往比赛但无活动设置，不冲突）。先于杯赛型主页——两代都含「比赛历史」，
         // 巡回赛主页右侧若也出现「下场比赛」会误中杯赛判定
         if (tourHomeBody)
             return CwScreen.EventHomeTour;
-
         // 活动主页：底栏「RT 教练入场」（周活动专属词）；左栏 球队阵容/比赛历史/建议 磁贴
         // 与右栏「下场比赛」为备份（教练入场 OCR 漏读时）
         if (eventHomeBody)
             return CwScreen.EventHome;
-
         // 对阵表页：底栏「X 重置」独有；「冠军杯」页签徽章备份
         if (bracketBody)
             return CwScreen.Bracket;
-
         // 活动介绍页：进入 + 详情 按钮同屏（列表卡只有「进入」，无「详情」）
         if (introBody)
             return CwScreen.EventIntro;
-
         // 比赛活动列表：顶部「对阵电脑 / 对阵玩家」页签
         if (listBody)
             return CwScreen.EventsList;
-
         // 国服主页：顶部页签行 推荐/比赛/签约/商店（同一行，y&lt;0.15），按内容词分页签
         if (HasTopTabs(ocr))
         {
@@ -211,7 +206,6 @@ public static class CnWeeklyBrain
             if (ocr.ContainsJoined("活动中心") || ocr.ContainsJoined("我的球队") || ocr.ContainsJoined("设置"))
                 return CwScreen.HomeRecommended;
         }
-
         return CwScreen.None;
     }
 
@@ -230,7 +224,6 @@ public static class CnWeeklyBrain
 
     /// <summary>顶部页签行通用特征（共享实现见 <see cref="RegionProbe.HasTopTabs"/>）。</summary>
     public static bool HasTopTabs(OcrResult ocr) => RegionProbe.HasTopTabs(ocr);
-
     /// <summary>
     /// 是否「国服主页样」页面（推荐/比赛两个页签的任一内容可由下面的词判定）。用于主页导航
     /// 前的安全检查：只有确认是主页才允许按 上×2→下→左→A 的盲序列；识别不出的页面（过场、
@@ -242,7 +235,6 @@ public static class CnWeeklyBrain
         ocr.ContainsJoined("活动中心") || ocr.ContainsJoined("我的球队") ||
         ocr.ContainsJoined("天梯巅峰赛") || ocr.ContainsJoined("比赛活动") ||
         ocr.ContainsJoined("训练手册");
-
     /// <summary>活动列表页顶部页签词（限定 y&lt;0.15 的页签行：比赛页「我的联赛」卡面海报里
     /// 同样印着「对阵电脑」，不限位置会误判）。</summary>
     private static bool HasTopTabWord(OcrResult ocr, string keyword)
@@ -258,17 +250,14 @@ public static class CnWeeklyBrain
     public static bool LooksLikeEventList(OcrResult ocr) =>
         HasTopTabWord(ocr, "对阵电脑") || HasTopTabWord(ocr, "对阵玩家") ||
         (ocr.ContainsJoined("加入") && ocr.ContainsJoined("返回") && ocr.ContainsJoined("奖励"));
-
     /// <summary>RS 菜单中「活动加成」选项行号（0 起，自上而下：无变更/重视能力值/重视能力值心有灵犀/活动加成）。
     /// 光标默认在第 1 项「无变更」（实机帧验证），按 Down×3 到「活动加成」。</summary>
     public const int EventBonusOptionIndex = 3;
-
     /// <summary>活动主页左栏磁贴固定行序（球队阵容/比赛历史/建议）。光标默认在第 1 项「球队阵容」，
     /// 按 A 直接进入阵容页（实机帧：球队阵容磁贴白色高亮为默认焦点）。</summary>
     public const int SquadTileIndex = 0;
 
     // ---------------- 巡回赛活动设置核验（只读） ----------------
-
     /// <summary>
     /// 活动设置面板是否已满足全自动开赛（实机 2026-10-17 cn_tour_event_settings.png）：
     /// 教练模式=开 且 教练模式内控制=完全托管。值的排版为标签行下方独立 pill 行，
@@ -293,7 +282,6 @@ public static class CnWeeklyBrain
     // 布局不固定卡数：国服当前一屏 3 张、国际服 2 张，都可能更多（用户明示 5 卡/多卡布局
     // 存在）。一律以 OCR 大字卡号自身动态定位：卡号在卡左上角，卡右缘 ≈ 下一张卡号位置
     // （最后一张用相邻间距外推），锁/勾探针在卡内动态取区，不绑定任何固定卡位坐标。
-
     /// <summary>卡号大字判定：H≥0.075（国服 3 卡布局实机 H≈0.09，普通文字 H≈0.05）、
     /// y 0.15~0.40、x&lt;0.95（出屏残卡的窄边碎片不取）的两位数字。O/0 归一防 "O1" 漏检。</summary>
     private static bool IsChallengeCardNumber(OcrWord w, out int index)
@@ -311,7 +299,6 @@ public static class CnWeeklyBrain
     /// ⚠ 反推值偏大即探针扫到卡边框描边（亮卡边框有大量 90~220 灰过渡像素）误报锁，
     /// 探针右界须再内收 0.01 兜住推导误差。</summary>
     private const double ChallengeNumberInset = 0.07;
-
     /// <summary>
     /// 挑战清单兜底特征：卡号带里至少两枚大字卡号 + 底栏「返回」。任意卡数布局通用。
     /// </summary>
@@ -343,7 +330,6 @@ public static class CnWeeklyBrain
             bounds.Add((ordered[i].Index, i, right, ordered[i].X - ChallengeNumberInset));
         }
         return bounds;
-
         double pitchDefault(List<(int Index, double X)> list)
             => list.Count >= 2 ? list[^1].X - list[^2].X : 0.30;
     }
@@ -376,7 +362,6 @@ public static class CnWeeklyBrain
     /// <summary>区域内亮度中位数（共享实现见 <see cref="RegionProbe.MedianLuma"/>）。</summary>
     private static int RegionMedianLuma(FrameData f, double x0, double x1, double y0, double y1)
         => RegionProbe.MedianLuma(f, x0, x1, y0, y1);
-
     /// <summary>
     /// 挑战清单当前聚焦卡（游标所在卡）：聚焦卡白底高亮、其余卡深灰底（实机 2026-10-17 晚
     /// cn_challenge_list_done_focus：聚焦白卡中位亮度 200+，深灰卡 &lt;80）。对每张可见卡体
@@ -404,13 +389,10 @@ public static class CnWeeklyBrain
     /// <summary>区域内灰色像素计数（共享实现见 <see cref="RegionProbe.CountGray"/>）。</summary>
     private static int CountGray(FrameData f, double x0, double x1, double y0, double y1)
         => RegionProbe.CountGrayRef(f, x0, x1, y0, y1);
-
     /// <summary>区域内绿色像素计数（共享实现见 <see cref="RegionProbe.CountGreen"/>）。</summary>
     private static int CountGreen(FrameData f, double x0, double x1, double y0, double y1)
         => RegionProbe.CountGreenRef(f, x0, x1, y0, y1);
-
     // ---------------- 挑战型活动（国服专属词） ----------------
-
     /// <summary>
     /// 挑战卡详情页右栏「奖励」行末端的绿勾（2026-10-17 实机 ≈(0.96,0.51)）：本卡奖励已
     /// 领取 = 卡已完成，选中未完成的新挑战时该位置无勾。★比「首次以后的奖励」词探针
@@ -418,7 +400,6 @@ public static class CnWeeklyBrain
     /// </summary>
     public static bool ChallengeRewardClaimed(FrameData frame)
         => CountGreen(frame, 0.935, 0.985, 0.470, 0.545) >= 30;
-
     /// <summary>
     /// 挑战卡详情页积分/进度未达标（用户 2026-10-31 实机反馈：卡 03「以4分或以上为目标」
     /// 积分 3/4，被「已打满 2 局按通关处理」兜底误判通关，主要奖励漏拿）。扫描页面上
@@ -455,7 +436,6 @@ public static class CnWeeklyBrain
     // 页面：标题「请选择您的教练」+ 教练卡横排（姓名 / 国旗 / 评价大字数字 / 进攻风格战术板），
     // 底栏 B 返回。★只比较卡上的评价数字（80/81 这类固定 UI 数字），教练姓名/国籍/战术
     // 风格每周轮换，一律不作判定点（可变内容禁令）。
-
     /// <summary>
     /// 教练评价数字词：H≥0.035（实机 1280×720 评价字高 ≈0.047，普通正文 ≈0.03）、
     /// y 0.30~0.50（卡头姓名下方、进攻风格之上）、x&lt;0.95（出屏残卡碎片不取）的
@@ -529,15 +509,13 @@ public static class CnWeeklyBrain
     public static bool IsSignConfirmPopup(OcrResult ocr) => ocr.ContainsJoined("签下确认");
 
     // ---------------- 选择比赛难度页（2026-10-17 实机 cn_tour_difficulty.png） ----------------
-
-    /// <summary>难度卡名前缀 → 规范难度名（MyLeagueBrain.Difficulties 同表）。国服卡名与国际服
+    /// <summary>难度卡名前缀 → 规范难度名（MatchBrain.Difficulties 同表）。国服卡名与国际服
     /// 用词可能有别（如 顶尖球[星/球员]），按前缀归一到规范名供配置比对。</summary>
     private static readonly (string Prefix, string Name)[] DifficultyPrefixes =
     {
         ("新手", "新手"), ("业余", "业余"), ("标准", "标准"), ("职业", "职业"),
         ("顶尖球", "顶尖球员"), ("超级球", "超级球星"), ("传奇", "传奇"),
     };
-
     /// <summary>OCR 词 → 规范难度名（卡头行难度名词；匹配不到返回 null）。</summary>
     public static string? MatchDifficultyWord(OcrWord w)
     {
@@ -572,7 +550,6 @@ public static class CnWeeklyBrain
         var bgra = frame.Bgra;
         int w = frame.Width, h = frame.Height;
         if (w < 100 || h < 100 || bgra.Length < w * h * 4) return null;
-
         double RegionAvg(double x0, double x1, double y0, double y1)
         {
             long sum = 0; int n = 0;
@@ -585,7 +562,6 @@ public static class CnWeeklyBrain
                 }
             return n == 0 ? 0 : (double)sum / n;
         }
-
         var scores = new List<(string Name, double Avg)>();
         foreach (var word in ocr.Words)
         {
@@ -597,19 +573,16 @@ public static class CnWeeklyBrain
             scores.Add((name, avg));
         }
         if (scores.Count < 2) return null;
-
         var sorted = scores.Select(s => s.Avg).OrderBy(v => v).ToList();
         double median = sorted.Count % 2 == 1
             ? sorted[sorted.Count / 2]
             : (sorted[sorted.Count / 2 - 1] + sorted[sorted.Count / 2]) / 2;
         double threshold = Math.Max(112, median + 22);
-
         var best = scores.OrderByDescending(s => s.Avg).First();
         return best.Avg >= threshold ? best.Name : null;
     }
 
     // ---------------- 巡回赛主要奖励核验（2026-10-17 实机 cn_tour_reward_popup） ----------------
-
     /// <summary>
     /// 巡回赛主页右栏「主要奖励」行右端的绿勾（≥1 个主要奖励已领取）。实机帧：勾中心
     /// ≈(0.948,0.674)，与国际服活动主页勾区同位。⚠ 勾≠拿满——主页勾表示已有主要奖励
@@ -617,7 +590,6 @@ public static class CnWeeklyBrain
     /// </summary>
     public static bool MainRewardHasCheck(FrameData frame)
         => CountGreen(frame, 0.920, 0.965, 0.635, 0.715) >= 50;
-
     /// <summary>
     /// 解析 i 信息弹窗「主要奖励」进度（实机帧：主要奖励 头下方 金币 60/120、
     /// 高光定向券 1/2 各占一项）。进度词只认 主要奖励 头与 活动时间 头之间的
@@ -629,7 +601,6 @@ public static class CnWeeklyBrain
         double? top = ocr.Words.FirstOrDefault(w => w.Text.Replace(" ", "") == "主要奖励")?.CenterY;
         if (top is null) return (false, false);
         double? bottom = ocr.Words.FirstOrDefault(w => w.Text.Replace(" ", "").Contains("活动时间"))?.CenterY;
-
         var items = new List<(int Cur, int Max)>();
         foreach (var w in ocr.Words)
         {
@@ -644,3 +615,7 @@ public static class CnWeeklyBrain
         return items.Count > 0 ? (true, items.All(i => i.Cur == i.Max)) : (false, false);
     }
 }
+
+
+
+

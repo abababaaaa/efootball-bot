@@ -3,16 +3,32 @@ using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 using System.IO; // Core.System 命名空间遮蔽：裸 Path/File/Directory 必须靠本 using（同 MyLeagueScenario）
 
+// ===========================================================================
+// 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
+// 本层职责：单个挂机模块自己的菜单流程与私有状态机（只认自己的界面）。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 不许引用别的模块的 *Scenario（只读借用别人的 *Brain.Classify 认残留页面是允许的）
+//   · 不许自己写场次记账 / 比赛内挂机节奏 —— 一律走 MatchPlay.Tick / IdleTapAsync
+//   · 共享界面判定与决策一律用 Core/Bot/Match 的 MatchBrain，不要复制一份
+// 新增模块：ModuleIds 加常量 + BotModuleCatalog 加一条记录，再写本目录的状态机。
+// 除非用户明确要求更换写法，否则按本层约定写。
+// ===========================================================================
+
 namespace EfootballBot.Core.Bot.Scenarios.MyLeague;
 
 /// <summary>状态机对手柄的最小依赖（测试用录制实现替换；生产转发引擎手柄）。</summary>
 internal interface ISwapPad
 {
     Task Y();
+
     Task X();
+
     Task Confirm();
+
     Task Back();
+
     Task Dpad(PadDir dir);
+
     Task DpadRepeat(PadDir dir, int count);
 }
 
@@ -21,11 +37,15 @@ internal interface ISwapPad
 internal sealed class EngineSwapPad(Pad pad) : ISwapPad
 {
     public Task Y() => pad.Y();
+
     public Task X() => pad.X();
+
     public Task Confirm() => pad.Confirm();
+
     public Task Back() => pad.Back();
     // 单次移光标同样走快速连按通道（机械导航不是拟人语义，用户 2026-10-25：方向移动太拖沓）
     public Task Dpad(PadDir dir) => pad.DpadRepeatFast(dir, 1);
+
     public Task DpadRepeat(PadDir dir, int count) => pad.DpadRepeatFast(dir, count);
 }
 
@@ -98,7 +118,6 @@ public sealed class MaxLevelSwapController
     internal static readonly PadDir[] CursorMoves =
         { PadDir.Up, PadDir.Left, PadDir.Up, PadDir.Right, PadDir.Right,
           PadDir.Right, PadDir.Right, PadDir.Right, PadDir.Down, PadDir.Left };
-
     /// <summary>整轮巡检轮数保险丝（含等待重试；约 700 轮 × ~1.2s ≈ 14 分钟上限）。</summary>
     internal const int MaxRounds = 700;
 
@@ -107,11 +126,17 @@ public sealed class MaxLevelSwapController
     private int _pos;
     /// <summary>刚完成换人的位置（重进后盲走回这里）。</summary>
     private int _swapPos;
+
     private int _stall;
+
     private int _readTries;
+
     private int _escapes;
+
     private int _rounds;
+
     private int _swapped;
+
     private int _maxed;
     /// <summary>本次排序弹窗已按过几次 Y 翻方向（至多 2 次：第 1 次可能没被游戏吃掉——
     /// 2026-10-31 实机按完不核验直接 B 返回，列表停在降序、整晚把最高评价后备换进首发）。</summary>
@@ -132,8 +157,8 @@ public sealed class MaxLevelSwapController
     private bool _skipInspectMove;
     /// <summary>退出驱动的上一次逃生键是否为 A（A/B 交替，防止卡死在确认窗上）。</summary>
     private bool _exitUsedA;
-    private bool _errorDumped;
 
+    private bool _errorDumped;
     /// <summary>巡检是否空闲（空闲时场景层才允许触发新的巡检）。</summary>
     public bool Idle => _phase == Phase.Idle;
 
@@ -155,7 +180,6 @@ public sealed class MaxLevelSwapController
     /// <summary>在联赛主页（无弹窗）触发：按 Y 打开比赛计划。返回下一轮延时。</summary>
     public Task<int> StartAsync(BotEngine engine, Action<string, LogLevel> log, CancellationToken ct = default)
         => StartCore(new EngineSwapPad(engine.Pad), log);
-
     /// <summary>核心入口（手柄参数化，可单测）。</summary>
     internal async Task<int> StartCore(ISwapPad pad, Action<string, LogLevel> log)
     {
@@ -170,7 +194,6 @@ public sealed class MaxLevelSwapController
     public Task<int> StartOnPlanAsync(BotEngine engine, Action<string, LogLevel> log,
         CancellationToken ct = default)
         => StartOnPlanCore(new EngineSwapPad(engine.Pad), log);
-
     /// <summary>核心入口（手柄参数化，可单测）。</summary>
     internal Task<int> StartOnPlanCore(ISwapPad pad, Action<string, LogLevel> log)
     {
@@ -192,7 +215,6 @@ public sealed class MaxLevelSwapController
                 engine.ReportMaxLevel($"第 {pos + 1}/11 位（满级换人巡检）");
             },
             dumpFrame: (f, tag) => DumpFrame(f, tag, log), ct);
-
     /// <summary>读不出的详情页帧落 data\dump\（远程排障：OCR 几何与截图差异只有真帧能定位）。</summary>
     private static void DumpFrame(Capture.FrameData f, string tag, Action<string, LogLevel> log)
     {
@@ -239,7 +261,6 @@ public sealed class MaxLevelSwapController
     internal static Task<PlayerStatus?> ReadStatusAsync(BotEngine engine, OcrResult ocr,
         FrameData frame, CancellationToken ct)
         => ReadPartsFromFrameAsync(engine.Ocr, ocr, frame, ct);
-
     /// <summary>核心读取（OCR 引擎参数化，可单测；实机落帧 swap_read_fail 做回归）。</summary>
     internal static async Task<PlayerStatus?> ReadPartsFromFrameAsync(OcrRecognizer ocrEngine,
         OcrResult ocr, FrameData frame, CancellationToken ct)
@@ -309,10 +330,8 @@ public sealed class MaxLevelSwapController
         if (_phase == Phase.Idle) return null;
         if (++_rounds > MaxRounds)
             return await AbortAsync("巡检轮数超限", pad, log);
-
         var screen = MaxLevelSwapBrain.Classify(ocr);
         bool home = ocr.ContainsJoined("前往比赛");
-
         // 游戏错误弹窗（功能目前无法使用 代码:C_XIQX_0019，实机 2026-10-25 换人流程
         // 被同名卡打乱后出现）：B 按不掉，只能 A 点 OK——任何阶段出现都先关掉再继续。
         if (MaxLevelSwapBrain.IsGameErrorDialog(ocr))
@@ -326,7 +345,6 @@ public sealed class MaxLevelSwapController
             await pad.Confirm();
             return 1200;
         }
-
         switch (_phase)
         {
             case Phase.Opening:
@@ -347,7 +365,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await AbortAsync("打开比赛计划失败", pad, log);
             }
-
             case Phase.Inspect:
             {
                 if (screen == SwapScreen.Detail)
@@ -368,7 +385,6 @@ public sealed class MaxLevelSwapController
                 _phase = Phase.DetailRead;
                 return 1300;
             }
-
             case Phase.DetailRead:
             {
                 if (screen == SwapScreen.Detail)
@@ -394,7 +410,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("详情页未打开", screen, pad, log);
             }
-
             case Phase.InspectAdvance:
             {
                 if (screen == SwapScreen.Lineup)
@@ -418,7 +433,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("详情退出异常", screen, pad, log);
             }
-
             case Phase.ActionPopup:
             {
                 if (screen == SwapScreen.ActionPopup)
@@ -457,7 +471,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("球员动作弹窗未出现", screen, pad, log);
             }
-
             case Phase.AllocWait:
             {
                 if (screen == SwapScreen.Alloc)
@@ -487,7 +500,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("能力点分配页未打开", screen, pad, log);
             }
-
             case Phase.AllocDone:
             {
                 if (screen == SwapScreen.Alloc)
@@ -504,7 +516,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("分配页关闭异常", screen, pad, log);
             }
-
             case Phase.DetailVerify:
             {
                 if (screen == SwapScreen.Detail)
@@ -521,7 +532,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("分配后详情页异常", screen, pad, log);
             }
-
             case Phase.LineupSelect:
             {
                 if (screen == SwapScreen.Lineup)
@@ -538,7 +548,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("选中球员异常", screen, pad, log);
             }
-
             case Phase.SidebarNav:
             {
                 if (screen != SwapScreen.Lineup)
@@ -551,7 +560,6 @@ public sealed class MaxLevelSwapController
                 _phase = Phase.BenchWait;
                 return 1600;
             }
-
             case Phase.BenchWait:
             {
                 if (screen == SwapScreen.Bench)
@@ -576,7 +584,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("后备球员页未打开", screen, pad, log);
             }
-
             case Phase.SortWait:
             {
                 if (screen == SwapScreen.Sort)
@@ -627,7 +634,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("排序弹窗未出现", screen, pad, log);
             }
-
             case Phase.SortApplied:
             {
                 if (screen == SwapScreen.Bench)
@@ -648,7 +654,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("排序应用异常", screen, pad, log);
             }
-
             case Phase.FilterWait:
             {
                 if (screen == SwapScreen.Filter)
@@ -674,7 +679,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("筛选页未打开", screen, pad, log);
             }
-
             case Phase.CardTypeWait:
             {
                 if (screen != SwapScreen.CardType)
@@ -700,7 +704,6 @@ public sealed class MaxLevelSwapController
                 _phase = Phase.FilterApply;
                 return 2300;
             }
-
             case Phase.FilterApply:
             {
                 if (screen == SwapScreen.Filter)
@@ -721,7 +724,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("筛选应用异常", screen, pad, log);
             }
-
             case Phase.BenchSwap:
             {
                 if (screen == SwapScreen.Bench)
@@ -755,7 +757,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("筛选后列表异常", screen, pad, log);
             }
-
             case Phase.SwapExit:
             {
                 _verifyRounds++;
@@ -819,7 +820,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("换人后返回异常", screen, pad, log);
             }
-
             case Phase.Reopen:
             {
                 if (home)
@@ -837,7 +837,6 @@ public sealed class MaxLevelSwapController
                 }
                 return await StallAsync("回主页异常", screen, pad, log);
             }
-
             case Phase.Rewind:
             {
                 if (screen != SwapScreen.Lineup)
@@ -882,7 +881,6 @@ public sealed class MaxLevelSwapController
                 log($"[我的联赛] 已走到第 {_pos + 1}/11 位，继续巡检", LogLevel.Info);
                 return _rewindWalk ? 700 + 110 * _swapPos : 600;
             }
-
             case Phase.Done:
             {
                 if (home)
@@ -925,7 +923,6 @@ public sealed class MaxLevelSwapController
                 await pad.Back(); // 其他意外页面：B 退出
                 return 1100;
             }
-
             default:
                 Reset();
                 return null;
@@ -954,3 +951,7 @@ public sealed class MaxLevelSwapController
         return Task.FromResult<int?>(2000);
     }
 }
+
+
+
+

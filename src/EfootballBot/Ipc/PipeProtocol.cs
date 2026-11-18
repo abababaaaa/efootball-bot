@@ -24,7 +24,8 @@ public static class PipeProtocol
     {
         // 命令（GUI→Worker）
         public string? Cmd { get; set; }          // start | stop | preview | reloadConfig | ping
-        public string? Mode { get; set; }         // start: observe / cndaily / intl
+        // start: 模块 id（唯一来源见 Core/Bot/Modules/ModuleIds.cs）或 EngineModes.Observe 纯观察
+        public string? Mode { get; set; }
         public bool? On { get; set; }             // preview: true/false
 
         // 事件（Worker→GUI）

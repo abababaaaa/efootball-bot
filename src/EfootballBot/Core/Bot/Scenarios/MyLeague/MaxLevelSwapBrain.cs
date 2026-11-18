@@ -1,6 +1,17 @@
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Vision;
 
+// ===========================================================================
+// 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
+// 本层职责：单个挂机模块自己的菜单流程与私有状态机（只认自己的界面）。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 不许引用别的模块的 *Scenario（只读借用别人的 *Brain.Classify 认残留页面是允许的）
+//   · 不许自己写场次记账 / 比赛内挂机节奏 —— 一律走 MatchPlay.Tick / IdleTapAsync
+//   · 共享界面判定与决策一律用 Core/Bot/Match 的 MatchBrain，不要复制一份
+// 新增模块：ModuleIds 加常量 + BotModuleCatalog 加一条记录，再写本目录的状态机。
+// 除非用户明确要求更换写法，否则按本层约定写。
+// ===========================================================================
+
 namespace EfootballBot.Core.Bot.Scenarios.MyLeague;
 
 /// <summary>满级自动换人涉及的界面（OCR 固定词判定；可变内容一律不作判定点）。</summary>
@@ -47,7 +58,6 @@ public sealed record PlayerStatus(int Level, int LevelMax, int Points)
 public static partial class MaxLevelSwapBrain
 {
     // ---------------- 界面判定 ----------------
-
     /// <summary>
     /// 首发站位页：侧栏「替补球员 / 自动配置球员」为该页独有（后备球员页标题虽有
     /// 「后备球员」但无侧栏文字项；排序/筛选弹窗先于本判定）。整体实力 + 战术 做兜底证据——
@@ -58,18 +68,14 @@ public static partial class MaxLevelSwapBrain
         ocr.ContainsJoined("替补球员") || ocr.ContainsJoined("自动配置球员") ||
         (ocr.ContainsJoined("整体实力") && ocr.FindAll("战术").Any(w =>
             w.NormText == "战术" || (w.NormText.Length <= 3 && w.NormText.EndsWith("战术"))));
-
     /// <summary>球员详情页：底部「X 球员动作」为主判据，「惯用脚」（数据栏固定列）兜底。</summary>
     public static bool IsDetail(OcrResult ocr) =>
         ocr.ContainsJoined("球员动作") || ocr.ContainsJoined("惯用脚");
-
     /// <summary>球员动作弹窗：详情页底部也有「球员动作」四字，弹窗必须叠加「取消」同屏才成立。</summary>
     public static bool IsActionPopup(OcrResult ocr) =>
         ocr.ContainsJoined("球员动作") && ocr.ContainsJoined("取消");
-
     /// <summary>能力点分配页：底部「Y 推荐分配」为唯一词（弹窗项只有「能力点分配」）。</summary>
     public static bool IsAlloc(OcrResult ocr) => ocr.ContainsJoined("推荐分配");
-
     /// <summary>
     /// 后备球员卡格子页：左下「剩余球员数: N」唯一；兜底 标题+排除侧栏词
     /// （首发站位页侧栏也印「后备球员」）。★必须先于本页判站位页：换人后 B 返回的
@@ -80,24 +86,20 @@ public static partial class MaxLevelSwapBrain
         ocr.ContainsJoined("剩余球员数") || ocr.ContainsJoined("剩余球员") ||
         (ocr.ContainsJoined("后备球员") && !ocr.ContainsJoined("替补球员") &&
          !ocr.ContainsJoined("自动配置球员"));
-
     /// <summary>排序弹窗：列表项（「整体评价」，OCR 漏读时退回「当前等级」）+ 「取消」。
     /// 先于筛选（弹窗盖在列表上，底层词可能漏读进来）。</summary>
     public static bool IsSort(OcrResult ocr) =>
         (ocr.ContainsJoined("整体评价") || ocr.ContainsJoined("当前等级")) && ocr.ContainsJoined("取消");
-
     /// <summary>卡片类型子页：末行「不可用的球员」为该页独有，先于筛选页判定。
     /// ★不能再看「状态火热」：筛选页光标停在「卡片类型」行时，右侧已选值
     /// 「状态火热/精选/高光/高光-ShowTime」会被 OCR 整串读进来（2026-10-30 用户实机），
     /// 误判成子页 → 筛选页识别不到 → 巡检 B×3 逃生弃权。</summary>
     public static bool IsCardType(OcrResult ocr) =>
         ocr.ContainsJoined("不可用的球员");
-
     /// <summary>筛选页：行首「俱乐部球队」为主判据；标题「筛选」+ 行尾「比赛风格」兜底。</summary>
     public static bool IsFilter(OcrResult ocr) =>
         ocr.ContainsJoined("俱乐部球队") ||
         (ocr.ContainsJoined("筛选") && ocr.ContainsJoined("比赛风格"));
-
     public static SwapScreen Classify(OcrResult ocr)
     {
         if (IsActionPopup(ocr)) return SwapScreen.ActionPopup;
@@ -116,7 +118,6 @@ public static partial class MaxLevelSwapBrain
     }
 
     // ---------------- 详情页数据栏读取（等级 x/x + 能力点） ----------------
-
     /// <summary>
     /// 读取数据栏：找「等级」「能力点」表头词（y 带 <paramref name="headYMin"/>~0.52），
     /// 取正下方 <paramref name="valueMaxDy"/> 内、横向 ±0.06 的词拼出 23/26 与 44。
@@ -146,7 +147,6 @@ public static partial class MaxLevelSwapBrain
     public static ((int Cur, int Max)? Pair, int? Points) MergeParts(
         ((int Cur, int Max)? Pair, int? Points) direct, ((int Cur, int Max)? Pair, int? Points) crop)
         => (direct.Pair ?? crop.Pair, direct.Points ?? crop.Points);
-
     /// <summary>等级列文本 → (cur,max)。OCR 可能拆成 "23" + "/26" 或丢斜杠拼成 "2326"——
     /// 丢斜杠时按两位数等分/单数×自身兜底（等级上限常见 24~37）。</summary>
     internal static (int Cur, int Max)? ParseLevelPair(string? lv)
@@ -195,7 +195,6 @@ public static partial class MaxLevelSwapBrain
             .Where(w => w.NormText.Contains(keyword) && w.CenterY >= headYMin && w.CenterY <= 0.52)
             .OrderBy(w => w.CenterY).ThenBy(w => w.CenterX)
             .FirstOrDefault();
-
     /// <summary>
     /// 拼出表头正下方 <paramref name="valueMaxDy"/> 内的值文本。候选词按「离哪个表头更近」归属：
     /// 实机相邻列（等级 23/26 与 能力点 44）横向只差 ~0.05，固定 ± 容差会把邻列的
@@ -219,7 +218,6 @@ public static partial class MaxLevelSwapBrain
     }
 
     // ---------------- 换入生效判据（整体实力 / 剩余球员数）与弹窗词 ----------------
-
     /// <summary>
     /// 整体实力数值（站位页/后备球员页右上角，值在标签正下方偏右，实机 1280×720：
     /// 标签 (0.855, 0.20)、值 2403 位于 (0.89, 0.26)）。换入生效后阵容变化该值必变，
@@ -269,24 +267,19 @@ public static partial class MaxLevelSwapBrain
     /// </summary>
     public static bool IsGameErrorDialog(OcrResult ocr) =>
         ocr.ContainsJoined("功能目前无法使用") || ocr.ContainsJoined("不便之处");
-
     /// <summary>
     /// 确认类弹窗盖在站位页/后备页上（底层页面词仍在，画面分类不变）：
     /// 以「确定/确认/是否」为准——原页固定词里没有这三个词（完成/返回/战术…），命中即有弹窗。
     /// </summary>
     public static bool HasDialogConfirmWords(OcrResult ocr) =>
         ocr.ContainsJoined("确定") || ocr.ContainsJoined("确认") || ocr.ContainsJoined("是否");
-
     // ---------------- 后备列表暗卡探针（同名在首发/替补名单的卡整体压暗，用户 2026-10-25） ----------------
-
     /// <summary>列几何（兜底）：5 列卡心 x（实机 2026-10-25 截图 1280×720 归一化）。
     /// 网格会随窗口/预览面板变化（实测两帧列距 0.116 vs 0.097），优先用
     /// <see cref="BenchColumnCenters"/> 从名字行动态推导。</summary>
     private static readonly double[] BenchColumnsFixed = { 0.174, 0.290, 0.405, 0.520, 0.635 };
-
     /// <summary>行几何：4 行卡顶 y（名字行中心上移 0.085，两帧实测一致）。</summary>
     private static readonly double[] BenchRowTops = { 0.228, 0.389, 0.550, 0.710 };
-
     /// <summary>
     /// 卡格列心：用第一行球员名字的 OCR 词按 x 间隙聚类推导（名字行 y≈0.31 带、
     /// 右边预览卡区域 x&gt;0.68 排除）。网格几何随窗口变化，固定坐标会采错格
@@ -378,7 +371,6 @@ public static partial class MaxLevelSwapBrain
     }
 
     // ---------------- 详情页等级列文本（供整帧+裁切两源合并解析） ----------------
-
     /// <summary>整帧「等级」表头正下方的值文本（与 <see cref="ReadParts"/> 同几何）。</summary>
     public static string? ReadLevelText(OcrResult ocr)
     {
@@ -418,7 +410,6 @@ public static partial class MaxLevelSwapBrain
     }
 
     // ---------------- 等级多配置投票（大字细笔画「1」单配置不可信，实机 20261025_11 五帧标定） ----------------
-
     /// <summary>等级列值区词（「等级」表头正下方 ±0.06 横带内，与 <see cref="ReadParts"/> 同几何）。
     /// 投票的直接帧候选必须限定在该区域——全页数字词（年龄/能力点/评分）会污染票仓。</summary>
     public static IReadOnlyList<OcrWord> LevelValueWords(OcrResult ocr)
@@ -510,7 +501,6 @@ public static partial class MaxLevelSwapBrain
     }
 
     // ---------------- 排序/筛选「已设置」探针（中断续跑不重复勾选） ----------------
-
     /// <summary>
     /// 排序弹窗「整体评价」行是否已有蓝勾（勾 = 该排序键已生效）。实机 2026-10-24
     /// （1280×720 用户截图）：勾在行右端 x≈0.94~0.97，亮蓝 ≈RGB(33,155,243)；
@@ -560,7 +550,6 @@ public static partial class MaxLevelSwapBrain
     }
 
     // ---------------- 排序弹窗方向箭头（像素探针） ----------------
-
     /// <summary>
     /// 排序弹窗右上角方向箭头：↑ = 整体评价升序（列表首位为最低评价，换人目标）。
     /// 实机 2026-10-24（1280×720 用户截图）：箭头为「菱形头 + 细杆」emoji 形态，
@@ -609,7 +598,10 @@ public static partial class MaxLevelSwapBrain
         }
         return (top, bottom, top + bottom);
     }
-
     [global::System.Text.RegularExpressions.GeneratedRegex(@"(\d{1,3})\s*/\s*(\d{1,3})")]
     private static partial global::System.Text.RegularExpressions.Regex SlashNum();
 }
+
+
+
+

@@ -1,6 +1,17 @@
 using System.Text.RegularExpressions;
 using EfootballBot.Core.Vision;
 
+// ===========================================================================
+// 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
+// 本层职责：单个挂机模块自己的菜单流程与私有状态机（只认自己的界面）。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 不许引用别的模块的 *Scenario（只读借用别人的 *Brain.Classify 认残留页面是允许的）
+//   · 不许自己写场次记账 / 比赛内挂机节奏 —— 一律走 MatchPlay.Tick / IdleTapAsync
+//   · 共享界面判定与决策一律用 Core/Bot/Match 的 MatchBrain，不要复制一份
+// 新增模块：ModuleIds 加常量 + BotModuleCatalog 加一条记录，再写本目录的状态机。
+// 除非用户明确要求更换写法，否则按本层约定写。
+// ===========================================================================
+
 namespace EfootballBot.Core.Bot.Scenarios.AiLadder;
 
 /// <summary>国际服 AI 天梯联赛界面（AiLadderBrain 判定）。None = 非本模块界面，交给周活动/我的联赛链分类。</summary>
@@ -26,7 +37,6 @@ public static class AiLadderBrain
     private static readonly Regex DivisionWord = new("[组組]别(\\d+)", RegexOptions.Compiled);
 
     // ---------------- 界面分类 ----------------
-
     /// <summary>
     /// 界面分类。判定顺序：组别主页 → 类别选择页。
     /// 组别主页先判：其左上角 logo 与奖励行都可能出现「eFootball™联赛」字样；
@@ -41,13 +51,11 @@ public static class AiLadderBrain
             (ocr.ContainsJoined("组别分布") || ocr.ContainsJoined("比赛场次") ||
              ocr.ContainsJoined("当前积分") || ParseDivision(ocr) is not null))
             return AlScreen.DivisionHome;
-
         // 类别选择页：两卡标题带「类别」后缀。周活动列表页的 对阵AI/对阵玩家 页签无此后缀，
         // 以此互斥（两页共用 对阵AI/对阵玩家 词，裸词绝不能作判定点）。
         if (ocr.ContainsJoined("对阵AI类别") || ocr.ContainsJoined("对阵玩家类别") ||
             ocr.ContainsJoined("AI类别") || ocr.ContainsJoined("玩家类别"))
             return AlScreen.CategorySelect;
-
         // 兜底：页面标题「eFootball™联赛」在顶部（y<0.2）。比赛页 hub 的同名词是卡片标签
         // （y≈0.7）不会命中；组别主页顶部无中文「联赛」（logo 是英文 EFOOTBALL LEAGUE）。
         bool topTitle = ocr.Lines.Any(l => l.CenterY < 0.2 && l.Text.Contains("联赛"));
@@ -55,12 +63,10 @@ public static class AiLadderBrain
             w.NormText.Contains("eFootball", StringComparison.OrdinalIgnoreCase));
         if (topTitle && topBrand)
             return AlScreen.CategorySelect;
-
         return AlScreen.None;
     }
 
     // ---------------- 组别解析 ----------------
-
     /// <summary>
     /// 解析组别主页左上角的当前组别（组别8 → 8；10 最低、1 最高）。
     /// 只认「组别+数字」相邻且位置在左上（y&lt;0.22 / x&lt;0.45）的词：右栏「升级至组别7」
@@ -79,3 +85,7 @@ public static class AiLadderBrain
         return null;
     }
 }
+
+
+
+

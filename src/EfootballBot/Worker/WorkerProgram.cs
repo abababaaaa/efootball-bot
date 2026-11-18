@@ -5,7 +5,9 @@ using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
+using EfootballBot.Core.Bot.Modules;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Logging;
 using EfootballBot.Core.System;
@@ -19,13 +21,40 @@ namespace EfootballBot.Worker;
 /// </summary>
 public static class WorkerProgram
 {
+    /// <summary>
+    /// 打印模块注册表（按服分组）+ 自检结果。返回值 0 = 自检通过，2 = 注册表有结构性问题。
+    /// 用于「某个模块点了没反应」的现场核对：这条命令能一眼看出该模块在不在表里、
+    /// 属于哪个服、是不是场景、能不能被接力。
+    /// </summary>
+    private static int ListModules()
+    {
+        Console.OutputEncoding = Encoding.UTF8;
+        foreach (var region in new[] { ServerRegion.Intl, ServerRegion.Cn })
+        {
+            Console.WriteLine($"== {region.Display()}（{region.Key()}）==");
+            foreach (var d in BotModuleCatalog.By(region))
+                Console.WriteLine($"  {d.Id,-14} {d.DisplayName,-12} " +
+                                  $"{(d.IsScenario ? "场景" : "工具")}  " +
+                                  $"{(d.HandoffEligible ? "可接力" : "      ")}  {d.Summary}");
+        }
+        var problems = BotModuleCatalog.SelfCheck();
+        Console.WriteLine(problems.Count == 0
+            ? $"-- 注册表自检通过（{BotModuleCatalog.All.Count} 个模块）"
+            : "-- 注册表自检未通过：" + string.Join("；", problems));
+        return problems.Count == 0 ? 0 : 2;
+    }
+
     public static async Task<int> RunAsync(string[] args)
     {
+        // 诊断入口：打印模块注册表并退出（不建会话、不接手柄、不写游戏）。
+        // 用法：EfootballBot.exe --worker --list-modules
+        if (args.Contains("--list-modules")) return ListModules();
+
         // 崩溃自动抓 minidump，越早装越好（挂机中 Worker 被原生崩溃打死是最常见的事故）
         CrashReporter.Install("worker");
 
         // 解析参数：--worker <mode> [--pipe <name>] [--console]
-        string mode = args.Length > 1 ? args[1] : "observe";
+        string mode = args.Length > 1 ? args[1] : EngineModes.Observe;
         bool console = args.Contains("--console");
 
         int pid = Environment.ProcessId;
@@ -418,3 +447,4 @@ public static class WorkerProgram
         return Convert.ToBase64String(ms.ToArray());
     }
 }
+

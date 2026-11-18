@@ -4,6 +4,17 @@ using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 using EfootballBot.Core.Bot.Scenarios.MyLeague;
 
+// ===========================================================================
+// 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
+// 本层职责：单个挂机模块自己的菜单流程与私有状态机（只认自己的界面）。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 不许引用别的模块的 *Scenario（只读借用别人的 *Brain.Classify 认残留页面是允许的）
+//   · 不许自己写场次记账 / 比赛内挂机节奏 —— 一律走 MatchPlay.Tick / IdleTapAsync
+//   · 共享界面判定与决策一律用 Core/Bot/Match 的 MatchBrain，不要复制一份
+// 新增模块：ModuleIds 加常量 + BotModuleCatalog 加一条记录，再写本目录的状态机。
+// 除非用户明确要求更换写法，否则按本层约定写。
+// ===========================================================================
+
 namespace EfootballBot.Core.Bot.Scenarios.Stud;
 
 /// <summary>
@@ -62,37 +73,65 @@ public sealed class StudFlowController
     }
 
     private readonly BotEngine _engine;
+
     private readonly Action<string, LogLevel> _log;
+
     private readonly StudTrainingConfig _cfg;
 
     private Phase _phase;
+
     private StudScreen _lastScreen = StudScreen.Unknown;
+
     private int _stall;
+
     private int _rounds;
+
     private int _gkLeft;
+
     private int _outfieldLeft;
+
     private bool _buyingGk;
+
     private bool _acquiredCounted;
+
     private int _sortFlips;
+
     private bool _filterReset;
+
     private bool _positionStarted;
+
     private int _positionIndex;
+
     private bool _trainingSeekStarted;
+
     private int _trainingSeekSteps;
+
     private bool _ratingStarted;
+
     private bool _ratingMoved;
+
     private bool _ratingSelected;
+
     private int _trainRemaining;
+
     private bool _trainAll;
+
     private int _trainedRuns;
+
     private int _playerIndex;
+
     private bool _skillCompleted;
+
     private bool _skillResultRecorded;
+
     private bool _skillSlotEmpty;
+
     private int _slotProbeTries;
+
     private readonly Dictionary<string, int> _skillResults = new(StringComparer.Ordinal);
 
     private const int MaxRounds = 1500;
+
     private const int MaxStall = 45;
 
     public StudFlowController(BotEngine engine, Action<string, LogLevel> log, bool training)
@@ -114,7 +153,6 @@ public sealed class StudFlowController
     {
         if (++_rounds > MaxRounds)
             return Abort("流程轮数超限");
-
         var screen = StudTrainingBrain.Classify(obs.Ocr);
         if (screen != _lastScreen)
         {
@@ -127,7 +165,6 @@ public sealed class StudFlowController
         {
             return Abort($"在「{Describe(screen)}」停留过久");
         }
-
         return _phase switch
         {
             Phase.BuyGoContract => await BuyGoContractAsync(screen, ct),
@@ -143,7 +180,6 @@ public sealed class StudFlowController
             Phase.BuyPostAcquire => await BuyPostAcquireAsync(screen, ct),
             Phase.BuyAfterList => await BuyAfterListAsync(screen, ct),
             Phase.BuyDone => 0,
-
             Phase.TrainGoMyTeam => await TrainGoMyTeamAsync(screen, ct),
             Phase.TrainGoPlayers => await TrainGoPlayersAsync(screen, ct),
             Phase.TrainOpenAction => await TrainOpenActionAsync(screen, ct),
@@ -174,7 +210,6 @@ public sealed class StudFlowController
     }
 
     // ================= 购买 =================
-
     private async Task<int> BuyGoContractAsync(StudScreen screen, CancellationToken ct)
     {
         if (screen == StudScreen.ContractHome)
@@ -191,7 +226,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.MainMenu)
             return await WaitAsync("等待游戏主菜单");
-
         _stall = 0;
         _log("[种马购买] 主菜单：下×2 → 左×6（比赛）→ 右×2（合约）→ A", LogLevel.Info);
         var pad = _engine.Pad;
@@ -239,7 +273,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.ContractPlayerList)
             return await WaitAsync("等待普通球员列表");
-
         _stall = 0;
         _log("[种马购买] 普通球员列表：X 打开排序", LogLevel.Info);
         await _engine.Pad.X();
@@ -257,7 +290,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.SortPopup)
             return await WaitAsync("等待排序弹窗");
-
         _stall = 0;
         _sortFlips = 0;
         _log("[种马购买] 排序：上×9 归位 → 下×3 选「价格」", LogLevel.Info);
@@ -277,7 +309,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.SortPopup)
             return await WaitAsync("等待排序弹窗");
-
         _stall = 0;
         bool? up = MaxLevelSwapBrain.IsSortArrowUp(frame);
         if (up == false && _sortFlips < 2)
@@ -291,7 +322,6 @@ public sealed class StudFlowController
             _log("[种马购买] 排序箭头读不出：按升序继续（如实际为降序请反馈）", LogLevel.Warn);
         else if (up == false)
             _log("[种马购买] 翻方向两次后箭头仍朝下：按升序继续", LogLevel.Warn);
-
         _log("[种马购买] 已选「价格」+ 升序，A 应用", LogLevel.Info);
         await _engine.Pad.Confirm();
         _phase = Phase.BuySortClose;
@@ -331,15 +361,12 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.ContractPlayerList)
             return await WaitAsync("等待普通球员列表");
-
         _stall = 0;
         if (!PrepareNextPurchase())
             return await BuyFinishAsync();
-
         _log(_buyingGk
             ? $"[种马购买] 买入门将种马（剩余 {_gkLeft} 个）：归顶 → 第 1 张 → A"
             : $"[种马购买] 买入非门将种马（剩余 {_outfieldLeft} 个）：归顶 → 下 1 格 → 第 2 张 → A", LogLevel.Info);
-
         var pad = _engine.Pad;
         await pad.DpadRepeatFast(PadDir.Up, 9);
         if (!_buyingGk)
@@ -393,7 +420,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.PaymentConfirm)
             return await WaitAsync("等待付款确认弹窗");
-
         _stall = 0;
         _log("[种马购买] 付款确认：上移焦点（取消 → 0GP 确认）→ A", LogLevel.Info);
         var pad = _engine.Pad;
@@ -417,7 +443,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.AcquiredPopup)
             return await WaitAsync("等待获得球员弹窗");
-
         _stall = 0;
         if (!_acquiredCounted)
         {
@@ -449,7 +474,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.PostAcquireDetail)
             return await WaitAsync("等待签下后的详情页");
-
         _stall = 0;
         _log("[种马购买] 签下后详情：A 下一步返回列表", LogLevel.Info);
         await _engine.Pad.Confirm();
@@ -510,7 +534,6 @@ public sealed class StudFlowController
     }
 
     // ================= 培训（筛选） =================
-
     private async Task<int> TrainGoMyTeamAsync(StudScreen screen, CancellationToken ct)
     {
         if (screen == StudScreen.MyTeamHome)
@@ -535,7 +558,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.MainMenu)
             return await WaitAsync("等待游戏主菜单");
-
         _stall = 0;
         _log("[种马培训] 主菜单：下×2 → 左×6（比赛）→ 右×1（我的球队）→ A", LogLevel.Info);
         var pad = _engine.Pad;
@@ -566,7 +588,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.MyTeamHome)
             return await WaitAsync("等待我的球队首页");
-
         _stall = 0;
         _log("[种马培训] 我的球队：左×9 归位 → 右×1（球员）→ A", LogLevel.Info);
         var pad = _engine.Pad;
@@ -590,7 +611,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.SquadList)
             return await WaitAsync("等待全部球员列表");
-
         _stall = 0;
         _log("[种马培训] 全部球员：X 打开动作", LogLevel.Info);
         await _engine.Pad.X();
@@ -607,7 +627,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.ActionMenu)
             return await WaitAsync("等待动作侧栏");
-
         _stall = 0;
         _log("[种马培训] 动作：下×2（筛选）→ A", LogLevel.Info);
         var pad = _engine.Pad;
@@ -627,7 +646,6 @@ public sealed class StudFlowController
             if (screen == StudScreen.RatingFilter) { _phase = Phase.TrainRatingSelect; return 300; }
             return await WaitAsync("等待筛选页");
         }
-
         _stall = 0;
         if (!_filterReset)
         {
@@ -649,7 +667,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.Filter)
             return await WaitAsync("等待筛选页/最佳位置");
-
         _stall = 0;
         _log("[种马培训] 筛选：上×9 归位 → 下×3（最佳位置）→ A", LogLevel.Info);
         var pad = _engine.Pad;
@@ -671,7 +688,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.PositionFilter)
             return await WaitAsync("等待最佳位置子页");
-
         _stall = 0;
         var pad = _engine.Pad;
         if (!_positionStarted)
@@ -682,7 +698,6 @@ public sealed class StudFlowController
             await pad.DpadRepeatFast(PadDir.Up, 9);
             return 700;
         }
-
         if (_positionIndex < 12)
         {
             await pad.Dpad(PadDir.Down);
@@ -692,7 +707,6 @@ public sealed class StudFlowController
                 _log("[种马培训] 最佳位置：已选择 12 类（GK 除外），B 返回筛选", LogLevel.Info);
             return 800;
         }
-
         await pad.Back();
         _positionStarted = false;
         _phase = Phase.TrainFilterTraining;
@@ -708,7 +722,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.Filter)
             return await WaitAsync("等待筛选页/培育");
-
         _stall = 0;
         _log("[种马培训] 筛选：上×9 归位 → 下×9（培育）→ A", LogLevel.Info);
         var pad = _engine.Pad;
@@ -729,7 +742,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.TrainingFilter)
             return await WaitAsync("等待培育子页");
-
         _stall = 0;
         var pad = _engine.Pad;
         if (!_trainingSeekStarted)
@@ -740,7 +752,6 @@ public sealed class StudFlowController
             await pad.DpadRepeatFast(PadDir.Up, 9);
             return 700;
         }
-
         string? row = StudTrainingBrain.SelectedRightRowText(obs.Ocr, obs.Frame);
         if (row is not null && row.Contains("未完成培育", StringComparison.Ordinal))
         {
@@ -749,7 +760,6 @@ public sealed class StudFlowController
             _phase = Phase.TrainTrainingConfirm;
             return 1000;
         }
-
         if (_trainingSeekSteps++ >= 15)
         {
             _log("[种马培训] 培育：未找到「未完成培育」，B 返回并跳过该项（请反馈实机筛选截图）", LogLevel.Warn);
@@ -758,7 +768,6 @@ public sealed class StudFlowController
             _phase = Phase.TrainFilterRating;
             return 1200;
         }
-
         await pad.Dpad(PadDir.Down);
         return 700;
     }
@@ -773,7 +782,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.TrainingFilter)
             return await WaitAsync("等待培育子页关闭");
-
         _stall = 0;
         await _engine.Pad.Back();
         _trainingSeekStarted = false;
@@ -790,7 +798,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.Filter)
             return await WaitAsync("等待筛选页/球员评价");
-
         _stall = 0;
         _log("[种马培训] 筛选：上×9 归位 → 下×10（球员评价）→ A", LogLevel.Info);
         var pad = _engine.Pad;
@@ -811,7 +818,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.RatingFilter)
             return await WaitAsync("等待球员评价子页");
-
         _stall = 0;
         var pad = _engine.Pad;
         if (!_ratingStarted)
@@ -835,7 +841,6 @@ public sealed class StudFlowController
             await pad.Confirm();
             return 900;
         }
-
         await pad.Back();
         _ratingStarted = false;
         _phase = Phase.TrainFilterComplete;
@@ -851,7 +856,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.Filter)
             return await WaitAsync("等待筛选页完成");
-
         _stall = 0;
         _log("[种马培训] 筛选完成：下移光标至「完成」→ A 应用", LogLevel.Info);
         var pad = _engine.Pad;
@@ -873,7 +877,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.SquadList)
             return await WaitAsync("等待筛选后的全部球员列表");
-
         if (_trainRemaining == 0 && !_trainAll)
         {
             _phase = Phase.TrainStopped;
@@ -882,7 +885,6 @@ public sealed class StudFlowController
             _engine.Stop();
             return 0;
         }
-
         if (_trainAll)
         {
             int visible = StudTrainingBrain.ReadVisiblePlayerCount(obs.Ocr) ?? 50;
@@ -913,7 +915,6 @@ public sealed class StudFlowController
                 return 0;
             }
         }
-
         _phase = Phase.TrainPickPlayer;
         return 500;
     }
@@ -930,7 +931,6 @@ public sealed class StudFlowController
             if (screen == StudScreen.Filter) { _phase = Phase.TrainApplied; return 300; }
             return await WaitAsync("等待筛选后的全部球员列表");
         }
-
         _stall = 0;
         _skillResultRecorded = false;
         _skillSlotEmpty = false;
@@ -939,7 +939,6 @@ public sealed class StudFlowController
         _log(_trainRemaining == int.MaxValue
             ? $"[种马培训] 打开第 {_playerIndex + 1} 名球员（全部）"
             : $"[种马培训] 打开第 {_playerIndex + 1}/{_playerIndex + _trainRemaining} 名球员", LogLevel.Info);
-
         var pad = _engine.Pad;
         await pad.DpadRepeatFast(PadDir.Up, 9);
         if (_playerIndex > 0)
@@ -966,7 +965,6 @@ public sealed class StudFlowController
             }
             return await WaitAsync("等待培训球员详情");
         }
-
         _stall = 0;
         _log("[种马培训] 球员详情：X 打开球员动作", LogLevel.Info);
         await _engine.Pad.X();
@@ -990,7 +988,6 @@ public sealed class StudFlowController
             }
             return await WaitAsync("等待球员动作侧栏");
         }
-
         _stall = 0;
         _log("[种马培训] 球员动作：上×9 归位 → 下×2（技巧训练）→ A", LogLevel.Info);
         var pad = _engine.Pad;
@@ -1017,7 +1014,6 @@ public sealed class StudFlowController
             }
             return await WaitAsync("等待技巧训练页");
         }
-
         _stall = 0;
         if (!_skillSlotEmpty)
         {
@@ -1033,7 +1029,6 @@ public sealed class StudFlowController
                 return 1200;
             }
         }
-
         _log("[种马培训] 技巧训练：当前空槽为蓝色加号，A 下一步", LogLevel.Info);
         await _engine.Pad.Confirm();
         _phase = Phase.TrainSkillItem;
@@ -1056,7 +1051,6 @@ public sealed class StudFlowController
             }
             return await WaitAsync("等待选择要使用的物品");
         }
-
         _stall = 0;
         _log("[种马培训] 选择物品：上 → 右（随机）→ A", LogLevel.Info);
         var pad = _engine.Pad;
@@ -1083,7 +1077,6 @@ public sealed class StudFlowController
             }
             return await WaitAsync("等待执行训练课弹窗");
         }
-
         _stall = 0;
         _log("[种马培训] 执行训练课：上移焦点 → A 确认", LogLevel.Info);
         var pad = _engine.Pad;
@@ -1112,7 +1105,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.SkillResult)
             return await WaitAsync("等待训练结果弹窗");
-
         _stall = 0;
         if (!_skillResultRecorded)
         {
@@ -1149,7 +1141,6 @@ public sealed class StudFlowController
         }
         if (screen != StudScreen.SkillTraining)
             return await WaitAsync("等待技巧训练页（训练后）");
-
         _stall = 0;
         _log("[种马培训] 技巧训练完成，附加技巧已写入：B 返回球员详情", LogLevel.Info);
         await _engine.Pad.Back();
@@ -1178,7 +1169,6 @@ public sealed class StudFlowController
             }
             return await WaitAsync("等待返回球员详情");
         }
-
         _stall = 0;
         _log("[种马培训] 球员详情：B 返回全部球员列表", LogLevel.Info);
         await _engine.Pad.Back();
@@ -1202,7 +1192,6 @@ public sealed class StudFlowController
             }
             return await WaitAsync("等待返回全部球员列表");
         }
-
         _stall = 0;
         _playerIndex++;
         if (_skillCompleted)
@@ -1217,10 +1206,8 @@ public sealed class StudFlowController
             _log("[种马培训] 本名球员未执行训练（已跳过），继续下一名", LogLevel.Warn);
         }
         _skillCompleted = false;
-
         if (_trainRemaining <= 0)
             return await FinishTrainingAsync();
-
         _phase = Phase.TrainPickPlayer;
         return 800;
     }
@@ -1238,7 +1225,6 @@ public sealed class StudFlowController
     }
 
     // ================= 公共 =================
-
     private async Task<int> WaitAsync(string what)
     {
         if (_stall == 0)
@@ -1280,3 +1266,7 @@ public sealed class StudFlowController
         _ => "未知界面",
     };
 }
+
+
+
+

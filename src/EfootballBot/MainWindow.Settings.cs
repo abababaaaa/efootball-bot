@@ -8,13 +8,16 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
 using System.Windows.Threading;
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
+using EfootballBot.Core.Bot.Modules;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.System;
 using EfootballBot.Core.Logging;
 using EfootballBot.Core.UI;
+using EfootballBot.Shell;
 using EfootballBot.Core.Vision;
 
 namespace EfootballBot;
@@ -34,12 +37,19 @@ public partial class MainWindow
     /// <summary>技能卡消耗数量档位；索引 4 = 自定义，索引 5 = 全部（单独存 SkillCardAll）。</summary>
     private static readonly int[] StudSkillCountPresets = { 0, 1, 5, 10 };
 
-    /// <summary>周活动（国际服）全部完成后的接力模块（索引=下拉序；空串=不跳转，停止挂机）。
-    /// 值即引擎模式名，由 BotEngine.HandoffTo 按同一张表换场景。</summary>
-    private static readonly string[] WeeklyAfterModules = { "", "intl", "intlladder" };
+    /// <summary>
+    /// 周活动「全部完成后接力」候选模块（索引=下拉序；首项空串 = 不跳转，停止挂机）。
+    /// 候选来自 <see cref="BotModuleCatalog.HandoffCandidates"/>：本服 + 可接力 + 排除周活动自己。
+    /// 以前这两张表是手写的字面量，和引擎的白名单是两份——加模块时漏改一处就「选了没反应」。
+    /// </summary>
+    private static readonly string[] WeeklyAfterModules =
+        new[] { "" }.Concat(BotModuleCatalog
+            .HandoffCandidates(ServerRegion.Intl, ModuleIds.IntlWeekly).Select(d => d.Id)).ToArray();
 
-    /// <summary>周活动（国服）全部完成后的接力模块：国服没有 AI 天梯，只有我的联赛与天梯巅峰赛。</summary>
-    private static readonly string[] CnWeeklyAfterModules = { "", "cnmyleague", "cndaily" };
+    /// <summary>周活动（国服）全部完成后的接力候选：国服只有我的联赛与天梯巅峰赛，同样来自注册表。</summary>
+    private static readonly string[] CnWeeklyAfterModules =
+        new[] { "" }.Concat(BotModuleCatalog
+            .HandoffCandidates(ServerRegion.Cn, ModuleIds.CnWeekly).Select(d => d.Id)).ToArray();
 
     /// <summary>满级自动换人间隔档位（索引=下拉序）；非档位值载入时就近收敛，缺省每 5 场。</summary>
     private static readonly int[] AutoSwapEveryPresets = { 1, 2, 3, 5, 10 };
@@ -876,7 +886,7 @@ public partial class MainWindow
         {
             string dir = Path.Combine(Core.System.AppPaths.ExeDir, "captures");
             Directory.CreateDirectory(dir);
-            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+            _ = OpenPathAsync(dir); // 工具层：ShellTool.OpenPath（界面层不再直接起进程）
         }
         catch (Exception ex)
         {
@@ -924,7 +934,7 @@ public partial class MainWindow
         try
         {
             Directory.CreateDirectory(DiagRoot);
-            Process.Start(new ProcessStartInfo { FileName = DiagRoot, UseShellExecute = true });
+            _ = OpenPathAsync(DiagRoot);
         }
         catch (Exception ex)
         {
@@ -932,18 +942,10 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>在资源管理器中定位生成的 zip（打包失败返回目录时直接打开该目录）。</summary>
-    private static void OpenDiagResult(string result)
-    {
-        try
-        {
-            if (File.Exists(result))
-                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{result}\"") { UseShellExecute = true });
-            else
-                Process.Start(new ProcessStartInfo { FileName = result, UseShellExecute = true });
-        }
-        catch { /* 打不开不提示，路径已在状态栏显示 */ }
-    }
+    /// <summary>在资源管理器中定位生成的 zip（打包失败返回目录时直接打开该目录）。
+    /// 实现走工具层 ShellTool：界面层不再直接起进程（见 AGENTS.md / arch-guard）。</summary>
+    private void OpenDiagResult(string result)
+        => _ = OpenPathAsync(result, reveal: File.Exists(result));
 
     // ================= 自动更新事件 =================
 
@@ -1058,15 +1060,7 @@ public partial class MainWindow
 
     private void TxtUpdateRepo_MouseLeftButtonUp(object sender, MouseButtonEventArgs e)
     {
-        try
-        {
-            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo
-            {
-                FileName = $"https://github.com/{Updater.DefaultRepository}",
-                UseShellExecute = true
-            });
-        }
-        catch { /* 忽略 */ }
+        _ = OpenUrlAsync($"https://github.com/{Updater.DefaultRepository}");
     }
 
     private void BtnBannerUpdate_Click(object sender, RoutedEventArgs e)
@@ -1178,3 +1172,5 @@ public partial class MainWindow
         _cfg.Save();
     }
 }
+
+

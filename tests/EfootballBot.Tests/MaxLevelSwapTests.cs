@@ -1,3 +1,4 @@
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Capture;
@@ -7,6 +8,7 @@ using EfootballBot.Core.Vision.Yolo;
 using OpenCvSharp;
 using Xunit;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 满级自动换人：纯判定（界面分类/等级读取/排序箭头像素）+ 状态机全流程脚本（录制手柄）。
@@ -37,7 +39,7 @@ public class MaxLevelSwapTests
         return new FrameData(px, w, h, 0);
     }
 
-    private static readonly Action<string, EfootballBot.Core.Bot.LogLevel> SilentLog = (_, _) => { };
+    private static readonly Action<string, EfootballBot.Core.LogLevel> SilentLog = (_, _) => { };
     private static readonly CancellationToken CT = CancellationToken.None;
 
     // ---------------- 界面分类 ----------------
@@ -392,21 +394,21 @@ public class MaxLevelSwapTests
             W("战术", 0.10, 0.28), W("球队", 0.10, 0.40),
             W("替补球员", 0.10, 0.48), W("后备球员", 0.10, 0.55), W("自动配置球员", 0.10, 0.63),
             W("球员详细数据", 0.60, 0.92));
-        Assert.Equal(MlScreen.LeagueSquadPage, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), squad));
-        Assert.Equal(MlScreen.LeagueSquadPage, MyLeagueBrain.Classify(
+        Assert.Equal(MatchScreen.LeagueSquadPage, MatchBrain.Classify(Array.Empty<YoloDetection>(), squad));
+        Assert.Equal(MatchScreen.LeagueSquadPage, MatchBrain.Classify(
             Array.Empty<YoloDetection>(),
             Ocr(W("整体实力", 0.88, 0.18), W("替补球员", 0.10, 0.48), W("球员详细数据", 0.60, 0.92)))); // 侧栏词漏读兜底
         var home = Ocr(W("前往比赛", 0.17, 0.24), W("整体实力", 0.88, 0.18),
             W("替补球员", 0.10, 0.48), W("自动配置球员", 0.10, 0.63));
-        Assert.NotEqual(MlScreen.LeagueSquadPage, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), home));
+        Assert.NotEqual(MatchScreen.LeagueSquadPage, MatchBrain.Classify(Array.Empty<YoloDetection>(), home));
     }
 
     [Fact]
     public void Decide_SquadPage_Back()
     {
         // 站位页：B 返回联赛主页交还正常流程（用户手动停在阵容查看页时不再无操作）
-        var a = MyLeagueBrain.Decide(MlScreen.LeagueSquadPage, Ocr(), 0, false, null);
-        Assert.Equal(MlActionKind.GamepadBack, a.Kind);
+        var a = MatchBrain.Decide(MatchScreen.LeagueSquadPage, Ocr(), 0, false, null);
+        Assert.Equal(MatchActionKind.GamepadBack, a.Kind);
     }
 
     [Fact]
@@ -1061,3 +1063,6 @@ public class MaxLevelSwapTests
         Assert.Equal(exp, pad.Log);
     }
 }
+
+
+

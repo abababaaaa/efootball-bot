@@ -11,4 +11,4 @@ public sealed record Observation(FrameData Frame, OcrResult Ocr, IReadOnlyList<Y
         new FrameData(Array.Empty<byte>(), 0, 0, 0), OcrResult.Empty, Array.Empty<YoloDetection>());
 }
 
-public enum LogLevel { Info, Success, Warn, Error, Debug }
+// 日志级别已提到 EfootballBot.Core.LogLevel（工具层也要用，不能挂在挂机模块下）

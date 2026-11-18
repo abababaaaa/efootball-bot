@@ -4,6 +4,7 @@ using EfootballBot.Core.Vision;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 难度选择页蓝勾校准（实机帧 difficulty_new_ui.png 12:10 / difficulty_live_20261020.png 18:21）：
@@ -47,7 +48,7 @@ public class DifficultyNewUiCalibrationTests
                      })
             {
                 _out.WriteLine($"-- 窗 {tag} --");
-                foreach (var diff in MyLeagueBrain.Difficulties)
+                foreach (var diff in MatchBrain.Difficulties)
                 {
                     var word = ocrRes.Words.FirstOrDefault(x => x.Text.Replace(" ", "").Contains(diff));
                     if (word is null) { _out.WriteLine($"   {diff}: 词未检出"); continue; }
@@ -79,3 +80,4 @@ public class DifficultyNewUiCalibrationTests
         return count;
     }
 }
+

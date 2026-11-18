@@ -4,6 +4,7 @@ using EfootballBot.Core.Vision;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 比赛页 hub 新 UI（2027，2026-10-21 实机帧）回归：
@@ -33,9 +34,9 @@ public class MatchHubNewUiRealFrameTests
         using var ocr = new OcrRecognizer(OcrEngineKind.SimdPaddle, preferInt8: false);
         var res = TestOcr.Run(ocr, frame);
 
-        var ml = MyLeagueBrain.Classify(
+        var ml = MatchBrain.Classify(
             new System.Collections.Generic.List<EfootballBot.Core.Vision.Yolo.YoloDetection>(), res);
-        Assert.Equal(MlScreen.MatchHub, ml);
+        Assert.Equal(MatchScreen.MatchHub, ml);
     }
 
     [Fact]
@@ -46,8 +47,8 @@ public class MatchHubNewUiRealFrameTests
         using var ocr = new OcrRecognizer(OcrEngineKind.SimdPaddle, preferInt8: false);
         var res = TestOcr.Run(ocr, frame);
 
-        var act = MyLeagueBrain.Decide(MlScreen.MatchHub, res, screenStreak: 0);
-        Assert.Equal(MlActionKind.PadMoveRight, act.Kind);
+        var act = MatchBrain.Decide(MatchScreen.MatchHub, res, screenStreak: 0);
+        Assert.Equal(MatchActionKind.PadMoveRight, act.Kind);
     }
 
     [Fact]
@@ -58,8 +59,10 @@ public class MatchHubNewUiRealFrameTests
         using var ocr = new OcrRecognizer(OcrEngineKind.SimdPaddle, preferInt8: false);
         var res = TestOcr.Run(ocr, frame);
 
-        var ml = MyLeagueBrain.Classify(
+        var ml = MatchBrain.Classify(
             new System.Collections.Generic.List<EfootballBot.Core.Vision.Yolo.YoloDetection>(), res);
-        Assert.Equal(MlScreen.MatchHub, ml);
+        Assert.Equal(MatchScreen.MatchHub, ml);
     }
 }
+
+

@@ -6,6 +6,7 @@ using EfootballBot.Core.Vision.Yolo;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 /// <summary>
@@ -49,17 +50,19 @@ public class RecogWalkProbe
         foreach (var l in ocrRes.Lines)
             _out.WriteLine($"    行 [{l.Text}] @({l.CenterX:F3},{l.CenterY:F3}) h={l.H:F3}");
 
-        _out.WriteLine($"探针：corner={MyLeagueScenario.CornerHasContent(frame)} light={MyLeagueScenario.IsMostlyLightPage(frame)}");
+        _out.WriteLine($"探针：corner={ScreenProbe.CornerHasContent(frame)} light={ScreenProbe.IsMostlyLightPage(frame)}");
 
-        var screen = MyLeagueBrain.Classify(dets, ocrRes);
-        var screenCtx = MyLeagueBrain.Classify(dets, ocrRes, MyLeagueScenario.CornerHasContent(frame), true,
-            MyLeagueScenario.IsMostlyLightPage(frame), false);
+        var screen = MatchBrain.Classify(dets, ocrRes);
+        var screenCtx = MatchBrain.Classify(dets, ocrRes, ScreenProbe.CornerHasContent(frame), true,
+            ScreenProbe.IsMostlyLightPage(frame), false);
         _out.WriteLine($"判定：默认探针={screen} / 完整探针={screenCtx}");
 
         foreach (var s in new[] { screen, screenCtx })
         {
-            var a = MyLeagueBrain.Decide(s, ocrRes, 0, inMatchRecently: false, frame: frame);
+            var a = MatchBrain.Decide(s, ocrRes, 0, inMatchRecently: false, frame: frame);
             _out.WriteLine($"动作[{s}]：{a.Kind} wait={a.WaitMs} target={a.Target}");
         }
     }
 }
+
+

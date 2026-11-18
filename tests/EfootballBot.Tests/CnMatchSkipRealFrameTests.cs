@@ -5,6 +5,7 @@ using OpenCvSharp;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 国服比赛「跳过比赛✅」三实机帧回归（2026-10-17 用户截图，1280×720）：
@@ -43,15 +44,15 @@ public class CnMatchSkipRealFrameTests
         var frame = new FrameData(data, w, h, 0);
         var ocrRes = await ocr.RecognizeAsync(frame);
 
-        var screen = MyLeagueBrain.Classify(Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
-        var action = MyLeagueBrain.Decide(screen, ocrRes, 2, frame: frame);
+        var screen = MatchBrain.Classify(Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
+        var action = MatchBrain.Decide(screen, ocrRes, 2, frame: frame);
 
         _out.WriteLine($"screen={screen} action={action.Kind} ({action.Target})");
         foreach (var wd in ocrRes.Words)
             _out.WriteLine($"  W \"{wd.Text}\" @({wd.CenterX:F2},{wd.CenterY:F2})");
 
-        Assert.Equal(MlScreen.InMatch, screen);
-        Assert.Equal(MlActionKind.PadStartPress, action.Kind);
+        Assert.Equal(MatchScreen.InMatch, screen);
+        Assert.Equal(MatchActionKind.PadStartPress, action.Kind);
     }
 
     // 2026-11-06 实机帧（国服周活动·挑战赛，MIL 7-0 MDC 87:13）：新 UI 横幅「☰ 跳过比赛 ✅」。
@@ -65,18 +66,18 @@ public class CnMatchSkipRealFrameTests
         var frame = new FrameData(data, w, h, 0);
         var ocrRes = await ocr.RecognizeAsync(frame);
 
-        var screen = MyLeagueBrain.Classify(Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
+        var screen = MatchBrain.Classify(Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
         _out.WriteLine($"screen={screen} 跳过比赛={ocrRes.ContainsJoined("跳过比赛")} " +
                        $"绿勾={RegionProbe.CountGreenRef(frame, 0.930, 0.990, 0.015, 0.095)}");
 
-        Assert.Equal(MlScreen.InMatch, screen);
+        Assert.Equal(MatchScreen.InMatch, screen);
         Assert.True(ocrRes.ContainsJoined("跳过比赛"), "新 UI 横幅仍应读到「跳过比赛」");
-        Assert.True(MyLeagueBrain.SkipBannerHasCheck(frame), "横幅右端绿勾仍在（绿像素 ≥30）");
-        Assert.Equal(MlActionKind.PadStartPress,
-            MyLeagueBrain.Decide(screen, ocrRes, 2, frame: frame, allowMatchSkip: true).Kind);
+        Assert.True(MatchBrain.SkipBannerHasCheck(frame), "横幅右端绿勾仍在（绿像素 ≥30）");
+        Assert.Equal(MatchActionKind.PadStartPress,
+            MatchBrain.Decide(screen, ocrRes, 2, frame: frame, allowMatchSkip: true).Kind);
         // 挑战赛旧行为（禁跳）仍可复现：显式关闭时不按暂停键
-        Assert.Equal(MlActionKind.MatchIdleTap,
-            MyLeagueBrain.Decide(screen, ocrRes, 2, frame: frame, allowMatchSkip: false).Kind);
+        Assert.Equal(MatchActionKind.MatchIdleTap,
+            MatchBrain.Decide(screen, ocrRes, 2, frame: frame, allowMatchSkip: false).Kind);
     }
 
     // 实机干扰项：同位置「跳过比赛/累计进球0/3个或以上」目标提示 toast（无绿勾）——
@@ -89,15 +90,15 @@ public class CnMatchSkipRealFrameTests
         var frame = new FrameData(data, w, h, 0);
         var ocrRes = await ocr.RecognizeAsync(frame);
 
-        var screen = MyLeagueBrain.Classify(Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
-        var action = MyLeagueBrain.Decide(screen, ocrRes, 2, frame: frame);
+        var screen = MatchBrain.Classify(Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
+        var action = MatchBrain.Decide(screen, ocrRes, 2, frame: frame);
 
         _out.WriteLine($"screen={screen} action={action.Kind} toast={ocrRes.ContainsJoined("累计进球")}");
         foreach (var wd in ocrRes.Words)
             _out.WriteLine($"  W \"{wd.Text}\" @({wd.CenterX:F2},{wd.CenterY:F2})");
 
-        Assert.Equal(MlScreen.InMatch, screen);
-        Assert.Equal(MlActionKind.MatchIdleTap, action.Kind);
+        Assert.Equal(MatchScreen.InMatch, screen);
+        Assert.Equal(MatchActionKind.MatchIdleTap, action.Kind);
     }
 
     [Fact]
@@ -107,17 +108,17 @@ public class CnMatchSkipRealFrameTests
         var data = LoadPngBgra(Path.Combine(CnDir, "cn_pause_menu.png"), out int w, out int h);
         var ocrRes = await ocr.RecognizeAsync(new FrameData(data, w, h, 0));
 
-        var screen = MyLeagueBrain.Classify(Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
-        var action = MyLeagueBrain.Decide(screen, ocrRes, 1);
+        var screen = MatchBrain.Classify(Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
+        var action = MatchBrain.Decide(screen, ocrRes, 1);
 
         _out.WriteLine($"screen={screen} action={action.Kind} ({action.Target}) " +
                        $"win={ocrRes.ContainsJoined("对局获胜")}");
         foreach (var wd in ocrRes.Words)
             _out.WriteLine($"  W \"{wd.Text}\" @({wd.CenterX:F2},{wd.CenterY:F2})");
 
-        Assert.Equal(MlScreen.CnMatchPause, screen);
+        Assert.Equal(MatchScreen.CnMatchPause, screen);
         Assert.True(ocrRes.ContainsJoined("对局获胜"), "菜单应读到绿色小字 对局获胜");
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
     }
 
     [Fact]
@@ -127,14 +128,16 @@ public class CnMatchSkipRealFrameTests
         var data = LoadPngBgra(Path.Combine(CnDir, "cn_skip_popup.png"), out int w, out int h);
         var ocrRes = await ocr.RecognizeAsync(new FrameData(data, w, h, 0));
 
-        var screen = MyLeagueBrain.Classify(Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
-        var action = MyLeagueBrain.Decide(screen, ocrRes, 1);
+        var screen = MatchBrain.Classify(Array.Empty<EfootballBot.Core.Vision.Yolo.YoloDetection>(), ocrRes);
+        var action = MatchBrain.Decide(screen, ocrRes, 1);
 
         _out.WriteLine($"screen={screen} action={action.Kind} ({action.Target})");
         foreach (var wd in ocrRes.Words)
             _out.WriteLine($"  W \"{wd.Text}\" @({wd.CenterX:F2},{wd.CenterY:F2})");
 
-        Assert.Equal(MlScreen.CnMatchPause, screen);
-        Assert.Equal(MlActionKind.PadUpConfirm, action.Kind);
+        Assert.Equal(MatchScreen.CnMatchPause, screen);
+        Assert.Equal(MatchActionKind.PadUpConfirm, action.Kind);
     }
 }
+
+

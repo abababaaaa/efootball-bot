@@ -3,9 +3,19 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
+using EfootballBot.Core.Bot.Modules;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.System;
+
+// ===========================================================================
+// 架构锁 · 界面接线 MainWindow.ModuleRun.cs（v7.2）
+// 模块 id 与接力候选都来自 BotModuleCatalog：这里只把按钮与 id 绑起来。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 不许写模块 id 字面量（用 ModuleIds），接力下拉候选不许手写（用 HandoffCandidates）
+// 除非用户明确要求更换写法，否则按本约定写。
+// ===========================================================================
 
 namespace EfootballBot;
 
@@ -19,22 +29,24 @@ public partial class MainWindow
     private sealed record ModuleRun(Button Start, Button Pause, Button Manual, string Mode, Button? Step);
 
     private ModuleRun[] _moduleRuns = Array.Empty<ModuleRun>();
+
     private bool _manualStopBusy;
 
     private void InitModuleRuns()
     {
         _moduleRuns = new[]
         {
-            new ModuleRun(BtnStartMyLeague, BtnPauseMyLeague, BtnManualMyLeague, "intl", BtnStep),
+            // 模块 id 全部来自 BotModuleCatalog（ModuleIds）：加模块只改注册表与这里一行按钮接线
+            new ModuleRun(BtnStartMyLeague, BtnPauseMyLeague, BtnManualMyLeague, ModuleIds.IntlMyLeague, BtnStep),
             // 满级换人测试（独立会话）：无挂机时可直接开始，跑完自动停；暂停/手动停止共用我的联赛按钮
-            new ModuleRun(BtnTestSwap, BtnPauseMyLeague, BtnManualMyLeague, "intlswaptest", null),
-            new ModuleRun(BtnStartWeekly, BtnPauseWeekly, BtnManualWeekly, "intlweekly", null),
-            new ModuleRun(BtnStartAiLadder, BtnPauseAiLadder, BtnManualAiLadder, "intlladder", null),
+            new ModuleRun(BtnTestSwap, BtnPauseMyLeague, BtnManualMyLeague, ModuleIds.IntlSwapTest, null),
+            new ModuleRun(BtnStartWeekly, BtnPauseWeekly, BtnManualWeekly, ModuleIds.IntlWeekly, null),
+            new ModuleRun(BtnStartAiLadder, BtnPauseAiLadder, BtnManualAiLadder, ModuleIds.IntlAiLadder, null),
             // 种马模块共用一枚开始按钮：具体模式由当前子页签在 BtnStartStud_Click 里决定
-            new ModuleRun(BtnStartStud, BtnPauseStud, BtnManualStud, "intlstudbuy", null),
-            new ModuleRun(BtnStartCn, BtnPauseCn, BtnManualCn, "cndaily", null),
-            new ModuleRun(BtnStartCnWeekly, BtnPauseCnWeekly, BtnManualCnWeekly, "cnweekly", null),
-            new ModuleRun(BtnStartCnMyLeague, BtnPauseCnMyLeague, BtnManualCnMyLeague, "cnmyleague", null),
+            new ModuleRun(BtnStartStud, BtnPauseStud, BtnManualStud, ModuleIds.IntlStudBuy, null),
+            new ModuleRun(BtnStartCn, BtnPauseCn, BtnManualCn, ModuleIds.CnLadder, null),
+            new ModuleRun(BtnStartCnWeekly, BtnPauseCnWeekly, BtnManualCnWeekly, ModuleIds.CnWeekly, null),
+            new ModuleRun(BtnStartCnMyLeague, BtnPauseCnMyLeague, BtnManualCnMyLeague, ModuleIds.CnMyLeague, null),
         };
     }
 
@@ -67,7 +79,6 @@ public partial class MainWindow
 
     private async void BtnManualStop_Click(object sender, RoutedEventArgs e)
         => await ManualStopWithReportAsync();
-
     /// <summary>
     /// 发现问题手动停止：≈一键结束，但先自动截取当前游戏画面，走诊断报告渠道生成反馈包，
     /// 并提示用户把包发给作者、可一键打开目录。
@@ -81,14 +92,12 @@ public partial class MainWindow
             AppendLog("【手动停止】当前没有运行中的挂机。", LogLevel.Info);
             return;
         }
-
         _manualStopBusy = true;
         foreach (var m in _moduleRuns) m.Manual.IsEnabled = false;
         try
         {
             AppendLog("【手动停止】正在截取当前游戏画面…", LogLevel.Info);
             var (frame, info) = await Task.Run(() => GameFrameGrabber.GrabOnce(TimeSpan.FromSeconds(3)));
-
             string shotPath = "";
             if (frame is not null)
             {
@@ -110,10 +119,8 @@ public partial class MainWindow
             {
                 AppendLog($"【手动停止】未取到游戏画面：{info}（反馈包仍会生成）", LogLevel.Warn);
             }
-
             await StopScenarioAsync(allowAutoClose: false);
             AppendLog("【手动停止】挂机已停止。", LogLevel.Info);
-
             string? note = NotePromptWindow.Ask(this,
                 "已为你截取当前游戏画面。可选：描述遇到的问题（卡在哪一步、点了什么没反应、什么时候开始），" +
                 "会写进反馈包，帮助作者快速定位。");
@@ -122,11 +129,9 @@ public partial class MainWindow
                 AppendLog("【手动停止】已取消生成反馈包（挂机已停止，截图保留在 data\\ManualStopShots）。", LogLevel.Info);
                 return;
             }
-
             AppendLog("【手动停止】正在生成反馈包（约 1~2 分钟，请勿关闭程序）…", LogLevel.Info);
             string result = await Task.Run(() => DiagReporter.CollectAsync(userNote: note, screenshotPath: shotPath));
             AppendLog($"【手动停止】反馈包已生成：{result}", LogLevel.Success);
-
             var ans = MessageBox.Show(this,
                 "反馈包已生成完毕。\n\n请把下面这个文件直接发给作者（或发到反馈群），即可帮你定位问题：\n\n" +
                 result + "\n\n是否现在打开反馈包所在目录？",
@@ -159,3 +164,8 @@ public partial class MainWindow
         enc.Save(fs);
     }
 }
+
+
+
+
+

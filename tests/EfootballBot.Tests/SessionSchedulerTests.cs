@@ -1,3 +1,4 @@
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Logging;
@@ -134,3 +135,4 @@ public class SessionSchedulerTests
         Assert.True(sawBreak, "90 分钟内应出现至少一次模拟短暂离开");
     }
 }
+

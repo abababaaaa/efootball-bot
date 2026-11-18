@@ -2,6 +2,7 @@ using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Capture;
 using Xunit;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 「我的联赛」说明页亮度探针：白底文档页（从 i 图标误入）vs 深色主题页/球场帧
@@ -33,7 +34,7 @@ public class LeagueInfoPageProbeTests
             bgra[i + 1] = 20;
             bgra[i + 2] = 20;
         }
-        Assert.True(MyLeagueScenario.IsMostlyLightPage(f));
+        Assert.True(ScreenProbe.IsMostlyLightPage(f));
     }
 
     [Fact]
@@ -41,13 +42,15 @@ public class LeagueInfoPageProbeTests
     {
         // 我的联赛深色主页（深蓝黑背景 + 少量亮字）
         var f = SolidFrame(640, 360, 12, 14, 30);
-        Assert.False(MyLeagueScenario.IsMostlyLightPage(f));
+        Assert.False(ScreenProbe.IsMostlyLightPage(f));
     }
 
     [Fact]
     public void PitchGreenFrame_IsNotLight()
     {
         // 球场草绿（比赛帧，RGB 均 <180）
-        Assert.False(MyLeagueScenario.IsMostlyLightPage(SolidFrame(640, 360, 60, 140, 70)));
+        Assert.False(ScreenProbe.IsMostlyLightPage(SolidFrame(640, 360, 60, 140, 70)));
     }
 }
+
+

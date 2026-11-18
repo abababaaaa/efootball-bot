@@ -10,13 +10,25 @@ using EfootballBot.Core.Bot.Scenarios.CnMyLeague;
 using EfootballBot.Core.Bot.Scenarios.PeakLadder;
 using EfootballBot.Core.Bot.Scenarios.AiLadder;
 using EfootballBot.Core.Bot.Scenarios.Stud;
+using EfootballBot.Core.Bot.Modules;
 using EfootballBot.Core.Observation;
 using EfootballBot.Core.System;
+
 #if CHILD_SESSION_BETA
 using EfootballBot.Core.System.VirtualDisplay;
+
 #endif
 using EfootballBot.Core.Vision;
 using SkiaSharp;
+
+// ===========================================================================
+// 架构锁 · 引擎层 Core/Bot/BotEngine.cs（v7.2）
+// 引擎不认识具体场景：场景由 BotModuleCatalog 造，模块复位通过 IModuleLifecycle 回调。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 本文件不许出现任何 *Scenario 类型名
+//   · 模块 id 一律用 ModuleIds / EngineModes 常量，不写字面量
+// 除非用户明确要求更换写法，否则按本约定写。
+// ===========================================================================
 
 namespace EfootballBot.Core.Bot;
 
@@ -24,15 +36,19 @@ namespace EfootballBot.Core.Bot;
 public sealed class BotStats
 {
     public int MatchesDone;
+
     public int KeyMatches;
     /// <summary>跳过（重启游戏放弃）的普通比赛场次：只打关键比赛模式专用，不计入 MatchesDone。</summary>
     public int SkippedMatches;
     /// <summary>球员满级提示次数（比赛中"满级"通知检测；统计接口，GUI 可展示）。</summary>
     public int PlayersMaxed;
+
     public DateTime? StartedAt;
     /// <summary>最近一次感知摘要（如 "OCR 12 词 / 检测 3 框"）。</summary>
     public string LastScreen = "";
+
     public string LastScreenEvidence = "";
+
     public string LastError = "";
     /// <summary>最近一次分段耗时摘要（1 分钟刷新一次，GUI 侧栏直接显示）。</summary>
     public string PerfNote = "";
@@ -46,7 +62,6 @@ public sealed class BotStats
 public interface IScenario
 {
     string Name { get; }
-
     /// <summary>
     /// 当前是否在比赛中。引擎用它把"手柄输入诊断"挡在比赛之外：
     /// 比赛里方向键会真的操控球员、摇杆微码探测也会让球员跑偏，菜单里才是安全的诊断窗口。
@@ -61,11 +76,11 @@ public sealed class BotEngine : IDisposable
 {
     /// <summary>国服游戏进程名（窗口标题：实况足球在线）。</summary>
     public const string CnProcessName = "eFootballOnline";
-
     /// <summary>路径分隔符集合（文件名提取用；避免 System.IO 命名空间遮蔽问题）。</summary>
     private static readonly char[] PathSeparatorChars = { '\\', '/' };
 
     private readonly AppConfig _cfg;
+
     public AppConfig Config => _cfg;
     /// <summary>虚拟手柄（连接失败按 <see cref="PadBackendInfo.FallbackChain"/> 回退时整体换实例）。</summary>
     public IVirtualPad Pad360 { get; private set; }
@@ -73,13 +88,21 @@ public sealed class BotEngine : IDisposable
     public readonly CaptureHost Capture;
     /// <summary>DXGI 桌面复制捕获器（Vortice 实现，实现 ICaptureProvider）。</summary>
     private ICaptureProvider? _dxgi;
+
     private bool _dxgiStepWired;
+
     private GdiWindowCapture? _gdi;
+
     public readonly OcrRecognizer Ocr;
+
     public readonly ObservationService Observation;
+
     private readonly OnnxSessionFactory _factory;
+
     private PerceptionPipeline? _perception;
+
     private readonly SessionScheduler _scheduler;
+
     private BackgroundParker? _parker;
     /// <summary>GDI+停靠黑帧自动还原是否已执行（每次运行一次，避免反复横跳）。</summary>
     private bool _blackGdiUnparked;
@@ -87,16 +110,12 @@ public sealed class BotEngine : IDisposable
     private bool _gdiFallbackTried;
     /// <summary>黑帧暂停告警上次输出时间（30s 节流）。</summary>
     private DateTime _lastBlackLogAt;
-
     /// <summary>当前场景插件（null = 纯感知观察模式）。</summary>
     public IScenario? Scenario { get; set; }
-
     // 暂停标志：置位后主循环不再观察/操作，且立即清空手柄输出防残留半按状态
     private volatile bool _paused;
-
     /// <summary>单步请求：暂停状态下执行一轮「观察 + 决策」后自动回到暂停（见 RequestStep）。</summary>
     private volatile bool _stepOnce;
-
     /// <summary>暂停/继续场景循环（幂等）。暂停即刻清空手柄输出防残留半按状态
     /// （真实手柄本就处于禁用让位态，无需断开虚拟手柄）。</summary>
     public void SetPaused(bool on)
@@ -130,95 +149,96 @@ public sealed class BotEngine : IDisposable
     }
 
     public readonly BotStats Stats = new();
-
     /// <summary>
     /// 手动「一键测试换人」请求（GUI 按钮 → IPC 置位；我的联赛场景下一轮消费并清零，
     /// 排队等回联赛主页无弹窗时执行，无视每 N 场间隔与自动开关）。
     /// </summary>
     public volatile bool SwapTestRequested;
-
     /// <summary>请求一次满级换人巡检（GUI「一键测试换人」按钮入口）。</summary>
     public void RequestSwapInspection() => SwapTestRequested = true;
-
     /// <summary>
     /// 「只打关键比赛」请求：场景判定当前这场是普通比赛后置位，由引擎在场景返回后执行
     /// 杀进程重启游戏（场景自身不改捕获/停靠/窗口，全部由引擎集中处理）。
     /// </summary>
     public volatile bool RestartGameRequested;
-
     /// <summary>请求重启游戏以跳过当前这场普通比赛（只打关键比赛模式）。</summary>
     public void RequestGameRestart() => RestartGameRequested = true;
 
     // ---------------- 微信实时动态（WeChatFeed 接线） ----------------
-
     /// <summary>写会话摘要期间的日志不再转发推送（摘要本身以 Stop/Error 种类推送，避免双发）。</summary>
     private bool _summarizing;
-
     /// <summary>feed 内部日志直达事件、绕过 LogInternal，防「推送失败→Warn 日志→再进推送」回环。</summary>
     private void FeedQuietLog(string msg, LogLevel lv) => Log?.Invoke($"[{DateTime.Now:HH:mm:ss}] {msg}", lv);
-
     /// <summary>比赛完成 → 微信动态（合并/配额在 feed 内部）。各场景在 MatchesDone++ 落点调用。</summary>
     public void ReportMatchDone(bool keyMatch)
         => WeChatFeed.MatchDone(Scenario?.Name ?? "挂机", keyMatch, Stats.MatchesDone, Stats.KeyMatches, LogInternal);
-
     /// <summary>满级球员 → 微信动态。detail 带「第 N/11 位」（巡检）或「比赛中满级提示」上下文。</summary>
     public void ReportMaxLevel(string detail)
         => WeChatFeed.MaxLevel(detail, Stats.PlayersMaxed, LogInternal);
-
     /// <summary>运行中摘要正文（定时推送用；与停止摘要同一套口径）。</summary>
     private string BuildRunningSummaryText()
     {
         var s = Stats;
         TimeSpan dur = s.StartedAt is { } t ? DateTime.Now - t : TimeSpan.Zero;
         int suppressed = Pad360 is DryRunPad dr ? dr.SuppressedActions : 0;
-        return $"{Scenario?.Name ?? "observe"} · 场次 {s.MatchesDone}（关键 {s.KeyMatches}）" +
+        return $"{Scenario?.Name ?? EngineModes.Observe} · 场次 {s.MatchesDone}（关键 {s.KeyMatches}）" +
                $" · 满级 {s.PlayersMaxed} · 用时 {dur:hh\\:mm}" +
                (suppressed > 0 ? $" · 影子拦截 {suppressed}" : "");
     }
 
-
     private CancellationTokenSource? _cts;
+
     private Task? _loop;
+
     private Observation? _lastObs;
+
     private long _lastOcrDumpTick;
+
     private long _lastFrameDumpTick;
 
     // ---- 性能埋点（P1-14）：上一次观察的各段耗时（毫秒），由主循环汇总进 Perf ----
     private long _lastFrameWaitMs, _lastHashMs, _lastOcrMs, _lastYoloMs;
+
     private long _lastPerfLogTick;
 
     // ---- 输入活性探针（P0-1）：同屏文字卡住判定 ----
     private string _stuckText = "";
+
     private long _stuckSinceTick;
+
     private long _stuckActionBase;
+
     private bool _livenessProbed;
 
     // ---- 玩家 1 归属巡检（P0-2）：启动验证过一次，运行中每 5 分钟再确认 ----
     private long _lastWitnessTick;
-    private bool _padOwnershipLostLogged;
 
+    private bool _padOwnershipLostLogged;
     /// <summary>观察循环分段耗时滚动统计（日志与侧栏共用；每次开始挂机重置）。</summary>
     public readonly PerfTrace Perf = new();
-    private GameWindowInfo? _window;
 
+    private GameWindowInfo? _window;
     /// <summary>本次会话的停靠目标（虚拟显示器矩形；null = 屏外停靠）。重启游戏后据此重新停靠。</summary>
     private ParkRect? _parkTarget;
 
     public event Action<string, LogLevel>? Log;
-    public event Action<BotStats>? StatsChanged;
-    public event Action<Observation>? Observed;
 
+    public event Action<BotStats>? StatsChanged;
+
+    public event Action<Observation>? Observed;
     /// <summary>感知摘要事件（Worker→GUI），Screen 为摘要文本（管道协议旧字段名）。</summary>
     public event Action<ScreenEvent>? ScreenChanged;
 
     public bool IsRunning => _loop is { IsCompleted: false };
+
     public GameWindowInfo? Window => _window;
+
     public FrameData? LatestFrame => Observation.LatestFrame;
+
     public OcrResult LatestOcr => Observation.LatestOcr;
     /// <summary>感知管线（StartAsync 后可用）；YOLO 模型缺失时仅 OCR。</summary>
     public PerceptionPipeline Perception => _perception
         ?? throw new InvalidOperationException("引擎尚未启动（StartAsync）。");
-
     public BotEngine(AppConfig cfg)
     {
         _cfg = cfg;
@@ -238,7 +258,6 @@ public sealed class BotEngine : IDisposable
         if (cfg.DryRun)
             LogInternal("影子模式：手柄输出全部拦截，只在日志记录「本来会按什么」——本次不会操作游戏", LogLevel.Warn);
         Pad = new Pad(Pad360, cfg.Timing);
-
         // EP 降级工厂：OCR 与 YOLO 共享同一 SessionOptions（进程内仅一份 onnxruntime.dll）
         // 推理资源走进程级缓存（P0-10）：停止挂机后 Worker 保活，下次开始直接复用，
         // 不再重新加载 30MB 级 OCR 模型（旧实现每次开始白花 1~3 秒）。
@@ -250,32 +269,30 @@ public sealed class BotEngine : IDisposable
             LogInternal($"OCR 引擎：{Ocr.LanguageTag}（复用已加载实例，无需重新载入模型）", LogLevel.Info);
         else
             LogInternal($"OCR 引擎：{Ocr.LanguageTag}（{Ocr.EngineKind}）", LogLevel.Info);
-
         Observation = new ObservationService(Capture, Ocr, cfg);
         Observation.Log = LogInternal;
-
         _scheduler = new SessionScheduler(cfg.Schedule, LogInternal);
-
         Capture.CaptureClosed += (_, msg) => LogInternal($"画面捕获已结束：{msg}", LogLevel.Warn);
     }
 
     public IReadOnlyList<GameWindowInfo> DetectWindows() => GameWindow.FindAll();
 
     // ---------------- 生命周期 ----------------
-
     public async Task StartAsync(string mode)
     {
         if (IsRunning) return;
         _summaryWritten = false; // 新会话：允许再写一次摘要
         Stats.StartedAt ??= DateTime.Now;
-        // 场景模式（cndaily=国服天梯巅峰赛 / cnweekly=国服周活动 / cnmyleague=国服我的联赛 /
-        // intl=国际服我的联赛 / intlweekly=国际服周活动 / intlladder=国际服AI天梯联赛 /
-        // intlstudbuy=种马购买 / intlstudtrain=种马培训（筛选 + 技巧训练） /
-        // intlswaptest=满级换人测试——只跑一次巡检即自动停）
-        // 需接管虚拟手柄（B 键逃生依赖）；observe 纯观察不操作游戏
-        bool scenarioMode = mode is "cndaily" or "cnweekly" or "cnmyleague" or "intl" or "intlweekly" or "intlladder"
-            or "intlstudbuy" or "intlstudtrain" or "intlswaptest";
-        bool cn = mode is "cndaily" or "cnweekly" or "cnmyleague";
+        // 模块清单只在 BotModuleCatalog 里维护（国服/国际服、场景/工具、接力白名单都是那张表）。
+        // 引擎这里只问两件事：「这个 id 是不是挂机场景」（要不要接管手柄）、「属于哪个服」
+        // （找哪个窗口）。加模块不需要动引擎。
+        bool scenarioMode = BotModuleCatalog.IsScenarioMode(mode);
+        bool cn = BotModuleCatalog.IsCn(mode);
+        // 注册表自检：结构性错误（重复 id / 场景缺工厂 / 接力目标跨服）只会在运行期表现为
+        // 「点了没反应」，所以每次启动都写一条日志留证（正常时一条都不打）
+        if (BotModuleCatalog.SelfCheck() is { Count: > 0 } registryProblems)
+            LogInternal($"模块注册表自检未通过（请把这份日志反馈）：{string.Join("；", registryProblems)}",
+                LogLevel.Warn);
         _cnSession = cn; // 接力目标按服校验：国际服会话绝不切到国服模块（反之亦然）
         CancellationToken token;
         try
@@ -291,18 +308,15 @@ public sealed class BotEngine : IDisposable
             try { _gdi?.Stop(); } catch { }
             throw;
         }
-
         // 所有模式统一节流到 300ms（场景决策周期 ≥2s，300ms 感知粒度足够）：
         // 全速 30fps 逐帧 SoftwareBitmap 拷贝 + CPU 降采样（LOH 高速churn）会打满 CPU 卡死系统
         Observation.ApplyCaptureThrottle(300);
-
         // 感知管线（YOLO 模型缺失时仅 OCR，不阻塞启动）；同样跨会话复用，
         // 避免每次开始都重建 ONNX 会话（DirectML/CPU 会话初始化本身就是百毫秒级）
         _perception = EngineServices.AcquirePerception(_cfg, _factory, LogInternal, out bool yoloReused);
         if (yoloReused && _perception.YoloEnabled)
             LogInternal($"目标检测：复用已加载会话（{_perception.YoloLabel}）", LogLevel.Info);
-        // 场景体系：cndaily=国服天梯巅峰赛 / cnweekly=国服周活动 / cnmyleague=国服我的联赛 /
-        // intl=国际服我的联赛 / intlweekly=国际服周活动 / intlladder=国际服AI天梯联赛
+        // 场景由注册表造（BotModuleCatalog.Create）：本引擎不认识任何具体场景类型
         Scenario = scenarioMode ? CreateScenario(mode) : null;
         LogInternal(
             $"引擎就绪（模式：{mode}）—— EP={_factory.ActiveProvider}，" +
@@ -315,11 +329,9 @@ public sealed class BotEngine : IDisposable
             LogInternal("当前为感知观察模式（无场景插件）", LogLevel.Info);
         if (_cfg.FrameDump.Enabled)
             LogInternal($"训练数据采集已开启：每 {_cfg.FrameDump.IntervalMs / 1000.0:F0} 秒存帧至 captures\\（exe 同级目录）", LogLevel.Info);
-
         // 微信实时动态：会话期间的事件合并/配额/定时摘要（配置为 Worker 启动时快照，
         // 设置页改动在下次开始挂机生效——与 Webhook 一致）
         WeChatFeed.SessionStart(_cfg, BuildRunningSummaryText, LogInternal);
-
         // 后台停靠：场景模式下把游戏窗口移出屏幕（观察模式用户要亲眼看画面，不隐藏）。
         // 放在捕获会话建立之后：WGC/GDI 绑定的是窗口本身，与窗口是否在屏幕上无关。
         // 测试版可改用虚拟显示器停靠：游戏停靠到一块"看不见的屏幕"上，非 RDP，游戏不拒绝。
@@ -345,9 +357,7 @@ public sealed class BotEngine : IDisposable
             _parker ??= new BackgroundParker(LogInternal, _cfg.BackgroundParking.WatchdogIntervalMs);
             _parker.Start(parkWin.Handle, parkTarget);
         }
-
         // 共存让步传感器已随 3.3.0 共存模式移除（全权接管：真实手柄挂机期间禁用让位）
-
         _gdiFallbackTried = false;
         Perf.Reset();
         _lastPerfLogTick = Environment.TickCount64;
@@ -412,7 +422,6 @@ public sealed class BotEngine : IDisposable
                             await Task.Delay(400, token);
                             continue;
                         }
-
                         // 作息调度：超出活跃时段/当日上限/模拟短暂离开时，复位手柄空转等待自动恢复
                         if (!_scheduler.ShouldRunNow(DateTime.Now))
                         {
@@ -424,18 +433,15 @@ public sealed class BotEngine : IDisposable
                             await Task.Delay(2500, token);
                             continue;
                         }
-
                         // 恢复活跃：还原常规捕获节奏
                         if (idleThrottled)
                         {
                             idleThrottled = false;
                             Observation.ApplyCaptureThrottle(300);
                         }
-
                         long roundStartTick = Environment.TickCount64;
                         long actionStartMs = Pad.BusyMs;
                         var obs = await ObserveAsync(token);
-
                         // GDI 兜底 + 后台停靠 = 黑帧（PrintWindow 取不到屏外 D3D 内容）：
                         // 停靠看门狗与还原会互相打架——整体停掉停靠（还原窗口 + 停看门狗），
                         // 放弃隐藏保挂机（WGC/DXGI 均不可用时的唯一可行组合）
@@ -451,7 +457,6 @@ public sealed class BotEngine : IDisposable
                             LogInternal("已自动还原窗口位置并停用本次运行的停靠：放弃隐藏，优先保证挂机可用。" +
                                 "重启电脑修复显卡驱动后，WGC 捕获 + 后台停靠即可兼得", LogLevel.Warn);
                         }
-
                         // 盲操作防护：捕获产出全黑帧（PrintWindow 取不到屏外 D3D 内容/驱动异常/
                         // 输出属主不匹配）→ 感知全盲，此时的任何"识别"都是噪声。挂起场景决策，
                         // 绝不盲按：2026-10-11 用户实机，黑帧被角区探针连续判成 InMatch，
@@ -468,17 +473,14 @@ public sealed class BotEngine : IDisposable
                             await Task.Delay(1000, token);
                             continue;
                         }
-
                         int delayMs = 300;
                         if (Scenario is not null)
                             delayMs = await Scenario.RunOnceAsync(token);
                         RecordPerf(roundStartTick, actionStartMs);
-
                         // 输入活性（P0-1）与玩家 1 归属（P0-2）：都是"游戏到底还收不收得到 bot 输入"
                         // 这一件事的两面——前者看按键有没有效果，后者看槽位还是不是我们的。
                         await CheckInputLivenessAsync(obs, token);
                         await CheckPadOwnershipAsync(token);
-
                         // 只打关键比赛：场景判定当前场次是普通比赛后置位，这里集中执行重启
                         // （捕获/停靠/窗口状态全部由引擎自己管，场景侧只管判定与统计）。
                         // 重启本身耗时长（启动+登录+回联赛约 1~2 分钟），不计入 failStreak。
@@ -488,16 +490,15 @@ public sealed class BotEngine : IDisposable
                             bool restarted = await RestartGameAsync(token);
                             // 无论成败都要复位场景状态：成功=清旧记忆按冷启动续接；
                             // 失败=清本场的一次性请求标记，否则这一场再也不会尝试（也不会重打）
-                            (Scenario as MyLeagueScenario)?.OnGameRestarted(restarted);
+                            // 模块自己复位（引擎只认 IModuleLifecycle 接口，不认识具体场景类型）
+                            (Scenario as IModuleLifecycle)?.OnGameRestarted(restarted);
                             if (!restarted)
                             {
                                 // 重启失败：场景已复位，当前比赛按正常流程打完（有熔断，不会循环重启）
                                 LogInternal("游戏重启失败：本次不再尝试跳过，当前比赛按正常流程打完", LogLevel.Warn);
                             }
                         }
-
                         await Task.Delay(delayMs, token);
-
                         if (failStreak > 0)
                         {
                             failStreak = 0;
@@ -599,47 +600,37 @@ public sealed class BotEngine : IDisposable
                 StatsChanged?.Invoke(Stats);
             }
         }, token);
-
         EmitStats();
     }
 
-    /// <summary>按模式名创建场景插件（启动与「全部完成后接力」共用同一张表）。</summary>
-    private IScenario? CreateScenario(string mode) => mode switch
+    /// <summary>
+    /// 按模块 id 创建场景插件（启动与「全部完成后接力」共用注册表）。
+    /// 表在 <see cref="BotModuleCatalog"/>：引擎不再认识任何具体场景类型，
+    /// 加一个模块 = 表里加一条，这里零改动。
+    /// </summary>
+    private IScenario? CreateScenario(string mode)
     {
-        "intlweekly" => new WeeklyEventScenario(this, LogInternal),
-        "cnweekly" => new CnWeeklyScenario(this, LogInternal),
-        "cndaily" => new PeakLadderScenario(this, LogInternal),
-        "cnmyleague" => new CnMyLeagueScenario(this, LogInternal),
-        "intlladder" => new AiLadderScenario(this, LogInternal),
-        "intlstudbuy" => new StudTrainingScenario(this, LogInternal, training: false),
-        "intlstudtrain" => new StudTrainingScenario(this, LogInternal, training: true),
-        "intlswaptest" => new MyLeagueScenario(this, LogInternal, swapTestOnly: true),
-        "intl" => new MyLeagueScenario(this, LogInternal),
-        _ => null,
-    };
+        var scenario = BotModuleCatalog.Create(this, mode, LogInternal);
+        if (scenario is null)
+            LogInternal($"模块「{mode}」未在注册表里登记为挂机场景，本次不建场景", LogLevel.Warn);
+        return scenario;
+    }
 
     /// <summary>接力起点的场次基线：接力模块的「完成场次停止」只算自己跑的场次。</summary>
     private int _matchBaseline;
+
     private int _keyMatchBaseline;
     /// <summary>本次会话是否国服（决定允许接力到哪些模块：两服窗口/界面互不通用）。</summary>
     private bool _cnSession;
-
-    /// <summary>国际服可接力模块（模式名=引擎场景 id）：intl=我的联赛，intlladder=AI天梯联赛。</summary>
-    public static readonly string[] IntlHandoffTargets = { "intl", "intlladder" };
-
-    /// <summary>国服可接力模块：cnmyleague=我的联赛（国服），cndaily=天梯巅峰赛。</summary>
-    public static readonly string[] CnHandoffTargets = { "cnmyleague", "cndaily" };
-
-    /// <summary>接力目标是否属于该服（配置手改/跨服残留时拒绝，绝不在国际服界面上跑国服导航）。</summary>
-    public static bool IsHandoffTarget(string mode, bool cn) =>
-        Array.IndexOf(cn ? CnHandoffTargets : IntlHandoffTargets, mode) >= 0;
-
+    /// <summary>
+    /// 接力目标是否属于该服（配置手改/跨服残留时拒绝，绝不在国际服界面上跑国服导航）。
+    /// 白名单唯一来源是 <see cref="BotModuleCatalog"/>（HandoffEligible + Server）。
+    /// </summary>
+    public static bool IsHandoffTarget(string mode, bool cn) => BotModuleCatalog.IsHandoffTarget(mode, cn);
     /// <summary>当前模块已完成的场次（不含接力前模块的场次）。</summary>
     public int ModuleMatchesDone => Stats.MatchesDone - _matchBaseline;
-
     /// <summary>当前模块已完成的关键比赛场次（不含接力前模块的场次）。</summary>
     public int ModuleKeyMatchesDone => Stats.KeyMatches - _keyMatchBaseline;
-
     /// <summary>
     /// 模块接力：当前模块「全部完成」后换成另一个模块继续挂机。同一会话内切换——
     /// 虚拟手柄、捕获会话、后台停靠、作息调度全部保持不动，只替换决策插件；
@@ -681,13 +672,11 @@ public sealed class BotEngine : IDisposable
         {
             LogInternal($"独显偏好检查失败（不影响使用）：{ex.Message}", LogLevel.Debug);
         }
-
         processName ??= GameWindow.GlobalProcessName;
         _window = GameWindow.FindFirst(processName)
             ?? throw new InvalidOperationException(processName.Contains("Online")
                 ? "未找到正在运行的国服游戏窗口（eFootballOnline），请先启动「实况足球在线」。"
                 : "未找到正在运行的 eFootball 游戏窗口，请先启动游戏。");
-
         // 管理员权限失配检测：游戏提权而本程序未提权时，UIPI 会拦截跨完整性级别的窗口操作与
         // 窗口消息（后台停靠 SetWindowPos 恒 ERROR_ACCESS_DENIED、后台鼠标注入失效；
         // WGC 捕获走 DWM，部分环境仍正常出图——2026-10-15 实机：画面正常但停靠失效）。
@@ -700,9 +689,7 @@ public sealed class BotEngine : IDisposable
                     "或到 属性→兼容性 勾选「以管理员身份运行此程序」", LogLevel.Warn);
         }
         catch { /* 权限检测失败不影响启动 */ }
-
         // 非 720p 只在开始捕获时给一条性能提醒；高分辨率的捕获开销由帧池高≤720 降采样缓解。
-
         // 已在捕获另一个窗口（如国际服→国服切换）时，先停掉旧捕获
         if (Capture.IsRunning && Capture.Hwnd != _window.Handle)
         {
@@ -711,7 +698,6 @@ public sealed class BotEngine : IDisposable
         }
         if (_dxgi is { IsRunning: true } && _dxgi.Hwnd != _window.Handle)
             _dxgi.Stop();
-
         if (!Capture.IsRunning && !(_dxgi?.IsRunning ?? false))
         {
             var (w, h) = GameWindow.GetClientSize(_window.Handle);
@@ -720,9 +706,7 @@ public sealed class BotEngine : IDisposable
                 LogInternal($"当前游戏分辨率 {w}×{h} 高于 720p，已自动降采样；DXGI 模式可显著降低高分辨率下的捕获开销", LogLevel.Warn);
             await StartCaptureAsync(w, h);
         }
-
         Observation.Window = _window;
-
         if (connectPad)
         {
             // ViGEmBus 驱动缺失时静默安装（内置官方安装器；本程序自 v2.0.6 强制管理员启动，
@@ -748,7 +732,6 @@ public sealed class BotEngine : IDisposable
                     throw new InvalidOperationException($"ViGEmBus 驱动安装失败：{ex.Message}", ex);
                 }
             }
-
             // 全权接管：存在「已启用」的物理手柄节点时按设置自动禁用（设备管理器级）——
             // XInput 手柄释放玩家 1，虚拟 Xbox 360 手柄成为游戏唯一可见的手柄。
             // 触发条件只看节点不看 slot0 占用：
@@ -801,9 +784,7 @@ public sealed class BotEngine : IDisposable
                     Input.PhysicalPadControl.RequestPadHide();
                 }
             }
-
             await ConnectPadWithFallbackAsync();
-
             if (Pad360.Kind == PadBackendKind.XInputProxy)
             {
                 // 代理模式：系统槽位无关紧要，真实手柄可以照常插着；只验证"游戏真的读到了"。
@@ -821,7 +802,6 @@ public sealed class BotEngine : IDisposable
             {
                 LogInternal("虚拟手柄已连接（Xbox 360 形态，需占玩家 1 才能被游戏消费）",
                     LogLevel.Success);
-
                 // 连上之后验证「玩家 1 到底是虚拟手柄还是真实手柄」：真实手柄晚到/抢槽的兜底。
                 var (outcome, message) = await PadSlotWitness.EnsureVirtualPadInSlot0Async(
                     () => Pad360, _cfg.HidHide.HidePhysicalGamepad, _cfg.DryRun, LogInternal);
@@ -841,7 +821,6 @@ public sealed class BotEngine : IDisposable
         {
             LogInternal("感知观察模式：不接管手柄，真实手柄可直接使用", LogLevel.Info);
         }
-
         Stats.StartedAt = DateTime.Now;
         _cts = new CancellationTokenSource();
         // 会话标记：sync 提权任务凭它跳过 pad-restore（挂机中绝不能复活被禁用的真实手柄）
@@ -880,7 +859,6 @@ public sealed class BotEngine : IDisposable
                 Pad360 = CreatePad(chain[i]);
                 Pad = new Pad(Pad360, _cfg.Timing);
             }
-
             try
             {
                 Pad360.Connect();
@@ -917,14 +895,12 @@ public sealed class BotEngine : IDisposable
     {
         string procName = _cnSession ? CnProcessName : GameWindow.GlobalProcessName;
         LogInternal($"[跳过普通比赛] 正在重启游戏（{procName}）…", LogLevel.Warn);
-
         // ① 停捕获（旧 hwnd 即将失效）
         try { Capture.Stop(); } catch { }
         try { _dxgi?.Stop(); } catch { }
         try { _gdi?.Stop(); } catch { }
         // ② 停靠看门狗：不还原窗口（旧窗口已死），只停任务
         try { _parker?.StopWatchdogOnly(); } catch { }
-
         // ③ 杀进程（整棵进程树，等它真的退出）
         try
         {
@@ -949,7 +925,6 @@ public sealed class BotEngine : IDisposable
             LogInternal($"[跳过普通比赛] 结束游戏进程失败：{ex.Message}", LogLevel.Error);
             return false;
         }
-
         // 进程没退干净 → 不拉起新的（会两个实例抢窗口/抢手柄）
         if (GameWindow.FindFirst(procName) is not null)
         {
@@ -960,7 +935,6 @@ public sealed class BotEngine : IDisposable
                     "请右键本程序选「以管理员身份运行」"), LogLevel.Error);
             return false;
         }
-
         // ④ 拉起游戏
         if (!TryLaunchGame(procName, out string launchError))
         {
@@ -968,7 +942,6 @@ public sealed class BotEngine : IDisposable
             StopWithError("跳过普通比赛时游戏无法重新启动：" + launchError);
             return false;
         }
-
         // ⑤ 等新窗口（启动器 + 引擎初始化，实测 20~60s，给 120s 余量）
         var winDeadline = DateTime.Now.AddSeconds(120);
         GameWindowInfo? win = null;
@@ -990,7 +963,6 @@ public sealed class BotEngine : IDisposable
             return false;
         }
         LogInternal($"[跳过普通比赛] 游戏已重启（窗口 {win.Title}），恢复捕获与停靠…", LogLevel.Success);
-
         // 重绑窗口与捕获；Observation 切到新窗口后，登录/标题页/弹窗链全部走既有恢复链路
         _window = win;
         Observation.Window = win;
@@ -1008,7 +980,6 @@ public sealed class BotEngine : IDisposable
             LogInternal($"[跳过普通比赛] 新窗口捕获启动失败：{ex.Message}", LogLevel.Warn);
             return false;
         }
-
         // 重新停靠到本次会话的同一目标（虚拟屏矩形不变；屏外停靠按新窗口原位重算）。
         // 停靠失败不影响挂机（窗口留在屏幕上），但要让用户知道，否则他会看到游戏突然出现在桌面。
         if (_cfg.BackgroundParking.Enabled && _parker is not null)
@@ -1055,7 +1026,6 @@ public sealed class BotEngine : IDisposable
                 LogInternal($"[跳过普通比赛] {error}", LogLevel.Warn);
             }
         }
-
         var settingsPath = intl ? _cfg.GamePaths.IntlSettingsTool : _cfg.GamePaths.CnSettingsTool;
         string? exe = GameSettingsLocator.LocateGameExe(intl, global::System.IO.Path.GetDirectoryName(settingsPath));
         if (exe is null)
@@ -1113,11 +1083,9 @@ public sealed class BotEngine : IDisposable
     private async Task StartCaptureAsync(int w, int h)
     {
         var failures = new List<string>();
-
         // —— 方案 A：Rust sidecar 接管捕获（配置开启时优先；任何失败自动回退原 WGC/DXGI/GDI 链）——
         if (_cfg.VisionSidecar.Enabled && _cfg.VisionSidecar.UseForCapture &&
             await TryStartSidecarAsync(w, h, failures)) return;
-
         async Task<bool> TryStartSidecarAsync(int sw, int sh, List<string> fails)
         {
             try
@@ -1125,13 +1093,11 @@ public sealed class BotEngine : IDisposable
                 LogInternal($"开始捕获游戏窗口（Rust sidecar vision-svc，{sw}×{sh}，DXGI 复制走独立进程）", LogLevel.Info);
                 Capture.EnableSidecar(_cfg.VisionSidecar);
                 if (!Capture.IsRunning) Capture.Start(_window!.Handle, sw, sh);
-
                 var deadline = DateTime.Now.AddSeconds(6);
                 while (DateTime.Now < deadline && Capture.LastFrameAt == DateTime.MinValue)
                     await Task.Delay(80);
                 if (Capture.LastFrameAt == DateTime.MinValue)
                     throw new TimeoutException("sidecar 6s 内未产出帧（exe 缺失/管道未连接/DXGI 被占用）");
-
                 // 黑帧校验（与 DXGI 路径同口径）：HDR 降位失败/虚拟显示器会产出全黑帧
                 var checkDeadline = DateTime.Now.AddSeconds(3);
                 bool sawContent = false;
@@ -1143,7 +1109,6 @@ public sealed class BotEngine : IDisposable
                 }
                 if (!sawContent)
                     throw new TimeoutException("sidecar 捕获画面全黑（显示器输出/HDR 降位异常）");
-
                 if (Observation.Provider != Capture)
                 {
                     try { _dxgi?.Stop(); } catch { }
@@ -1161,7 +1126,6 @@ public sealed class BotEngine : IDisposable
                 return false;
             }
         }
-
         async Task<bool> TryStartDxgiAsync()
         {
             try
@@ -1184,7 +1148,6 @@ public sealed class BotEngine : IDisposable
                     await Task.Delay(100);
                 if (_dxgi.LastFrameAt == DateTime.MinValue)
                     throw new TimeoutException("DXGI 5s 内未收到桌面帧（画面静止/设备不支持/被远程桌面占用）");
-
                 // 黑帧校验（3s 窗口）：驱动异常/虚拟显示器环境下桌面复制会产出全黑帧
                 // （2026-10-10 15:48 实机：帧在流但 OCR 0 词，感知全盲）。全黑=假成功，
                 // 判失败走 GDI 兜底；正常桌面首帧即有内容，开销仅 ~250ms。
@@ -1198,7 +1161,6 @@ public sealed class BotEngine : IDisposable
                 }
                 if (!sawContent)
                     throw new TimeoutException("DXGI 捕获画面全黑（显示器输出/显卡驱动异常），不可用于感知");
-
                 if (Observation.Provider != _dxgi)
                 {
                     try { Capture.Stop(); } catch { }
@@ -1216,7 +1178,6 @@ public sealed class BotEngine : IDisposable
                 return false;
             }
         }
-
         async Task<bool> TryStartWgcAsync()
         {
             try
@@ -1242,7 +1203,6 @@ public sealed class BotEngine : IDisposable
                 return false;
             }
         }
-
         // 上次运行的本机判定（data\capture-backend.json）：Wgc 模式下直连已验证的后端，
         // 免撞完整探测链（虚拟显示器/无输出显卡机器上探测全程曾需约 1 分钟）。
         // 用户显式选择 DXGI 模式时不消费记忆——那是"我就要用 DXGI"的明确意图。
@@ -1262,13 +1222,11 @@ public sealed class BotEngine : IDisposable
                     break;
             }
         }
-
         // 后台停靠会把窗口移出屏幕：DXGI 桌面复制抓的是屏幕上那块区域，窗口不在屏幕上即黑屏失效，
         // 此时无论用户选什么都强制走 WGC → GDI 链（两者按窗口捕获，窗口在屏幕外照常出帧）
         bool park = _cfg.BackgroundParking.Enabled;
         if (park && _cfg.CaptureMode == CaptureMode.Dxgi)
             LogInternal("后台停靠已开启：游戏窗口将移出屏幕，DXGI 桌面复制无法捕获，本次自动改用 WGC/GDI 捕获链", LogLevel.Warn);
-
         if (!park && _cfg.CaptureMode == CaptureMode.Dxgi)
         {
             if (await TryStartDxgiAsync()) return;
@@ -1280,7 +1238,6 @@ public sealed class BotEngine : IDisposable
             if (!park && await TryStartDxgiAsync()) return;
         }
         if (await TryStartGdiCaptureAsync(w, h, failures)) return;
-
         throw new InvalidOperationException(
             "所有捕获后端均不可用：" + string.Join("；", failures) +
             "。请确认游戏窗口存在、显卡驱动正常（事件查看器查 dwm.exe 记录），必要时重启电脑。");
@@ -1315,7 +1272,6 @@ public sealed class BotEngine : IDisposable
                 await Task.Delay(150);
                 firstFrame = await Task.Run(() => _gdi.StartAndWaitFirstFrame(_window!.Handle, w, h));
             }
-
             if (!firstFrame)
             {
                 string reason = _gdi.LastError ?? "启动后 2 秒内未产出任何画面";
@@ -1327,7 +1283,6 @@ public sealed class BotEngine : IDisposable
                 failures?.Add($"GDI：{reason}（{hang}）");
                 return false;
             }
-
             if (Observation.Provider != _gdi)
             {
                 try { Capture.Stop(); } catch { }
@@ -1372,7 +1327,6 @@ public sealed class BotEngine : IDisposable
         // 手柄一旦被游戏看到「断开→重连」，eFootball 会把光标停靠到顶部头部的「手柄归属」图标上，
         // 重连设备的 Left/A 全部失效（焦点不在磁贴行）。运行期自愈走 ReconnectPadAsync，
         // 仅在提交连续失败（手柄实质已失效）时才重建。
-
         WriteSessionSummary("正常停止", isError: false);
         WeChatFeed.SessionStop();
     }
@@ -1388,7 +1342,6 @@ public sealed class BotEngine : IDisposable
 
     /// <summary>本次运行是否已写过会话摘要（Stop 可能被多处调用，摘要只写一次）。</summary>
     private bool _summaryWritten;
-
     /// <summary>
     /// 会话摘要：一行日志 + 一条 JSONL（data\session-summary.jsonl）。
     /// 用途是把「这次挂了多久、打了多少场、为什么停」变成可聚合数据——
@@ -1409,11 +1362,10 @@ public sealed class BotEngine : IDisposable
                           (suppressed > 0 ? $"影子模式拦截 {suppressed} 次输入 · " : "") +
                           $"结束原因：{reason}";
             LogInternal(line, isError ? LogLevel.Warn : LogLevel.Success);
-
             var record = new
             {
                 at = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
-                mode = Scenario?.Name ?? "observe",
+                mode = Scenario?.Name ?? EngineModes.Observe,
                 matches = s.MatchesDone,
                 keyMatches = s.KeyMatches,
                 playersMaxed = s.PlayersMaxed,
@@ -1425,7 +1377,6 @@ public sealed class BotEngine : IDisposable
             string path = Path.Combine(AppPaths.DataDir, "session-summary.jsonl");
             Directory.CreateDirectory(AppPaths.DataDir);
             File.AppendAllText(path, global::System.Text.Json.JsonSerializer.Serialize(record) + Environment.NewLine);
-
             Notifier.Send(_cfg, $"挂机{(isError ? "异常停止" : "已停止")}", line,
                 isError ? NotifyKind.Error : NotifyKind.Stop, LogInternal);
         }
@@ -1514,7 +1465,6 @@ public sealed class BotEngine : IDisposable
     }
 
     // ---------------- 输入活性 / 玩家 1 归属 ----------------
-
     /// <summary>
     /// 输入活性探针（P0-1）：同一屏文字连续 <see cref="InputLivenessProbe.StuckMs"/> 一字不差、
     /// 期间又按过键 → 按 下/A/B 验证游戏是否真的收到了输入；三次都没反应就判死并抛出
@@ -1537,7 +1487,6 @@ public sealed class BotEngine : IDisposable
             _livenessProbed = false;
             return;
         }
-
         string sig = InputLivenessProbe.TextSignature(obs.Ocr);
         if (!InputLivenessProbe.IsReadable(sig))
         {
@@ -1546,7 +1495,6 @@ public sealed class BotEngine : IDisposable
             _livenessProbed = false;
             return;
         }
-
         long now = Environment.TickCount64;
         if (sig != _stuckText)
         {
@@ -1556,11 +1504,9 @@ public sealed class BotEngine : IDisposable
             _livenessProbed = false;
             return;
         }
-
         if (_livenessProbed) return;                       // 本轮卡住只探一次，避免反复按键
         if (now - _stuckSinceTick < InputLivenessProbe.StuckMs) return;
         if (Pad.ActionCount - _stuckActionBase < InputLivenessProbe.MinActionsDuringStuck) return;
-
         _livenessProbed = true;
         LogInternal($"[输入自检] 页面文字 {InputLivenessProbe.StuckMs / 1000}s 未变且期间按过键，" +
             "开始探测游戏是否还收得到手柄输入…", LogLevel.Warn);
@@ -1571,7 +1517,6 @@ public sealed class BotEngine : IDisposable
             _stuckText = "";
             return;
         }
-
         // 给"刚好在加载/过场"留一条退路：等 2 秒看页面文字会不会自己更新（加载页的提示语、
         // 对战双方信息都会变）。慢机器上 45 秒的加载画面不该被判成"手柄已死"。
         await Task.Delay(2000, ct);
@@ -1590,7 +1535,6 @@ public sealed class BotEngine : IDisposable
             _stuckText = "";
             return;
         }
-
         LogInternal($"[输入自检] 输入无响应（{r.Detail} / 二轮 {r2.Detail}）", LogLevel.Error);
         throw new InputNotRespondingException(InputLivenessProbe.DeadMessage);
     }
@@ -1610,11 +1554,9 @@ public sealed class BotEngine : IDisposable
         if (Pad360 is DryRunPad || !Pad360.IsConnected) return;
         // 摇杆微码探测会把左摇杆打到 (-31000,-31000) 120ms：比赛里那是在操控球员，必须避开。
         if (Scenario is { InMatch: true }) return;
-
         long now = Environment.TickCount64;
         if (now - _lastWitnessTick < 5 * 60_000) return;
         _lastWitnessTick = now;
-
         var r1 = PadSlotWitness.Probe(Pad360);
         if (r1.VirtualInSlot0)
         {
@@ -1627,14 +1569,12 @@ public sealed class BotEngine : IDisposable
             }
             return;
         }
-
         // 单次读不到可能是 XInput 状态刷新的一拍抖动：连续两次复测（共 3 次读）都失败才动手。
         // 重连会让游戏看到"手柄断开→重连"，代价不小，宁可多等 3 秒也不能误触发。
         await Task.Delay(1500, ct);
         if (PadSlotWitness.Probe(Pad360).VirtualInSlot0) return;
         await Task.Delay(1500, ct);
         if (PadSlotWitness.Probe(Pad360).VirtualInSlot0) return;
-
         LogInternal("玩家 1 归属漂移：虚拟手柄已不在 slot0（游戏会无视 bot 的所有按键），正在重连抢回…",
             LogLevel.Warn);
         await ReconnectPadAsync();
@@ -1644,7 +1584,6 @@ public sealed class BotEngine : IDisposable
             LogInternal("已抢回玩家 1：虚拟手柄重新独占游戏输入", LogLevel.Success);
             return;
         }
-
         _padOwnershipLostLogged = true;
         Stats.LastError = "虚拟手柄不在玩家 1，游戏收不到任何操作（真实手柄或其他手柄软件占用了 slot0）";
         LogInternal("玩家 1 仍不属于本程序的虚拟手柄：游戏不会响应 bot 的任何按键。\n" +
@@ -1654,7 +1593,6 @@ public sealed class BotEngine : IDisposable
     }
 
     // ---------------- 感知观察 ----------------
-
     /// <summary>
     /// 获取一帧新鲜画面 → OCR（节流）→ YOLO 检测（仅新帧）→ 组装 Observation 并派发事件。
     /// 捕获自愈 + OCR 节流由 ObservationService 负责。
@@ -1671,7 +1609,6 @@ public sealed class BotEngine : IDisposable
         int ocrIntervalMs = forceOcr ? 0 : _cfg.Timing.OcrIntervalMs;
         if (!forceOcr && _lastObs is { } prev && prev.Ocr.Words.Count == 0 && prev.Detections.Count == 0)
             ocrIntervalMs = Math.Min(ocrIntervalMs * 3, 5000);
-
         var res = await Observation.ObserveAsync(ct, ocrIntervalMs);
         var f = res.Frame;
         var ocr = res.Ocr;
@@ -1680,30 +1617,25 @@ public sealed class BotEngine : IDisposable
         _lastHashMs = res.HashMs;
         _lastOcrMs = res.OcrMs;
         _lastYoloMs = 0;
-
         // 距上次 OCR 不足间隔时返回缓存帧，直接复用上一次感知结果
         if (_lastObs is not null && _lastObs.Frame == f && _lastObs.Ocr == ocr)
             return _lastObs;
-
         long tYolo0 = Environment.TickCount64;
         var dets = await _perception!.DetectAsync(f, ct);
         _lastYoloMs = Environment.TickCount64 - tYolo0;
         var obs = new Observation(f, ocr, dets);
         _lastObs = obs;
         DumpFrame(f);
-
         // ---------------- 事件派发 ----------------
         bool yoloOn = _perception.YoloEnabled;
         string summary = $"OCR {ocr.Words.Count} 词" + (yoloOn ? $" / 检测 {dets.Count} 框" : "");
         var evidence = dets.Select(d => $"{d.ClassName} {d.Score:F2}").Take(8).ToList();
-
         ScreenChanged?.Invoke(new ScreenEvent
         {
             Screen = summary,
             Score = yoloOn ? dets.Count : ocr.Words.Count,
             Evidence = evidence,
         });
-
         if (Stats.LastScreen != summary)
         {
             Stats.LastScreen = summary;
@@ -1711,7 +1643,6 @@ public sealed class BotEngine : IDisposable
             LogInternal($"感知 → {summary}（{Stats.LastScreenEvidence}）", LogLevel.Debug);
             EmitStats();
         }
-
         // 周期性输出 OCR 原文（Debug 级：比赛中 YOLO 无检测是常态，Warn 会刷屏）。
         // 零检测帧 5s 一条（过场/比赛画面）；有检测帧 30s 一条——此前只在零检测时输出，
         // 带按钮框的弹窗帧（如关键比赛弹窗）恰恰永远没有 OCR 线索，远程排障抓瞎
@@ -1725,13 +1656,11 @@ public sealed class BotEngine : IDisposable
             var words = ocr.MergedWords.Select(w => w.Text);
             LogInternal($"[OCR原文] {string.Join(" | ", words)}", LogLevel.Debug);
         }
-
         Observed?.Invoke(obs);
         return obs;
     }
 
     // ---------------- 杂项 ----------------
-
     /// <summary>
     /// 训练数据采集：按间隔把观察帧存为 JPG（exe 同级 captures\日期\HHmmss_fff.jpg），
     /// 后台任务执行不阻塞观察循环；失败静默（采集不影响挂机）。仅新帧触发，间隔内重复画面跳过。
@@ -1743,7 +1672,6 @@ public sealed class BotEngine : IDisposable
         long now = Environment.TickCount64;
         if (now - _lastFrameDumpTick < cfg.IntervalMs) return;
         _lastFrameDumpTick = now;
-
         // 帧池会复用数组：先在观察线程拷贝像素，后台任务只做编码写盘
         var pixels = (byte[])f.Bgra.Clone();
         // exe 真实目录（AppContext.BaseDirectory 在单文件自解压下指向 %TEMP% 解压目录，不能用）
@@ -1819,3 +1747,7 @@ public sealed class CaptureUnrecoverableException : Exception
 {
     public CaptureUnrecoverableException(string message) : base(message) { }
 }
+
+
+
+

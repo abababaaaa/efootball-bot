@@ -1,3 +1,4 @@
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Bot.Scenarios;
 using EfootballBot.Core.Input;
@@ -162,3 +163,4 @@ public class PostMatchActivityFlowTests
         Assert.Contains("dpad:Right", pad.Calls.Skip(before));
     }
 }
+

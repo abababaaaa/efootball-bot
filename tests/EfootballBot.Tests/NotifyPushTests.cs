@@ -1,3 +1,4 @@
+using EfootballBot.Core;
 using EfootballBot.Core.Bot;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.System;
@@ -225,3 +226,4 @@ public class NotifyPushTests : IDisposable
         Assert.Single(Sent); // 间隔内不重复
     }
 }
+

@@ -7,6 +7,7 @@ using EfootballBot.Core.Vision;
 using EfootballBot.Core.Vision.Yolo;
 using Xunit;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 国服我的联赛移植回归：锁定进入导航所依赖的界面分类契约（合成 OCR 帧，坐标均为归一化值）。
@@ -54,7 +55,7 @@ public class CnMyLeagueEntryTests
         var ocr = Ocr(W("比赛", 0.07, 0.07),
             W("比赛活动", 0.2, 0.69), W("天梯巅峰赛", 0.5, 0.7),
             W("我的联赛", 0.8, 0.41), W("好友对战", 0.8, 0.78));
-        Assert.Equal(MlScreen.MatchHub, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.MatchHub, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
 
     // ---------------- 进联赛后：共享判定两服一致 ----------------
@@ -65,9 +66,9 @@ public class CnMyLeagueEntryTests
         // 联赛主页（前往比赛）：国服同一界面 → LeaguePage + A 推进（继承流程的核心前提）
         var ocr = Ocr(W("我的联赛", 0.2, 0.07), W("前往比赛", 0.14, 0.24),
             W("赛程表", 0.14, 0.38), W("兑换积分", 0.14, 0.52), W("返回", 0.07, 0.94));
-        var screen = MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr);
-        Assert.Equal(MlScreen.LeaguePage, screen);
-        Assert.Equal(MlActionKind.PadConfirm, MyLeagueBrain.Decide(screen, ocr, 0).Kind);
+        var screen = MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr);
+        Assert.Equal(MatchScreen.LeaguePage, screen);
+        Assert.Equal(MatchActionKind.PadConfirm, MatchBrain.Decide(screen, ocr, 0).Kind);
     }
 
     [Fact]
@@ -77,8 +78,8 @@ public class CnMyLeagueEntryTests
         // 确认键是 RT 而非 A（国服特有），CnMyLeagueScenario 拦截钩子按此改按 RT
         var ocr = Ocr(W("eFootball™ Stadium", 0.5, 0.3), W("球场", 0.62, 0.9),
             W("下一步", 0.85, 0.9));
-        Assert.Equal(MlScreen.MatchStartPage,
-            MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.MatchStartPage,
+            MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
 
     // ---------------- 回归 2026-11-11：国服关键比赛弹窗（按钮=确定/取消，A 落在取消上）----------------
@@ -106,9 +107,9 @@ public class CnMyLeagueEntryTests
         };
 
         Assert.True(CnMyLeagueScenario.IsCnKeyMatchPopup(ocr));   // 修复后的判定
-        Assert.False(MyLeagueBrain.HasOkButton(ocr));             // 漏接事实：没有 OK 词
-        Assert.Equal(MlScreen.HasConfirm,                         // 旧分类落 HasConfirm
-            MyLeagueBrain.Classify(dets, ocr));
+        Assert.False(MatchBrain.HasOkButton(ocr));             // 漏接事实：没有 OK 词
+        Assert.Equal(MatchScreen.HasConfirm,                         // 旧分类落 HasConfirm
+            MatchBrain.Classify(dets, ocr));
 
         // 按钮布局锁定：确定在上、取消在下 → 阶梯第 1 招「上×1+A」方向正确
         var buttons = PopupBrain.FindButtons(null, ocr);
@@ -171,8 +172,8 @@ public class CnMyLeagueEntryTests
         Assert.Equal(PlScreen.ActivityHome, PeakLadderBrain.Classify(ocr)); // 碰撞事实锁定
         Assert.False(CnMyLeagueScenario.HasPeakLadderEvidence(ocr));        // 修复判定
 
-        var leagueHome = MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr);
-        Assert.Equal(MlScreen.LeaguePage, leagueHome); // 交还后走联赛主页推进
+        var leagueHome = MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr);
+        Assert.Equal(MatchScreen.LeaguePage, leagueHome); // 交还后走联赛主页推进
     }
 
     [Fact]
@@ -188,3 +189,5 @@ public class CnMyLeagueEntryTests
         Assert.Equal(PlScreen.ActivityHome, PeakLadderBrain.Classify(withTitle));
     }
 }
+
+

@@ -7,6 +7,7 @@ using OpenCvSharp;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 统计训练集 val 帧：各界面分类下 OCR 是否出现"我的联赛"——
@@ -30,7 +31,7 @@ public class ValFrameOcrSurvey
             new OnnxSessionFactory("CPU"));
         using var ocr = new OcrRecognizer();
 
-        var counts = new Dictionary<MlScreen, (int Total, int ContainsMl, int ContainsMatch)>();
+        var counts = new Dictionary<MatchScreen, (int Total, int ContainsMl, int ContainsMatch)>();
         foreach (var img in Directory.GetFiles(ValDir, "*.jpg").Take(60))
         {
             using var mat = Cv2.ImRead(img, ImreadModes.Color);
@@ -43,7 +44,7 @@ public class ValFrameOcrSurvey
             var frame = new FrameData(data, mat.Width, mat.Height, 0);
             var dets = det.Detect(frame);
             var ocrRes = TestOcr.Run(ocr, frame);
-            var screen = MyLeagueBrain.Classify(dets, ocrRes);
+            var screen = MatchBrain.Classify(dets, ocrRes);
             bool ml = ocrRes.ContainsJoined("我的联赛");
             bool match = ocrRes.ContainsJoined("比赛");
             var (t, c, m) = counts.TryGetValue(screen, out var v) ? v : (0, 0, 0);
@@ -57,3 +58,5 @@ public class ValFrameOcrSurvey
             _out.WriteLine($"  {k}: {v.Total}, {v.ContainsMl}, {v.ContainsMatch}");
     }
 }
+
+

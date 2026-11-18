@@ -8,6 +8,7 @@ using OpenCvSharp;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 校准/回归：用户提供的国际服挑战活动（挑战清单/卡片页/活动设置）截图 →
@@ -64,12 +65,12 @@ public class ChallengeRealFrameTests
             var dets = det.Detect(frame);
             var ocrRes = TestOcr.Run(ocr, frame);
             var screen = WeeklyBrain.Classify(dets, ocrRes,
-                MyLeagueScenario.CornerHasContent(frame),
+                ScreenProbe.CornerHasContent(frame),
                 matchContext: false,
-                MyLeagueScenario.IsMostlyLightPage(frame));
+                ScreenProbe.IsMostlyLightPage(frame));
 
             _out.WriteLine($"==== {name} -> {screen} ====");
-            foreach (var d in dets.Where(d => d.Score >= MyLeagueBrain.MinScore))
+            foreach (var d in dets.Where(d => d.Score >= MatchBrain.MinScore))
                 _out.WriteLine($"  YOLO {d.ClassName} {d.Score:F2} @({d.CenterX:F2},{d.CenterY:F2})");
             foreach (var l in ocrRes.Lines)
                 _out.WriteLine($"  L \"{l.Text}\" @({l.CenterX:F2},{l.CenterY:F2})");
@@ -119,9 +120,9 @@ public class ChallengeRealFrameTests
         var ocr = new OcrRecognizer();
         var ocrRes = TestOcr.Run(ocr, frame);
         return (WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocrRes,
-            MyLeagueScenario.CornerHasContent(frame),
+            ScreenProbe.CornerHasContent(frame),
             matchContext: false,
-            MyLeagueScenario.IsMostlyLightPage(frame)), ocrRes, frame);
+            ScreenProbe.IsMostlyLightPage(frame)), ocrRes, frame);
     }
 
     [Fact]
@@ -228,3 +229,5 @@ public class ChallengeRealFrameTests
         Assert.False(s.FlexibleAutoControl);
     }
 }
+
+

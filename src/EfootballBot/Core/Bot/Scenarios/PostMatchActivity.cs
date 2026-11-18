@@ -2,6 +2,17 @@ using EfootballBot.Core.Bot;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 
+// ===========================================================================
+// 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
+// 本层职责：单个挂机模块自己的菜单流程与私有状态机（只认自己的界面）。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 不许引用别的模块的 *Scenario（只读借用别人的 *Brain.Classify 认残留页面是允许的）
+//   · 不许自己写场次记账 / 比赛内挂机节奏 —— 一律走 MatchPlay.Tick / IdleTapAsync
+//   · 共享界面判定与决策一律用 Core/Bot/Match 的 MatchBrain，不要复制一份
+// 新增模块：ModuleIds 加常量 + BotModuleCatalog 加一条记录，再写本目录的状态机。
+// 除非用户明确要求更换写法，否则按本层约定写。
+// ===========================================================================
+
 namespace EfootballBot.Core.Bot.Scenarios;
 
 /// <summary>赛后活动任务页（活动地图）界面类型。None = 非该模块界面。</summary>
@@ -55,7 +66,6 @@ public static class PostMatchActivityBrain
         ocr.ContainsJoined("对阵AI") || ocr.ContainsJoined("对阵玩家") ||
         ocr.ContainsJoined("活动设置") || ocr.ContainsJoined("比赛计划") ||
         ocr.ContainsJoined("前往比赛");
-
     /// <summary>
     /// 活动地图主界面：「当前位置」为全游戏唯一词（底部 Y 键说明），再叠加「下一步」或
     /// 右上「奖励」任一固定元素。弹窗先行判定——弹窗背景暗化后仍可能读到地图词。
@@ -63,7 +73,6 @@ public static class PostMatchActivityBrain
     public static bool IsMap(OcrResult ocr) =>
         ocr.ContainsJoined("当前位置") &&
         (ocr.ContainsJoined("下一步") || ocr.ContainsJoined("奖励"));
-
     public static PmScreen Classify(OcrResult ocr)
     {
         if (IsPopup(ocr)) return PmScreen.Popup;
@@ -81,7 +90,6 @@ public static class PostMatchActivityBrain
     {
         double? totalY = ocr.Words
             .FirstOrDefault(w => w.NormText.Contains("总积分"))?.CenterY;
-
         int? best = null;
         double bestH = 0;
         foreach (var w in ocr.Words)
@@ -92,7 +100,6 @@ public static class PostMatchActivityBrain
                 if (w.CenterY <= ty - 0.16 || w.CenterY >= ty - 0.02) continue;
             }
             else if (w.CenterY < 0.17 || w.CenterY > 0.34) continue;
-
             if (TryParseCount(w.NormText, out int v) && w.H > bestH)
             {
                 bestH = w.H;
@@ -146,7 +153,9 @@ public static class PostMatchActivityBrain
 internal interface IPmActivityPad
 {
     Task Y();
+
     Task Dpad(PadDir dir);
+
     Task Confirm();
 }
 
@@ -154,7 +163,9 @@ internal interface IPmActivityPad
 internal sealed class EnginePmActivityPad(Pad pad) : IPmActivityPad
 {
     public Task Y() => pad.Y();
+
     public Task Dpad(PadDir dir) => pad.Dpad(dir);
+
     public Task Confirm() => pad.Confirm();
 }
 
@@ -179,17 +190,20 @@ public sealed class PostMatchActivityController
     }
 
     private Phase _phase = Phase.Idle;
+
     private int _remaining;
+
     private int _steps;
+
     private int _popupMiss;
+
     private int _missing;
+
     private int _exitRetries;
     /// <summary>Y（回当前位置）只在首次进入时按一次，无论后续推进多少轮（用户 2026-10-22 修正）。</summary>
     private bool _yPressed;
-
     /// <summary>是否正在处理该界面（供调用方日志/统计用）。</summary>
     public bool Active => _phase != Phase.Idle;
-
     /// <summary>
     /// 每轮调用：命中活动地图/弹窗时执行一步并返回下一轮延时；
     /// 未命中时返回 null（屏幕消失 3 帧后自动复位）。
@@ -200,7 +214,6 @@ public sealed class PostMatchActivityController
         => StepAsyncCore(obs.Ocr, autoAdvance,
             countReader: token => PostMatchActivityBrain.ReadAdvanceCountAsync(engine, obs, token),
             pad: new EnginePmActivityPad(engine.Pad), log, module, ct);
-
     /// <summary>核心状态机（OCR/手柄全部参数化，可单测）。countReader 仅在首次进入且开启自动推进时调用。</summary>
     internal async Task<int?> StepAsyncCore(OcrResult ocr, bool autoAdvance,
         Func<CancellationToken, Task<int?>>? countReader, IPmActivityPad pad,
@@ -213,7 +226,6 @@ public sealed class PostMatchActivityController
             return null;
         }
         _missing = 0;
-
         // ---- 新一轮：首次进入地图/弹窗 ----
         if (_phase == Phase.Idle)
         {
@@ -227,7 +239,6 @@ public sealed class PostMatchActivityController
                 _phase = Phase.Exit;
                 return 2200;
             }
-
             if (!autoAdvance)
             {
                 log($"[{module}] 赛后活动地图：未开启自动推进，直接退出（→ 下一步）", LogLevel.Info);
@@ -253,7 +264,6 @@ public sealed class PostMatchActivityController
                 }
             }
         }
-
         switch (_phase)
         {
             case Phase.Advance:
@@ -275,7 +285,6 @@ public sealed class PostMatchActivityController
                     return 2200;
                 }
                 return await ExitAsync(pad, log, module);
-
             case Phase.AwaitPopup:
                 if (screen == PmScreen.Popup)
                 {
@@ -291,10 +300,8 @@ public sealed class PostMatchActivityController
                 _remaining--;
                 _phase = Phase.Advance;
                 return 1000;
-
             case Phase.Exit:
                 return await ExitAsync(pad, log, module);
-
             case Phase.Done:
             default:
                 // 退出动作已发出：等待画面切走。长时间仍在地图（→/下一步 被吞）重试退出
@@ -328,3 +335,7 @@ public sealed class PostMatchActivityController
         _yPressed = false;
     }
 }
+
+
+
+

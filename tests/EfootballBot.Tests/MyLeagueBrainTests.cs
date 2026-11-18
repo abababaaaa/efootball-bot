@@ -4,6 +4,7 @@ using EfootballBot.Core.Vision;
 using EfootballBot.Core.Vision.Yolo;
 using Xunit;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 我的联赛决策大脑（全手柄版）：Classify（YOLO+OCR）与 Decide（纯手柄动作）纯函数单测
@@ -24,14 +25,14 @@ public class MyLeagueBrainTests
     public void Classify_MainMenu()
     {
         var dets = new[] { Det("main_menu", 0.9f), Det("player_card", 0.8f) };
-        Assert.Equal(MlScreen.MainMenu, MyLeagueBrain.Classify(dets, OcrResult.Empty));
+        Assert.Equal(MatchScreen.MainMenu, MatchBrain.Classify(dets, OcrResult.Empty));
     }
 
     [Fact]
     public void Classify_ItemList_NeedsTwoRowsAndBack()
     {
         var dets = new[] { Det("item_row", 0.9f), Det("item_row", 0.8f), Det("btn_back", 0.9f) };
-        Assert.Equal(MlScreen.ItemList, MyLeagueBrain.Classify(dets, OcrResult.Empty));
+        Assert.Equal(MatchScreen.ItemList, MatchBrain.Classify(dets, OcrResult.Empty));
     }
 
     [Fact]
@@ -39,21 +40,21 @@ public class MyLeagueBrainTests
     {
         var dets = new[] { Det("item_row", 0.9f), Det("btn_back", 0.9f) };
         // 单行不足列表特征 → 落入 LeaguePage（仅返回按钮可见）
-        Assert.Equal(MlScreen.LeaguePage, MyLeagueBrain.Classify(dets, OcrResult.Empty));
+        Assert.Equal(MatchScreen.LeaguePage, MatchBrain.Classify(dets, OcrResult.Empty));
     }
 
     [Fact]
     public void Classify_HasConfirm_BeatsLeaguePage()
     {
         var dets = new[] { Det("btn_confirm", 0.9f), Det("btn_back", 0.8f) };
-        Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(dets, OcrResult.Empty));
+        Assert.Equal(MatchScreen.HasConfirm, MatchBrain.Classify(dets, OcrResult.Empty));
     }
 
     [Fact]
     public void Classify_LowScore_Ignored()
     {
         var dets = new[] { Det("main_menu", 0.3f), Det("btn_confirm", 0.3f) };
-        Assert.Equal(MlScreen.Unknown, MyLeagueBrain.Classify(dets, OcrResult.Empty));
+        Assert.Equal(MatchScreen.Unknown, MatchBrain.Classify(dets, OcrResult.Empty));
     }
 
     [Fact]
@@ -61,7 +62,7 @@ public class MyLeagueBrainTests
     {
         // 比赛页无 YOLO 特征：OCR 含"我的联赛"且无主菜单"退出游戏"
         var ocr = Ocr(("我的联赛", 0.3, 0.2), ("赛季目标", 0.6, 0.5));
-        Assert.Equal(MlScreen.MatchHub, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.MatchHub, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
 
     [Fact]
@@ -72,7 +73,7 @@ public class MyLeagueBrainTests
         var dets = new[] { Det("btn_back", 0.93f), Det("player_card", 0.89f) };
         var ocr = Ocr(("比赛", 0.10, 0.11), ("锦标赛", 0.11, 0.73), ("活动", 0.40, 0.72),
             ("eFootballTM联赛", 0.76, 0.72), ("返回", 0.10, 0.93));
-        Assert.Equal(MlScreen.MatchHub, MyLeagueBrain.Classify(dets, ocr));
+        Assert.Equal(MatchScreen.MatchHub, MatchBrain.Classify(dets, ocr));
     }
 
     [Fact]
@@ -82,7 +83,7 @@ public class MyLeagueBrainTests
         var dets = new[] { Det("btn_back", 0.93f), Det("player_card", 0.89f) };
         var ocr = Ocr(("比赛", 0.10, 0.11), ("我的联赛", 0.72, 0.37),
             ("在整个赛季中对抗AI", 0.74, 0.42), ("自定义锦标赛", 0.75, 0.72), ("返回", 0.10, 0.93));
-        Assert.Equal(MlScreen.MatchHub, MyLeagueBrain.Classify(dets, ocr));
+        Assert.Equal(MatchScreen.MatchHub, MatchBrain.Classify(dets, ocr));
     }
 
     [Fact]
@@ -94,7 +95,7 @@ public class MyLeagueBrainTests
         var ocr = Ocr(("排名比赛记录最近5场比赛", 0.62, 0.24), ("前往比赛2积分5517胜4平3负", 0.52, 0.29),
             ("F0OTBALL8FOOYBALL93250我的联赛积分保持1场不失球", 0.39, 0.47), ("比赛日25B期间", 0.43, 0.53),
             ("返回设置比赛计划", 0.34, 0.94));
-        Assert.Equal(MlScreen.LeaguePage, MyLeagueBrain.Classify(dets, ocr));
+        Assert.Equal(MatchScreen.LeaguePage, MatchBrain.Classify(dets, ocr));
     }
 
     [Fact]
@@ -102,13 +103,13 @@ public class MyLeagueBrainTests
     {
         // 主菜单特有"退出游戏"，即使 OCR 含"我的联赛"（banner 文字）也不算比赛页
         var ocr = Ocr(("我的联赛", 0.3, 0.5), ("退出游戏", 0.8, 0.75));
-        Assert.Equal(MlScreen.Unknown, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.Unknown, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
 
     [Fact]
     public void Classify_Empty_IsUnknown()
     {
-        Assert.Equal(MlScreen.Unknown, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), OcrResult.Empty));
+        Assert.Equal(MatchScreen.Unknown, MatchBrain.Classify(Array.Empty<YoloDetection>(), OcrResult.Empty));
     }
 
     [Fact]
@@ -116,7 +117,7 @@ public class MyLeagueBrainTests
     {
         // 实机回归（2026-10-10 15:59 会话）：比赛中 OCR 见 队名缩写+时钟+球员名，无 YOLO 特征
         var ocr = Ocr(("GS", 0.1, 0.05), ("BJK", 0.3, 0.05), ("0:57", 0.2, 0.06), ("LeandroTrossard", 0.5, 0.8));
-        Assert.Equal(MlScreen.InMatch, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.InMatch, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
 
     [Fact]
@@ -125,7 +126,7 @@ public class MyLeagueBrainTests
         // 用户约定（2026-10-10）：比分/球队名/球员名每场可变，一律不作为判定点——
         // 只有比分形态词（如 1-0）不触发比赛判定；时钟（固定 UI）才是比分框主判据
         var ocr = Ocr(("AME", 0.08, 0.09), ("GS", 0.20, 0.09), ("1-0", 0.15, 0.088), ("LeandroTrossard", 0.5, 0.4));
-        Assert.Equal(MlScreen.Unknown, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.Unknown, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
 
     [Fact]
@@ -133,15 +134,15 @@ public class MyLeagueBrainTests
     {
         // 时钟词出现在比分框区之外（如页面中部文本）不触发比赛主判据
         var ocr = Ocr(("0:57", 0.8, 0.9));
-        Assert.Equal(MlScreen.Unknown, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.Unknown, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
 
     [Fact]
     public void Classify_TopRightContent_Alone_IsInMatch()
     {
         // 辅助判据：右上角（AI 徽标区）有画面内容 → 比赛中（重播/丢时钟帧兜底）
-        Assert.Equal(MlScreen.InMatch,
-            MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), OcrResult.Empty, topRightHasContent: true));
+        Assert.Equal(MatchScreen.InMatch,
+            MatchBrain.Classify(Array.Empty<YoloDetection>(), OcrResult.Empty, topRightHasContent: true));
     }
 
     [Fact]
@@ -149,7 +150,7 @@ public class MyLeagueBrainTests
     {
         // 辅助判据排在所有菜单判定之后：亮色菜单页（右上也有内容）仍按菜单处理
         var dets = new[] { Det("btn_back", 0.9f) };
-        Assert.Equal(MlScreen.LeaguePage, MyLeagueBrain.Classify(dets, OcrResult.Empty, topRightHasContent: true));
+        Assert.Equal(MatchScreen.LeaguePage, MatchBrain.Classify(dets, OcrResult.Empty, topRightHasContent: true));
     }
 
     [Fact]
@@ -158,8 +159,8 @@ public class MyLeagueBrainTests
         // 2026-10-11 用户实机回归：国际服联赛主页 YOLO 未检出返回按钮，右上角奖励徽章
         // 点亮角区探针 → 被兜底成 InMatch 盲按 A 误开新比赛。「前往比赛」只在联赛主页出现
         var ocr = Ocr(("ManchesterB", 0.2, 0.05), ("前往比赛", 0.15, 0.75), ("赛程表", 0.4, 0.9));
-        Assert.Equal(MlScreen.LeaguePage,
-            MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr, topRightHasContent: true));
+        Assert.Equal(MatchScreen.LeaguePage,
+            MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr, topRightHasContent: true));
     }
 
     [Fact]
@@ -167,7 +168,7 @@ public class MyLeagueBrainTests
     {
         // 赛季结束：前往比赛位置替换为「下个赛季」
         var ocr = Ocr(("下个赛季", 0.15, 0.75));
-        Assert.Equal(MlScreen.LeaguePage, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.LeaguePage, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
 
     [Fact]
@@ -175,8 +176,8 @@ public class MyLeagueBrainTests
     {
         // 无比赛上下文时角区探针不作为比赛证据（2026-10-11 用户实机回归：
         // 菜单页右上角内容被兜底成 InMatch 盲按 A）
-        Assert.Equal(MlScreen.Unknown,
-            MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), OcrResult.Empty,
+        Assert.Equal(MatchScreen.Unknown,
+            MatchBrain.Classify(Array.Empty<YoloDetection>(), OcrResult.Empty,
                 topRightHasContent: true, allowCornerInMatch: false));
     }
 
@@ -185,8 +186,8 @@ public class MyLeagueBrainTests
     {
         // 难度选择页覆盖在联赛主页上（主页「前往比赛」词仍可见）：必须先判难度页
         var ocr = Ocr(("选择赛事等级", 0.5, 0.08), ("前往比赛", 0.15, 0.75), ("职业", 0.3, 0.4));
-        Assert.Equal(MlScreen.DifficultyPage,
-            MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr, topRightHasContent: true));
+        Assert.Equal(MatchScreen.DifficultyPage,
+            MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr, topRightHasContent: true));
     }
 
     [Fact]
@@ -197,7 +198,7 @@ public class MyLeagueBrainTests
         // 用户配置的难度被跳过（「不能自动选难度」）。列表 + 确认按钮必须判难度页。
         var dets = new[] { Det("btn_confirm", 0.83f), Det("btn_back", 0.28f) };
         var ocr = Ocr(("前往比赛", 0.2, 0.9), ("新手", 0.5, 0.30), ("业余", 0.5, 0.38), ("传奇", 0.5, 0.62));
-        Assert.Equal(MlScreen.DifficultyPage, MyLeagueBrain.Classify(dets, ocr));
+        Assert.Equal(MatchScreen.DifficultyPage, MatchBrain.Classify(dets, ocr));
     }
 
     [Fact]
@@ -206,7 +207,7 @@ public class MyLeagueBrainTests
         // 单个难度词（如赛后评价页出现"传奇"字样）不构成难度列表，仍按确认按钮推进
         var dets = new[] { Det("btn_confirm", 0.9f) };
         var ocr = Ocr(("传奇", 0.5, 0.4), ("球员评价", 0.5, 0.2));
-        Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(dets, ocr));
+        Assert.Equal(MatchScreen.HasConfirm, MatchBrain.Classify(dets, ocr));
     }
 
     [Fact]
@@ -217,8 +218,8 @@ public class MyLeagueBrainTests
         // 盲按 A。白底 + btn_back → 必须判 LeagueInfoPage（B 返回主页）。
         var dets = new[] { Det("btn_back", 0.67f) };
         var ocr = Ocr(("我的联赛", 0.5, 0.08), ("前往比赛", 0.4, 0.5), ("赛季", 0.6, 0.6), ("积分", 0.5, 0.7), ("奖励", 0.55, 0.8));
-        Assert.Equal(MlScreen.LeagueInfoPage,
-            MyLeagueBrain.Classify(dets, ocr, mostlyLightPage: true));
+        Assert.Equal(MatchScreen.LeagueInfoPage,
+            MatchBrain.Classify(dets, ocr, mostlyLightPage: true));
     }
 
     [Fact]
@@ -227,17 +228,17 @@ public class MyLeagueBrainTests
         // 同样的词出现在深色联赛主页上（mostlyLightPage=false）→ 仍判 LeaguePage
         var dets = new[] { Det("btn_back", 0.67f) };
         var ocr = Ocr(("我的联赛", 0.5, 0.08), ("前往比赛", 0.4, 0.5), ("赛季", 0.6, 0.6), ("积分", 0.5, 0.7), ("奖励", 0.55, 0.8));
-        Assert.Equal(MlScreen.LeaguePage,
-            MyLeagueBrain.Classify(dets, ocr, mostlyLightPage: false));
+        Assert.Equal(MatchScreen.LeaguePage,
+            MatchBrain.Classify(dets, ocr, mostlyLightPage: false));
     }
 
     [Fact]
     public void Decide_LeagueInfoPage_WaitsThenBacks()
     {
         // 连测 2 轮再按 B：第 1 轮（streak=0）等待，防白屏过渡帧误退；第 2 轮按 B 返回
-        Assert.Equal(MlActionKind.Wait, MyLeagueBrain.Decide(MlScreen.LeagueInfoPage, OcrResult.Empty, 0).Kind);
-        var back = MyLeagueBrain.Decide(MlScreen.LeagueInfoPage, OcrResult.Empty, 1);
-        Assert.Equal(MlActionKind.GamepadBack, back.Kind);
+        Assert.Equal(MatchActionKind.Wait, MatchBrain.Decide(MatchScreen.LeagueInfoPage, OcrResult.Empty, 0).Kind);
+        var back = MatchBrain.Decide(MatchScreen.LeagueInfoPage, OcrResult.Empty, 1);
+        Assert.Equal(MatchActionKind.GamepadBack, back.Kind);
     }
 
     [Fact]
@@ -248,7 +249,7 @@ public class MyLeagueBrainTests
         var dets = new[] { Det("btn_confirm", 0.63f) };
         var ocr = Ocr(("比赛历史", 0.15, 0.15), ("2026/10/26 12:44", 0.50, 0.25),
             ("Manchester United", 0.65, 0.29), ("返回", 0.10, 0.93));
-        Assert.Equal(MlScreen.MatchHistory, MyLeagueBrain.Classify(dets, ocr));
+        Assert.Equal(MatchScreen.MatchHistory, MatchBrain.Classify(dets, ocr));
     }
 
     [Fact]
@@ -257,15 +258,15 @@ public class MyLeagueBrainTests
         // 联赛主页自身也有「比赛历史」面板标签（不在页首）+ 前往比赛：不得判成历史页
         var dets = new[] { Det("btn_back", 0.67f) };
         var ocr = Ocr(("前往比赛", 0.13, 0.24), ("比赛历史", 0.18, 0.38), ("返回", 0.10, 0.93));
-        Assert.Equal(MlScreen.LeaguePage, MyLeagueBrain.Classify(dets, ocr));
+        Assert.Equal(MatchScreen.LeaguePage, MatchBrain.Classify(dets, ocr));
     }
 
     [Fact]
     public void Decide_MatchHistory_WaitsThenBacks()
     {
-        Assert.Equal(MlActionKind.Wait, MyLeagueBrain.Decide(MlScreen.MatchHistory, OcrResult.Empty, 0).Kind);
-        var back = MyLeagueBrain.Decide(MlScreen.MatchHistory, OcrResult.Empty, 1);
-        Assert.Equal(MlActionKind.GamepadBack, back.Kind);
+        Assert.Equal(MatchActionKind.Wait, MatchBrain.Decide(MatchScreen.MatchHistory, OcrResult.Empty, 0).Kind);
+        var back = MatchBrain.Decide(MatchScreen.MatchHistory, OcrResult.Empty, 1);
+        Assert.Equal(MatchActionKind.GamepadBack, back.Kind);
     }
 
     [Fact]
@@ -273,7 +274,7 @@ public class MyLeagueBrainTests
     {
         var dets = new[] { Det("btn_back", 0.9f) };
         var ocr = Ocr(("2:19", 0.2, 0.06));
-        Assert.Equal(MlScreen.InMatch, MyLeagueBrain.Classify(dets, ocr));
+        Assert.Equal(MatchScreen.InMatch, MatchBrain.Classify(dets, ocr));
     }
 
     [Fact]
@@ -282,7 +283,7 @@ public class MyLeagueBrainTests
         // 结算/中场页同时有时钟与确定键：优先按 A 推进
         var dets = new[] { Det("btn_confirm", 0.9f) };
         var ocr = Ocr(("90:00", 0.2, 0.06));
-        Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(dets, ocr));
+        Assert.Equal(MatchScreen.HasConfirm, MatchBrain.Classify(dets, ocr));
     }
 
     [Fact]
@@ -290,7 +291,7 @@ public class MyLeagueBrainTests
     {
         // 菜单倒计时（HH:MM:SS）不是记分牌时钟形态
         var ocr = Ocr(("23:59:59", 0.5, 0.5));
-        Assert.Equal(MlScreen.Unknown, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.Unknown, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
 
     [Fact]
@@ -299,8 +300,8 @@ public class MyLeagueBrainTests
         // 比赛中按用户设定的随机间隔点击 A（挂机节奏）——不再纯等待；
         // B 绝不按（铲球），超时才逃生
         var ocr = Ocr(("0:57", 0.2, 0.06));
-        var action = MyLeagueBrain.Decide(MlScreen.InMatch, ocr, 50);
-        Assert.Equal(MlActionKind.MatchIdleTap, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.InMatch, ocr, 50);
+        Assert.Equal(MatchActionKind.MatchIdleTap, action.Kind);
     }
 
     [Fact]
@@ -309,8 +310,8 @@ public class MyLeagueBrainTests
         // 用户 2026-11-13 国际服反馈：一场 20 分钟、动画基本都看完了，把挂机节奏改成
         // 1~2 秒也没用。进球回放出现「跳过」提示时必须快按 A（300ms），而不是等挂机节奏
         var ocr = Ocr(("0:57", 0.2, 0.06), ("跳过", 0.88, 0.86));
-        var action = MyLeagueBrain.Decide(MlScreen.InMatch, ocr, 5);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.InMatch, ocr, 5);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
         Assert.Equal(300, action.WaitMs);
     }
 
@@ -319,25 +320,25 @@ public class MyLeagueBrainTests
     {
         // 国服「跳过比赛」横幅仍是暂停链路（PadStartPress），不能被过场快按吃掉
         var ocr = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.86, 0.055));
-        Assert.False(MyLeagueBrain.IsSkipOverlay(ocr));
-        Assert.Equal(MlActionKind.PadStartPress, MyLeagueBrain.Decide(MlScreen.InMatch, ocr, 5).Kind);
+        Assert.False(MatchBrain.IsSkipOverlay(ocr));
+        Assert.Equal(MatchActionKind.PadStartPress, MatchBrain.Decide(MatchScreen.InMatch, ocr, 5).Kind);
     }
 
     [Fact]
     public void IsSkipOverlay_EnglishSkipNeedsLowerHalf()
     {
         // 国际服英文界面：SKIP 只在画面下半部（按钮区）才算，顶部菜单同词不触发
-        Assert.True(MyLeagueBrain.IsSkipOverlay(Ocr(("SKIP", 0.90, 0.88))));
-        Assert.False(MyLeagueBrain.IsSkipOverlay(Ocr(("SKIP", 0.50, 0.08))));
-        Assert.True(MyLeagueBrain.IsSkipOverlay(Ocr(("重播", 0.88, 0.86))));
+        Assert.True(MatchBrain.IsSkipOverlay(Ocr(("SKIP", 0.90, 0.88))));
+        Assert.False(MatchBrain.IsSkipOverlay(Ocr(("SKIP", 0.50, 0.08))));
+        Assert.True(MatchBrain.IsSkipOverlay(Ocr(("重播", 0.88, 0.86))));
     }
 
     [Fact]
     public void Decide_InMatch_TimeoutEscapes()
     {
         // 远超一场比赛时长（~30 分钟）仍停留才 B 逃生（重播暂停等卡死兜底）
-        var action = MyLeagueBrain.Decide(MlScreen.InMatch, OcrResult.Empty, MyLeagueBrain.InMatchEscapeStreak);
-        Assert.Equal(MlActionKind.GamepadBack, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.InMatch, OcrResult.Empty, MatchBrain.InMatchEscapeStreak);
+        Assert.Equal(MatchActionKind.GamepadBack, action.Kind);
     }
 
     // ---------------- 国服跳过比赛（2026-10-17 实机规则） ----------------
@@ -350,13 +351,13 @@ public class MyLeagueBrainTests
         var ocr = Ocr(("跳过比赛", 0.14, 0.13), ("对局获胜", 0.14, 0.20),
             ("比赛回放", 0.14, 0.35), ("重新开始", 0.14, 0.55), ("放弃", 0.14, 0.75),
             ("瑞典", 0.43, 0.27), ("AC米兰", 0.79, 0.27));
-        Assert.Equal(MlScreen.CnMatchPause, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.CnMatchPause, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr));
 
         // 确认弹窗盖在菜单上（背景左列仍可读）：同样判暂停菜单，Decide 内再分弹窗/菜单
         var popup = Ocr(("跳过比赛", 0.14, 0.13), ("比赛回放", 0.14, 0.35),
             ("重新开始", 0.14, 0.55), ("放弃", 0.14, 0.75),
             ("确认跳过", 0.5, 0.66), ("关闭", 0.5, 0.74), ("对局获胜", 0.5, 0.32));
-        Assert.Equal(MlScreen.CnMatchPause, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), popup));
+        Assert.Equal(MatchScreen.CnMatchPause, MatchBrain.Classify(Array.Empty<YoloDetection>(), popup));
     }
 
     [Fact]
@@ -364,7 +365,7 @@ public class MyLeagueBrainTests
     {
         // 比赛中右上角横幅只有 跳过比赛 一个词：仍是 InMatch（触发暂停键在 Decide 里）
         var ocr = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.86, 0.055));
-        Assert.Equal(MlScreen.InMatch, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.InMatch, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
 
     [Fact]
@@ -375,7 +376,7 @@ public class MyLeagueBrainTests
         // 会抢先吃掉 InMatch 的跳过分支（按 A 而不是按暂停键），跳过永远不发生。
         var ocr = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.86, 0.055));
         var bannerHit = new[] { new YoloDetection("btn_confirm", 0, 0.89f, 0.93, 0.02, 0.06, 0.05) };
-        Assert.Equal(MlScreen.InMatch, MyLeagueBrain.Classify(bannerHit, ocr));
+        Assert.Equal(MatchScreen.InMatch, MatchBrain.Classify(bannerHit, ocr));
     }
 
     [Fact]
@@ -384,7 +385,7 @@ public class MyLeagueBrainTests
         // 真正的确认按钮在画面中部：同屏即使有「跳过比赛」也不能被位置剔除逻辑吞掉
         var ocr = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.86, 0.055));
         var centerHit = new[] { new YoloDetection("btn_confirm", 0, 0.89f, 0.42, 0.42, 0.16, 0.08) };
-        Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(centerHit, ocr));
+        Assert.Equal(MatchScreen.HasConfirm, MatchBrain.Classify(centerHit, ocr));
     }
 
     [Fact]
@@ -392,8 +393,8 @@ public class MyLeagueBrainTests
     {
         // 无帧（词判兜底路径）：横幅词即可触发
         var ocr = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.86, 0.055));
-        var action = MyLeagueBrain.Decide(MlScreen.InMatch, ocr, 5);
-        Assert.Equal(MlActionKind.PadStartPress, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.InMatch, ocr, 5);
+        Assert.Equal(MatchActionKind.PadStartPress, action.Kind);
     }
 
     [Fact]
@@ -402,19 +403,19 @@ public class MyLeagueBrainTests
         // 用户 2026-10-17 实机干扰项：同位置「跳过比赛/累计进球N/3个或以上」目标 toast
         // （无绿勾）——词排除 + 绿勾像素双闸，绝不因此空开暂停菜单
         var toast = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.84, 0.05), ("累计进球0/3个或以上", 0.84, 0.10));
-        Assert.Equal(MlActionKind.MatchIdleTap,
-            MyLeagueBrain.Decide(MlScreen.InMatch, toast, 5, frame: Frame()).Kind);
+        Assert.Equal(MatchActionKind.MatchIdleTap,
+            MatchBrain.Decide(MatchScreen.InMatch, toast, 5, frame: Frame()).Kind);
 
         // 有横幅词但右端无绿勾 → 不可跳，继续挂机
         var banner = Ocr(("0:57", 0.2, 0.06), ("跳过比赛", 0.86, 0.055));
-        Assert.Equal(MlActionKind.MatchIdleTap,
-            MyLeagueBrain.Decide(MlScreen.InMatch, banner, 5, frame: Frame()).Kind);
+        Assert.Equal(MatchActionKind.MatchIdleTap,
+            MatchBrain.Decide(MatchScreen.InMatch, banner, 5, frame: Frame()).Kind);
 
         // 词 + 右端绿勾 → 按暂停键
         var green = Frame();
         PaintGreen(green, 0.930, 0.990, 0.015, 0.095);
-        Assert.Equal(MlActionKind.PadStartPress,
-            MyLeagueBrain.Decide(MlScreen.InMatch, banner, 5, frame: green).Kind);
+        Assert.Equal(MatchActionKind.PadStartPress,
+            MatchBrain.Decide(MatchScreen.InMatch, banner, 5, frame: green).Kind);
     }
 
     private static FrameData Frame() => new(new byte[4 * 400 * 240], 400, 240, 0);
@@ -435,20 +436,20 @@ public class MyLeagueBrainTests
         // 确认弹窗（确认跳过/关闭，焦点默认在关闭）→ 上移确认，绝不盲按 A
         var popup = Ocr(("跳过比赛", 0.5, 0.25), ("以当前比分跳过，对局获胜", 0.5, 0.32),
             ("确认跳过", 0.5, 0.66), ("关闭", 0.5, 0.74));
-        Assert.Equal(MlActionKind.PadUpConfirm,
-            MyLeagueBrain.Decide(MlScreen.CnMatchPause, popup, 1).Kind);
+        Assert.Equal(MatchActionKind.PadUpConfirm,
+            MatchBrain.Decide(MatchScreen.CnMatchPause, popup, 1).Kind);
 
         // 菜单且有「对局获胜」小字 → A（默认光标即在跳过比赛上）
         var menu = Ocr(("跳过比赛", 0.14, 0.13), ("对局获胜", 0.14, 0.20),
             ("比赛回放", 0.14, 0.35), ("重新开始", 0.14, 0.55), ("放弃", 0.14, 0.75));
-        Assert.Equal(MlActionKind.PadConfirm,
-            MyLeagueBrain.Decide(MlScreen.CnMatchPause, menu, 1).Kind);
+        Assert.Equal(MatchActionKind.PadConfirm,
+            MatchBrain.Decide(MatchScreen.CnMatchPause, menu, 1).Kind);
 
         // 没有「对局获胜」小字 → B 返回比赛继续挂机（用户实机规则）
         var noWin = Ocr(("跳过比赛", 0.14, 0.13),
             ("比赛回放", 0.14, 0.35), ("重新开始", 0.14, 0.55), ("放弃", 0.14, 0.75));
-        Assert.Equal(MlActionKind.GamepadBack,
-            MyLeagueBrain.Decide(MlScreen.CnMatchPause, noWin, 1).Kind);
+        Assert.Equal(MatchActionKind.GamepadBack,
+            MatchBrain.Decide(MatchScreen.CnMatchPause, noWin, 1).Kind);
     }
 
     [Fact]
@@ -457,17 +458,17 @@ public class MyLeagueBrainTests
         // 统一弹窗规则（用户 2026-10-18）：弹窗带 取消/关闭 一律先上移再 A——默认焦点多在
         // 取消/关闭上，盲按 A 会把弹窗关掉（跳过比赛确认弹窗 确认跳过/关闭 即此类）
         var close = Ocr(("跳过比赛", 0.5, 0.25), ("确认跳过", 0.5, 0.66), ("关闭", 0.5, 0.74));
-        Assert.Equal(MlActionKind.PadUpConfirm,
-            MyLeagueBrain.Decide(MlScreen.HasConfirm, close, 1).Kind);
+        Assert.Equal(MatchActionKind.PadUpConfirm,
+            MatchBrain.Decide(MatchScreen.HasConfirm, close, 1).Kind);
 
         var cancel = Ocr(("参加新的挑战?", 0.5, 0.32), ("进入", 0.5, 0.55), ("取消", 0.5, 0.65));
-        Assert.Equal(MlActionKind.PadUpConfirm,
-            MyLeagueBrain.Decide(MlScreen.HasConfirm, cancel, 1).Kind);
+        Assert.Equal(MatchActionKind.PadUpConfirm,
+            MatchBrain.Decide(MatchScreen.HasConfirm, cancel, 1).Kind);
 
         // 仅推进键的弹窗/页面：直接按 A
         var next = Ocr(("全场", 0.6, 0.1), ("下一步", 0.5, 0.9));
-        Assert.Equal(MlActionKind.PadConfirm,
-            MyLeagueBrain.Decide(MlScreen.HasConfirm, next, 1).Kind);
+        Assert.Equal(MatchActionKind.PadConfirm,
+            MatchBrain.Decide(MatchScreen.HasConfirm, next, 1).Kind);
     }
 
     [Fact]
@@ -475,7 +476,7 @@ public class MyLeagueBrainTests
     {
         // 实机回归（2026-10-10）：进球弹窗「今天的进球：1」叠加在比赛画面上，出现即按 A
         var ocr = Ocr(("AME", 0.083, 0.088), ("GS 14:47 e", 0.261, 0.088), ("今天的进球：1", 0.099, 0.169));
-        Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr, topRightHasContent: true));
+        Assert.Equal(MatchScreen.HasConfirm, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr, topRightHasContent: true));
     }
 
     [Fact]
@@ -483,7 +484,7 @@ public class MyLeagueBrainTests
     {
         // 实机回归（2026-10-10）：比赛回放弹窗出现即按 A 下一步
         var ocr = Ocr(("比赛回放", 0.161, 0.099), ("trendyol", 0.68, 0.31));
-        Assert.Equal(MlScreen.HasConfirm, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr, topRightHasContent: true));
+        Assert.Equal(MatchScreen.HasConfirm, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr, topRightHasContent: true));
     }
 
     [Fact]
@@ -491,7 +492,7 @@ public class MyLeagueBrainTests
     {
         // OCR 常把时钟与队名合并（"GS 14:47 e"）——比分框区内子串匹配仍判比赛中
         var ocr = Ocr(("AME", 0.083, 0.088), ("GS 14:47 e", 0.261, 0.088));
-        Assert.Equal(MlScreen.InMatch, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.Equal(MatchScreen.InMatch, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
 
     [Fact]
@@ -499,7 +500,7 @@ public class MyLeagueBrainTests
     {
         // 实机回归（2026-10-10）：终场页顶部「全场」+ 比分 2-2 + 右上有内容——判 FullTime
         var ocr = Ocr(("全场", 0.62, 0.074), ("2-2", 0.619, 0.143), ("下一步", 0.132, 0.287));
-        Assert.Equal(MlScreen.FullTime, MyLeagueBrain.Classify(Array.Empty<YoloDetection>(), ocr, topRightHasContent: true));
+        Assert.Equal(MatchScreen.FullTime, MatchBrain.Classify(Array.Empty<YoloDetection>(), ocr, topRightHasContent: true));
     }
 
     [Fact]
@@ -508,15 +509,15 @@ public class MyLeagueBrainTests
         // YOLO 也检出确认按钮时仍优先 FullTime（更具体的状态，驱动场次关场）
         var dets = new[] { Det("btn_confirm", 0.94f) };
         var ocr = Ocr(("全场", 0.62, 0.074), ("下一步", 0.132, 0.287));
-        Assert.Equal(MlScreen.FullTime, MyLeagueBrain.Classify(dets, ocr));
+        Assert.Equal(MatchScreen.FullTime, MatchBrain.Classify(dets, ocr));
     }
 
     [Fact]
     public void Decide_FullTime_ConfirmsNext()
     {
         var ocr = Ocr(("全场", 0.62, 0.074));
-        var action = MyLeagueBrain.Decide(MlScreen.FullTime, ocr, 0);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.FullTime, ocr, 0);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
         Assert.Contains("下一步", action.Target);
     }
 
@@ -525,8 +526,8 @@ public class MyLeagueBrainTests
     [Fact]
     public void Decide_MainMenu_EnterMatchNavigation()
     {
-        var action = MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.PadEnterMatch, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.MainMenu, OcrResult.Empty, 0);
+        Assert.Equal(MatchActionKind.PadEnterMatch, action.Kind);
     }
 
     [Fact]
@@ -534,8 +535,8 @@ public class MyLeagueBrainTests
     {
         // 导航屏退避放慢继续导航；永久等待已改为 NavEscapeStreak 后周期性 B 逃生
         //（v2.0.7 弹窗链 8 小时空转同款模式，2026-10-17 评审补齐）
-        var action = MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, MyLeagueBrain.StuckStreak);
-        Assert.Equal(MlActionKind.PadEnterMatch, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.MainMenu, OcrResult.Empty, MatchBrain.StuckStreak);
+        Assert.Equal(MatchActionKind.PadEnterMatch, action.Kind);
         Assert.True(action.WaitMs >= 5000, "退避后应放慢节奏");
     }
 
@@ -543,8 +544,8 @@ public class MyLeagueBrainTests
     public void Decide_MatchHub_NotFocused_MovesRight()
     {
         // 默认焦点不在我的联赛（OCR 预览区看不到）→ 右移一格再观察
-        var action = MyLeagueBrain.Decide(MlScreen.MatchHub, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.PadMoveRight, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.MatchHub, OcrResult.Empty, 0);
+        Assert.Equal(MatchActionKind.PadMoveRight, action.Kind);
     }
 
     [Fact]
@@ -552,22 +553,22 @@ public class MyLeagueBrainTests
     {
         // 预览区（y<0.6）看到我的联赛 = 焦点已到 → A 进入
         var ocr = Ocr(("我的联赛", 0.72, 0.37), ("比赛", 0.10, 0.11));
-        var action = MyLeagueBrain.Decide(MlScreen.MatchHub, ocr, 0);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.MatchHub, ocr, 0);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
     }
 
     [Fact]
     public void Decide_ItemList_ConfirmsFocusedRow()
     {
-        var action = MyLeagueBrain.Decide(MlScreen.ItemList, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.ItemList, OcrResult.Empty, 0);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
     }
 
     [Fact]
     public void Decide_HasConfirm_Confirms()
     {
-        var action = MyLeagueBrain.Decide(MlScreen.HasConfirm, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.HasConfirm, OcrResult.Empty, 0);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
     }
 
     // ---------------- 弹窗链退避不停手（实机 2026-10-16 回归） ----------------
@@ -578,8 +579,8 @@ public class MyLeagueBrainTests
     [Fact]
     public void Decide_HasConfirm_Stuck_StillConfirms()
     {
-        var action = MyLeagueBrain.Decide(MlScreen.HasConfirm, OcrResult.Empty, MyLeagueBrain.StuckStreak);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.HasConfirm, OcrResult.Empty, MatchBrain.StuckStreak);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
         Assert.True(action.WaitMs >= 5000, "退避后应放慢节奏");
     }
 
@@ -587,8 +588,8 @@ public class MyLeagueBrainTests
     public void Decide_HasConfirm_Stuck_WithCancel_StillUpConfirms()
     {
         var ocr = Ocr(("取消", 0.5, 0.6));
-        var action = MyLeagueBrain.Decide(MlScreen.HasConfirm, ocr, MyLeagueBrain.StuckStreak);
-        Assert.Equal(MlActionKind.PadUpConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.HasConfirm, ocr, MatchBrain.StuckStreak);
+        Assert.Equal(MatchActionKind.PadUpConfirm, action.Kind);
         Assert.True(action.WaitMs >= 5000, "退避后应放慢节奏");
     }
 
@@ -596,29 +597,29 @@ public class MyLeagueBrainTests
     public void Decide_FullTime_Stuck_StillConfirms()
     {
         var ocr = Ocr(("全场", 0.62, 0.074));
-        var action = MyLeagueBrain.Decide(MlScreen.FullTime, ocr, MyLeagueBrain.StuckStreak);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.FullTime, ocr, MatchBrain.StuckStreak);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
     }
 
     [Fact]
     public void Decide_KeyMatchDialog_Stuck_StillUpConfirms()
     {
-        var action = MyLeagueBrain.Decide(MlScreen.KeyMatchDialog, OcrResult.Empty, MyLeagueBrain.StuckStreak);
-        Assert.Equal(MlActionKind.PadUpConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.KeyMatchDialog, OcrResult.Empty, MatchBrain.StuckStreak);
+        Assert.Equal(MatchActionKind.PadUpConfirm, action.Kind);
     }
 
     [Fact]
     public void Decide_PurchaseDialog_Stuck_StillUpConfirms()
     {
-        var action = MyLeagueBrain.Decide(MlScreen.PurchaseDialog, OcrResult.Empty, MyLeagueBrain.StuckStreak);
-        Assert.Equal(MlActionKind.PadUpConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.PurchaseDialog, OcrResult.Empty, MatchBrain.StuckStreak);
+        Assert.Equal(MatchActionKind.PadUpConfirm, action.Kind);
     }
 
     [Fact]
     public void Decide_MatchStartPage_Stuck_StillConfirms()
     {
-        var action = MyLeagueBrain.Decide(MlScreen.MatchStartPage, OcrResult.Empty, MyLeagueBrain.StuckStreak);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.MatchStartPage, OcrResult.Empty, MatchBrain.StuckStreak);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
     }
 
     [Fact]
@@ -626,8 +627,8 @@ public class MyLeagueBrainTests
     {
         // 真标题（掉线/重启）：场景层 30s 宽限只护加载帧，宽限后必须持续按 X，
         // 退避停手会让标题画面永久卡死
-        var action = MyLeagueBrain.Decide(MlScreen.TitleScreen, OcrResult.Empty, MyLeagueBrain.StuckStreak);
-        Assert.Equal(MlActionKind.PadXPress, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.TitleScreen, OcrResult.Empty, MatchBrain.StuckStreak);
+        Assert.Equal(MatchActionKind.PadXPress, action.Kind);
     }
 
     [Fact]
@@ -635,29 +636,29 @@ public class MyLeagueBrainTests
     {
         // 导航屏：StuckStreak 后放慢继续原动作（不再 Wait 停手）；到 NavEscapeStreak
         // 周期性（每 5 轮）按 B 逃生，其余轮继续导航
-        Assert.Equal(MlActionKind.PadEnterMatch,
-            MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
+        Assert.Equal(MatchActionKind.PadEnterMatch,
+            MatchBrain.Decide(MatchScreen.MainMenu, OcrResult.Empty, MatchBrain.StuckStreak).Kind);
         // 比赛页例外（识别走查 2026-11-18）：焦点词读不到时右移是空转，连续
         // MatchHubFocusBlindStreak 轮还读不到就按 A 试进当前卡，别等到 NavEscapeStreak
-        Assert.Equal(MlActionKind.PadMoveRight,
-            MyLeagueBrain.Decide(MlScreen.MatchHub, OcrResult.Empty, MyLeagueBrain.MatchHubFocusBlindStreak - 1).Kind);
-        Assert.Equal(MlActionKind.PadConfirm,
-            MyLeagueBrain.Decide(MlScreen.MatchHub, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
-        Assert.Equal(MlActionKind.PadConfirm,
-            MyLeagueBrain.Decide(MlScreen.ItemList, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
-        Assert.Equal(MlActionKind.PadConfirm,
-            MyLeagueBrain.Decide(MlScreen.PointsPage, OcrResult.Empty, MyLeagueBrain.StuckStreak).Kind);
+        Assert.Equal(MatchActionKind.PadMoveRight,
+            MatchBrain.Decide(MatchScreen.MatchHub, OcrResult.Empty, MatchBrain.MatchHubFocusBlindStreak - 1).Kind);
+        Assert.Equal(MatchActionKind.PadConfirm,
+            MatchBrain.Decide(MatchScreen.MatchHub, OcrResult.Empty, MatchBrain.StuckStreak).Kind);
+        Assert.Equal(MatchActionKind.PadConfirm,
+            MatchBrain.Decide(MatchScreen.ItemList, OcrResult.Empty, MatchBrain.StuckStreak).Kind);
+        Assert.Equal(MatchActionKind.PadConfirm,
+            MatchBrain.Decide(MatchScreen.PointsPage, OcrResult.Empty, MatchBrain.StuckStreak).Kind);
 
-        Assert.Equal(MlActionKind.GamepadBack,
-            MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, MyLeagueBrain.NavEscapeStreak).Kind);
-        Assert.Equal(MlActionKind.GamepadBack,
-            MyLeagueBrain.Decide(MlScreen.MatchHub, OcrResult.Empty, MyLeagueBrain.NavEscapeStreak).Kind);
-        Assert.Equal(MlActionKind.GamepadBack,
-            MyLeagueBrain.Decide(MlScreen.ItemList, OcrResult.Empty, MyLeagueBrain.NavEscapeStreak).Kind);
-        Assert.Equal(MlActionKind.GamepadBack,
-            MyLeagueBrain.Decide(MlScreen.PointsPage, OcrResult.Empty, MyLeagueBrain.NavEscapeStreak).Kind);
-        Assert.Equal(MlActionKind.PadEnterMatch,
-            MyLeagueBrain.Decide(MlScreen.MainMenu, OcrResult.Empty, MyLeagueBrain.NavEscapeStreak + 1).Kind);
+        Assert.Equal(MatchActionKind.GamepadBack,
+            MatchBrain.Decide(MatchScreen.MainMenu, OcrResult.Empty, MatchBrain.NavEscapeStreak).Kind);
+        Assert.Equal(MatchActionKind.GamepadBack,
+            MatchBrain.Decide(MatchScreen.MatchHub, OcrResult.Empty, MatchBrain.NavEscapeStreak).Kind);
+        Assert.Equal(MatchActionKind.GamepadBack,
+            MatchBrain.Decide(MatchScreen.ItemList, OcrResult.Empty, MatchBrain.NavEscapeStreak).Kind);
+        Assert.Equal(MatchActionKind.GamepadBack,
+            MatchBrain.Decide(MatchScreen.PointsPage, OcrResult.Empty, MatchBrain.NavEscapeStreak).Kind);
+        Assert.Equal(MatchActionKind.PadEnterMatch,
+            MatchBrain.Decide(MatchScreen.MainMenu, OcrResult.Empty, MatchBrain.NavEscapeStreak + 1).Kind);
     }
 
     [Fact]
@@ -665,33 +666,33 @@ public class MyLeagueBrainTests
     {
         // A 永不生效的「RT 下一步」型页（实机 2026-10-14 对阵表连按 A 8 次不动）：
         // ConfirmEscapeStreak（30）轮后周期性 B 逃生；之前仍按 A 推进（弹窗链 9+ 页到不了）
-        var before = MyLeagueBrain.Decide(MlScreen.HasConfirm, OcrResult.Empty, MyLeagueBrain.ConfirmEscapeStreak - 1);
-        Assert.Equal(MlActionKind.PadConfirm, before.Kind);
-        var escape = MyLeagueBrain.Decide(MlScreen.HasConfirm, OcrResult.Empty, MyLeagueBrain.ConfirmEscapeStreak);
-        Assert.Equal(MlActionKind.GamepadBack, escape.Kind);
+        var before = MatchBrain.Decide(MatchScreen.HasConfirm, OcrResult.Empty, MatchBrain.ConfirmEscapeStreak - 1);
+        Assert.Equal(MatchActionKind.PadConfirm, before.Kind);
+        var escape = MatchBrain.Decide(MatchScreen.HasConfirm, OcrResult.Empty, MatchBrain.ConfirmEscapeStreak);
+        Assert.Equal(MatchActionKind.GamepadBack, escape.Kind);
     }
 
     [Fact]
     public void Decide_LeaguePage_NextStep_Confirms()
     {
         var ocr = Ocr(("下一步", 0.80, 0.91));
-        var action = MyLeagueBrain.Decide(MlScreen.LeaguePage, ocr, 0);
-        Assert.Equal(MlActionKind.PadConfirm, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.LeaguePage, ocr, 0);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
         Assert.Contains("下一步", action.Target);
     }
 
     [Fact]
     public void Decide_LeaguePage_NoButton_Waits()
     {
-        var action = MyLeagueBrain.Decide(MlScreen.LeaguePage, OcrResult.Empty, 0);
-        Assert.Equal(MlActionKind.Wait, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.LeaguePage, OcrResult.Empty, 0);
+        Assert.Equal(MatchActionKind.Wait, action.Kind);
     }
 
     [Fact]
     public void Decide_Unknown_EarlyStreak_Waits()
     {
-        var action = MyLeagueBrain.Decide(MlScreen.Unknown, OcrResult.Empty, 3);
-        Assert.Equal(MlActionKind.Wait, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.Unknown, OcrResult.Empty, 3);
+        Assert.Equal(MatchActionKind.Wait, action.Kind);
     }
 
     [Fact]
@@ -699,15 +700,17 @@ public class MyLeagueBrainTests
     {
         // 有 OCR 感知（过场字幕等）时才按 B 逃生
         var ocr = Ocr(("比赛回放", 0.16, 0.14));
-        var action = MyLeagueBrain.Decide(MlScreen.Unknown, ocr, MyLeagueBrain.UnknownEscapeStreak);
-        Assert.Equal(MlActionKind.GamepadBack, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.Unknown, ocr, MatchBrain.UnknownEscapeStreak);
+        Assert.Equal(MatchActionKind.GamepadBack, action.Kind);
     }
 
     [Fact]
     public void Decide_Unknown_BlindPerception_NeverPressesBack()
     {
         // 完全无感知（OCR 0 词，典型：捕获黑屏）绝不盲按 B（2026-10-10 黑帧实机回归）
-        var action = MyLeagueBrain.Decide(MlScreen.Unknown, OcrResult.Empty, MyLeagueBrain.UnknownEscapeStreak * 3);
-        Assert.Equal(MlActionKind.Wait, action.Kind);
+        var action = MatchBrain.Decide(MatchScreen.Unknown, OcrResult.Empty, MatchBrain.UnknownEscapeStreak * 3);
+        Assert.Equal(MatchActionKind.Wait, action.Kind);
     }
 }
+
+

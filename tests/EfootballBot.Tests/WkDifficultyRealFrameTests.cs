@@ -8,6 +8,7 @@ using OpenCvSharp;
 using Xunit;
 using Xunit.Abstractions;
 
+using EfootballBot.Core.Bot.Match;
 namespace EfootballBot.Tests;
 
 // 校准/回归：2026-10-30 用户截图 + GitHub issue #1（单场周活动「选择赛事等级」页）。
@@ -63,14 +64,14 @@ public class WkDifficultyRealFrameTests
             var dets = det.Detect(frame);
             var ocrRes = TestOcr.Run(ocr, frame);
             var wk = WeeklyBrain.Classify(dets, ocrRes,
-                MyLeagueScenario.CornerHasContent(frame), matchContext: false,
-                MyLeagueScenario.IsMostlyLightPage(frame));
-            var ml = MyLeagueBrain.Classify(dets, ocrRes,
-                MyLeagueScenario.CornerHasContent(frame), false,
-                MyLeagueScenario.IsMostlyLightPage(frame));
+                ScreenProbe.CornerHasContent(frame), matchContext: false,
+                ScreenProbe.IsMostlyLightPage(frame));
+            var ml = MatchBrain.Classify(dets, ocrRes,
+                ScreenProbe.CornerHasContent(frame), false,
+                ScreenProbe.IsMostlyLightPage(frame));
 
             _out.WriteLine($"==== {name} ({w}x{h}) -> wk={wk} ml={ml} ====");
-            foreach (var d in dets.Where(d => d.Score >= MyLeagueBrain.MinScore))
+            foreach (var d in dets.Where(d => d.Score >= MatchBrain.MinScore))
                 _out.WriteLine($"  YOLO {d.ClassName} {d.Score:F2} @({d.CenterX:F2},{d.CenterY:F2})");
             foreach (var wd in ocrRes.Words)
                 _out.WriteLine($"  W \"{wd.Text}\" @({wd.CenterX:F2},{wd.CenterY:F2}) wh=({wd.W:F3},{wd.H:F3})");
@@ -80,7 +81,7 @@ public class WkDifficultyRealFrameTests
             // 难度行亮度/描边探针：对每个难度词所在行带（y±0.035，词左 -0.28~右 +0.06）
             // 统计亮像素（lum>200）与蓝像素，标定「聚焦行=白底高亮」判定阈值。
             var bgra = frame.Bgra;
-            foreach (var diff in MyLeagueBrain.Difficulties)
+            foreach (var diff in MatchBrain.Difficulties)
             {
                 var word = ocrRes.Words.FirstOrDefault(x => x.Text.Replace(" ", "").Contains(diff));
                 if (word is null) { _out.WriteLine($"  [probe {diff}] word missing"); continue; }
@@ -119,8 +120,8 @@ public class WkDifficultyRealFrameTests
             var frame = new FrameData(data, w, h, 0);
             var ocrRes = TestOcr.Run(ocr0, frame);
             var wk = WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocrRes,
-                MyLeagueScenario.CornerHasContent(frame), matchContext: false,
-                MyLeagueScenario.IsMostlyLightPage(frame));
+                ScreenProbe.CornerHasContent(frame), matchContext: false,
+                ScreenProbe.IsMostlyLightPage(frame));
 
             if (name == "wk_difficulty_popup.png")
             {
@@ -152,3 +153,6 @@ public class WkDifficultyRealFrameTests
         }
     }
 }
+
+
+

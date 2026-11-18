@@ -1,6 +1,17 @@
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Vision;
 
+// ===========================================================================
+// 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
+// 本层职责：单个挂机模块自己的菜单流程与私有状态机（只认自己的界面）。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 不许引用别的模块的 *Scenario（只读借用别人的 *Brain.Classify 认残留页面是允许的）
+//   · 不许自己写场次记账 / 比赛内挂机节奏 —— 一律走 MatchPlay.Tick / IdleTapAsync
+//   · 共享界面判定与决策一律用 Core/Bot/Match 的 MatchBrain，不要复制一份
+// 新增模块：ModuleIds 加常量 + BotModuleCatalog 加一条记录，再写本目录的状态机。
+// 除非用户明确要求更换写法，否则按本层约定写。
+// ===========================================================================
+
 namespace EfootballBot.Core.Bot.Scenarios.Stud;
 
 /// <summary>种马球员培训（购买）涉及的界面。全部用固定词判定，可变球员名/数量不作判据。</summary>
@@ -90,94 +101,72 @@ public static class StudTrainingBrain
 
     public static bool IsMainMenu(OcrResult ocr) =>
         ocr.ContainsJoined("游戏主菜单") && ocr.ContainsJoined("合约") && ocr.ContainsJoined("我的球队");
-
     public static bool IsContractHome(OcrResult ocr) =>
         ocr.ContainsJoined("合约") &&
         (ocr.ContainsJoined("特殊球员名单") || ocr.ContainsJoined("可自定义物品"));
-
     public static bool IsContractPlayerList(OcrResult ocr) =>
         ocr.ContainsJoined("普通球员") && ocr.ContainsJoined("排序") && ocr.ContainsJoined("筛选");
-
     public static bool IsSortPopup(OcrResult ocr) =>
         ocr.ContainsJoined("排序") && ocr.ContainsJoined("价格") && ocr.ContainsJoined("取消");
-
     public static bool IsContractDetail(OcrResult ocr) =>
         ocr.ContainsJoined("商品详情") && ocr.ContainsJoined("签下");
-
     public static bool IsPayment(OcrResult ocr) => ocr.ContainsJoined("付款确认");
 
     public static bool IsAcquired(OcrResult ocr) =>
         ocr.ContainsJoined("获得") && ocr.ContainsJoined("OK");
-
     public static bool IsPostAcquireDetail(OcrResult ocr) =>
         ocr.ContainsJoined("下一步") && ocr.ContainsJoined("球员动作") &&
         ocr.ContainsJoined("切换显示") && !ocr.ContainsJoined("商品详情");
-
     public static bool IsMyTeamHome(OcrResult ocr) =>
         ocr.ContainsJoined("我的球队") && ocr.ContainsJoined("比赛计划");
-
     public static bool IsSquadList(OcrResult ocr) =>
         ocr.ContainsJoined("储备球员") && ocr.ContainsJoined("数量");
-
     public static bool IsActionMenu(OcrResult ocr) =>
         ocr.ContainsJoined("选择视图") && ocr.ContainsJoined("筛选") && ocr.ContainsJoined("取消");
-
     public static bool IsFilter(OcrResult ocr) =>
         HasFilterDoneButton(ocr) &&
         (ocr.ContainsJoined("球员筛选") || ocr.ContainsJoined("俱乐部球队"));
-
     /// <summary>
     /// 筛选页底部「B 返回 / 完成」按钮。不能直接用 ContainsJoined("完成")：
     /// 培育子页的「未完成培育」也含「完成」二字，会把子页误判成筛选页。
     /// </summary>
     public static bool HasFilterDoneButton(OcrResult ocr) =>
         ocr.Words.Any(w => w.CenterY > 0.85 && w.NormText.EndsWith("完成", StringComparison.Ordinal));
-
     public static bool IsPositionFilter(OcrResult ocr) =>
         ocr.ContainsJoined("最佳位置") && ocr.ContainsJoined("搜索将基于任一选定的筛选条件");
-
     public static bool IsTrainingFilter(OcrResult ocr) =>
         !HasFilterDoneButton(ocr) &&
         (ocr.ContainsJoined("未完成培育") || ocr.ContainsJoined("已完成培育"));
-
     public static bool IsSkillResult(OcrResult ocr) =>
         ocr.ContainsJoined("OK") && !ocr.ContainsJoined("获得") &&
         (ocr.ContainsJoined("技巧列表") || ocr.ContainsJoined("技巧训练") || ocr.ContainsJoined("使")) &&
         !ocr.ContainsJoined("选择要使用的物品") && !ocr.ContainsJoined("执行训练课") &&
         !ocr.ContainsJoined("付款确认");
-
     public static bool IsSkillItemSelect(OcrResult ocr) =>
         ocr.ContainsJoined("选择要使用的物品");
-
     public static bool IsSkillConfirm(OcrResult ocr) =>
         ocr.ContainsJoined("执行训练课");
-
     public static bool IsSkillTraining(OcrResult ocr) =>
         ocr.ContainsJoined("技巧训练") && ocr.ContainsJoined("附加技巧") &&
         (ocr.ContainsJoined("技巧列表") || ocr.ContainsJoined("关闭"));
-
     public static bool IsPlayerActions(OcrResult ocr) =>
         ocr.ContainsJoined("球员动作") && ocr.ContainsJoined("技巧训练") &&
         ocr.ContainsJoined("取消");
-
     public static bool IsTrainingPlayerDetail(OcrResult ocr) =>
         ocr.ContainsJoined("球员动作") && ocr.ContainsJoined("切换显示") &&
         !ocr.ContainsJoined("下一步") && !ocr.ContainsJoined("商品详情") &&
         !ocr.ContainsJoined("技巧训练") && !ocr.ContainsJoined("取消");
-
     /// <summary>
     /// 技巧训练页第一个「附加技巧」槽是否为空（蓝色加号）。实机 2026-11-08：
     /// 第一格中心 x≈0.557 / y≈0.324，加号为高蓝低红；选中边框在四角，不进入中心探针区。
     /// </summary>
     public static bool HasEmptyFirstSkillSlot(FrameData f) => SkillSlotBlueCounts(f)[0] >= 25;
-
     /// <summary>
     /// 任意一个「附加技巧」槽是否显示蓝色加号。实机 2026-11-08 反馈：第一格已有技巧时，
     /// 游戏会把光标自动移到下一个空槽（第二格变蓝框 + 蓝色加号）。只探第一格会误判
     /// 「第一格不是加号」并把所有球员跳过，因此改为扫描 5 个槽位。
     /// </summary>
     public static bool HasEmptySkillSlot(FrameData f) => SkillSlotBlueCounts(f).Any(c => c >= 25);
-
     /// <summary>5 个附加技巧槽中心区域的蓝色像素数（排障日志用；顺序=左上/右上/左中/右中/左下）。</summary>
     public static int[] SkillSlotBlueCounts(FrameData f) => new[]
     {
@@ -238,7 +227,6 @@ public static class StudTrainingBrain
 
     public static bool IsRatingFilter(OcrResult ocr) =>
         ocr.ContainsJoined("球员评价") && !HasFilterDoneButton(ocr) && !ocr.ContainsJoined("价格");
-
     /// <summary>
     /// 读取右侧子页当前高亮（白底）行的文字。最佳位置/培育/球员评价子页的选中行为纯白，
     /// 其余行为深灰；采样行中心上下若干点，平均亮度 &gt; 170 判为高亮。读不出返回 null。
@@ -247,7 +235,6 @@ public static class StudTrainingBrain
     {
         if (frame.Width < 200 || frame.Height < 120 ||
             frame.Bgra.Length < frame.Width * frame.Height * 4) return null;
-
         foreach (var line in ocr.Lines.Where(l => l.CenterY is > 0.12 and < 0.90)
                                       .OrderBy(l => l.CenterY))
         {
@@ -282,3 +269,7 @@ public static class StudTrainingBrain
         return total > 0 && lit * 100 / total >= 55;
     }
 }
+
+
+
+

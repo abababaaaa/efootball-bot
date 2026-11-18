@@ -1,7 +1,17 @@
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Vision;
 
-namespace EfootballBot.Core.Bot.Scenarios;
+// ===========================================================================
+// 架构锁 · 共享层 Core/Bot/Match（v7.2）
+// 本层职责：所有模块共用的能力 —— 界面分类、共享决策、赛中匹配 MatchPlay、流程记忆、像素探针、弹窗判定。
+// 硬约束（构建期 tools/arch-guard/arch-guard.ps1 强制，违反即编译失败）：
+//   · 本层不许 using / 引用 Core/Bot/Scenarios.*（共享层绝不能反向依赖模块）
+//   · 场次记账（MatchesDone/KeyMatches）与比赛内挂机节奏只在本层实现，模块不许自己抄一份
+// 新增共享能力：本层加文件；需要模块配合的用接口（如 IModuleLifecycle）反向交给模块。
+// 除非用户明确要求更换写法，否则按本层约定写。
+// ===========================================================================
+
+namespace EfootballBot.Core.Bot.Match;
 
 /// <summary>弹窗这一轮该按什么（用户 2026-11-10 规则）。</summary>
 public enum PopupAction
@@ -19,7 +29,6 @@ public enum PopupAction
 /// <summary>弹窗里识别到的一枚按钮。<paramref name="Luma"/> 是按钮底色中位亮度（判定高光用）。</summary>
 public sealed record PopupButton(
     string Label, bool IsConfirm, double CenterX, double CenterY, double H, int Luma);
-
 /// <summary>
 /// 弹窗按钮决策（用户 2026-11-10 实机规则，纯函数 + 像素探针，可单测）：
 /// <list type="number">
@@ -41,30 +50,22 @@ public static class PopupBrain
     /// <summary>聚焦按钮判定阈值：聚焦行是白/亮底（实机白按钮 230~255、青色 OK 键 146），
     /// 未聚焦是深色半透明（实机 40~90）。取 120 留出青色按钮与深色按钮两侧的余量。</summary>
     public const int FocusedButtonLuma = 120;
-
     /// <summary>两枚按钮都偏亮/偏暗时，靠亮度差判聚焦（差值够大才算数）。</summary>
     public const int FocusedButtonLumaGap = 40;
-
     /// <summary>推进键词素（规范化 + 去尾部数字后整词比较）。</summary>
     private static readonly string[] ConfirmWords =
         { "确认", "確定", "确定", "下一步", "进行", "进入", "继续", "领取", "获取", "ok", "yes", "next", "confirm" };
-
     /// <summary>非推进键词素：命中这些一律视为「不该按的键」。</summary>
     private static readonly string[] CancelWords =
         { "取消", "返回", "关闭", "稍后", "否", "离开", "退出", "cancel", "back", "close", "no" };
-
     /// <summary>按钮候选纵向带：按钮在屏幕中部偏下（底栏 B/A 提示在 y&gt;0.92，排除掉）。</summary>
     private const double MinButtonY = 0.30, MaxButtonY = 0.92;
-
     /// <summary>按钮候选横向带：按钮居中，左右边缘的「奖励/条件」面板词不算。</summary>
     private const double MinButtonX = 0.10, MaxButtonX = 0.90;
-
     /// <summary>按钮字高下限（实机按钮词 H≈0.026~0.05，正文 H≈0.02）。</summary>
     private const double MinButtonH = 0.022;
-
     /// <summary>按钮词长度上限（「取消比赛」「返回主页」这类正文短语不算按钮）。</summary>
     private const int MaxButtonChars = 6;
-
     /// <summary>找弹窗上的按钮：按标签去重，同一标签只留字高最大的一枚（OCR 常把同一按钮读成两枚）。</summary>
     public static IReadOnlyList<PopupButton> FindButtons(FrameData? frame, OcrResult ocr)
     {
@@ -110,10 +111,8 @@ public static class PopupBrain
             note = $"单按钮「{buttons[0].Label}」→ 直接 A";
             return PopupAction.PressConfirm;
         }
-
         var confirm = buttons.FirstOrDefault(b => b.IsConfirm);
         var focused = Focused(buttons);
-
         if (focused is null)
         {
             // 探针读不出高光（低对比主题/过渡帧）：默认焦点多为推进键，直接 A（与旧行为等价）
@@ -139,7 +138,6 @@ public static class PopupBrain
     /// <summary>Buttons 的可读摘要（日志用）。</summary>
     public static string Describe(IReadOnlyList<PopupButton> buttons)
         => string.Join(" / ", buttons.Select(b => $"{b.Label}{(b.IsConfirm ? "·推进" : "·取消")}@y{b.CenterY:F2} L{b.Luma}"));
-
     /// <summary>白底高亮的那一枚（亮度差不够大时返回 null = 认不出高光）。</summary>
     private static PopupButton? Focused(IReadOnlyList<PopupButton> buttons)
     {
@@ -171,3 +169,7 @@ public static class PopupBrain
         return RegionProbe.MedianLuma(frame, x0, x1, y0, y1);
     }
 }
+
+
+
+
