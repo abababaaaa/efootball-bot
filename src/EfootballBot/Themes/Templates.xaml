@@ -133,9 +133,9 @@
                             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentLight}"/>
-                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource AccentBorder}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource AccentGlow}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFill}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SelectBorder}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
