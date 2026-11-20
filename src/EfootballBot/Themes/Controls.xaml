@@ -14,7 +14,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid>
-                        <Border x:Name="bd" CornerRadius="4" Padding="12,8" Background="Transparent"/>
+                        <Border x:Name="bd" CornerRadius="8" Padding="12,8" Background="Transparent"/>
                         <!-- Win11 导航选中指示条：3px 竖条，贴在项的最左侧 -->
                         <Rectangle x:Name="ind" Width="3" Height="16" RadiusX="1.5" Fill="{DynamicResource Accent}"
                                    HorizontalAlignment="Left" VerticalAlignment="Center" Margin="1,0,0,0"
@@ -66,7 +66,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid>
-                        <Border x:Name="bd" CornerRadius="4" Background="Transparent"/>
+                        <Border x:Name="bd" CornerRadius="8" Background="Transparent"/>
                         <Rectangle x:Name="ind" Width="3" Height="16" RadiusX="1.5" Fill="{DynamicResource Accent}"
                                    HorizontalAlignment="Left" VerticalAlignment="Center" Margin="1,0,0,0"
                                    Visibility="Collapsed"/>
@@ -107,7 +107,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid>
-                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8"
                                 Padding="{TemplateBinding Padding}"
                                 RenderTransformOrigin="0.5,0.5">
                             <Border.RenderTransform>
@@ -116,7 +116,7 @@
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <!-- 悬停提亮层（Win11 强调色按钮 hover 变亮一档） -->
-                        <Border x:Name="flash" CornerRadius="4" Background="White" Opacity="0"
+                        <Border x:Name="flash" CornerRadius="8" Background="White" Opacity="0"
                                 IsHitTestVisible="False"/>
                     </Grid>
                     <ControlTemplate.Triggers>
@@ -156,7 +156,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             Padding="{TemplateBinding Padding}"
@@ -227,7 +227,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             Padding="{TemplateBinding Padding}"
@@ -270,7 +270,7 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Grid Width="18" Height="18" VerticalAlignment="Center" Margin="0,0,9,0">
-                            <Border x:Name="box" CornerRadius="5" Background="{DynamicResource InputBg}"
+                            <Border x:Name="box" CornerRadius="6" Background="{DynamicResource InputBg}"
                                     BorderBrush="{DynamicResource InputBorder}" BorderThickness="1"/>
                             <Path x:Name="check" Data="M 3.5,9.5 L 7.5,13 L 14.5,4.5"
                                   Stroke="White" StrokeThickness="2"
@@ -352,7 +352,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="TextBox">
                     <Border x:Name="bd" Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="7">
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8">
                         <ScrollViewer x:Name="PART_ContentHost" Margin="10,0" Focusable="False"
                                       VerticalAlignment="Center"/>
                     </Border>
@@ -393,7 +393,7 @@
                                 <ControlTemplate TargetType="ToggleButton">
                                     <Border x:Name="bd" Background="{TemplateBinding Background}"
                                             BorderBrush="{TemplateBinding BorderBrush}"
-                                            BorderThickness="1" CornerRadius="7"/>
+                                            BorderThickness="1" CornerRadius="8"/>
                                 </ControlTemplate>
                             </ToggleButton.Template>
                         </ToggleButton>
@@ -469,7 +469,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="bd" CornerRadius="4" Padding="14,5.5" Background="Transparent"
+                    <Border x:Name="bd" CornerRadius="8" Padding="14,5.5" Background="Transparent"
                             BorderBrush="Transparent" BorderThickness="1"
                             RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform>
@@ -515,7 +515,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid>
-                        <Border x:Name="bd" CornerRadius="4" Background="Transparent"/>
+                        <Border x:Name="bd" CornerRadius="8" Background="Transparent"/>
                         <Border x:Name="ul" Height="3" CornerRadius="1.5" VerticalAlignment="Bottom"
                                 HorizontalAlignment="Stretch" Margin="10,0"
                                 Background="{DynamicResource Accent}" Opacity="0"/>

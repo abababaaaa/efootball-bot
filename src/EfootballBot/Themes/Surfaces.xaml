@@ -7,26 +7,26 @@
          ================================================================== -->
 
     <!-- ============ 间距（Thickness 资源） ============ -->
-    <Thickness x:Key="PagePad">24,20,24,24</Thickness>
-    <Thickness x:Key="SectionGap">0,0,0,16</Thickness>
-    <Thickness x:Key="HeadGap">0,0,0,12</Thickness>
-    <Thickness x:Key="FieldGap">0,0,0,12</Thickness>
+    <Thickness x:Key="PagePad">28,24,28,28</Thickness>
+    <Thickness x:Key="SectionGap">0,0,0,20</Thickness>
+    <Thickness x:Key="HeadGap">0,0,0,14</Thickness>
+    <Thickness x:Key="FieldGap">0,0,0,14</Thickness>
 
-    <!-- ============ 容器（Win11 卡片：玻璃底 + 细描边 + 8 圆角） ============ -->
+    <!-- ============ 容器（Apple 玻璃卡片：半透明底 + 细描边 + 12 圆角） ============ -->
     <Style x:Key="Card" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource CardBg}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="8"/>
-        <Setter Property="Padding" Value="16,14"/>
-        <Setter Property="Margin" Value="0,0,0,12"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Padding" Value="16,15"/>
+        <Setter Property="Margin" Value="0,0,0,14"/>
     </Style>
 
     <Style x:Key="Inset" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource InsetBg}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="CornerRadius" Value="10"/>
         <Setter Property="Padding" Value="14,12"/>
     </Style>
 
