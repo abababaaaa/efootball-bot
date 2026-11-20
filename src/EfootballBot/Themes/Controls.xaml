@@ -7,19 +7,20 @@
 
     <!-- ============ 左栏模块选择（WorkBuddy 风格：规整小圆角矩形 + 左侧细指示条） ============ -->
     <Style x:Key="ModuleRadio" TargetType="RadioButton">
-        <Setter Property="Margin" Value="0,0,0,3"/>
+        <Setter Property="Margin" Value="0,0,0,5"/>
         <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+        <Setter Property="FontSize" Value="13.5"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Grid Margin="5,0">
-                        <Border x:Name="bd" CornerRadius="6" Padding="12,10" Background="Transparent"
+                    <Grid Margin="4,0">
+                        <Border x:Name="bd" CornerRadius="8" Padding="16,14" Background="Transparent"
                                 BorderBrush="Transparent" BorderThickness="1">
                             <Grid>
                                 <!-- 左侧选中指示条：WorkBuddy 侧栏的方形强调，不用整块药丸 -->
-                                <Border x:Name="bar" Width="3" CornerRadius="1.5" HorizontalAlignment="Left"
-                                        VerticalAlignment="Stretch" Margin="-12,4,0,4"
+                                <Border x:Name="bar" Width="3.5" CornerRadius="1.5" HorizontalAlignment="Left"
+                                        VerticalAlignment="Stretch" Margin="-16,6,0,6"
                                         Background="{DynamicResource SelectFg}" Opacity="0"/>
                                 <ContentPresenter Margin="8,0,8,0" VerticalAlignment="Center"/>
                             </Grid>
@@ -472,14 +473,14 @@
     </Style>
     <Style x:Key="SegTab" TargetType="RadioButton">
         <Setter Property="Foreground" Value="{DynamicResource SegTabFg}"/>
-        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="FontSize" Value="14"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Margin" Value="2,0"/>
+        <Setter Property="Margin" Value="3,0"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="bd" CornerRadius="5" Padding="14,6" Background="Transparent"
+                    <Border x:Name="bd" CornerRadius="6" Padding="18,9" Background="Transparent"
                             BorderBrush="Transparent" BorderThickness="1"
                             RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform>
@@ -517,17 +518,17 @@
     <!-- 顶部功能分类页签（WorkBuddy 风格：文字 + 底部细线，选中不再是大药丸块） -->
     <Style x:Key="SubTab" TargetType="RadioButton">
         <Setter Property="Foreground" Value="{DynamicResource SegTabFg}"/>
-        <Setter Property="FontSize" Value="13.5"/>
+        <Setter Property="FontSize" Value="15"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Margin" Value="0,0,8,0"/>
+        <Setter Property="Margin" Value="0,0,12,0"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid>
-                        <Border x:Name="bd" CornerRadius="5" Background="Transparent" Padding="11,9"/>
-                        <Border x:Name="bar" Height="2" CornerRadius="1" VerticalAlignment="Bottom"
-                                HorizontalAlignment="Stretch" Margin="10,0" Background="{DynamicResource SelectFg}" Opacity="0"/>
+                        <Border x:Name="bd" CornerRadius="6" Background="Transparent" Padding="16,12"/>
+                        <Border x:Name="bar" Height="2.5" CornerRadius="1.5" VerticalAlignment="Bottom"
+                                HorizontalAlignment="Stretch" Margin="14,0" Background="{DynamicResource SelectFg}" Opacity="0"/>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Grid>
                     <ControlTemplate.Triggers>

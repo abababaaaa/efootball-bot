@@ -102,16 +102,16 @@
                                  ToolTip="国服（网易实况足球在线，进程 eFootballOnline）"
                                  Checked="RbModule_Checked" Click="RbModule_Click">
                         <StackPanel>
-                            <TextBlock Text="国服" FontSize="12" FontWeight="SemiBold"/>
-                            <TextBlock Text="网易 · 实况足球在线" FontSize="10" Margin="0,2,0,0"
+                            <TextBlock Text="国服" FontSize="14" FontWeight="SemiBold"/>
+                            <TextBlock Text="网易 · 实况足球在线" FontSize="11.5" Margin="0,3,0,0"
                                        Foreground="{DynamicResource NavDescFg}"/>
                         </StackPanel>
                     </RadioButton>
                     <RadioButton x:Name="RbIntl" Style="{StaticResource ModuleRadio}" IsChecked="True"
                                  Checked="RbModule_Checked" Click="RbModule_Click">
                         <StackPanel>
-                            <TextBlock Text="国际服" FontSize="12" FontWeight="SemiBold"/>
-                            <TextBlock Text="Steam PC 版" FontSize="10" Margin="0,2,0,0"
+                            <TextBlock Text="国际服" FontSize="14" FontWeight="SemiBold"/>
+                            <TextBlock Text="Steam PC 版" FontSize="11.5" Margin="0,3,0,0"
                                        Foreground="{DynamicResource NavDescFg}"/>
                         </StackPanel>
                     </RadioButton>
@@ -281,7 +281,7 @@
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
-                                <Setter Property="Margin" Value="0,0,6,0"/>
+                                <Setter Property="Margin" Value="0,0,12,0"/>
                                 <Setter Property="VerticalAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
@@ -302,7 +302,7 @@
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
-                                <Setter Property="Margin" Value="0,0,6,0"/>
+                                <Setter Property="Margin" Value="0,0,12,0"/>
                                 <Setter Property="VerticalAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
@@ -364,7 +364,7 @@
                         <WrapPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
-                                <Setter Property="Margin" Value="0,0,6,0"/>
+                                <Setter Property="Margin" Value="0,0,12,0"/>
                                 <Setter Property="VerticalAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
