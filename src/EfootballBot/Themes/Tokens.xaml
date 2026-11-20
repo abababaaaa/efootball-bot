@@ -8,19 +8,19 @@
          字体 Segoe UI Variable。页面里只准引用 token，不写十六进制。
          ================================================================== -->
     <!-- ===== 底层：窗口与三栏（都带透明度，让材质从后面透出来） ===== -->
-    <SolidColorBrush x:Key="WindowBg" Color="#FF1C1C1E"/>
-    <SolidColorBrush x:Key="ContentBg" Color="#E61C1C1E"/>
-    <SolidColorBrush x:Key="CardBg" Color="#1AFFFFFF"/>
-    <SolidColorBrush x:Key="CardBorder" Color="#24FFFFFF"/>
-    <SolidColorBrush x:Key="SideLeftBg" Color="#66101012"/>
-    <SolidColorBrush x:Key="SideRightBg" Color="#4D101012"/>
-    <SolidColorBrush x:Key="Surface2" Color="#24FFFFFF"/>
-    <SolidColorBrush x:Key="InsetBg" Color="#14FFFFFF"/>
+    <SolidColorBrush x:Key="WindowBg" Color="#FF08080A"/>
+    <SolidColorBrush x:Key="ContentBg" Color="#F208080A"/>
+    <SolidColorBrush x:Key="CardBg" Color="#12FFFFFF"/>
+    <SolidColorBrush x:Key="CardBorder" Color="#20FFFFFF"/>
+    <SolidColorBrush x:Key="SideLeftBg" Color="#59000000"/>
+    <SolidColorBrush x:Key="SideRightBg" Color="#42000000"/>
+    <SolidColorBrush x:Key="Surface2" Color="#1CFFFFFF"/>
+    <SolidColorBrush x:Key="InsetBg" Color="#0A000000"/>
     <SolidColorBrush x:Key="TrackBg" Color="#4D000000"/>
-    <SolidColorBrush x:Key="GlassBg" Color="#CC2C2C2E"/>
-    <SolidColorBrush x:Key="GlassStroke" Color="#29FFFFFF"/>
-    <SolidColorBrush x:Key="ControlFill" Color="#1FFFFFFF"/>
-    <SolidColorBrush x:Key="ControlStroke" Color="#33FFFFFF"/>
+    <SolidColorBrush x:Key="GlassBg" Color="#D9101012"/>
+    <SolidColorBrush x:Key="GlassStroke" Color="#24FFFFFF"/>
+    <SolidColorBrush x:Key="ControlFill" Color="#18FFFFFF"/>
+    <SolidColorBrush x:Key="ControlStroke" Color="#2EFFFFFF"/>
 
     <!-- ===== 文字（Apple 三级：主 白 / 次 #E5E5EA / 弱 #98989F） ===== -->
     <SolidColorBrush x:Key="TextPrimary" Color="#FFFFFFFF"/>
@@ -100,10 +100,41 @@
                       ShadowDepth="1" Opacity="0.22"/>
     <DropShadowEffect x:Key="AccentShadow" Color="#660A84FF" BlurRadius="20"
                       ShadowDepth="1" Opacity="0.28"/>
+    <!-- 玻璃卡片投影：极淡的一层，只把卡片从底材上"托"起来 -->
+    <DropShadowEffect x:Key="GlassCardShadow" Color="#FF000000" BlurRadius="18"
+                      ShadowDepth="2" Opacity="0.14"/>
+
+    <!-- ===== 高级玻璃质感：渐变光影（高级感来自光影，不是半透明色块） =====
+         渐变停点引用主题 Color token（DynamicResource 会跟随主题切换），
+         具体色值由 ThemeManager.ApplyTheme 在运行时构造对应主题的渐变后覆盖。
+         这里给的是暗色（默认）兜底值，保证设计器里也能预览。 -->
+    <LinearGradientBrush x:Key="GlassFill" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="#3DFFFFFF" Offset="0"/>
+        <GradientStop Color="#14FFFFFF" Offset="0.16"/>
+        <GradientStop Color="#0DFFFFFF" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="AccentPillFill" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="{DynamicResource AccentHoverColor}" Offset="0"/>
+        <GradientStop Color="{DynamicResource AccentColor}" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="PrimaryBtnFill" StartPoint="0,0" EndPoint="0,1">
+        <GradientStop Color="{DynamicResource AccentHoverColor}" Offset="0"/>
+        <GradientStop Color="{DynamicResource AccentColor}" Offset="0.52"/>
+        <GradientStop Color="{DynamicResource BrandToColor}" Offset="1"/>
+    </LinearGradientBrush>
+    <LinearGradientBrush x:Key="CardTopHighlight" StartPoint="0,0" EndPoint="1,0">
+        <GradientStop Color="#00FFFFFF" Offset="0"/>
+        <GradientStop Color="{DynamicResource HairlineStrongColor}" Offset="0.5"/>
+        <GradientStop Color="#00FFFFFF" Offset="1"/>
+    </LinearGradientBrush>
 
     <!-- ===== 渐变停点专用 Color 版（GradientStop.Color 只吃 Color） ===== -->
     <Color x:Key="BrandFromColor">#FF0A84FF</Color>
     <Color x:Key="BrandToColor">#FF0057D6</Color>
+    <!-- 渐变引用的兜底 Color：ApplyTheme 会在运行时按主题覆盖这些同名 key -->
+    <Color x:Key="AccentColor">#FF0A84FF</Color>
+    <Color x:Key="AccentHoverColor">#FF3D9CFF</Color>
+    <Color x:Key="HairlineStrongColor">#3DFFFFFF</Color>
     <Color x:Key="HeroGlowFromColor">#260A84FF</Color>
     <Color x:Key="HeroGlowFadeColor">#000A84FF</Color>
     <Color x:Key="HeroTitleFromColor">#FFFFFFFF</Color>

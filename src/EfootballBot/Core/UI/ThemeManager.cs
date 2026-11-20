@@ -104,14 +104,15 @@ public static class ThemeManager
 
             WindowBackdrop.ApplyBackdrop(window, want);
 
-            // Apple Glass（v8.0）：WindowBg 同时铺在窗口与根 Grid 上，两层叠加会让透明度
-            // 翻倍衰减——旧值 0xF2(95%) 叠加后只透 0.25%，几乎看不到材质。这里降到 0xB3(70%)，
-            // 双层叠加后约透 9%，系统亚克力的磨砂感才透得出来。中栏内容层用独立的近实色
-            // ContentBg（90%），文字可读性不受影响；玻璃感集中在顶栏与左右栏。
-            // 不支持材质的机器会退回纯色外壳（见上面的 None 分支），观感仍然完整。
+            // 黑色毛玻璃（v8.0）：WindowBg 同时铺在窗口与根 Grid 上，透明度会双层叠加衰减。
+            // 旧值 0xF2(95%) 叠加后只透 0.25%，几乎看不到材质；但底色已压到近纯黑(#08080A)，
+            // 太透会让亮色壁纸透进来破坏「黑玻璃」。0xC4(约77%) 双层叠加后约透 5%——
+            // 刚好透出系统亚克力的磨砂颗粒，又守住深色基调。中栏用独立近实色 ContentBg，
+            // 文字可读性不受影响；玻璃感集中在顶栏与左右栏。
+            // 不支持材质的机器退回纯色外壳（见 None 分支），观感仍然完整。
             if (Application.Current.Resources["WindowBg"] is SolidColorBrush cur)
             {
-                var glass = new SolidColorBrush(Color.FromArgb(0xB3, cur.Color.R, cur.Color.G, cur.Color.B));
+                var glass = new SolidColorBrush(Color.FromArgb(0xC4, cur.Color.R, cur.Color.G, cur.Color.B));
                 glass.Freeze();
                 Application.Current.Resources["WindowBg"] = glass;
                 window.Background = glass;

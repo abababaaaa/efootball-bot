@@ -31,22 +31,22 @@ public static class ThemePalette
         return [.. Diff(LightColors, "亮色"), .. Diff(DeepBlueColors, "深蓝")];
     }
 
-    // ---------------- 暗色 · Apple 深色 + 强毛玻璃（默认） ----------------
+    // ---------------- 暗色 · 黑色毛玻璃（默认）：近纯黑底 + 冷调玻璃高光 ----------------
     private static readonly Dictionary<string, string> DarkColors = new()
     {
-        ["WindowBg"] = "#FF1C1C1E",
-        ["ContentBg"] = "#E61C1C1E",
-        ["CardBg"] = "#1AFFFFFF",
-        ["CardBorder"] = "#24FFFFFF",
-        ["SideLeftBg"] = "#66101012",
-        ["SideRightBg"] = "#4D101012",
-        ["Surface2"] = "#24FFFFFF",
-        ["InsetBg"] = "#14FFFFFF",
+        ["WindowBg"] = "#FF08080A",
+        ["ContentBg"] = "#F208080A",
+        ["CardBg"] = "#12FFFFFF",
+        ["CardBorder"] = "#20FFFFFF",
+        ["SideLeftBg"] = "#59000000",
+        ["SideRightBg"] = "#42000000",
+        ["Surface2"] = "#1CFFFFFF",
+        ["InsetBg"] = "#0A000000",
         ["TrackBg"] = "#4D000000",
-        ["GlassBg"] = "#CC2C2C2E",
-        ["GlassStroke"] = "#29FFFFFF",
-        ["ControlFill"] = "#1FFFFFFF",
-        ["ControlStroke"] = "#33FFFFFF",
+        ["GlassBg"] = "#D9101012",
+        ["GlassStroke"] = "#24FFFFFF",
+        ["ControlFill"] = "#18FFFFFF",
+        ["ControlStroke"] = "#2EFFFFFF",
         ["TextPrimary"] = "#FFFFFFFF",
         ["TextSecondary"] = "#FFE5E5EA",
         ["TextMuted"] = "#FF98989F",

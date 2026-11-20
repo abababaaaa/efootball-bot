@@ -5,21 +5,18 @@
          同一控件的所有状态（默认/悬停/按下/选中/禁用）必须写在同一个 ControlTemplate 里。
          ================================================================== -->
 
-    <!-- ============ 左栏模块选择（Win11 NavigationView 项：半透明底 + 左侧强调色指示条） ============ -->
+    <!-- ============ 左栏模块选择（macOS 胶囊选中态：渐变胶囊 + 柔和高光，无竖条） ============ -->
     <Style x:Key="ModuleRadio" TargetType="RadioButton">
-        <Setter Property="Margin" Value="0,0,0,2"/>
+        <Setter Property="Margin" Value="0,0,0,3"/>
         <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Grid>
-                        <Border x:Name="bd" CornerRadius="8" Padding="12,8" Background="Transparent"/>
-                        <!-- Win11 导航选中指示条：3px 竖条，贴在项的最左侧 -->
-                        <Rectangle x:Name="ind" Width="3" Height="16" RadiusX="1.5" Fill="{DynamicResource Accent}"
-                                   HorizontalAlignment="Left" VerticalAlignment="Center" Margin="1,0,0,0"
-                                   Visibility="Collapsed"/>
-                        <ContentPresenter Margin="14,0,8,0" VerticalAlignment="Center"/>
+                    <Grid Margin="6,0">
+                        <Border x:Name="bd" CornerRadius="9" Padding="12,9" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="1"/>
+                        <ContentPresenter Margin="6,0,8,0" VerticalAlignment="Center"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <!-- 选中高亮必须「已选中 + 当前正在看游戏模块（Tag=Active）」双条件：
@@ -31,9 +28,9 @@
                                 <Condition Property="IsChecked" Value="True"/>
                                 <Condition Property="Tag" Value="Active"/>
                             </MultiTrigger.Conditions>
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource ControlFill}"/>
-                            <Setter TargetName="ind" Property="Visibility" Value="Visible"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentPillFill}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource AccentBorder}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccent}"/>
                         </MultiTrigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
@@ -51,13 +48,13 @@
         </Setter>
     </Style>
 
-    <!-- ============ 左栏工具导航（Win11 NavigationView 项：32px 高、4px 圆角、选中半透明底） ============ -->
+    <!-- ============ 左栏工具导航（macOS 胶囊选中态：渐变胶囊 + 柔和高光，无竖条） ============ -->
     <Style x:Key="NavToolBtn" TargetType="Button">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Height" Value="32"/>
-        <Setter Property="Margin" Value="0,0,0,1"/>
+        <Setter Property="Height" Value="34"/>
+        <Setter Property="Margin" Value="6,0,6,2"/>
         <Setter Property="FontSize" Value="12.5"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="HorizontalContentAlignment" Value="Left"/>
@@ -66,11 +63,9 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid>
-                        <Border x:Name="bd" CornerRadius="8" Background="Transparent"/>
-                        <Rectangle x:Name="ind" Width="3" Height="16" RadiusX="1.5" Fill="{DynamicResource Accent}"
-                                   HorizontalAlignment="Left" VerticalAlignment="Center" Margin="1,0,0,0"
-                                   Visibility="Collapsed"/>
-                        <ContentPresenter Margin="14,0,8,0" VerticalAlignment="Center"
+                        <Border x:Name="bd" CornerRadius="9" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="1"/>
+                        <ContentPresenter Margin="18,0,8,0" VerticalAlignment="Center"
                                           HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
                     </Grid>
                     <ControlTemplate.Triggers>
@@ -79,9 +74,9 @@
                             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
                         </Trigger>
                         <Trigger Property="Tag" Value="Active">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource ControlFill}"/>
-                            <Setter TargetName="ind" Property="Visibility" Value="Visible"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentPillFill}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource AccentBorder}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccent}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4"/>
@@ -92,13 +87,13 @@
         </Setter>
     </Style>
 
-    <!-- ============ 主按钮（绿色实心，悬停提亮，按下轻微回弹） ============ -->
+    <!-- ============ 主按钮（Apple 玻璃实体感：渐变 + 顶部高光边 + 轻投影） ============ -->
     <Style x:Key="PrimaryBtn" TargetType="Button">
-        <Setter Property="Background" Value="{DynamicResource Accent}"/>
+        <Setter Property="Background" Value="{DynamicResource PrimaryBtnFill}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextOnAccent}"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Padding" Value="16,7"/>
-        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="Padding" Value="16,8"/>
+        <Setter Property="MinHeight" Value="34"/>
         <Setter Property="FontSize" Value="12.5"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
@@ -106,26 +101,30 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Grid>
-                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8"
-                                Padding="{TemplateBinding Padding}"
-                                RenderTransformOrigin="0.5,0.5">
-                            <Border.RenderTransform>
-                                <ScaleTransform ScaleX="1" ScaleY="1"/>
-                            </Border.RenderTransform>
+                    <Grid RenderTransformOrigin="0.5,0.5">
+                        <Grid.RenderTransform>
+                            <ScaleTransform ScaleX="1" ScaleY="1"/>
+                        </Grid.RenderTransform>
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="9"
+                                BorderBrush="{DynamicResource AccentBorder}" BorderThickness="1"
+                                Padding="{TemplateBinding Padding}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
-                        <!-- 悬停提亮层（Win11 强调色按钮 hover 变亮一档） -->
-                        <Border x:Name="flash" CornerRadius="8" Background="White" Opacity="0"
+                        <!-- 顶部 1px 高光：玻璃厚度的信号 -->
+                        <Border CornerRadius="9" Height="1" VerticalAlignment="Top"
+                                Margin="8,1,8,0" Background="{DynamicResource CardTopHighlight}"
+                                IsHitTestVisible="False"/>
+                        <!-- 悬停提亮层 -->
+                        <Border x:Name="flash" CornerRadius="9" Background="White" Opacity="0"
                                 IsHitTestVisible="False"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="flash" Property="Opacity" Value="0.10"/>
+                            <Setter TargetName="flash" Property="Opacity" Value="0.08"/>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="bd" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.975" ScaleY="0.975"/></Setter.Value></Setter>
-                            <Setter TargetName="flash" Property="Opacity" Value="0.16"/>
+                            <Setter Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.975" ScaleY="0.975"/></Setter.Value></Setter>
+                            <Setter TargetName="flash" Property="Opacity" Value="0.14"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.34"/>
