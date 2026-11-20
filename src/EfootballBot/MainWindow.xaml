@@ -281,7 +281,7 @@
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
-                                <Setter Property="Margin" Value="0"/>
+                                <Setter Property="Margin" Value="0,0,6,0"/>
                                 <Setter Property="VerticalAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
@@ -302,7 +302,7 @@
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
-                                <Setter Property="Margin" Value="0"/>
+                                <Setter Property="Margin" Value="0,0,6,0"/>
                                 <Setter Property="VerticalAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
@@ -364,7 +364,7 @@
                         <WrapPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
-                                <Setter Property="Margin" Value="0"/>
+                                <Setter Property="Margin" Value="0,0,6,0"/>
                                 <Setter Property="VerticalAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>

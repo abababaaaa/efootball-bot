@@ -474,7 +474,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFill}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFillStrong}"/>
                             <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SelectBorder}"/>
                             <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                         </Trigger>
@@ -505,20 +505,20 @@
         <Setter Property="FontSize" Value="12"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Margin" Value="1,0"/>
+        <Setter Property="Margin" Value="0,0,6,0"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid>
                         <Border x:Name="bd" CornerRadius="9" Background="Transparent"
                                 BorderBrush="Transparent" BorderThickness="1"
-                                Padding="11,7" HorizontalAlignment="Stretch"/>
+                                Padding="14,8" HorizontalAlignment="Stretch"/>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Grid>
                     <ControlTemplate.Triggers>
-                        <!-- 选中态：浅灰毛玻璃高亮 + 白字，平直克制、不抢主操作 -->
+                        <!-- 选中态：浅灰毛玻璃高亮 + 白字，比 hover 更亮，当前分类一眼可辨 -->
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFill}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFillStrong}"/>
                             <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SelectBorder}"/>
                             <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                             <Setter Property="FontWeight" Value="SemiBold"/>
