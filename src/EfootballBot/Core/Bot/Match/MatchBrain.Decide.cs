@@ -228,7 +228,11 @@ public static partial class MatchBrain
                     return new MatchAction(MatchActionKind.PadConfirm, 400, "比赛中推进键：快按 A");
                 
                 // 【新增】入场与过场动画跳过
-                if (!HasScoreboard(ocr))
+                // 门槛：画面须有实际内容（球队名/球场等 ≥2 词）才算「入场动画」。
+                // 空帧(0词) = 黑帧/驱动异常，跳过比赛横幅(1词) = 目标提醒非动画——
+                // 这两类若也快按 A，会破坏「无感知不盲按」「挑战赛禁跳仍继续挂机」的安全契约。
+                // 真实入场帧（REAL MADRID / BARCELONA 等双队名）仍走快按 A（RecogWalkHardeningTests 锁定）。
+                if (!HasScoreboard(ocr) && ocr.Words.Count >= 2)
                     return new MatchAction(MatchActionKind.PadConfirm, 350, "无时钟过场/入场：快按 A 跳过");
 
                 return new MatchAction(MatchActionKind.MatchIdleTap, 0, "比赛中随机点击");
@@ -314,10 +318,13 @@ public static partial class MatchBrain
                 if (inMatchRecently && IsInMatchAdvance(ocr))
                     return new MatchAction(MatchActionKind.PadConfirm, 1500, "比赛弹窗→下一步");
                 
-                // 【新增】开赛过渡期避免等 4 秒
                 if (inMatchRecently && IsSkipOverlay(ocr))
                     return new MatchAction(MatchActionKind.PadConfirm, 350, "过场回放：快按 A 跳过");
-                if (inMatchRecently && screenStreak < 8 && ocr.Words.Count <= 5)
+                // 【新增】开赛过渡期避免等 4 秒：只在开赛头 2 轮试一次 A 跳过入场。
+                // 门槛从 <8 收紧到 <=2：比赛中途单帧丢时钟（画面认不出但 streak 已累积）
+                // 时不能一直快按 A——那种情况该耐心等它恢复，到 escapeAt 才 B 逃生
+                // （MlFlowMemoryTests.Decide_Unknown_InMatchContext_Patient 锁定）。
+                if (inMatchRecently && screenStreak <= 2 && ocr.Words.Count <= 5)
                     return new MatchAction(MatchActionKind.PadConfirm, 400, "开赛过场过渡：按 A 跳过");
                 int escapeAt = inMatchRecently ? UnknownEscapeStreakInMatch : UnknownEscapeStreak;
                 // 认不出的普通界面（非比赛上下文）：等 UnknownProbeAStreak 轮还认不出，就按一次 A
