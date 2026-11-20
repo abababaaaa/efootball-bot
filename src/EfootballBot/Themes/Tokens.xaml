@@ -21,6 +21,8 @@
     <SolidColorBrush x:Key="GlassStroke" Color="#24FFFFFF"/>
     <SolidColorBrush x:Key="ControlFill" Color="#18FFFFFF"/>
     <SolidColorBrush x:Key="ControlStroke" Color="#2EFFFFFF"/>
+    <!-- 顶栏/左栏的淡黑玻璃蒙版：护住导航文字可读性，同时保留毛玻璃透射 -->
+    <SolidColorBrush x:Key="ChromeGlass" Color="#4D08080A"/>
 
     <!-- ===== 文字（Apple 三级：主 白 / 次 #E5E5EA / 弱 #98989F） ===== -->
     <SolidColorBrush x:Key="TextPrimary" Color="#FFFFFFFF"/>

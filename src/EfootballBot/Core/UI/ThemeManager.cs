@@ -104,15 +104,14 @@ public static class ThemeManager
 
             WindowBackdrop.ApplyBackdrop(window, want);
 
-            // 黑色毛玻璃（v8.0）：WindowBg 同时铺在窗口与根 Grid 上，透明度会双层叠加衰减。
-            // 旧值 0xF2(95%) 叠加后只透 0.25%，几乎看不到材质；但底色已压到近纯黑(#08080A)，
-            // 太透会让亮色壁纸透进来破坏「黑玻璃」。0xC4(约77%) 双层叠加后约透 5%——
-            // 刚好透出系统亚克力的磨砂颗粒，又守住深色基调。中栏用独立近实色 ContentBg，
-            // 文字可读性不受影响；玻璃感集中在顶栏与左右栏。
+            // 黑色透明毛玻璃（v8.1）：根 Grid 已改为全透明，这里只剩窗口这一层染色底。
+            // 0x8C(约55% 不透明) 让系统 Acrylic 模糊壁纸透出约 45%——桌面内容被磨砂后清晰可见，
+            // 而近纯黑底(#08080A)压住大部分亮度，整体仍是「黑色高级玻璃」而非发灰的透明。
+            // 顶栏/左栏/中栏空隙直接透出这层毛玻璃；卡片用 GlassFill 渐变底承托文字，保证可读。
             // 不支持材质的机器退回纯色外壳（见 None 分支），观感仍然完整。
             if (Application.Current.Resources["WindowBg"] is SolidColorBrush cur)
             {
-                var glass = new SolidColorBrush(Color.FromArgb(0xC4, cur.Color.R, cur.Color.G, cur.Color.B));
+                var glass = new SolidColorBrush(Color.FromArgb(0x8C, cur.Color.R, cur.Color.G, cur.Color.B));
                 glass.Freeze();
                 Application.Current.Resources["WindowBg"] = glass;
                 window.Background = glass;

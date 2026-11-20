@@ -12,16 +12,16 @@
         FontFamily="Microsoft YaHei UI"
         TextOptions.TextFormattingMode="Ideal" TextOptions.TextRenderingMode="ClearType">
 
-    <!-- 根容器铺 WindowBg：Apple Glass 下它被换成 70% 不透明版本 + 系统亚克力底，
-         于是「外框玻璃 + 内容可读」同时成立（macOS / Win11 第一方应用就是这个做法）。
-         左栏/右栏/卡片再叠各自的半透明层，材质在层级之间露出来。 -->
-    <Grid Background="{DynamicResource WindowBg}">
+    <!-- 根容器保持完全透明：黑色毛玻璃的「透」来自窗口底那一层半透明黑 + 系统 Acrylic。
+         这里若再铺一层 WindowBg，两层叠加会把透明度吃掉（约 95% 不透明），壁纸模糊就透不进来。
+         顶栏/左栏/右栏/中栏空隙都直接透出窗口底的毛玻璃，卡片/内容再用自己的半透明层承托文字。 -->
+    <Grid Background="Transparent">
         <Grid.RowDefinitions>
             <RowDefinition Height="52"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
-        <Border x:Name="TopBar" Grid.Row="0" Background="Transparent"
+        <Border x:Name="TopBar" Grid.Row="0" Background="{DynamicResource ChromeGlass}"
                 BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,0,1"
                 MouseLeftButtonDown="TopBar_MouseLeftButtonDown">
             <Grid Margin="14,0,0,0">
@@ -75,7 +75,7 @@
             </Grid.ColumnDefinitions>
 
         <!-- ============ 左栏：导航轨道 ============ -->
-        <Border Grid.Column="0" Background="Transparent"
+        <Border Grid.Column="0" Background="{DynamicResource ChromeGlass}"
                 BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,1,0">
             <DockPanel Margin="14,16">
                 <!-- 底部：主题切换 -->
