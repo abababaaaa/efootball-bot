@@ -33,7 +33,7 @@
                 </Grid.ColumnDefinitions>
 
                 <StackPanel Grid.Column="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,26,0">
-                    <Border Width="26" Height="26" CornerRadius="4" Background="{DynamicResource Accent}">
+                    <Border Width="28" Height="28" CornerRadius="8" Background="{DynamicResource Accent}">
                         <Grid Width="15" Height="15">
                             <Path Data="M7.5,0.6 V3.3 M7.5,11.7 V14.4" Stroke="{DynamicResource TextOnAccent}" StrokeThickness="1.2"
                                   StrokeStartLineCap="Round" StrokeEndLineCap="Round"/>
@@ -42,9 +42,9 @@
                         </Grid>
                     </Border>
                     <StackPanel VerticalAlignment="Center" Margin="9,0,0,0">
-                        <TextBlock Text="eFootball 挂机助手" FontSize="12.5" FontWeight="Bold"
+                        <TextBlock Text="eFootball 挂机助手" FontSize="13" FontWeight="SemiBold"
                                    Foreground="{DynamicResource TextPrimary}"/>
-                        <TextBlock Text="Windows 11 · 控制台" FontSize="10" Margin="0,1,0,0"
+                        <TextBlock Text="自动化控制台" FontSize="10.5" Margin="0,2,0,0"
                                    Foreground="{DynamicResource TextMuted}"/>
                     </StackPanel>
                 </StackPanel>
@@ -3155,8 +3155,8 @@
             </Grid>
 
         <!-- ============ 右栏：实时辅助栏（预览 + 紧凑统计 + 运行日志占满剩余） ============ -->
-        <Border x:Name="RightPanel" Grid.Column="2" Background="{DynamicResource SideRightBg}"
-                BorderBrush="{DynamicResource CardBorder}" BorderThickness="1,0,0,0">
+        <Border x:Name="RightPanel" Grid.Column="2" Background="{DynamicResource ChromeGlass}"
+                BorderBrush="{DynamicResource Divider}" BorderThickness="1,0,0,0">
             <Grid Margin="16,16,16,14">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -3168,8 +3168,7 @@
                 <!-- 实时画面 -->
                 <Grid Grid.Row="0" Margin="2,0,0,8">
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <Rectangle Width="3" Height="13" RadiusX="1.5" Fill="{DynamicResource AccentGlow}"
-                                   VerticalAlignment="Center" Margin="0,0,8,0"/>
+                        <Rectangle Style="{StaticResource CardTitleBar}"/>
                         <TextBlock Text="实时画面" Style="{StaticResource CardTitle}" VerticalAlignment="Center"/>
                     </StackPanel>
                     <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
@@ -3289,8 +3288,7 @@
                             <ColumnDefinition Width="Auto"/>
                         </Grid.ColumnDefinitions>
                         <StackPanel Orientation="Horizontal" Grid.Column="0" VerticalAlignment="Center">
-                            <Rectangle Width="3" Height="13" RadiusX="1.5" Fill="{DynamicResource AccentGlow}"
-                                       VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <Rectangle Style="{StaticResource CardTitleBar}"/>
                             <TextBlock Text="运行日志" Style="{StaticResource CardTitle}" VerticalAlignment="Center"/>
                         </StackPanel>
                         <StackPanel Orientation="Horizontal" Grid.Column="2" VerticalAlignment="Center">
@@ -3344,8 +3342,8 @@
 
         <!-- ===== 右侧折叠条：右栏收起后点它展开（中栏已铺满） ===== -->
         <Border x:Name="RightRail" Grid.Column="3" Width="30" Visibility="Collapsed"
-                Background="{DynamicResource SideRightBg}"
-                BorderBrush="{DynamicResource CardBorder}" BorderThickness="1,0,1,0">
+                Background="{DynamicResource ChromeGlass}"
+                BorderBrush="{DynamicResource Divider}" BorderThickness="1,0,1,0">
             <Button x:Name="BtnRightExpand" Background="Transparent" BorderThickness="0" Cursor="Hand"
                     ToolTip="展开右侧栏（实时画面 / 统计 / 运行日志）" Click="BtnRightExpand_Click">
                 <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
@@ -3390,8 +3388,8 @@
                                     <Grid>
                                         <Rectangle Width="32" Height="80" Fill="#FF1C1C1E" RadiusX="6" RadiusY="6"
                                                    HorizontalAlignment="Left" VerticalAlignment="Top"/>
-                                        <Rectangle Width="3" Height="18" Fill="#FF0A84FF" RadiusX="1.5"
-                                                   HorizontalAlignment="Left" Margin="0,10" VerticalAlignment="Top"/>
+                                        <Rectangle Width="20" Height="9" Fill="#FF0A84FF" RadiusX="4.5" RadiusY="4.5"
+                                                   HorizontalAlignment="Left" Margin="4,12" VerticalAlignment="Top"/>
                                         <StackPanel Margin="41,3,0,0">
                                             <Rectangle Height="6" Width="82" Fill="#FFFFFFFF" RadiusX="3" RadiusY="3" Margin="0,0,0,7"/>
                                             <Rectangle Height="4" Width="62" Fill="#FF98989F" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
@@ -3416,8 +3414,8 @@
                                     <Grid>
                                         <Rectangle Width="32" Height="80" Fill="#FFFFFFFF" RadiusX="6" RadiusY="6"
                                                    HorizontalAlignment="Left" VerticalAlignment="Top"/>
-                                        <Rectangle Width="3" Height="18" Fill="#FF007AFF" RadiusX="1.5"
-                                                   HorizontalAlignment="Left" Margin="0,10" VerticalAlignment="Top"/>
+                                        <Rectangle Width="20" Height="9" Fill="#FF007AFF" RadiusX="4.5" RadiusY="4.5"
+                                                   HorizontalAlignment="Left" Margin="4,12" VerticalAlignment="Top"/>
                                         <StackPanel Margin="41,3,0,0">
                                             <Rectangle Height="6" Width="82" Fill="#FF1C1C1E" RadiusX="3" RadiusY="3" Margin="0,0,0,7"/>
                                             <Rectangle Height="4" Width="62" Fill="#FF6E6E73" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
@@ -3442,8 +3440,8 @@
                                     <Grid>
                                         <Rectangle Width="32" Height="80" Fill="#FF2C2C32" RadiusX="6" RadiusY="6"
                                                    HorizontalAlignment="Left" VerticalAlignment="Top"/>
-                                        <Rectangle Width="3" Height="18" Fill="#FF5AC8FA" RadiusX="1.5"
-                                                   HorizontalAlignment="Left" Margin="0,10" VerticalAlignment="Top"/>
+                                        <Rectangle Width="20" Height="9" Fill="#FF5AC8FA" RadiusX="4.5" RadiusY="4.5"
+                                                   HorizontalAlignment="Left" Margin="4,12" VerticalAlignment="Top"/>
                                         <StackPanel Margin="41,3,0,0">
                                             <Rectangle Height="6" Width="82" Fill="#FFF5F8FF" RadiusX="3" RadiusY="3" Margin="0,0,0,7"/>
                                             <Rectangle Height="4" Width="62" Fill="#FF98A6B8" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>

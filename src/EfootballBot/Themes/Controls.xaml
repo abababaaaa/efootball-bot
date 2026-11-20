@@ -107,7 +107,7 @@
                         </Grid.RenderTransform>
                         <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="9"
                                 BorderBrush="{DynamicResource AccentBorder}" BorderThickness="1"
-                                Padding="{TemplateBinding Padding}">
+                                Padding="{TemplateBinding Padding}" Effect="{StaticResource AccentShadow}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
                         <!-- 顶部 1px 高光：玻璃厚度的信号 -->
@@ -478,9 +478,9 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource Surface2}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentLight}"/>
                             <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource AccentBorder}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource AccentGlow}"/>
                         </Trigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
@@ -514,19 +514,18 @@
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid>
-                        <Border x:Name="bd" CornerRadius="8" Background="Transparent"/>
-                        <Border x:Name="ul" Height="3" CornerRadius="1.5" VerticalAlignment="Bottom"
-                                HorizontalAlignment="Stretch" Margin="10,0"
-                                Background="{DynamicResource Accent}" Opacity="0"/>
-                        <ContentPresenter Margin="14,7" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Border x:Name="bd" CornerRadius="8" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="1"
+                                Padding="14,7" HorizontalAlignment="Stretch"/>
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Grid>
                     <ControlTemplate.Triggers>
-                        <!-- 选中态：主题色底 + 主题色描边 + 加粗。
-                             原先用 Surface2 中性底（和窗口底色几乎同色），一排五六个页签里
-                             看不出当前在哪一页 —— Operate 界面里「我在哪」必须一眼可读。 -->
+                        <!-- 选中态：Apple 分段控件风格 —— 主题色浅底 + 主题色描边 + 主题色文字。
+                             一排页签里「我在哪」一眼可读，又不像实心按钮那样抢主操作。 -->
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="ul" Property="Opacity" Value="1"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentLight}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource AccentBorder}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource AccentGlow}"/>
                             <Setter Property="FontWeight" Value="SemiBold"/>
                         </Trigger>
                         <MultiTrigger>
