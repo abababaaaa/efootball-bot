@@ -64,7 +64,10 @@ public class CnWeeklyChallengeGuardTests
     [Fact]
     public void Decide_ChallengeMode_SkipBannerIgnored()
     {
-        var ocr = Ocr(("跳过比赛", 0.85, 0.06));
+        // 比赛中途的「跳过比赛✅」横幅（右上角 y0.06）必与比分板时钟同屏——真实 Live Match
+        // 一定有时钟。带时钟后 HasScoreboard=true，不走入场过场快跳；禁跳模式下忽略横幅、
+        // 继续正常挂机（MatchIdleTap），绝不开暂停菜单。
+        var ocr = Ocr(("12:34", 0.12, 0.08), ("跳过比赛", 0.85, 0.06));
         var action = MatchBrain.Decide(MatchScreen.InMatch, ocr, 5, allowMatchSkip: false);
         Assert.Equal(MatchActionKind.MatchIdleTap, action.Kind); // 继续正常挂机，不开暂停菜单
     }

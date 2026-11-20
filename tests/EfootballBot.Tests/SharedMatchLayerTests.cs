@@ -31,8 +31,11 @@ public class SharedMatchLayerTests
     [Fact]
     public void 比赛中默认动作是随机点击而不是按_B()
     {
-        // 比赛中 B 是铲球键：共享决策只能给出 MatchIdleTap（A），绝不能给 B 逃生
-        var action = MatchBrain.Decide(MatchScreen.InMatch, EmptyOcr(), screenStreak: 0);
+        // 比赛中 B 是铲球键：共享决策只能给出 MatchIdleTap（A），绝不能给 B 逃生。
+        // 必须带比分板时钟——真实 Live Match（左上角 12:34）一定有时钟，Classify 也靠它判 InMatch；
+        // 空 OCR 的 InMatch 帧在真实流程里不存在（那是过场/黑帧，走的是快按 A 跳过）。
+        var live = new OcrResult(new List<OcrWord> { new("12:34", 0.15, 0.08, 0.08, 0.035) }, 1, 1);
+        var action = MatchBrain.Decide(MatchScreen.InMatch, live, screenStreak: 0);
         Assert.Equal(MatchActionKind.MatchIdleTap, action.Kind);
     }
 
