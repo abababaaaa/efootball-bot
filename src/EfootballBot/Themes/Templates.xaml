@@ -71,7 +71,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ListViewItem">
-                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="4" Padding="0,1">
+                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8" Padding="0,1">
                         <GridViewRowPresenter Content="{TemplateBinding Content}"
                                               Columns="{TemplateBinding GridView.ColumnCollection}"/>
                     </Border>
@@ -124,7 +124,7 @@
                 <ControlTemplate TargetType="RadioButton">
                     <Grid Background="Transparent">
                         <Border x:Name="hover" Background="{DynamicResource HoverOverlay}"
-                                CornerRadius="7" Margin="4,8" Opacity="0"/>
+                                CornerRadius="8" Margin="4,8" Opacity="0"/>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         <Border x:Name="bar" Height="3" CornerRadius="1.5" VerticalAlignment="Bottom"
                                 Margin="8,0" Background="{DynamicResource Accent}" Opacity="0"/>
@@ -207,7 +207,7 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="CornerRadius" Value="8"/>
         <Setter Property="Padding" Value="12,9"/>
         <Setter Property="Margin" Value="0,0,0,4"/>
         <Setter Property="Cursor" Value="Hand"/>

@@ -5,7 +5,7 @@
     <Application.Resources>
         <ResourceDictionary>
             <!-- ============================================================
-                 设计系统「Pitch Console」入口 —— 本文件只负责「按顺序合并」，
+                 设计系统「Apple Glass」入口 —— 本文件只负责「按顺序合并」，
                  样式本体一律在 Themes/ 下，改样式不要回到这里：
                    Tokens.xaml     颜色 / 阴影（唯一颜色真相，改配色只动这个）
                    Surfaces.xaml   容器与字体阶梯（Card / 标题 / 正文 / 小字）

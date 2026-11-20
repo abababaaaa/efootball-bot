@@ -12,8 +12,8 @@
         FontFamily="Microsoft YaHei UI"
         TextOptions.TextFormattingMode="Ideal" TextOptions.TextRenderingMode="ClearType">
 
-    <!-- 根容器铺 WindowBg：运行时它会被换成 95% 不透明版本 + 系统亚克力底，
-         于是「外框玻璃 + 内容可读」同时成立（Win11 第一方应用就是这个做法）。
+    <!-- 根容器铺 WindowBg：Apple Glass 下它被换成 70% 不透明版本 + 系统亚克力底，
+         于是「外框玻璃 + 内容可读」同时成立（macOS / Win11 第一方应用就是这个做法）。
          左栏/右栏/卡片再叠各自的半透明层，材质在层级之间露出来。 -->
     <Grid Background="{DynamicResource WindowBg}">
         <Grid.RowDefinitions>
@@ -3385,18 +3385,18 @@
                                 BorderBrush="{DynamicResource Accent}" BorderThickness="2"
                                 MouseLeftButtonUp="ThemeCard_Click" Tag="Dark">
                             <StackPanel>
-                                <Border CornerRadius="9" Width="168" Height="104" Background="#FF0C1015"
-                                        BorderBrush="#FF242D3A" BorderThickness="1" Padding="9">
+                                <Border CornerRadius="12" Width="168" Height="104" Background="#FF08080A"
+                                        BorderBrush="#FF2C2C30" BorderThickness="1" Padding="9">
                                     <Grid>
-                                        <Rectangle Width="32" Height="80" Fill="#FF080B0F" RadiusX="3" RadiusY="3"
+                                        <Rectangle Width="32" Height="80" Fill="#FF1C1C1E" RadiusX="6" RadiusY="6"
                                                    HorizontalAlignment="Left" VerticalAlignment="Top"/>
-                                        <Rectangle Width="3" Height="18" Fill="#FF0FA968" RadiusX="1.5"
+                                        <Rectangle Width="3" Height="18" Fill="#FF0A84FF" RadiusX="1.5"
                                                    HorizontalAlignment="Left" Margin="0,10" VerticalAlignment="Top"/>
                                         <StackPanel Margin="41,3,0,0">
-                                            <Rectangle Height="6" Width="82" Fill="#FFECF1F7" RadiusX="3" RadiusY="3" Margin="0,0,0,7"/>
-                                            <Rectangle Height="4" Width="62" Fill="#FF6C7686" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
-                                            <Rectangle Height="4" Width="72" Fill="#FF6C7686" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
-                                            <Rectangle Height="4" Width="56" Fill="#FF6C7686" RadiusX="2" RadiusY="2"/>
+                                            <Rectangle Height="6" Width="82" Fill="#FFFFFFFF" RadiusX="3" RadiusY="3" Margin="0,0,0,7"/>
+                                            <Rectangle Height="4" Width="62" Fill="#FF98989F" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
+                                            <Rectangle Height="4" Width="72" Fill="#FF98989F" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
+                                            <Rectangle Height="4" Width="56" Fill="#FF98989F" RadiusX="2" RadiusY="2"/>
                                         </StackPanel>
                                     </Grid>
                                 </Border>
@@ -3411,18 +3411,18 @@
                                 BorderBrush="{DynamicResource CardBorder}" BorderThickness="2"
                                 MouseLeftButtonUp="ThemeCard_Click" Tag="Light">
                             <StackPanel>
-                                <Border CornerRadius="9" Width="168" Height="104" Background="#FFEDF0F4"
-                                        BorderBrush="#FFDDE3EA" BorderThickness="1" Padding="9">
+                                <Border CornerRadius="12" Width="168" Height="104" Background="#FFF2F2F7"
+                                        BorderBrush="#FFD1D1D6" BorderThickness="1" Padding="9">
                                     <Grid>
-                                        <Rectangle Width="32" Height="80" Fill="#FFF7F9FB" RadiusX="3" RadiusY="3"
+                                        <Rectangle Width="32" Height="80" Fill="#FFFFFFFF" RadiusX="6" RadiusY="6"
                                                    HorizontalAlignment="Left" VerticalAlignment="Top"/>
-                                        <Rectangle Width="3" Height="18" Fill="#FF0B8F5B" RadiusX="1.5"
+                                        <Rectangle Width="3" Height="18" Fill="#FF007AFF" RadiusX="1.5"
                                                    HorizontalAlignment="Left" Margin="0,10" VerticalAlignment="Top"/>
                                         <StackPanel Margin="41,3,0,0">
-                                            <Rectangle Height="6" Width="82" Fill="#FF151A21" RadiusX="3" RadiusY="3" Margin="0,0,0,7"/>
-                                            <Rectangle Height="4" Width="62" Fill="#FF8C97A6" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
-                                            <Rectangle Height="4" Width="72" Fill="#FF8C97A6" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
-                                            <Rectangle Height="4" Width="56" Fill="#FF8C97A6" RadiusX="2" RadiusY="2"/>
+                                            <Rectangle Height="6" Width="82" Fill="#FF1C1C1E" RadiusX="3" RadiusY="3" Margin="0,0,0,7"/>
+                                            <Rectangle Height="4" Width="62" Fill="#FF6E6E73" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
+                                            <Rectangle Height="4" Width="72" Fill="#FF6E6E73" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
+                                            <Rectangle Height="4" Width="56" Fill="#FF6E6E73" RadiusX="2" RadiusY="2"/>
                                         </StackPanel>
                                     </Grid>
                                 </Border>
@@ -3437,18 +3437,18 @@
                                 BorderBrush="{DynamicResource CardBorder}" BorderThickness="2"
                                 MouseLeftButtonUp="ThemeCard_Click" Tag="DeepBlue">
                             <StackPanel>
-                                <Border CornerRadius="9" Width="168" Height="104" Background="#FF081221"
-                                        BorderBrush="#FF1E3350" BorderThickness="1" Padding="9">
+                                <Border CornerRadius="12" Width="168" Height="104" Background="#FF1C1C20"
+                                        BorderBrush="#FF3A3A40" BorderThickness="1" Padding="9">
                                     <Grid>
-                                        <Rectangle Width="32" Height="80" Fill="#FF060D19" RadiusX="3" RadiusY="3"
+                                        <Rectangle Width="32" Height="80" Fill="#FF2C2C32" RadiusX="6" RadiusY="6"
                                                    HorizontalAlignment="Left" VerticalAlignment="Top"/>
-                                        <Rectangle Width="3" Height="18" Fill="#FF2F94C9" RadiusX="1.5"
+                                        <Rectangle Width="3" Height="18" Fill="#FF5AC8FA" RadiusX="1.5"
                                                    HorizontalAlignment="Left" Margin="0,10" VerticalAlignment="Top"/>
                                         <StackPanel Margin="41,3,0,0">
-                                            <Rectangle Height="6" Width="82" Fill="#FFDFE9F4" RadiusX="3" RadiusY="3" Margin="0,0,0,7"/>
-                                            <Rectangle Height="4" Width="62" Fill="#FF5D7EA3" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
-                                            <Rectangle Height="4" Width="72" Fill="#FF5D7EA3" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
-                                            <Rectangle Height="4" Width="56" Fill="#FF5D7EA3" RadiusX="2" RadiusY="2"/>
+                                            <Rectangle Height="6" Width="82" Fill="#FFF5F8FF" RadiusX="3" RadiusY="3" Margin="0,0,0,7"/>
+                                            <Rectangle Height="4" Width="62" Fill="#FF98A6B8" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
+                                            <Rectangle Height="4" Width="72" Fill="#FF98A6B8" RadiusX="2" RadiusY="2" Margin="0,0,0,5"/>
+                                            <Rectangle Height="4" Width="56" Fill="#FF98A6B8" RadiusX="2" RadiusY="2"/>
                                         </StackPanel>
                                     </Grid>
                                 </Border>
