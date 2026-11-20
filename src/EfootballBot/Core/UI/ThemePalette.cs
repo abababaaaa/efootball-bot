@@ -47,6 +47,9 @@ public static class ThemePalette
         ["GlassStroke"] = "#24FFFFFF",
         ["ControlFill"] = "#18FFFFFF",
         ["ControlStroke"] = "#2EFFFFFF",
+        // Chip（热键等标签）：更实的深色毛玻璃 + 方形小圆角
+        ["ChipFill"] = "#3D000000",
+        ["ChipStroke"] = "#3DFFFFFF",
         ["ChromeGlass"] = "#4D08080A",
         ["TextPrimary"] = "#FFFFFFFF",
         ["TextSecondary"] = "#FFE5E5EA",
@@ -130,6 +133,9 @@ public static class ThemePalette
         ["GlassStroke"] = "#1A000000",
         ["ControlFill"] = "#B3FFFFFF",
         ["ControlStroke"] = "#29000000",
+        // 亮色 Chip：稍深的浅灰 + 深描边
+        ["ChipFill"] = "#D91C1C1E",
+        ["ChipStroke"] = "#2E000000",
         ["ChromeGlass"] = "#59F2F2F7",
         ["TextPrimary"] = "#FF1C1C1E",
         ["TextSecondary"] = "#FF3C3C43",
@@ -213,6 +219,9 @@ public static class ThemePalette
         ["GlassStroke"] = "#29A0C8FF",
         ["ControlFill"] = "#1FFFFFFF",
         ["ControlStroke"] = "#33FFFFFF",
+        // 深蓝 Chip：更实的深色毛玻璃
+        ["ChipFill"] = "#420A0E14",
+        ["ChipStroke"] = "#3DFFFFFF",
         ["ChromeGlass"] = "#4D08080A",
         ["TextPrimary"] = "#FFF5F8FF",
         ["TextSecondary"] = "#FFE0E8F2",
