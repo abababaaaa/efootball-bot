@@ -139,7 +139,7 @@ public class FastGithubKernelTests
     [Fact]
     public void 链接转换_套前缀与剥前缀互为逆运算()
     {
-        string raw = "https://github.com/abababaaaa/efootball-bot/releases/download/v6.4.0/EfootballBot.exe";
+        string raw = "https://github.com/idhuanxiang/efootball-bot/releases/download/v6.4.0/EfootballBot.exe";
 
         string accelerated = FastGithubKernel.AccelerateUrl(raw, "https://ghfast.top/");
         Assert.Equal("https://ghfast.top/" + raw, accelerated);

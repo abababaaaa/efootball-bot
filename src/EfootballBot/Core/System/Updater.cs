@@ -18,14 +18,16 @@ namespace EfootballBot.Core.System;
 public static class Updater
 {
     /// <summary>GitHub 仓库地址（owner/repo），无需用户手动填写。</summary>
-    public const string DefaultRepository = "abababaaaa/efootball-bot";
+    public const string DefaultRepository = "idhuanxiang/efootball-bot";
 
     /// <summary>
-    /// 编译期内置的主源基址（Cloudflare R2 公开桶）。所有新版本开箱走主源；
-    /// config.json 与 <see cref="Configure"/> 里的值优先级更高，换桶/换域名不必重新发版。
-    /// 空 = 未内置，只有显式配置过主源的机器才启用该通道。
+    /// 编译期内置的主源基址（Cloudflare R2 公开桶）。空 = 未内置，客户端完全走
+    /// GitHub Release（版本检查 api.github.com + 下载 github.com + 加速镜像兜底）。
+    /// 本 fork 不使用原作者的 R2 桶（那个桶由原作者控制、版本不受我们发版影响），
+    /// 故置空；需用自建 R2 时可通过 config.json 的 Update.PrimaryBaseUrl 或环境变量配置，
+    /// 不必改代码。
     /// </summary>
-    public const string BuiltInPrimaryBaseUrl = "https://pub-5f1aff2ad4fd4fd4a12a51f3e73fa02a.r2.dev";
+    public const string BuiltInPrimaryBaseUrl = "";
 
     /// <summary>环境变量：临时把主源指向新桶/另一台机器做验证，不必改 config.json。</summary>
     public const string PrimaryBaseUrlEnvVar = "EFOOTBALL_UPDATE_BASE";
