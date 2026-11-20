@@ -275,13 +275,13 @@
 
             <Border x:Name="SubMenuHost" Grid.Row="0" Background="Transparent"
                     BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,0,1"
-                    Padding="20,8,20,8" Visibility="Collapsed">
+                    Padding="14,9,14,9" Visibility="Collapsed">
                 <Grid>
                     <StackPanel x:Name="SubMenuIntl" Orientation="Horizontal" Visibility="Collapsed">
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
-                                <Setter Property="Margin" Value="0"/>
+                                <Setter Property="Margin" Value="0,0,6,0"/>
                                 <Setter Property="VerticalAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
@@ -302,7 +302,7 @@
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
-                                <Setter Property="Margin" Value="0"/>
+                                <Setter Property="Margin" Value="0,0,6,0"/>
                                 <Setter Property="VerticalAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
@@ -364,7 +364,7 @@
                         <WrapPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
-                                <Setter Property="Margin" Value="0"/>
+                                <Setter Property="Margin" Value="0,0,6,0"/>
                                 <Setter Property="VerticalAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
@@ -676,7 +676,7 @@
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="暂停/终止热键" FontSize="10.5"
                                                    Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
-                                        <TextBlock x:Name="TxtHkIntlPreMatch" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                        <TextBlock x:Name="TxtHkIntlPreMatch" Text="—" Foreground="{DynamicResource TextPrimary}"
                                                    FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
@@ -729,7 +729,7 @@
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="暂停/终止热键" FontSize="10.5"
                                                    Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
-                                        <TextBlock x:Name="TxtHkIntlLeague" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                        <TextBlock x:Name="TxtHkIntlLeague" Text="—" Foreground="{DynamicResource TextPrimary}"
                                                    FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0"
                                                    VerticalAlignment="Center"/>
                                     </StackPanel>
@@ -908,7 +908,7 @@
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="暂停/终止热键" FontSize="10.5"
                                                    Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
-                                        <TextBlock x:Name="TxtHkIntlWeekly" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                        <TextBlock x:Name="TxtHkIntlWeekly" Text="—" Foreground="{DynamicResource TextPrimary}"
                                                    FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
@@ -1045,7 +1045,7 @@
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="暂停/终止热键" FontSize="10.5"
                                                    Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
-                                        <TextBlock x:Name="TxtHkIntlLadder" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                        <TextBlock x:Name="TxtHkIntlLadder" Text="—" Foreground="{DynamicResource TextPrimary}"
                                                    FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
@@ -1174,7 +1174,7 @@
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="暂停/终止热键" FontSize="10.5"
                                                    Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
-                                        <TextBlock x:Name="TxtHkStud" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                        <TextBlock x:Name="TxtHkStud" Text="—" Foreground="{DynamicResource TextPrimary}"
                                                    FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
@@ -1416,7 +1416,7 @@
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="暂停/终止热键" FontSize="10.5"
                                                    Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
-                                        <TextBlock x:Name="TxtHkCnPreMatch" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                        <TextBlock x:Name="TxtHkCnPreMatch" Text="—" Foreground="{DynamicResource TextPrimary}"
                                                    FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
@@ -1477,7 +1477,7 @@
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="暂停/终止热键" FontSize="10.5"
                                                    Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
-                                        <TextBlock x:Name="TxtHkCnLeague" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                        <TextBlock x:Name="TxtHkCnLeague" Text="—" Foreground="{DynamicResource TextPrimary}"
                                                    FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
@@ -1575,7 +1575,7 @@
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="暂停/终止热键" FontSize="10.5"
                                                    Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
-                                        <TextBlock x:Name="TxtHkCnWeekly" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                        <TextBlock x:Name="TxtHkCnWeekly" Text="—" Foreground="{DynamicResource TextPrimary}"
                                                    FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>
@@ -1708,7 +1708,7 @@
                                     <StackPanel Orientation="Horizontal">
                                         <TextBlock Text="暂停/终止热键" FontSize="10.5"
                                                    Foreground="{DynamicResource TextMuted}" VerticalAlignment="Center"/>
-                                        <TextBlock x:Name="TxtHkCnMyLeague" Text="—" Foreground="{DynamicResource AccentGlow}"
+                                        <TextBlock x:Name="TxtHkCnMyLeague" Text="—" Foreground="{DynamicResource TextPrimary}"
                                                    FontSize="10.5" FontWeight="SemiBold" Margin="7,0,0,0" VerticalAlignment="Center"/>
                                     </StackPanel>
                                 </Border>

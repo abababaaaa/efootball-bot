@@ -13,10 +13,10 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Grid Margin="6,0">
-                        <Border x:Name="bd" CornerRadius="9" Padding="12,9" Background="Transparent"
+                    <Grid Margin="5,0">
+                        <Border x:Name="bd" CornerRadius="11" Padding="12,11" Background="Transparent"
                                 BorderBrush="Transparent" BorderThickness="1"/>
-                        <ContentPresenter Margin="6,0,8,0" VerticalAlignment="Center"/>
+                        <ContentPresenter Margin="8,0,8,0" VerticalAlignment="Center"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <!-- 选中高亮必须「已选中 + 当前正在看游戏模块（Tag=Active）」双条件：
@@ -28,9 +28,9 @@
                                 <Condition Property="IsChecked" Value="True"/>
                                 <Condition Property="Tag" Value="Active"/>
                             </MultiTrigger.Conditions>
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentPillFill}"/>
-                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource AccentBorder}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccent}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFillStrong}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SelectBorder}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                         </MultiTrigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
@@ -53,8 +53,8 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Height" Value="34"/>
-        <Setter Property="Margin" Value="6,0,6,2"/>
+        <Setter Property="Height" Value="36"/>
+        <Setter Property="Margin" Value="5,0,5,2"/>
         <Setter Property="FontSize" Value="12.5"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="HorizontalContentAlignment" Value="Left"/>
@@ -63,7 +63,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid>
-                        <Border x:Name="bd" CornerRadius="9" Background="Transparent"
+                        <Border x:Name="bd" CornerRadius="11" Background="Transparent"
                                 BorderBrush="Transparent" BorderThickness="1"/>
                         <ContentPresenter Margin="18,0,8,0" VerticalAlignment="Center"
                                           HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
@@ -74,9 +74,9 @@
                             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
                         </Trigger>
                         <Trigger Property="Tag" Value="Active">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentPillFill}"/>
-                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource AccentBorder}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextOnAccent}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFillStrong}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SelectBorder}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4"/>
@@ -90,7 +90,7 @@
     <!-- ============ 主按钮（Apple 玻璃实体感：渐变 + 顶部高光边 + 轻投影） ============ -->
     <Style x:Key="PrimaryBtn" TargetType="Button">
         <Setter Property="Background" Value="{DynamicResource PrimaryBtnFill}"/>
-        <Setter Property="Foreground" Value="{DynamicResource TextOnAccent}"/>
+        <Setter Property="Foreground" Value="#FF1C1C1E"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Padding" Value="16,8"/>
         <Setter Property="MinHeight" Value="34"/>
@@ -106,25 +106,21 @@
                             <ScaleTransform ScaleX="1" ScaleY="1"/>
                         </Grid.RenderTransform>
                         <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="9"
-                                BorderBrush="{DynamicResource AccentBorder}" BorderThickness="1"
-                                Padding="{TemplateBinding Padding}" Effect="{StaticResource AccentShadow}">
+                                BorderBrush="#FFFFFFFF" BorderThickness="1"
+                                Padding="{TemplateBinding Padding}" Effect="{StaticResource GlassCardShadow}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
-                        <!-- 顶部 1px 高光：玻璃厚度的信号 -->
-                        <Border CornerRadius="9" Height="1" VerticalAlignment="Top"
-                                Margin="8,1,8,0" Background="{DynamicResource CardTopHighlight}"
-                                IsHitTestVisible="False"/>
-                        <!-- 悬停提亮层 -->
-                        <Border x:Name="flash" CornerRadius="9" Background="White" Opacity="0"
+                        <!-- 悬停压暗层：白按钮上用浅灰反馈 -->
+                        <Border x:Name="flash" CornerRadius="9" Background="#FF9A9AA0" Opacity="0"
                                 IsHitTestVisible="False"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="flash" Property="Opacity" Value="0.08"/>
+                            <Setter TargetName="flash" Property="Opacity" Value="0.10"/>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.975" ScaleY="0.975"/></Setter.Value></Setter>
-                            <Setter TargetName="flash" Property="Opacity" Value="0.14"/>
+                            <Setter TargetName="flash" Property="Opacity" Value="0.18"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.34"/>
@@ -478,9 +474,9 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentLight}"/>
-                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource AccentBorder}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource AccentGlow}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFillStrong}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SelectBorder}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                         </Trigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
@@ -506,26 +502,25 @@
     <!-- 三级菜单专用：选中态用白色文字 + 中性底，不再和主按钮抢绿色 -->
     <Style x:Key="SubTab" TargetType="RadioButton">
         <Setter Property="Foreground" Value="{DynamicResource SegTabFg}"/>
-        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="FontSize" Value="12"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Margin" Value="2,0"/>
+        <Setter Property="Margin" Value="0,0,6,0"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid>
-                        <Border x:Name="bd" CornerRadius="8" Background="Transparent"
+                        <Border x:Name="bd" CornerRadius="9" Background="Transparent"
                                 BorderBrush="Transparent" BorderThickness="1"
-                                Padding="14,7" HorizontalAlignment="Stretch"/>
+                                Padding="14,8" HorizontalAlignment="Stretch"/>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Grid>
                     <ControlTemplate.Triggers>
-                        <!-- 选中态：Apple 分段控件风格 —— 主题色浅底 + 主题色描边 + 主题色文字。
-                             一排页签里「我在哪」一眼可读，又不像实心按钮那样抢主操作。 -->
+                        <!-- 选中态：浅灰毛玻璃高亮 + 白字，比 hover 更亮，当前分类一眼可辨 -->
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentLight}"/>
-                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource AccentBorder}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource AccentGlow}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFillStrong}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SelectBorder}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                             <Setter Property="FontWeight" Value="SemiBold"/>
                         </Trigger>
                         <MultiTrigger>

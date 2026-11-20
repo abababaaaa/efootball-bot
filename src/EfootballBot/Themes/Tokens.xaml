@@ -64,7 +64,7 @@
     <SolidColorBrush x:Key="HoverOverlay" Color="#1AFFFFFF"/>
     <SolidColorBrush x:Key="ScrollThumb" Color="#66FFFFFF"/>
     <SolidColorBrush x:Key="ToggleOff" Color="#66EBEBF0"/>
-    <SolidColorBrush x:Key="ToggleOn" Color="#FF0A84FF"/>
+    <SolidColorBrush x:Key="ToggleOn" Color="#FFE5E5EA"/>
     <SolidColorBrush x:Key="ModuleDot" Color="#FF8E8E93"/>
     <SolidColorBrush x:Key="EnvDotIdle" Color="#FF8E8E93"/>
 
@@ -119,10 +119,11 @@
         <GradientStop Color="{DynamicResource AccentHoverColor}" Offset="0"/>
         <GradientStop Color="{DynamicResource AccentColor}" Offset="1"/>
     </LinearGradientBrush>
+    <!-- 主按钮：浅色玻璃质感（白→浅灰），靠描边与投影浮起，不靠蓝色色相 -->
     <LinearGradientBrush x:Key="PrimaryBtnFill" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="{DynamicResource AccentHoverColor}" Offset="0"/>
-        <GradientStop Color="{DynamicResource AccentColor}" Offset="0.52"/>
-        <GradientStop Color="{DynamicResource BrandToColor}" Offset="1"/>
+        <GradientStop Color="#FFFFFFFF" Offset="0"/>
+        <GradientStop Color="#FFF2F2F5" Offset="0.55"/>
+        <GradientStop Color="#FFE2E2E8" Offset="1"/>
     </LinearGradientBrush>
     <LinearGradientBrush x:Key="CardTopHighlight" StartPoint="0,0" EndPoint="1,0">
         <GradientStop Color="#00FFFFFF" Offset="0"/>
@@ -137,6 +138,11 @@
     <Color x:Key="AccentColor">#FF0A84FF</Color>
     <Color x:Key="AccentHoverColor">#FF3D9CFF</Color>
     <Color x:Key="HairlineStrongColor">#3DFFFFFF</Color>
+    <!-- 浅灰毛玻璃选中态兜底：ApplyTheme 运行时按主题覆盖 -->
+    <SolidColorBrush x:Key="SelectFill" Color="#2EFFFFFF"/>
+    <SolidColorBrush x:Key="SelectFillStrong" Color="#3DFFFFFF"/>
+    <SolidColorBrush x:Key="SelectBorder" Color="#3DFFFFFF"/>
+    <SolidColorBrush x:Key="SelectFg" Color="#FFFFFFFF"/>
     <Color x:Key="HeroGlowFromColor">#260A84FF</Color>
     <Color x:Key="HeroGlowFadeColor">#000A84FF</Color>
     <Color x:Key="HeroTitleFromColor">#FFFFFFFF</Color>
