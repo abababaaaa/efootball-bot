@@ -21,6 +21,11 @@
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
 
+        <!-- 抖动噪点覆盖层：铺在窗口毛玻璃上、所有内容之下，打散深色渐变的色带。
+             极淡(0~14/255)且不参与命中测试；顶栏/卡片等子层会盖住它，只在空隙透出。 -->
+        <Rectangle Grid.RowSpan="2" Fill="{DynamicResource DitherNoiseBrush}"
+                   IsHitTestVisible="False" Panel.ZIndex="0"/>
+
         <Border x:Name="TopBar" Grid.Row="0" Background="{DynamicResource ChromeGlass}"
                 BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,0,1"
                 MouseLeftButtonDown="TopBar_MouseLeftButtonDown">

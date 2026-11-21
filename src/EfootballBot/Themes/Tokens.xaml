@@ -150,4 +150,12 @@
     <Color x:Key="HeroTitleToColor">#FF9CCBFF</Color>
     <Color x:Key="BannerFromColor">#FF0A84FF</Color>
     <Color x:Key="BannerToColor">#FF0057D6</Color>
+
+    <!-- ===== 抖动噪点：打散 Acrylic 深色渐变的色带(banding) =====
+         极低透明度的白噪点平铺在窗口最底层，不参与交互；视觉上几乎不可见，
+         但能打散 8-bit 色深下一条一条的色阶，让毛玻璃过渡更平滑。 -->
+    <ImageBrush x:Key="DitherNoiseBrush"
+                ImageSource="pack://application:,,,/Assets/dither-noise.png"
+                TileMode="Tile" Viewport="0,0,128,128" ViewportUnits="Absolute"
+                Stretch="None" AlignmentX="Left" AlignmentY="Top"/>
 </ResourceDictionary>
