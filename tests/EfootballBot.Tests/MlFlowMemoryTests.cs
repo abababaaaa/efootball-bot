@@ -293,9 +293,12 @@ public class MlFlowMemoryTests
     [Fact]
     public void Decide_Unknown_InMatchContext_Patient()
     {
-        // 最近见过比赛特征：无特征界面 6 轮不按 B（单帧丢时钟），30 轮才逃生
+        // 比赛上下文下的少词画面 = 开赛入场/过场分镜（字幕、队名等），快按 A 跳过（不是 B——
+        // B 是铲球键，无论过场还是逃生都不能在这种情况下误按到比赛里）。
+        // 前几轮（streak<8）走开赛过场快跳 PadConfirm；到 UnknownEscapeStreakInMatch(30) 仍认不出
+        // 才算导航失控，GamepadBack 逃生。整条链路始终不按 B 进比赛乱踢。
         var ocr = Ocr(("过场字幕", 0.5, 0.5));
-        Assert.Equal(MatchActionKind.Wait,
+        Assert.Equal(MatchActionKind.PadConfirm,
             MatchBrain.Decide(MatchScreen.Unknown, ocr, MatchBrain.UnknownEscapeStreak, inMatchRecently: true).Kind);
         Assert.Equal(MatchActionKind.GamepadBack,
             MatchBrain.Decide(MatchScreen.Unknown, ocr, MatchBrain.UnknownEscapeStreakInMatch, inMatchRecently: true).Kind);

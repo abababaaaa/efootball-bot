@@ -68,6 +68,7 @@
     <!-- 主窗口 / exe 图标（Resource 供 WPF 窗口 Icon 引用，ApplicationIcon 供 exe 资源） -->
     <Resource Include="app.ico" />
     <Resource Include="Assets\autoswap_guide.png" />
+    <Resource Include="Assets\dither-noise.png" />
   </ItemGroup>
 
   <ItemGroup>

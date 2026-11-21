@@ -7,26 +7,27 @@
          ================================================================== -->
 
     <!-- ============ 间距（Thickness 资源） ============ -->
-    <Thickness x:Key="PagePad">24,20,24,24</Thickness>
-    <Thickness x:Key="SectionGap">0,0,0,16</Thickness>
-    <Thickness x:Key="HeadGap">0,0,0,12</Thickness>
-    <Thickness x:Key="FieldGap">0,0,0,12</Thickness>
+    <Thickness x:Key="PagePad">28,24,28,28</Thickness>
+    <Thickness x:Key="SectionGap">0,0,0,20</Thickness>
+    <Thickness x:Key="HeadGap">0,0,0,14</Thickness>
+    <Thickness x:Key="FieldGap">0,0,0,14</Thickness>
 
-    <!-- ============ 容器（Win11 卡片：玻璃底 + 细描边 + 8 圆角） ============ -->
+    <!-- ============ 容器（Apple 玻璃卡片：渐变玻璃 + 高光描边 + 柔和投影） ============ -->
     <Style x:Key="Card" TargetType="Border">
-        <Setter Property="Background" Value="{DynamicResource CardBg}"/>
+        <Setter Property="Background" Value="{DynamicResource GlassFill}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="8"/>
-        <Setter Property="Padding" Value="16,14"/>
-        <Setter Property="Margin" Value="0,0,0,12"/>
+        <Setter Property="CornerRadius" Value="12"/>
+        <Setter Property="Padding" Value="16,15"/>
+        <Setter Property="Margin" Value="0,0,0,14"/>
+        <Setter Property="Effect" Value="{StaticResource GlassCardShadow}"/>
     </Style>
 
     <Style x:Key="Inset" TargetType="Border">
         <Setter Property="Background" Value="{DynamicResource InsetBg}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="CornerRadius" Value="10"/>
         <Setter Property="Padding" Value="14,12"/>
     </Style>
 
@@ -41,47 +42,47 @@
 
     <Style x:Key="PageTitle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/>
-        <Setter Property="FontSize" Value="20"/>
+        <Setter Property="FontSize" Value="22"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
     </Style>
     <Style x:Key="PageSub" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="FontSize" Value="13"/>
         <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
-        <Setter Property="Margin" Value="0,5,0,0"/>
+        <Setter Property="Margin" Value="0,7,0,0"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
-        <Setter Property="LineHeight" Value="19"/>
-        <Setter Property="MaxWidth" Value="560"/>
+        <Setter Property="LineHeight" Value="21"/>
+        <Setter Property="MaxWidth" Value="600"/>
     </Style>
     <Style x:Key="H2" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/>
-        <Setter Property="FontSize" Value="14"/>
+        <Setter Property="FontSize" Value="14.5"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
     </Style>
     <Style x:Key="CardTitle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/>
-        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontSize" Value="13.5"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
     </Style>
     <Style x:Key="CardSub" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="FontSize" Value="12"/>
         <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
-        <Setter Property="Margin" Value="0,3,0,0"/>
+        <Setter Property="Margin" Value="0,4,0,0"/>
     </Style>
 
     <Style x:Key="BodyText" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="FontSize" Value="13"/>
         <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
-        <Setter Property="LineHeight" Value="20"/>
+        <Setter Property="LineHeight" Value="22"/>
     </Style>
     <Style x:Key="SmallText" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontSize" Value="12.5"/>
         <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
-        <Setter Property="LineHeight" Value="19"/>
+        <Setter Property="LineHeight" Value="20"/>
     </Style>
     <Style x:Key="MonoText" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource NumberFont}"/>
@@ -97,11 +98,11 @@
         <Setter Property="Margin" Value="0,8,9,0"/>
     </Style>
     <Style x:Key="BulletText" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="12"/>
+        <Setter Property="FontSize" Value="12.5"/>
         <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
-        <Setter Property="LineHeight" Value="18.5"/>
-        <Setter Property="Margin" Value="0,0,0,5"/>
+        <Setter Property="LineHeight" Value="20"/>
+        <Setter Property="Margin" Value="0,0,0,6"/>
     </Style>
 
     <Style x:Key="GroupLabel" TargetType="TextBlock">
@@ -124,12 +125,13 @@
         <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
 
+    <!-- Chip（热键/标签）：方形小圆角的深色毛玻璃，不再用椭圆药丸 -->
     <Style x:Key="Chip" TargetType="Border">
-        <Setter Property="Background" Value="{DynamicResource ControlFill}"/>
-        <Setter Property="BorderBrush" Value="{DynamicResource ControlStroke}"/>
+        <Setter Property="Background" Value="{DynamicResource ChipFill}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource ChipStroke}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="999"/>
-        <Setter Property="Padding" Value="9,3"/>
+        <Setter Property="CornerRadius" Value="6"/>
+        <Setter Property="Padding" Value="11,5"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
 

@@ -950,6 +950,9 @@ public partial class MainWindow
     // ================= 自动更新事件 =================
 
     private UpdateInfo? _pendingUpdate;
+    // 下载/应用更新进行中：防止「立即更新」被重复点击（横幅与更新面板两个入口）
+    // 在下载完成前再次触发，导致同一版本被下载两次。
+    private bool _updateInProgress;
 
     private async void BtnCheckUpdate_Click(object sender, RoutedEventArgs e)
     {
@@ -1065,6 +1068,8 @@ public partial class MainWindow
 
     private void BtnBannerUpdate_Click(object sender, RoutedEventArgs e)
     {
+        // 下载中忽略重复点击（横幅入口）
+        if (_updateInProgress) return;
         // 先跳转到更新面板，再执行更新
         NavigateTo(NavMode.Update);
         BtnApplyUpdate_Click(sender, e);
@@ -1072,9 +1077,15 @@ public partial class MainWindow
 
     private async void BtnApplyUpdate_Click(object sender, RoutedEventArgs e)
     {
+        // 守卫：正在下载/应用时再次点击（横幅或面板任一入口）直接忽略，
+        // 否则会重复调用 UpdateApplier.ApplyAsync 把同一版本下载两次。
+        if (_updateInProgress) return;
         if (_pendingUpdate is null) return;
+        _updateInProgress = true;
         BtnCheckUpdate.IsEnabled = false;
         BtnApplyUpdate.IsEnabled = false;
+        BtnBannerUpdate.IsEnabled = false;
+        HideUpdateBanner(); // 下载期间隐藏横幅，避免出现「还在提示更新」的误导
         PbUpdate.Visibility = Visibility.Visible;
         PbUpdate.Value = 0;
         TxtUpdateStatus.Text = $"下载 v{_pendingUpdate.Version}…";
@@ -1113,9 +1124,14 @@ public partial class MainWindow
         }
         finally
         {
+            _updateInProgress = false;
             PbUpdate.Visibility = Visibility.Collapsed;
             BtnCheckUpdate.IsEnabled = true;
             BtnApplyUpdate.IsEnabled = _pendingUpdate is not null;
+            // 更新失败时 _pendingUpdate 仍在，恢复横幅让用户能重试；
+            // 成功时进程马上退出，这里恢复与否都无影响。
+            BtnBannerUpdate.IsEnabled = _pendingUpdate is not null;
+            if (_pendingUpdate is not null) ShowUpdateBanner(_pendingUpdate);
         }
     }
 

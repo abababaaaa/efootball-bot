@@ -226,8 +226,15 @@ public static partial class MatchBrain
                 // 用户报的「比赛中下一步不会点击」正是这一层——按 A 也快一拍（400ms）
                 if (IsInMatchAdvance(ocr))
                     return new MatchAction(MatchActionKind.PadConfirm, 400, "比赛中推进键：快按 A");
-                // 比赛中挂机：按 A + 用户设定的随机间隔（设置→挂机节奏），
-                // 拟人化避免全程零输入；A 在比赛中是传球/逼抢，不会暂停或退出
+                
+                // 【新增】入场与过场动画跳过
+                // 比赛上下文下无比分板时钟 = 过场/入场分镜（首发阵容、猜硬币、入场动画等），
+                // 必须以快节奏连按 A 瞬间切断所有分镜、推进到开球（用户明确要求）。
+                // 只有 Live Match（HasScoreboard=true，左上角时钟常在）才落到下面的 MatchIdleTap
+                // 拟人化慢节奏，防止比赛中乱传球。
+                if (!HasScoreboard(ocr))
+                    return new MatchAction(MatchActionKind.PadConfirm, 350, "无时钟过场/入场：快按 A 跳过");
+
                 return new MatchAction(MatchActionKind.MatchIdleTap, 0, "比赛中随机点击");
             }
             case MatchScreen.CnMatchPause:
@@ -310,10 +317,13 @@ public static partial class MatchBrain
                 // 覆盖层只闪一瞬，旧节奏下这一拍经常落在两次点击之间（"下一步不会点击"）。
                 if (inMatchRecently && IsInMatchAdvance(ocr))
                     return new MatchAction(MatchActionKind.PadConfirm, 1500, "比赛弹窗→下一步");
-                // 比赛/过场/加载：连续多轮无特征时按 B 逃生。
-                // 完全无感知（OCR 0 词，典型：捕获黑屏/驱动异常）时绝不盲按 B
-                // （2026-10-10 15:48 实机：黑帧下盲按 B 9 次），只等待。
-                // 比赛上下文（最近见过比赛特征）：多为镜头切换丢时钟，延长逃生耐心防铲球。
+                
+                if (inMatchRecently && IsSkipOverlay(ocr))
+                    return new MatchAction(MatchActionKind.PadConfirm, 350, "过场回放：快按 A 跳过");
+                // 【新增】开赛过渡期避免等 4 秒：比赛上下文下画面认不出且词少（开赛入场、
+                // 分镜切换），快节奏按 A 跳过入场。这与 InMatch 分支的过场快跳同一意图。
+                if (inMatchRecently && screenStreak < 8 && ocr.Words.Count <= 5)
+                    return new MatchAction(MatchActionKind.PadConfirm, 400, "开赛过场过渡：按 A 跳过");
                 int escapeAt = inMatchRecently ? UnknownEscapeStreakInMatch : UnknownEscapeStreak;
                 // 认不出的普通界面（非比赛上下文）：等 UnknownProbeAStreak 轮还认不出，就按一次 A
                 // 试探。此前只等到 B 逃生，若 B 这条链路也被吞（国服网页层常见），画面就永远不动；

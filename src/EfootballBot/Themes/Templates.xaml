@@ -51,14 +51,15 @@
             </Trigger>
         </Style.Triggers>
     </Style>
-    <!-- 卡片标题前的绿色小竖条 -->
+    <!-- 卡片标题前的小圆点（macOS 风格）：取代旧的 3px 竖条，柔和地点一下标题 -->
     <Style x:Key="CardTitleBar" TargetType="Rectangle">
-        <Setter Property="Width" Value="3"/>
-        <Setter Property="Height" Value="13"/>
-        <Setter Property="RadiusX" Value="1.5"/>
+        <Setter Property="Width" Value="6"/>
+        <Setter Property="Height" Value="6"/>
+        <Setter Property="RadiusX" Value="3"/>
+        <Setter Property="RadiusY" Value="3"/>
         <Setter Property="Fill" Value="{DynamicResource Accent}"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
-        <Setter Property="Margin" Value="0,0,9,0"/>
+        <Setter Property="Margin" Value="1,0,10,0"/>
     </Style>
 
 
@@ -71,7 +72,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="ListViewItem">
-                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="4" Padding="0,1">
+                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8" Padding="0,1">
                         <GridViewRowPresenter Content="{TemplateBinding Content}"
                                               Columns="{TemplateBinding GridView.ColumnCollection}"/>
                     </Border>
@@ -110,7 +111,7 @@
             </Setter.Value>
         </Setter>
     </Style>
-    <!-- 上栏一级菜单：选中 = 绿色文字 + 底部指示条 -->
+    <!-- 上栏一级菜单：选中 = Apple 胶囊浅底 + 主题色文字（与左栏选中语言统一） -->
     <Style x:Key="TopNavTab" TargetType="RadioButton">
         <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
         <Setter Property="FontSize" Value="13"/>
@@ -122,21 +123,19 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Grid Background="Transparent">
-                        <Border x:Name="hover" Background="{DynamicResource HoverOverlay}"
-                                CornerRadius="7" Margin="4,8" Opacity="0"/>
+                    <Border x:Name="bd" CornerRadius="8" Background="Transparent"
+                            BorderBrush="Transparent" BorderThickness="1" Margin="3,9">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                        <Border x:Name="bar" Height="3" CornerRadius="1.5" VerticalAlignment="Bottom"
-                                Margin="8,0" Background="{DynamicResource Accent}" Opacity="0"/>
-                    </Grid>
+                    </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="hover" Property="Opacity" Value="1"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource HoverOverlay}"/>
                             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
                         </Trigger>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
-                            <Setter TargetName="bar" Property="Opacity" Value="1"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFill}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SelectBorder}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -207,7 +206,7 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="4"/>
+        <Setter Property="CornerRadius" Value="8"/>
         <Setter Property="Padding" Value="12,9"/>
         <Setter Property="Margin" Value="0,0,0,4"/>
         <Setter Property="Cursor" Value="Hand"/>

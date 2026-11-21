@@ -5,21 +5,26 @@
          同一控件的所有状态（默认/悬停/按下/选中/禁用）必须写在同一个 ControlTemplate 里。
          ================================================================== -->
 
-    <!-- ============ 左栏模块选择（Win11 NavigationView 项：半透明底 + 左侧强调色指示条） ============ -->
+    <!-- ============ 左栏模块选择（WorkBuddy 风格：规整小圆角矩形 + 左侧细指示条） ============ -->
     <Style x:Key="ModuleRadio" TargetType="RadioButton">
-        <Setter Property="Margin" Value="0,0,0,2"/>
+        <Setter Property="Margin" Value="0,0,0,5"/>
         <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+        <Setter Property="FontSize" Value="13.5"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Grid>
-                        <Border x:Name="bd" CornerRadius="4" Padding="12,8" Background="Transparent"/>
-                        <!-- Win11 导航选中指示条：3px 竖条，贴在项的最左侧 -->
-                        <Rectangle x:Name="ind" Width="3" Height="16" RadiusX="1.5" Fill="{DynamicResource Accent}"
-                                   HorizontalAlignment="Left" VerticalAlignment="Center" Margin="1,0,0,0"
-                                   Visibility="Collapsed"/>
-                        <ContentPresenter Margin="14,0,8,0" VerticalAlignment="Center"/>
+                    <Grid Margin="4,0">
+                        <Border x:Name="bd" CornerRadius="8" Padding="16,14" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="1">
+                            <Grid>
+                                <!-- 左侧选中指示条：WorkBuddy 侧栏的方形强调，不用整块药丸 -->
+                                <Border x:Name="bar" Width="3.5" CornerRadius="1.5" HorizontalAlignment="Left"
+                                        VerticalAlignment="Stretch" Margin="-16,6,0,6"
+                                        Background="{DynamicResource SelectFg}" Opacity="0"/>
+                                <ContentPresenter Margin="8,0,8,0" VerticalAlignment="Center"/>
+                            </Grid>
+                        </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <!-- 选中高亮必须「已选中 + 当前正在看游戏模块（Tag=Active）」双条件：
@@ -31,9 +36,10 @@
                                 <Condition Property="IsChecked" Value="True"/>
                                 <Condition Property="Tag" Value="Active"/>
                             </MultiTrigger.Conditions>
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource ControlFill}"/>
-                            <Setter TargetName="ind" Property="Visibility" Value="Visible"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFill}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SelectBorder}"/>
+                            <Setter TargetName="bar" Property="Opacity" Value="1"/>
+                            <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                         </MultiTrigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
@@ -51,13 +57,13 @@
         </Setter>
     </Style>
 
-    <!-- ============ 左栏工具导航（Win11 NavigationView 项：32px 高、4px 圆角、选中半透明底） ============ -->
+    <!-- ============ 左栏工具导航（WorkBuddy 风格：规整小圆角 + 左侧细指示条） ============ -->
     <Style x:Key="NavToolBtn" TargetType="Button">
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Height" Value="32"/>
-        <Setter Property="Margin" Value="0,0,0,1"/>
+        <Setter Property="Height" Value="36"/>
+        <Setter Property="Margin" Value="5,0,5,2"/>
         <Setter Property="FontSize" Value="12.5"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="HorizontalContentAlignment" Value="Left"/>
@@ -66,12 +72,16 @@
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
                     <Grid>
-                        <Border x:Name="bd" CornerRadius="4" Background="Transparent"/>
-                        <Rectangle x:Name="ind" Width="3" Height="16" RadiusX="1.5" Fill="{DynamicResource Accent}"
-                                   HorizontalAlignment="Left" VerticalAlignment="Center" Margin="1,0,0,0"
-                                   Visibility="Collapsed"/>
-                        <ContentPresenter Margin="14,0,8,0" VerticalAlignment="Center"
+                        <Border x:Name="bd" CornerRadius="6" Background="Transparent"
+                                BorderBrush="Transparent" BorderThickness="1">
+                            <Grid>
+                                <Border x:Name="bar" Width="3" CornerRadius="1.5" HorizontalAlignment="Left"
+                                        VerticalAlignment="Stretch" Margin="-5,6,0,6"
+                                        Background="{DynamicResource SelectFg}" Opacity="0"/>
+                                <ContentPresenter Margin="18,0,8,0" VerticalAlignment="Center"
                                           HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
+                            </Grid>
+                        </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
@@ -79,9 +89,10 @@
                             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
                         </Trigger>
                         <Trigger Property="Tag" Value="Active">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource ControlFill}"/>
-                            <Setter TargetName="ind" Property="Visibility" Value="Visible"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFill}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SelectBorder}"/>
+                            <Setter TargetName="bar" Property="Opacity" Value="1"/>
+                            <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.4"/>
@@ -92,13 +103,13 @@
         </Setter>
     </Style>
 
-    <!-- ============ 主按钮（绿色实心，悬停提亮，按下轻微回弹） ============ -->
+    <!-- ============ 主按钮（Apple 玻璃实体感：渐变 + 顶部高光边 + 轻投影） ============ -->
     <Style x:Key="PrimaryBtn" TargetType="Button">
-        <Setter Property="Background" Value="{DynamicResource Accent}"/>
-        <Setter Property="Foreground" Value="{DynamicResource TextOnAccent}"/>
+        <Setter Property="Background" Value="{DynamicResource PrimaryBtnFill}"/>
+        <Setter Property="Foreground" Value="#FF1C1C1E"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Padding" Value="16,7"/>
-        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="Padding" Value="16,8"/>
+        <Setter Property="MinHeight" Value="34"/>
         <Setter Property="FontSize" Value="12.5"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
@@ -106,17 +117,17 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Grid>
-                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="4"
-                                Padding="{TemplateBinding Padding}"
-                                RenderTransformOrigin="0.5,0.5">
-                            <Border.RenderTransform>
-                                <ScaleTransform ScaleX="1" ScaleY="1"/>
-                            </Border.RenderTransform>
+                    <Grid RenderTransformOrigin="0.5,0.5">
+                        <Grid.RenderTransform>
+                            <ScaleTransform ScaleX="1" ScaleY="1"/>
+                        </Grid.RenderTransform>
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="9"
+                                BorderBrush="#FFFFFFFF" BorderThickness="1"
+                                Padding="{TemplateBinding Padding}" Effect="{StaticResource GlassCardShadow}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
-                        <!-- 悬停提亮层（Win11 强调色按钮 hover 变亮一档） -->
-                        <Border x:Name="flash" CornerRadius="4" Background="White" Opacity="0"
+                        <!-- 悬停压暗层：白按钮上用浅灰反馈 -->
+                        <Border x:Name="flash" CornerRadius="9" Background="#FF9A9AA0" Opacity="0"
                                 IsHitTestVisible="False"/>
                     </Grid>
                     <ControlTemplate.Triggers>
@@ -124,8 +135,8 @@
                             <Setter TargetName="flash" Property="Opacity" Value="0.10"/>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter TargetName="bd" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.975" ScaleY="0.975"/></Setter.Value></Setter>
-                            <Setter TargetName="flash" Property="Opacity" Value="0.16"/>
+                            <Setter Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.975" ScaleY="0.975"/></Setter.Value></Setter>
+                            <Setter TargetName="flash" Property="Opacity" Value="0.18"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.34"/>
@@ -156,7 +167,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             Padding="{TemplateBinding Padding}"
@@ -227,7 +238,7 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="4"
+                    <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8"
                             BorderBrush="{TemplateBinding BorderBrush}"
                             BorderThickness="{TemplateBinding BorderThickness}"
                             Padding="{TemplateBinding Padding}"
@@ -270,7 +281,7 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <Grid Width="18" Height="18" VerticalAlignment="Center" Margin="0,0,9,0">
-                            <Border x:Name="box" CornerRadius="5" Background="{DynamicResource InputBg}"
+                            <Border x:Name="box" CornerRadius="6" Background="{DynamicResource InputBg}"
                                     BorderBrush="{DynamicResource InputBorder}" BorderThickness="1"/>
                             <Path x:Name="check" Data="M 3.5,9.5 L 7.5,13 L 14.5,4.5"
                                   Stroke="White" StrokeThickness="2"
@@ -352,7 +363,7 @@
             <Setter.Value>
                 <ControlTemplate TargetType="TextBox">
                     <Border x:Name="bd" Background="{TemplateBinding Background}"
-                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="7">
+                            BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="8">
                         <ScrollViewer x:Name="PART_ContentHost" Margin="10,0" Focusable="False"
                                       VerticalAlignment="Center"/>
                     </Border>
@@ -372,7 +383,7 @@
 
     <!-- ============ 下拉框 ============ -->
     <Style TargetType="ComboBox">
-        <Setter Property="Background" Value="{DynamicResource InputBg}"/>
+        <Setter Property="Background" Value="{DynamicResource ComboBg}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource InputBorder}"/>
         <Setter Property="MinHeight" Value="30"/>
@@ -393,7 +404,7 @@
                                 <ControlTemplate TargetType="ToggleButton">
                                     <Border x:Name="bd" Background="{TemplateBinding Background}"
                                             BorderBrush="{TemplateBinding BorderBrush}"
-                                            BorderThickness="1" CornerRadius="7"/>
+                                            BorderThickness="1" CornerRadius="8"/>
                                 </ControlTemplate>
                             </ToggleButton.Template>
                         </ToggleButton>
@@ -410,7 +421,7 @@
                         <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True"
                                Focusable="False" PopupAnimation="Fade"
                                IsOpen="{TemplateBinding IsDropDownOpen}">
-                            <Border Background="{DynamicResource CardBg}"
+                            <Border Background="{DynamicResource ComboPopupBg}"
                                     BorderBrush="{DynamicResource CardBorder}" BorderThickness="1"
                                     CornerRadius="10" Margin="0,5,0,9" Padding="4"
                                     Effect="{StaticResource FloatShadow}"
@@ -462,14 +473,14 @@
     </Style>
     <Style x:Key="SegTab" TargetType="RadioButton">
         <Setter Property="Foreground" Value="{DynamicResource SegTabFg}"/>
-        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="FontSize" Value="14"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Margin" Value="2,0"/>
+        <Setter Property="Margin" Value="3,0"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="bd" CornerRadius="4" Padding="14,5.5" Background="Transparent"
+                    <Border x:Name="bd" CornerRadius="6" Padding="18,9" Background="Transparent"
                             BorderBrush="Transparent" BorderThickness="1"
                             RenderTransformOrigin="0.5,0.5">
                         <Border.RenderTransform>
@@ -479,9 +490,9 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource Surface2}"/>
-                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource AccentBorder}"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFillStrong}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SelectBorder}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                         </Trigger>
                         <MultiTrigger>
                             <MultiTrigger.Conditions>
@@ -504,30 +515,26 @@
     </Style>
 
 
-    <!-- 三级菜单专用：选中态用白色文字 + 中性底，不再和主按钮抢绿色 -->
+    <!-- 顶部功能分类页签：选中=明显的灰色磨砂方框（宽高充足、一直高亮） -->
     <Style x:Key="SubTab" TargetType="RadioButton">
         <Setter Property="Foreground" Value="{DynamicResource SegTabFg}"/>
-        <Setter Property="FontSize" Value="12.5"/>
+        <Setter Property="FontSize" Value="15"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Margin" Value="2,0"/>
+        <Setter Property="Margin" Value="0,2,10,2"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Grid>
-                        <Border x:Name="bd" CornerRadius="4" Background="Transparent"/>
-                        <Border x:Name="ul" Height="3" CornerRadius="1.5" VerticalAlignment="Bottom"
-                                HorizontalAlignment="Stretch" Margin="10,0"
-                                Background="{DynamicResource Accent}" Opacity="0"/>
-                        <ContentPresenter Margin="14,7" HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Grid>
+                    <Border x:Name="bd" CornerRadius="8" Background="Transparent"
+                            BorderBrush="Transparent" BorderThickness="1" Padding="16,13">
+                        <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Border>
                     <ControlTemplate.Triggers>
-                        <!-- 选中态：主题色底 + 主题色描边 + 加粗。
-                             原先用 Surface2 中性底（和窗口底色几乎同色），一排五六个页签里
-                             看不出当前在哪一页 —— Operate 界面里「我在哪」必须一眼可读。 -->
+                        <!-- 选中态：灰色磨砂方框 + 描边 + 白字，常驻高亮、宽高大气 -->
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="ul" Property="Opacity" Value="1"/>
-                            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SubTabSelFill}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SubTabSelStroke}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                             <Setter Property="FontWeight" Value="SemiBold"/>
                         </Trigger>
                         <MultiTrigger>

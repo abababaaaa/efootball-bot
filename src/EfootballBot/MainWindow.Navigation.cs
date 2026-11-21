@@ -129,14 +129,21 @@ public partial class MainWindow
             return;
         }
 
-        SetTabImportant.Visibility = Visibility.Visible;
-        SetTabDisplay.Visibility = Visibility.Collapsed;
-        SetTabInput.Visibility = Visibility.Collapsed;
-        SetTabDaily.Visibility = Visibility.Collapsed;
+        // 设置页镜像页签：Imp1/2/3 走 Important 块内的子分段；
+        // RbSetDisplay/Input/Daily 走各自独立的内容块。之前后三个误用 SubTab_Checked，
+        // 其 ShowByTag 不认识 RbSet*，导致内容不切换、选中态也不常驻 —— 这里统一处理。
+        var isImp = target.StartsWith("Imp");
+        SetTabImportant.Visibility = isImp ? Visibility.Visible : Visibility.Collapsed;
+        SetTabDisplay.Visibility = target == "RbSetDisplay" ? Visibility.Visible : Visibility.Collapsed;
+        SetTabInput.Visibility = target == "RbSetInput" ? Visibility.Visible : Visibility.Collapsed;
+        SetTabDaily.Visibility = target == "RbSetDaily" ? Visibility.Visible : Visibility.Collapsed;
         SetTabDev.Visibility = Visibility.Collapsed;
-        foreach (UIElement child in SetTabImportant.Children)
-            if (child is FrameworkElement fe2 && fe2.Tag is string tg && tg.StartsWith("Imp"))
-                fe2.Visibility = tg == target ? Visibility.Visible : Visibility.Collapsed;
+        if (isImp)
+        {
+            foreach (UIElement child in SetTabImportant.Children)
+                if (child is FrameworkElement fe2 && fe2.Tag is string tg && tg.StartsWith("Imp"))
+                    fe2.Visibility = tg == target ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     /// <summary>只显示某个工具页滚动内容里的第 idx 段。</summary>
