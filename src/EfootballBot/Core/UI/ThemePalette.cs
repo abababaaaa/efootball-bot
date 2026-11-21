@@ -37,6 +37,9 @@ public static class ThemePalette
         ["WindowBg"] = "#FF08080A",
         ["ContentBg"] = "#F208080A",
         ["CardBg"] = "#12FFFFFF",
+        // 下拉选择卡：控件本体与弹出层用更实的底色，盖住下层文字避免重叠难辨
+        ["ComboBg"] = "#2A242428",
+        ["ComboPopupBg"] = "#F0161618",
         ["CardBorder"] = "#20FFFFFF",
         ["SideLeftBg"] = "#59000000",
         ["SideRightBg"] = "#42000000",
@@ -126,6 +129,9 @@ public static class ThemePalette
         ["WindowBg"] = "#FFF2F2F7",
         ["ContentBg"] = "#F2FFFFFF",
         ["CardBg"] = "#B3FFFFFF",
+        // 亮色下拉选择卡：浅色实底
+        ["ComboBg"] = "#E8F2F2F7",
+        ["ComboPopupBg"] = "#FAF2F2F7",
         ["CardBorder"] = "#1A000000",
         ["SideLeftBg"] = "#99F2F2F7",
         ["SideRightBg"] = "#80F2F2F7",
@@ -215,6 +221,9 @@ public static class ThemePalette
         ["WindowBg"] = "#FF1C1C20",
         ["ContentBg"] = "#E61C1C20",
         ["CardBg"] = "#1AFFFFFF",
+        // 深蓝下拉选择卡
+        ["ComboBg"] = "#2A1C2028",
+        ["ComboPopupBg"] = "#F0161A22",
         ["CardBorder"] = "#24A0C8FF",
         ["SideLeftBg"] = "#66151A22",
         ["SideRightBg"] = "#4D151A22",

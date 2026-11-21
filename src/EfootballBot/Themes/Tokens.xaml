@@ -143,6 +143,8 @@
     <SolidColorBrush x:Key="SelectFillStrong" Color="#3DFFFFFF"/>
     <SolidColorBrush x:Key="SelectBorder" Color="#3DFFFFFF"/>
     <SolidColorBrush x:Key="SelectFg" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="ComboBg" Color="#2A242428"/>
+    <SolidColorBrush x:Key="ComboPopupBg" Color="#F0161618"/>
     <Color x:Key="HeroGlowFromColor">#260A84FF</Color>
     <Color x:Key="HeroGlowFadeColor">#000A84FF</Color>
     <Color x:Key="HeroTitleFromColor">#FFFFFFFF</Color>

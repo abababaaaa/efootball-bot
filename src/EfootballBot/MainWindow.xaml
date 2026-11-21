@@ -2042,7 +2042,8 @@
                                 <Rectangle Style="{StaticResource CardTitleBar}"/>
                                 <TextBlock Style="{StaticResource H2}">赛后活动任务（仅国际服）</TextBlock>
                             </StackPanel>
-                            <TextBlock Style="{StaticResource SmallText}" Margin="0,6,0,0" MaxWidth="520"><Run Text="比赛结束后 / 开始前会出现的全屏活动地图（活动名与图标每周随服务器推送变化）。"/><Run Text="仅国际服独享" Foreground="{DynamicResource Warning}"/></TextBlock>
+                            <TextBlock Style="{StaticResource SmallText}" Margin="0,6,0,0" MaxWidth="520"
+                                       HorizontalAlignment="Left" TextAlignment="Left"><Run Text="比赛结束后 / 开始前会出现的全屏活动地图（活动名与图标每周随服务器推送变化）。"/><Run Text="仅国际服独享" Foreground="{DynamicResource Warning}"/></TextBlock>
                             <CheckBox x:Name="ChkPmAutoAdvance" FontWeight="SemiBold" Margin="0,10,0,0"
                                       Content="自动完成（推进）周任务"/>
                                                         <Grid Margin="0,4,0,0" MaxWidth="520" HorizontalAlignment="Left">
