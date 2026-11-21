@@ -223,9 +223,16 @@ public partial class MainWindow
         SyncSubTabs();
 
         // 设置页可见页签的选中态：镜像页签 SubRbSetImportant 是 Collapsed 的，
-        // 只同步它会让「★ 防检测 / 赛后活动任务 / 挂机节奏」这一排一个都不亮
-        // （用户看不出正在哪一页）。这里显式点亮可见的第一项。
-        if (mode == NavMode.Settings && !_devMode) SubRbImp1.IsChecked = true;
+        // 若当前没有任何可见的设置页签被选中，才点亮第一项（首次进入的兜底）。
+        // 不能每次进入都强制 SubRbImp1.IsChecked=true —— 那会覆盖用户上次选的页签，
+        // 导致「画面与性能 / 手柄与输入 / 挂机与日志」切走再回来高亮丢失（用户反馈）。
+        if (mode == NavMode.Settings && !_devMode)
+        {
+            bool anyVisibleChecked =
+                SubRbImp1.IsChecked == true || SubRbImp2.IsChecked == true || SubRbImp3.IsChecked == true ||
+                SubRbSetDisplay.IsChecked == true || SubRbSetInput.IsChecked == true || SubRbSetDaily.IsChecked == true;
+            if (!anyVisibleChecked) SubRbImp1.IsChecked = true;
+        }
     }
 
     /// <summary>设置页二级页签：正常模式停在「★重要设定」，开发者模式只显示开发者内容。</summary>

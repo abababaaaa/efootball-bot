@@ -293,15 +293,15 @@
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
                         </StackPanel.Resources>
-                        <RadioButton x:Name="SubRbPreMatch" GroupName="IntlModule" Tag="RbPreMatch"
+                        <RadioButton x:Name="SubRbPreMatch" GroupName="IntlMirror" Tag="RbPreMatch"
                                      Checked="SubTab_Checked" Content="赛前快捷设置"/>
-                        <RadioButton x:Name="SubRbMyLeague" GroupName="IntlModule" Tag="RbMyLeague"
+                        <RadioButton x:Name="SubRbMyLeague" GroupName="IntlMirror" Tag="RbMyLeague"
                                      Checked="SubTab_Checked" Content="我的联赛" IsChecked="True"/>
-                        <RadioButton x:Name="SubRbWeekly" GroupName="IntlModule" Tag="RbWeekly"
+                        <RadioButton x:Name="SubRbWeekly" GroupName="IntlMirror" Tag="RbWeekly"
                                      Checked="SubTab_Checked" Content="周活动"/>
-                        <RadioButton x:Name="SubRbAiLadder" GroupName="IntlModule" Tag="RbAiLadder"
+                        <RadioButton x:Name="SubRbAiLadder" GroupName="IntlMirror" Tag="RbAiLadder"
                                      Checked="SubTab_Checked" Content="AI 天梯联赛"/>
-                        <RadioButton x:Name="SubRbStud" GroupName="IntlModule" Tag="RbStud"
+                        <RadioButton x:Name="SubRbStud" GroupName="IntlMirror" Tag="RbStud"
                                      Checked="SubTab_Checked" Content="种马培训"/>
                     </StackPanel>
 
@@ -314,13 +314,13 @@
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
                         </StackPanel.Resources>
-                        <RadioButton x:Name="SubRbCnPreMatch" GroupName="CnModule" Tag="RbCnPreMatch"
+                        <RadioButton x:Name="SubRbCnPreMatch" GroupName="CnMirror" Tag="RbCnPreMatch"
                                      Checked="SubTab_Checked" Content="赛前快捷设置"/>
-                        <RadioButton x:Name="SubRbCnLeague" GroupName="CnModule" Tag="RbCnLeague"
+                        <RadioButton x:Name="SubRbCnLeague" GroupName="CnMirror" Tag="RbCnLeague"
                                      Checked="SubTab_Checked" Content="天梯巅峰赛" IsChecked="True"/>
-                        <RadioButton x:Name="SubRbCnWeekly" GroupName="CnModule" Tag="RbCnWeekly"
+                        <RadioButton x:Name="SubRbCnWeekly" GroupName="CnMirror" Tag="RbCnWeekly"
                                      Checked="SubTab_Checked" Content="周活动"/>
-                        <RadioButton x:Name="SubRbCnMyLeague" GroupName="CnModule" Tag="RbCnMyLeague"
+                        <RadioButton x:Name="SubRbCnMyLeague" GroupName="CnMirror" Tag="RbCnMyLeague"
                                      Checked="SubTab_Checked" Content="我的联赛"/>
                     </StackPanel>
 
@@ -376,18 +376,18 @@
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
                         </WrapPanel.Resources>
-                        <RadioButton x:Name="SubRbImp1" GroupName="SettingsNav" Tag="Imp1" Checked="SecTab_Checked"
+                        <RadioButton x:Name="SubRbImp1" GroupName="SettingsMirror" Tag="Imp1" Checked="SecTab_Checked"
                                      Content="防检测" IsChecked="True"/>
-                        <RadioButton x:Name="SubRbImp2" GroupName="SettingsNav" Tag="Imp2" Checked="SecTab_Checked" Content="赛后活动任务"/>
-                        <RadioButton x:Name="SubRbImp3" GroupName="SettingsNav" Tag="Imp3" Checked="SecTab_Checked" Content="挂机节奏"/>
-                        <RadioButton x:Name="SubRbSetImportant" GroupName="SettingsNav" Tag="RbSetImportant"
+                        <RadioButton x:Name="SubRbImp2" GroupName="SettingsMirror" Tag="Imp2" Checked="SecTab_Checked" Content="赛后活动任务"/>
+                        <RadioButton x:Name="SubRbImp3" GroupName="SettingsMirror" Tag="Imp3" Checked="SecTab_Checked" Content="挂机节奏"/>
+                        <RadioButton x:Name="SubRbSetImportant" GroupName="SettingsMirror" Tag="RbSetImportant"
                                      Checked="SubTab_Checked" Content="重要设定" Visibility="Collapsed"/>
-                        <RadioButton x:Name="SubRbSetDisplay" GroupName="SettingsNav" Tag="RbSetDisplay"
-                                     Checked="SubTab_Checked" Content="画面与性能"/>
-                        <RadioButton x:Name="SubRbSetInput" GroupName="SettingsNav" Tag="RbSetInput"
-                                     Checked="SubTab_Checked" Content="手柄与输入"/>
-                        <RadioButton x:Name="SubRbSetDaily" GroupName="SettingsNav" Tag="RbSetDaily"
-                                     Checked="SubTab_Checked" Content="挂机与日志"/>
+                        <RadioButton x:Name="SubRbSetDisplay" GroupName="SettingsMirror" Tag="RbSetDisplay"
+                                     Checked="SecTab_Checked" Content="画面与性能"/>
+                        <RadioButton x:Name="SubRbSetInput" GroupName="SettingsMirror" Tag="RbSetInput"
+                                     Checked="SecTab_Checked" Content="手柄与输入"/>
+                        <RadioButton x:Name="SubRbSetDaily" GroupName="SettingsMirror" Tag="RbSetDaily"
+                                     Checked="SecTab_Checked" Content="挂机与日志"/>
 
                     </WrapPanel>
                 </Grid>
