@@ -7,7 +7,7 @@
         WindowBackdropType="Acrylic"
         Title="eFootball 挂机助手（手柄后台版）" Height="800" Width="1280"
         Icon="app.ico"
-        MinHeight="640" MinWidth="1240"
+        MinHeight="640" MinWidth="1300"
         Background="{DynamicResource WindowBg}" Foreground="{DynamicResource TextPrimary}"
         FontFamily="Microsoft YaHei UI"
         TextOptions.TextFormattingMode="Ideal" TextOptions.TextRenderingMode="ClearType">
@@ -74,7 +74,7 @@
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="212"/>
-                <ColumnDefinition Width="*" MinWidth="520"/>
+                <ColumnDefinition Width="*" MinWidth="580"/>
                 <ColumnDefinition x:Name="RightCol" Width="*" MinWidth="360" MaxWidth="460"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
@@ -281,18 +281,16 @@
             <Border x:Name="SubMenuHost" Grid.Row="0" Background="Transparent"
                     BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,0,1"
                     Padding="10,7,10,7" Visibility="Collapsed">
-                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
-                              Focusable="False" PanningMode="HorizontalFirst">
-                <Grid HorizontalAlignment="Left">
-                    <StackPanel x:Name="SubMenuIntl" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
-                        <StackPanel.Resources>
+                <Grid>
+                    <WrapPanel x:Name="SubMenuIntl" Orientation="Horizontal" Visibility="Collapsed">
+                        <WrapPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
-                                <Setter Property="Margin" Value="0,0,12,0"/>
+                                <Setter Property="Margin" Value="0,2,10,2"/>
                                 <Setter Property="VerticalAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
-                        </StackPanel.Resources>
+                        </WrapPanel.Resources>
                         <RadioButton x:Name="SubRbPreMatch" GroupName="IntlMirror" Tag="RbPreMatch"
                                      Checked="SubTab_Checked" Content="赛前快捷设置"/>
                         <RadioButton x:Name="SubRbMyLeague" GroupName="IntlMirror" Tag="RbMyLeague"
@@ -303,17 +301,17 @@
                                      Checked="SubTab_Checked" Content="AI 天梯联赛"/>
                         <RadioButton x:Name="SubRbStud" GroupName="IntlMirror" Tag="RbStud"
                                      Checked="SubTab_Checked" Content="种马培训"/>
-                    </StackPanel>
+                    </WrapPanel>
 
-                    <StackPanel x:Name="SubMenuCn" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
-                        <StackPanel.Resources>
+                    <WrapPanel x:Name="SubMenuCn" Orientation="Horizontal" Visibility="Collapsed">
+                        <WrapPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
-                                <Setter Property="Margin" Value="0,0,12,0"/>
+                                <Setter Property="Margin" Value="0,2,10,2"/>
                                 <Setter Property="VerticalAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
-                        </StackPanel.Resources>
+                        </WrapPanel.Resources>
                         <RadioButton x:Name="SubRbCnPreMatch" GroupName="CnMirror" Tag="RbCnPreMatch"
                                      Checked="SubTab_Checked" Content="赛前快捷设置"/>
                         <RadioButton x:Name="SubRbCnLeague" GroupName="CnMirror" Tag="RbCnLeague"
@@ -322,56 +320,56 @@
                                      Checked="SubTab_Checked" Content="周活动"/>
                         <RadioButton x:Name="SubRbCnMyLeague" GroupName="CnMirror" Tag="RbCnMyLeague"
                                      Checked="SubTab_Checked" Content="我的联赛"/>
-                    </StackPanel>
+                    </WrapPanel>
 
                     <!-- 工具页：页内分段（按索引切换滚动内容里的第 N 段） -->
-                    <StackPanel x:Name="SubMenuUpdate" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
-                        <StackPanel.Resources>
+                    <WrapPanel x:Name="SubMenuUpdate" Orientation="Horizontal" Visibility="Collapsed">
+                        <WrapPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}"/>
-                        </StackPanel.Resources>
+                        </WrapPanel.Resources>
                         <RadioButton x:Name="UpTabAuto" GroupName="UpdateNav" Content="自动更新" IsChecked="True"
                                      Tag="UpdatePanel:0" Checked="SecTab_Checked"/>
                         <RadioButton x:Name="UpTabLog" GroupName="UpdateNav" Content="更新日志"
                                      Tag="UpdatePanel:1" Checked="SecTab_Checked"/>
-                    </StackPanel>
+                    </WrapPanel>
 
-                    <StackPanel x:Name="SubMenuNetwork" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
-                        <StackPanel.Resources>
+                    <WrapPanel x:Name="SubMenuNetwork" Orientation="Horizontal" Visibility="Collapsed">
+                        <WrapPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}"/>
-                        </StackPanel.Resources>
+                        </WrapPanel.Resources>
                         <RadioButton x:Name="NetTabPing" GroupName="NetNav" Content="服务器测速" IsChecked="True"
                                      Tag="NetworkPanel:0" Checked="SecTab_Checked"/>
                         <RadioButton x:Name="NetTabMonitor" GroupName="NetNav" Content="游戏内监控"
                                      Tag="NetworkPanel:1" Checked="SecTab_Checked"/>
                         <RadioButton x:Name="NetTabLine" GroupName="NetNav" Content="对战线路"
                                      Tag="NetworkPanel:2" Checked="SecTab_Checked"/>
-                    </StackPanel>
+                    </WrapPanel>
 
-                    <StackPanel x:Name="SubMenuGithub" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
-                        <StackPanel.Resources>
+                    <WrapPanel x:Name="SubMenuGithub" Orientation="Horizontal" Visibility="Collapsed">
+                        <WrapPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}"/>
-                        </StackPanel.Resources>
+                        </WrapPanel.Resources>
                         <RadioButton x:Name="GhTabPort" GroupName="GhNav" Content="访问加速" IsChecked="True"
                                      Tag="GitHubPanel:0" Checked="SecTab_Checked"/>
                         <RadioButton x:Name="GhTabSpeed" GroupName="GhNav" Content="域名测速"
                                      Tag="GitHubPanel:1" Checked="SecTab_Checked"/>
-                    </StackPanel>
+                    </WrapPanel>
 
-                    <StackPanel x:Name="SubMenuFeedback" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
-                        <StackPanel.Resources>
+                    <WrapPanel x:Name="SubMenuFeedback" Orientation="Horizontal" Visibility="Collapsed">
+                        <WrapPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}"/>
-                        </StackPanel.Resources>
+                        </WrapPanel.Resources>
                         <RadioButton x:Name="FbTabDiag" GroupName="FbNav" Content="诊断报告" IsChecked="True"
                                      Tag="FeedbackPanel:0" Checked="SecTab_Checked"/>
                         <RadioButton x:Name="FbTabTalk" GroupName="FbNav" Content="反馈交流"
                                      Tag="FeedbackPanel:1" Checked="SecTab_Checked"/>
-                    </StackPanel>
+                    </WrapPanel>
 
-                    <WrapPanel x:Name="SubMenuSettings" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
+                    <WrapPanel x:Name="SubMenuSettings" Orientation="Horizontal" Visibility="Collapsed">
                         <WrapPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
-                                <Setter Property="Margin" Value="0,0,12,0"/>
+                                <Setter Property="Margin" Value="0,2,10,2"/>
                                 <Setter Property="VerticalAlignment" Value="Center"/>
                                 <Setter Property="VerticalContentAlignment" Value="Center"/>
                             </Style>
@@ -391,7 +389,6 @@
 
                     </WrapPanel>
                 </Grid>
-                </ScrollViewer>
             </Border>
 
             <Grid Grid.Row="1" Margin="20,18,20,18">
@@ -3357,23 +3354,34 @@
         </Border>
 
         <!-- ===== 右侧折叠条：右栏收起后点它展开（中栏已铺满） ===== -->
-        <Border x:Name="RightRail" Grid.Column="3" Width="30" Visibility="Collapsed"
+        <Border x:Name="RightRail" Grid.Column="3" Width="42" Visibility="Collapsed"
                 Background="{DynamicResource ChromeGlass}"
-                BorderBrush="{DynamicResource Divider}" BorderThickness="1,0,1,0">
+                BorderBrush="{DynamicResource Divider}" BorderThickness="1,0,0,0">
             <Button x:Name="BtnRightExpand" Background="Transparent" BorderThickness="0" Cursor="Hand"
                     ToolTip="展开右侧栏（实时画面 / 统计 / 运行日志）" Click="BtnRightExpand_Click">
-                <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                    <Path Width="12" Height="12" Stretch="Uniform" HorizontalAlignment="Center"
-                          Stroke="{DynamicResource TextMuted}" StrokeThickness="1.6"
-                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                          Data="M15 5l-7 7 7 7"/>
-                    <StackPanel Margin="0,10,0,0" HorizontalAlignment="Center">
-                        <TextBlock Text="实" FontSize="11.5" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center"/>
-                        <TextBlock Text="时" FontSize="11.5" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center"/>
-                        <TextBlock Text="画" FontSize="11.5" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center"/>
-                        <TextBlock Text="面" FontSize="11.5" Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center"/>
-                    </StackPanel>
-                </StackPanel>
+                <Button.Template>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="rbd" Background="Transparent" CornerRadius="0">
+                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                <Border x:Name="ic" Width="30" Height="30" CornerRadius="8"
+                                        Background="{DynamicResource HoverOverlay}" HorizontalAlignment="Center">
+                                    <Path Width="16" Height="16" Stretch="Uniform" HorizontalAlignment="Center"
+                                          VerticalAlignment="Center"
+                                          Stroke="{DynamicResource TextSecondary}" StrokeThickness="2"
+                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                          Data="M15 5l-7 7 7 7"/>
+                                </Border>
+                                <TextBlock Text="展开面板" FontSize="12" Margin="0,12,0,0"
+                                           Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center"/>
+                            </StackPanel>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ic" Property="Background" Value="{DynamicResource SelectFillStrong}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Button.Template>
             </Button>
         </Border>
 

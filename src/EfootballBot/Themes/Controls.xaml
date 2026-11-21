@@ -521,7 +521,7 @@
         <Setter Property="FontSize" Value="15"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Margin" Value="0,0,10,0"/>
+        <Setter Property="Margin" Value="0,2,10,2"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
