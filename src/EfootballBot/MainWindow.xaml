@@ -409,6 +409,13 @@
                           Style="{StaticResource PageScroll}" HorizontalScrollBarVisibility="Disabled"
                           VerticalContentAlignment="Center">
                 <StackPanel MaxWidth="900" HorizontalAlignment="Stretch" Margin="0,0,0,0">
+                    <!-- 首页品牌眉题：与顶栏品牌呼应，让开屏标题区更完整和谐 -->
+                    <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                        <Rectangle Width="7" Height="7" RadiusX="3.5" RadiusY="3.5"
+                                   Fill="{DynamicResource AccentGlow}" VerticalAlignment="Center" Margin="0,0,9,0"/>
+                        <TextBlock Text="eFootball 挂机助手" FontSize="12.5" FontWeight="SemiBold"
+                                   Foreground="{DynamicResource TextSecondary}" VerticalAlignment="Center"/>
+                    </StackPanel>
                     <TextBlock Text="把比赛跑完，剩下的交给它" TextWrapping="Wrap"
                                FontSize="26" FontWeight="SemiBold" LineHeight="34"
                                Foreground="{DynamicResource TextPrimary}"/>
