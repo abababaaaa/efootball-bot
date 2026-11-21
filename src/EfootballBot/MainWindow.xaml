@@ -7,7 +7,7 @@
         WindowBackdropType="Acrylic"
         Title="eFootball 挂机助手（手柄后台版）" Height="800" Width="1280"
         Icon="app.ico"
-        MinHeight="640" MinWidth="1140"
+        MinHeight="640" MinWidth="1180"
         Background="{DynamicResource WindowBg}" Foreground="{DynamicResource TextPrimary}"
         FontFamily="Microsoft YaHei UI"
         TextOptions.TextFormattingMode="Ideal" TextOptions.TextRenderingMode="ClearType">
@@ -74,7 +74,7 @@
         <Grid Grid.Row="1">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="212"/>
-                <ColumnDefinition Width="*" MinWidth="430"/>
+                <ColumnDefinition Width="*" MinWidth="450"/>
                 <ColumnDefinition x:Name="RightCol" Width="*" MinWidth="380" MaxWidth="520"/>
                 <ColumnDefinition Width="Auto"/>
             </Grid.ColumnDefinitions>
@@ -284,7 +284,7 @@
                 <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
                               Focusable="False" PanningMode="HorizontalFirst">
                 <Grid>
-                    <StackPanel x:Name="SubMenuIntl" Orientation="Horizontal" Visibility="Collapsed">
+                    <StackPanel x:Name="SubMenuIntl" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
@@ -305,7 +305,7 @@
                                      Checked="SubTab_Checked" Content="种马培训"/>
                     </StackPanel>
 
-                    <StackPanel x:Name="SubMenuCn" Orientation="Horizontal" Visibility="Collapsed">
+                    <StackPanel x:Name="SubMenuCn" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
@@ -325,7 +325,7 @@
                     </StackPanel>
 
                     <!-- 工具页：页内分段（按索引切换滚动内容里的第 N 段） -->
-                    <StackPanel x:Name="SubMenuUpdate" Orientation="Horizontal" Visibility="Collapsed">
+                    <StackPanel x:Name="SubMenuUpdate" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}"/>
                         </StackPanel.Resources>
@@ -335,7 +335,7 @@
                                      Tag="UpdatePanel:1" Checked="SecTab_Checked"/>
                     </StackPanel>
 
-                    <StackPanel x:Name="SubMenuNetwork" Orientation="Horizontal" Visibility="Collapsed">
+                    <StackPanel x:Name="SubMenuNetwork" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}"/>
                         </StackPanel.Resources>
@@ -347,7 +347,7 @@
                                      Tag="NetworkPanel:2" Checked="SecTab_Checked"/>
                     </StackPanel>
 
-                    <StackPanel x:Name="SubMenuGithub" Orientation="Horizontal" Visibility="Collapsed">
+                    <StackPanel x:Name="SubMenuGithub" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}"/>
                         </StackPanel.Resources>
@@ -357,7 +357,7 @@
                                      Tag="GitHubPanel:1" Checked="SecTab_Checked"/>
                     </StackPanel>
 
-                    <StackPanel x:Name="SubMenuFeedback" Orientation="Horizontal" Visibility="Collapsed">
+                    <StackPanel x:Name="SubMenuFeedback" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
                         <StackPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}"/>
                         </StackPanel.Resources>
@@ -367,7 +367,7 @@
                                      Tag="FeedbackPanel:1" Checked="SecTab_Checked"/>
                     </StackPanel>
 
-                    <WrapPanel x:Name="SubMenuSettings" Orientation="Horizontal" Visibility="Collapsed">
+                    <WrapPanel x:Name="SubMenuSettings" Orientation="Horizontal" HorizontalAlignment="Left" Visibility="Collapsed">
                         <WrapPanel.Resources>
                             <Style TargetType="RadioButton" BasedOn="{StaticResource SubTab}">
                                 <Setter Property="MinHeight" Value="32"/>
@@ -725,8 +725,8 @@
                     <StackPanel x:Name="LeagueContent">
                         <Grid>
                             <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="*"/>
-                                <ColumnDefinition Width="320"/>
+                                <ColumnDefinition Width="*" MinWidth="190"/>
+                                <ColumnDefinition Width="Auto" MinWidth="280"/>
                             </Grid.ColumnDefinitions>
                             <StackPanel Grid.Column="0" VerticalAlignment="Center" Margin="0,0,16,0">
                                 <TextBlock Text="我的联赛挂机" Style="{StaticResource PageTitle}"/>
