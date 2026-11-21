@@ -275,7 +275,9 @@
 
             <Border x:Name="SubMenuHost" Grid.Row="0" Background="Transparent"
                     BorderBrush="{DynamicResource Divider}" BorderThickness="0,0,0,1"
-                    Padding="14,9,14,9" Visibility="Collapsed">
+                    Padding="10,7,10,7" Visibility="Collapsed">
+                <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled"
+                              Focusable="False" PanningMode="HorizontalFirst">
                 <Grid>
                     <StackPanel x:Name="SubMenuIntl" Orientation="Horizontal" Visibility="Collapsed">
                         <StackPanel.Resources>
@@ -384,6 +386,7 @@
 
                     </WrapPanel>
                 </Grid>
+                </ScrollViewer>
             </Border>
 
             <Grid Grid.Row="1" Margin="24,18,24,18">

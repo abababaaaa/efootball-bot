@@ -73,6 +73,9 @@ public static class ThemePalette
         ["SelectFillStrong"] = "#3DFFFFFF",
         ["SelectBorder"] = "#3DFFFFFF",
         ["SelectFg"] = "#FFFFFFFF",
+        // 功能分类页签选中：明显的灰色磨砂方框
+        ["SubTabSelFill"] = "#664A4A50",
+        ["SubTabSelStroke"] = "#4DFFFFFF",
         ["Danger"] = "#FFFF453A",
         ["DangerHover"] = "#FFFF695F",
         ["DangerText"] = "#FFFF6966",
@@ -159,6 +162,9 @@ public static class ThemePalette
         ["SelectFillStrong"] = "#26000000",
         ["SelectBorder"] = "#26000000",
         ["SelectFg"] = "#FF1C1C1E",
+        // 亮色功能页签选中：稍实的灰色磨砂方框
+        ["SubTabSelFill"] = "#3D8E8E93",
+        ["SubTabSelStroke"] = "#268E8E93",
         ["Danger"] = "#FFFF3B30",
         ["DangerHover"] = "#FFFF5A50",
         ["DangerText"] = "#FFFF3B30",
@@ -245,6 +251,9 @@ public static class ThemePalette
         ["SelectFillStrong"] = "#3DFFFFFF",
         ["SelectBorder"] = "#3DFFFFFF",
         ["SelectFg"] = "#FFF5F8FF",
+        // 深蓝功能页签选中：灰色磨砂方框
+        ["SubTabSelFill"] = "#664A4A50",
+        ["SubTabSelStroke"] = "#4DFFFFFF",
         ["Danger"] = "#FFFF453A",
         ["DangerHover"] = "#FFFF695F",
         ["DangerText"] = "#FFFF6966",

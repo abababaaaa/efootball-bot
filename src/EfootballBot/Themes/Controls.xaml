@@ -515,27 +515,25 @@
     </Style>
 
 
-    <!-- 顶部功能分类页签（WorkBuddy 风格：文字 + 底部细线，选中不再是大药丸块） -->
+    <!-- 顶部功能分类页签：选中=明显的灰色磨砂方框（宽高充足、一直高亮） -->
     <Style x:Key="SubTab" TargetType="RadioButton">
         <Setter Property="Foreground" Value="{DynamicResource SegTabFg}"/>
         <Setter Property="FontSize" Value="15"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Margin" Value="0,0,12,0"/>
+        <Setter Property="Margin" Value="0,0,10,0"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Grid>
-                        <Border x:Name="bd" CornerRadius="6" Background="Transparent" Padding="16,12"/>
-                        <Border x:Name="bar" Height="2.5" CornerRadius="1.5" VerticalAlignment="Bottom"
-                                HorizontalAlignment="Stretch" Margin="14,0" Background="{DynamicResource SelectFg}" Opacity="0"/>
+                    <Border x:Name="bd" CornerRadius="8" Background="Transparent"
+                            BorderBrush="Transparent" BorderThickness="1" Padding="16,13">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Grid>
+                    </Border>
                     <ControlTemplate.Triggers>
-                        <!-- 选中态：白字 + 底部细指示线（WorkBuddy 页签语言），极淡底衬但不做整块填充 -->
+                        <!-- 选中态：灰色磨砂方框 + 描边 + 白字，常驻高亮、宽高大气 -->
                         <Trigger Property="IsChecked" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SelectFill}"/>
-                            <Setter TargetName="bar" Property="Opacity" Value="1"/>
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource SubTabSelFill}"/>
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SubTabSelStroke}"/>
                             <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
                             <Setter Property="FontWeight" Value="SemiBold"/>
                         </Trigger>
