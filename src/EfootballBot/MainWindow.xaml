@@ -3362,18 +3362,15 @@
                 <Button.Template>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="rbd" Background="Transparent" CornerRadius="0">
-                            <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
-                                <Border x:Name="ic" Width="30" Height="30" CornerRadius="8"
-                                        Background="{DynamicResource HoverOverlay}" HorizontalAlignment="Center">
-                                    <Path Width="16" Height="16" Stretch="Uniform" HorizontalAlignment="Center"
-                                          VerticalAlignment="Center"
-                                          Stroke="{DynamicResource TextSecondary}" StrokeThickness="2"
-                                          StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                          Data="M15 5l-7 7 7 7"/>
-                                </Border>
-                                <TextBlock Text="展开面板" FontSize="12" Margin="0,12,0,0"
-                                           Foreground="{DynamicResource TextMuted}" HorizontalAlignment="Center"/>
-                            </StackPanel>
+                            <Border x:Name="ic" Width="32" Height="32" CornerRadius="9"
+                                    Background="{DynamicResource HoverOverlay}"
+                                    HorizontalAlignment="Center" VerticalAlignment="Center">
+                                <Path Width="18" Height="18" Stretch="Uniform" HorizontalAlignment="Center"
+                                      VerticalAlignment="Center"
+                                      Stroke="{DynamicResource TextSecondary}" StrokeThickness="2"
+                                      StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                      Data="M15 5l-7 7 7 7"/>
+                            </Border>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
