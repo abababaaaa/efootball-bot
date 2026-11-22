@@ -61,7 +61,7 @@ public static class BotModuleCatalog
         {
             Id = ModuleIds.IntlWeekly, Server = ServerRegion.Intl, Kind = ModuleKind.Scenario,
             DisplayName = "周活动",
-            Summary = "国际服周活动：活动列表/介绍页/挑战清单/赛后活动地图",
+            Summary = "国际服周活动：活动列表/介绍页/挑战清单/阵容挑战(Team Effort)/赛后活动地图",
             Factory = (engine, log) => new WeeklyEventScenario(engine, log),
         },
         new()

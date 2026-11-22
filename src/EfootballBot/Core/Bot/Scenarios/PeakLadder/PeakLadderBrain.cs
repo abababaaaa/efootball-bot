@@ -1,4 +1,5 @@
 using System.Text.RegularExpressions;
+using EfootballBot.Core.Bot.Match;
 using EfootballBot.Core.Vision;
 using EfootballBot.Core.Vision.Yolo;
 
@@ -62,6 +63,14 @@ public static class PeakLadderBrain
     public const double RankNextFallbackX = 0.870;
 
     public const double RankNextFallbackY = 0.920;
+
+    /// <summary>比赛页签卡行里「天梯巅峰赛」卡面的兜底落点（2026-11-21 实机 1920×1080 量取：
+    /// 卡面横跨 x 0.35~0.65 / y 0.12~0.80，标题「天梯巅峰赛」在 y≈0.73）。实测点 (0.5,0.72)
+    /// 一次就进模式选择页；取 0.70 落在标题上方、仍在卡内，避开卡行下沿与两侧
+    /// 「比赛活动 / 我的联赛」卡。OCR 锚到标题时优先用词中心。</summary>
+    public const double LadderTileFallbackX = 0.500;
+
+    public const double LadderTileFallbackY = 0.700;
 
     private static readonly Regex Digits = new(@"\d+", RegexOptions.Compiled);
 
@@ -155,6 +164,25 @@ public static class PeakLadderBrain
     }
 
     /// <summary>
+    /// 比赛页签卡行里的「天梯巅峰赛」卡面标题词：取卡行区域（y 0.45~0.95、x 0.25~0.75）
+    /// 内最靠下的一枚——卡面标题印在卡片下部，推荐页签的活动横幅不会被这个窗口收进来。
+    /// 手柄焦点链在新 UI 上走不通时，场景层用它做后台鼠标点击锚点。找不到返回 null
+    /// （场景层用 <see cref="LadderTileFallbackX"/>/<see cref="LadderTileFallbackY"/> 兜底）。
+    /// </summary>
+    public static OcrWord? FindLadderTileWord(OcrResult ocr)
+    {
+        OcrWord? best = null;
+        foreach (var w in ocr.MergedWords)
+        {
+            if (w.CenterY < 0.45 || w.CenterY > 0.95) continue;
+            if (w.CenterX < 0.25 || w.CenterX > 0.75) continue;
+            if (!w.NormText.Contains("天梯巅峰赛")) continue;
+            if (best is null || w.CenterY > best.CenterY) best = w;
+        }
+        return best;
+    }
+
+    /// <summary>
     /// 在活动主页 OCR 中找「前往比赛」卡标题词（y&lt;0.45 左栏；同分取最左——活动主页左列
     /// 只有前往比赛卡含此词）。找不到返回 null（场景层用兜底坐标）。
     /// </summary>
@@ -209,17 +237,7 @@ public static class PeakLadderBrain
     /// 同分区取置信度最高的一枚。dets 为空返回 null。
     /// </summary>
     public static YoloDetection? FindBottomConfirm(IReadOnlyList<YoloDetection>? dets, float minScore = 0.45f)
-    {
-        if (dets is null) return null;
-        YoloDetection? best = null;
-        foreach (var d in dets)
-        {
-            if (d.ClassName != "btn_confirm" || d.Score < minScore) continue;
-            if (d.CenterX < 0.55 || d.CenterY < 0.72) continue;
-            if (best is null || d.Score > best.Score) best = d;
-        }
-        return best;
-    }
+        => CnAdvance.FindRightBottomConfirm(dets, minScore);
 }
 
 

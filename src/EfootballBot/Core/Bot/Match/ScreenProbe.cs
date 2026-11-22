@@ -70,6 +70,61 @@ public static class ScreenProbe
         return samples > 0 && lit * 10 >= samples * 6; // ≥60% 亮色
     }
 
+    /// <summary>
+    /// 「画面还是球场」探针：中央区域（15%~85%）草地绿像素占比 ≥30%。
+    /// 用途：比赛画面/进球庆祝 CG/回放/镜头切换都是满屏草地绿的 3D 场景，必须优先判成
+    /// 「比赛进行中」，不许被菜单类判定（MatchHub / LeaguePage）抢走——2026-11-20 实机
+    /// 00:34:35：进球后庆祝 CG 被 IsMatchHub 判成比赛页，场次跟踪器单帧当成「回到菜单」关场，
+    /// 一场才走了 21 秒的「比赛」凭空计入完成场次（用户反馈「进球后 CG 误判成比赛结束」）。
+    /// 实机标定（同一口径，tests\EfootballBot.Tests\TestData）：比赛 0.819、赛中弹窗 0.773、
+    /// 国服跳过横幅 0.978~0.981、赛前起始页 0.377；全部菜单/主页/终场页 ≤0.037
+    /// （matchhub_user_1 0.037、比赛页新 UI 0.000、终场页 0.003）——30% 阈值两边都留了一档余量。
+    /// 与 <see cref="IsMostlyLightPage"/> 同为纯函数，可单测。
+    /// </summary>
+    public static bool LooksLikePitch(FrameData f)
+    {
+        var bgra = f.Bgra;
+        int w = f.Width, h = f.Height;
+        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return false;
+        int samples = 0, green = 0;
+        for (int y = (int)(h * 0.15); y < h * 0.85; y += 4)
+        {
+            for (int x = (int)(w * 0.15); x < w * 0.85; x += 4)
+            {
+                int i = (y * w + x) * 4;
+                samples++;
+                int b = bgra[i], g = bgra[i + 1], r = bgra[i + 2];
+                // 草地绿：G 明显高于 R/B，且有亮度（深色菜单底的偏色不算）
+                if (g > 60 && g > r * 1.25 && g > b * 1.25) green++;
+            }
+        }
+        if (samples > 0 && green * 10 >= samples * 3) return true; // ≥30% 亮草地绿
+        return LooksLikeDarkPitch(bgra, w, h);
+    }
+
+    /// <summary>
+    /// 暗光球场兜底：夜场/球场入场 CG 的草地被压得很暗（实机 2026-11-20 00:52 那一屏，草地均值
+    /// 只有 RGB(18,21,11)），绝对亮度判据全灭，但**绿通道仍然压过红与蓝**。改看「下半屏
+    /// （y 60%~95%）里 G≥R 且 G-B≥5 的像素占比 ≥60%」——只看色相关系不看亮度，暗场也认得出。
+    /// 实机标定（tests\EfootballBot.Tests\TestData 全部 187 张）：事故帧 0.983、比赛帧 0.990、
+    /// 赛前起始页 0.887；菜单/主页/终场页 0.000~0.025；187 张里只有事故帧是「靠这条新增」。
+    /// </summary>
+    private static bool LooksLikeDarkPitch(byte[] bgra, int w, int h)
+    {
+        int samples = 0, greenish = 0;
+        for (int y = (int)(h * 0.60); y < h * 0.95; y += 4)
+        {
+            for (int x = (int)(w * 0.10); x < w * 0.90; x += 4)
+            {
+                int i = (y * w + x) * 4;
+                samples++;
+                int b = bgra[i], g = bgra[i + 1], r = bgra[i + 2];
+                if (g >= r && g - b >= 5) greenish++;
+            }
+        }
+        return samples > 0 && greenish * 10 >= samples * 6; // ≥60% 下半屏偏绿
+    }
+
     /// <summary>区域内绿色像素计数（横幅绿勾核验等共用，转发 <see cref="RegionProbe"/>）。</summary>
     public static int CountGreen(FrameData f, double x0, double x1, double y0, double y1)
         => RegionProbe.CountGreenRef(f, x0, x1, y0, y1);

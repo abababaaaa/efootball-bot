@@ -176,18 +176,13 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
         // 离开主页/残留页（进联赛或过场）：预算复位，下次回主页从零计
         _homeAttempts = 0;
         _escapeAttempts = 0;
-        // ---- 国服比赛起始页：底栏印「RT 下一步」，但 A 同样生效（用户 2026-11-11 实测：
-        //      国服凡是印 RT 的 下一步/确认/确定，按 A 一样推进）。所以默认按 A——与共享流程、
-        //      国际服同一条路；只有同一页连续多轮按 A 画面不动（该页被网页层接管等）才换 RT ----
+        // ---- 国服比赛起始页：底栏印「RT 下一步」。按用户 2026-11-21 规则，国服「下一步/确认/确定」
+        //      一律走国服键序：① RT（页面所印提示键）→ ② A → ③ 后台鼠标点击（共享层 CnAdvance）----
         if (screen == MatchScreen.MatchStartPage)
         {
             if (streak < 1) return 800; // 过渡帧防抖
-            bool alt = streak >= 3;
-            _log(alt
-                ? "[我的联赛] 起始页：A 三轮未推进，改按 RT 下一步（底栏所印键）"
-                : "[我的联赛] 起始页：A 下一步开赛（底栏印 RT，A 同样生效）", LogLevel.Info);
-            if (alt) await _engine.Pad.RT(); else await _engine.Pad.Confirm();
-            return alt ? 3400 : 3000;
+            return await CnAdvance.AdvanceAsync(_engine, _mouse, streak + 1, "起始页", "我的联赛",
+                _log, obs.Ocr, obs.Detections, (0.850, 0.920), CancellationToken.None);
         }
         // ---- 国服「选择赛事等级」难度页接管。旧版页面（2026-10-18 实机）无「底行 取消/确认」
         //      结构、A=勾选、RT=确定；2026-11-04 实机改版为国际服同款 UI（底行 取消/确认，
@@ -195,26 +190,38 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
         if (screen == MatchScreen.DifficultyPage)
             return await HandleCnDifficultyAsync(obs, streak);
         _diffAttempts = 0;
-        // ---- 国服确认页兜底：A 是主路径（用户 2026-11-11 实测：国服印 RT 的 下一步/确认/确定
-        //      按 A 一样推进），只有 A 连续 10 轮都推不动时才试底栏所印的 RT——少数网页层页面
-        //      确实只认真实键位。正常 A 推进的页面每页 1~2 轮即过，到不了 10 轮；赛后奖励弹窗链
-        //      虽会累计轮数，但 RT 在弹窗上无绑定，按了无害。
-        //      难度页已由上方分支全量接管（含确认与 B 退出自愈），不进本兜底 ----
-        if (screen == MatchScreen.HasConfirm &&
-            streak >= 10 && (streak - 10) % 5 == 0)
+        // ---- 国服「下一步/确认」页的按键动作已由 <see cref="AdvanceConfirmAsync"/> 统管
+        //      （国服键序 RT → A → 鼠标点击），这里只留死页逃生：同一确认页连续 12 轮画面仍不动
+        //      （≈ 键序各跑完几遍）→ B 退出自愈。难度页已由上方分支全量接管；购买弹窗在共享流程里
+        //      先于本钩子的确认分支处理，两者都不进这里 ----
+        if (screen == MatchScreen.HasConfirm && streak >= 12 && (streak - 12) % 5 == 0)
         {
-            _log($"[我的联赛] {DescribeScreen(screen)} 连续 {streak} 轮 A 无进展，试按底栏所印 RT", LogLevel.Warn);
-            await _engine.Pad.RT();
-            return 3000;
-        }
-        // ---- 死页逃生：A/RT 均无进展 30 轮（≈2 分钟）→ B 退出该页自愈 ----
-        if (screen == MatchScreen.HasConfirm && streak >= 30 && (streak - 30) % 5 == 0)
-        {
-            _log("[我的联赛] 确认页 A/RT 均无进展，B 退出自愈", LogLevel.Warn);
+            _log("[我的联赛] 确认页国服键序（RT/A/鼠标）均无进展，B 退出自愈", LogLevel.Warn);
             await _engine.Pad.Back();
             return 2400;
         }
         return null;
+    }
+
+    /// <summary>
+    /// 国服「下一步 / 确认 / 确定」的按键动作：国服键序 ① RT（页面所印提示键）→ ② A →
+    /// ③ 后台鼠标点按钮（共享层 <see cref="CnAdvance"/>）。国服客户端里的网页层结算页
+    /// （段位积分页 / 赛后小结 / 各种确认页）只吃鼠标，旧逻辑每轮空按 A 就永远停在同一屏
+    /// （用户 2026-11-21 反馈「国服卡在 RT 下一步这一页」即此）；国际服不吃后台鼠标，
+    /// 所以只有国服子类覆盖本钩子，国际服仍是直接 A。
+    /// </summary>
+    protected override async Task<int> AdvanceConfirmAsync(MatchAction action, Observation obs, int streak,
+        CancellationToken ct)
+    {
+        // 比赛中的回放/中场小弹窗不掺进来：比赛里 RT 有游戏内含义，只按 A
+        if (InMatch)
+        {
+            _log($"[我的联赛] 比赛中弹窗 A：{action.Target}", LogLevel.Info);
+            await _engine.Pad.Confirm();
+            return action.WaitMs;
+        }
+        return await CnAdvance.AdvanceAsync(_engine, _mouse, streak + 1, action.Target, "我的联赛",
+            _log, obs.Ocr, obs.Detections, null, ct);
     }
 
     // ---------------- 国服「关键比赛」预告弹窗（A 落在取消上，见 InterceptAsync 分支注释）----------------

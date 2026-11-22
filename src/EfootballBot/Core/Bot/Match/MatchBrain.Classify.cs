@@ -50,10 +50,13 @@ public static partial class MatchBrain
     /// 弹窗链识别（登录奖励/物品到收件箱等每周轮换页面，只认推进按钮词不认
     /// 具体内容）与加载期 OCR 退化的标志帧兜底。New Playing Style 网格页不在门控内
     /// （标题词唯一，有专用判定）。
+    /// <paramref name="pitchLike"/> 来自草地绿占比探针（Scenario 计算，
+    /// <see cref="ScreenProbe.LooksLikePitch"/>）：画面还是球场（庆祝/回放过场）时一律按
+    /// 比赛中处理，先于一切菜单类判定——2026-11-20 实机进球 CG 被判 MatchHub 导致虚计一场。
     /// </summary>
     public static MatchScreen Classify(IReadOnlyList<YoloDetection> dets, OcrResult ocr,
         bool topRightHasContent = false, bool allowCornerInMatch = true, bool mostlyLightPage = false,
-        bool loginRecovery = false)
+        bool loginRecovery = false, bool pitchLike = false)
     {
         int Count(string name) => dets.Count(d => d.ClassName == name && d.Score >= MinScore);
         // 选择赛事等级页（难度选择）：置顶判定——该页覆盖在联赛主页上，画面同时含
@@ -225,6 +228,14 @@ public static partial class MatchBrain
         // （实机 bot-20261011-160559 16:07-16:48 卡死 41 分钟，预览 OCR 30 词/btn_back 0.67）
         if (mostlyLightPage && ocr.Words.Count >= 5)
             return MatchScreen.LeagueInfoPage;
+        // 草地绿守卫（2026-11-20 实机 00:34:35 用户反馈「进球后 CG 误判成比赛结束」）：
+        // 进球庆祝/回放/镜头切换都是满屏草地的 3D 场景，OCR 只剩零星碎片词，却可能凑巧满足
+        // 下面任一菜单类判定（IsMatchHub 的磁贴词 + 顶部含「比赛」的行极松），一旦被判菜单，
+        // 场次跟踪器就把这帧当成「回到菜单」关场——一场 21 秒的「比赛」凭空计入完成场次。
+        // 菜单/主页/终场页都是深色 UI 面板，中央草地绿实机全部 ≤4%，比赛帧 ≥65%（标定见
+        // ScreenProbe.LooksLikePitch）。画面还是球场 → 一律按比赛中处理，处置走 InMatch 分支
+        // （跳过横幅/推进键/挂机节奏），比当成菜单盲走安全。
+        if (pitchLike) return MatchScreen.InMatch;
         // 比赛选择页（我的联赛所在磁贴行）。必须先于 btn_back 判定：该页有返回按钮，
         // 否则被误判 LeaguePage 无限等待（2026-10-10 实机复现：比赛页卡死不选我的联赛）。
         // 我的联赛内部页虽也含「我的联赛」字样，但无独立「比赛」标题行 + 磁贴行特征词。

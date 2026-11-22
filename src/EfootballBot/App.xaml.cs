@@ -55,6 +55,22 @@ public partial class App : Application
                 Shutdown();
             };
         }
+        else if (args.Length > 0 && args[0] == "--proxy-assets")
+        {
+            // 现场自检：只装了 exe（没带 xinput1_3.dll）的机器上「投放代理」报缺文件时，
+            // 用它确认 exe 里的内嵌副本在、并且能真的解压出来。
+            // 用法：EfootballBot.exe --proxy-assets   （输出走管道：... | cat）
+            Startup += (_, _) =>
+            {
+                try { Console.OutputEncoding = System.Text.Encoding.UTF8; RunProxyAssetsCheck(); }
+                catch (Exception ex)
+                {
+                    Console.WriteLine("PROXY-ASSETS FAIL: " + ex.Message);
+                    Environment.ExitCode = 1;
+                }
+                Shutdown();
+            };
+        }
         else if (args.Length > 0 && args[0] == "--worker")
         {
             // 无头工作进程：不获取单实例 Mutex、不检查更新、不显示主窗口。
@@ -298,6 +314,23 @@ public partial class App : Application
     /// 加载 PNG（可选纵向裁剪）→ 缩放为标准整窗帧 → 用真实 OCR 输出关键词。
     /// 用于改完 OCR 逻辑后离线验证，无需操作游戏。
     /// </summary>
+    /// <summary>
+    /// --proxy-assets：逐个列出进程内代理 DLL 的内嵌状态与实际解压结果（长度 + 落盘路径）。
+    /// 现场排查「程序目录缺少 xinput1_3.dll」时，这行输出就能判断是构建没带资源还是解压被拦。
+    /// </summary>
+    private static void RunProxyAssetsCheck()
+    {
+        foreach (string name in new[] { PadProxyAssets.Dll13, PadProxyAssets.Dll14 })
+        {
+            bool embedded = PadProxyAssets.IsEmbedded(name);
+            string? src = PadProxyAssets.ResolveSource(name);
+            long len = 0;
+            try { if (src is not null) len = new FileInfo(src).Length; } catch { /* 只做展示 */ }
+            Console.WriteLine($"{(src is null ? "MISSING" : "OK")}\t{name}\tembedded={embedded}\tlen={len}\tsrc={src ?? "-"}");
+        }
+        Console.WriteLine("CACHE\t" + PadProxyAssets.CacheDir);
+    }
+
     private static async Task RunCheckFrameAsync(string[] args)
     {
         if (args.Length < 2)

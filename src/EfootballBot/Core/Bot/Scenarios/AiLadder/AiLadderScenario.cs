@@ -99,6 +99,8 @@ public sealed class AiLadderScenario : IScenario
         // 角区探针兜底 InMatch 需比赛上下文（同我的联赛/周活动场景）
         bool corner = ScreenProbe.CornerHasContent(obs.Frame);
         bool light = ScreenProbe.IsMostlyLightPage(obs.Frame);
+        // 画面还是球场（进球庆祝/回放过场）→ 共享分类一律按比赛中处理（2026-11-20 虚计场次事故）
+        bool pitch = ScreenProbe.LooksLikePitch(obs.Frame);
         bool matchContext = MatchShared.MatchContext(_memory, now);
         // 本模块界面先判（组别主页也含「前往比赛」，不先判会被共享分类误归 LeaguePage）；
         // 未命中再判周活动（比赛页活动板块扫格误入）残留页；两者都不是才交 MyLeagueBrain
@@ -108,7 +110,7 @@ public sealed class AiLadderScenario : IScenario
             : WkScreen.None;
         var ml = (al == AlScreen.None && wk == WkScreen.None)
             ? MatchBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light,
-                MatchShared.LoginRecovery(_memory, now))
+                MatchShared.LoginRecovery(_memory, now), pitch)
             : MatchScreen.Unknown;
         _memory.Record(ml, now);
         if (!_takeoverLogged)

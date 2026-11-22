@@ -91,6 +91,8 @@ public sealed class PeakLadderScenario : IScenario
         // 角区探针兜底 InMatch 需比赛上下文（同我的联赛/国服周活动场景）
         bool corner = ScreenProbe.CornerHasContent(obs.Frame);
         bool light = ScreenProbe.IsMostlyLightPage(obs.Frame);
+        // 画面还是球场（进球庆祝/回放过场）→ 共享分类一律按比赛中处理（2026-11-20 虚计场次事故）
+        bool pitch = ScreenProbe.LooksLikePitch(obs.Frame);
         bool matchContext = MatchShared.MatchContext(_memory, now);
         // 本模块界面先判：命中时 ml 记 Unknown（状态机处理，不走共享决策）；
         // 未命中再判周活动（冠军赛）残留页面；两者都不是才交 MyLeagueBrain
@@ -100,7 +102,7 @@ public sealed class PeakLadderScenario : IScenario
             : CwScreen.None;
         var ml = (pl == PlScreen.None && cw == CwScreen.None)
             ? MatchBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light,
-                MatchShared.LoginRecovery(_memory, now))
+                MatchShared.LoginRecovery(_memory, now), pitch)
             : MatchScreen.Unknown;
         _memory.Record(ml, now);
         if (!_takeoverLogged)
@@ -123,27 +125,22 @@ public sealed class PeakLadderScenario : IScenario
             _attempts = 0; // 换屏即重置当前阶段预算
             _log($"[天梯巅峰赛] 界面：{screenName}", LogLevel.Info);
         }
-        // 国服比赛起始页：底栏印「设置|球场|RT 下一步」，但 A 同样生效（用户 2026-11-11 实测：
-        // 国服凡印 RT 的 下一步/确认/确定，按 A 一样推进）。默认 A——与国际服同路；只有同一页
-        // 连续多轮按 A 画面不动，才换 RT（底栏所印键）兜底。拦截仍先于状态机：画面不变的
-        // 起始页会让共享决策在 _streak≥StuckStreak 后转静默等待（国服周活动 2026-10-14 卡死教训）。
+        // 国服比赛起始页：底栏印「设置|球场|RT 下一步」。按用户 2026-11-21 规则，国服「下一步/确认」
+        // 一律走国服键序：① RT（页面所印提示键）→ ② A → ③ 后台鼠标点击（共享层 CnAdvance，一份实现）。
+        // 拦截仍先于状态机：画面不变的起始页会让共享决策在 _streak≥StuckStreak 后转静默等待
+        // （国服周活动 2026-10-14 卡死教训）。
         if (ml == MatchScreen.MatchStartPage)
         {
             if (_streak < 1) return 800; // 过渡帧防抖
-            bool alt = _streak >= 3;
-            _log(alt
-                ? "[天梯巅峰赛] 起始页：A 三轮未推进，改按 RT 下一步（底栏所印键）"
-                : "[天梯巅峰赛] 起始页：A 下一步开赛（底栏印 RT，A 同样生效）", LogLevel.Info);
-            if (alt) await _engine.Pad.RT(); else await _engine.Pad.Confirm();
-            return alt ? 3400 : 3000;
+            return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, "起始页", "天梯巅峰赛", _log,
+                obs.Ocr, obs.Detections, (0.850, 0.920), ct);
         }
-        // Flow 阶段 HasConfirm 页面连续 5 轮无进展：A 在该页不生效（如冠军赛结束后的
-        // 对阵表「RT 下一步」页面，实机 2026-10-14 03:28 连按 A 8 次画面不动后共享决策
-        // 静默死等）→ 按 B 退出该页。正常确认弹窗第一轮 A 就会推进，到不了 5 轮；
-        // ModeDialog 等本模块界面已被 pl 分支先行接管，不受影响。
-        if (_phase == PlPhase.Flow && ml == MatchScreen.HasConfirm && _streak >= 5)
+        // Flow 阶段 HasConfirm 页面连续多轮无进展：国服键序（RT→A→鼠标）都用完仍不动才按 B 退出。
+        // 阈值放在键序之后（第 8 轮）：前 7 轮 = RT/A/鼠标各试过，页面真死了才逃生，绝不抢在
+        // 鼠标点击（第 3 轮，段位积分页/对阵表这类网页层页面唯一有效输入）之前 B 掉。
+        if (_phase == PlPhase.Flow && ml == MatchScreen.HasConfirm && _streak >= 8)
         {
-            _log("[天梯巅峰赛] 确认页面多轮无进展（疑似 RT 类页面），按 B 退出", LogLevel.Warn);
+            _log("[天梯巅峰赛] 确认页面 RT/A/鼠标多轮无进展，按 B 退出", LogLevel.Warn);
             await _engine.Pad.Back();
             return 2400;
         }
@@ -175,9 +172,16 @@ public sealed class PeakLadderScenario : IScenario
                 await _engine.Pad.Dpad(PadDir.Right);
                 break;
             case MatchActionKind.PadConfirm:
-                _log($"[天梯巅峰赛] 手柄 A：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Confirm();
-                break;
+                // 国服键序（用户 2026-11-21）：① RT（页面所印提示键）→ ② A → ③ 后台鼠标点击。
+                // 比赛中的回放/中场小弹窗不掺进来——比赛里 RT 有游戏内含义，只按 A。
+                if (_matchSession.Active)
+                {
+                    _log($"[天梯巅峰赛] 比赛中弹窗 A：{action.Target}", LogLevel.Info);
+                    await _engine.Pad.Confirm();
+                    break;
+                }
+                return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, action.Target,
+                    "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, ct);
             case MatchActionKind.PadUpConfirm:
                 _log($"[天梯巅峰赛] 弹窗上移确认：{action.Target}", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Up);
@@ -242,23 +246,24 @@ public sealed class PeakLadderScenario : IScenario
                 }
                 switch (pl)
                 {
-                    case PlScreen.HomeMatch:
                     case PlScreen.HomeRecommended:
+                        // 推荐页签：只做「归位到比赛页签」这一件事（卡行与进天梯交给下一帧的
+                        // HomeMatch 分支用鼠标点卡面）。2026-11-21 01:53 实机：把
+                        // 上×2/左×4/右/下/A 当一串盲按，A 要么落在页签上、要么被主页提示弹窗
+                        // 吃掉，画面三轮不变，日志刷「主页：上×2 左×4 …」永远进不了天梯。
                         if (++_attempts > 4)
                         {
-                            _log("[天梯巅峰赛] 主页导航多轮未进入天梯巅峰赛，暂停 8s 后重试（若反复出现请回报日志）", LogLevel.Error);
+                            _log("[天梯巅峰赛] 主页导航多轮未切到比赛页签，暂停 8s 后重试（若反复出现请回报日志）", LogLevel.Error);
                             _attempts = 0;
                             return 8000;
                         }
-                        // 饱和归位（任意焦点/页签状态皆可达）：上×2 进页签行 → 左×4 到最左「推荐」
-                        // → 右×1 到「比赛」页签 → 下进卡行（默认焦点即天梯巅峰赛）→ A 进入
-                        _log("[天梯巅峰赛] 主页：上×2 左×4 归位推荐 → 右进比赛页签 → 下+A 进天梯巅峰赛", LogLevel.Info);
+                        _log("[天梯巅峰赛] 主页（推荐页签）：上×2 进页签行 → 左×4 归位推荐 → 右进比赛页签", LogLevel.Info);
                         await _engine.Pad.DpadRepeat(PadDir.Up, 2);
                         await _engine.Pad.DpadRepeat(PadDir.Left, 4);
                         await _engine.Pad.Dpad(PadDir.Right);
-                        await _engine.Pad.Dpad(PadDir.Down);
-                        await _engine.Pad.Confirm();
-                        return 3200;
+                        return 2200;
+                    case PlScreen.HomeMatch:
+                        return await EnterLadderFromCardRowAsync(obs, ct);
                     case PlScreen.ModeSelect:
                     {
                         // 本页无手柄导航：必须鼠标点右下「天梯巅峰赛-教练」卡（B 是返回）
@@ -343,15 +348,14 @@ public sealed class PeakLadderScenario : IScenario
                     SetPhase(PlPhase.Flow); // 已开赛：交共享比赛流程，赛后屏幕驱动自动续
                     return null;
                 }
-                // 选择后可能弹出的确认/下一步弹窗：有推进词就按 A
+                // 选择后可能弹出的确认/下一步弹窗：有推进词就走国服键序（RT → A → 鼠标）
                 if (ml == MatchScreen.HasConfirm ||
                     obs.Ocr.ContainsJoined("下一步") || obs.Ocr.ContainsJoined("确定") ||
                     obs.Ocr.ContainsJoined("确认") || obs.Ocr.FindButton("OK") is not null)
                 {
                     if (++_attempts > 8) { SetPhase(PlPhase.Flow); return 600; }
-                    _log("[天梯巅峰赛] 赛前弹窗：A 下一步", LogLevel.Info);
-                    await _engine.Pad.Confirm();
-                    return 2400;
+                    return await CnAdvance.AdvanceAsync(_engine, _mouse, _attempts, "赛前确认弹窗",
+                        "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, ct);
                 }
                 if (++_attempts > 12)
                 {
@@ -403,28 +407,20 @@ public sealed class PeakLadderScenario : IScenario
         if (count is null)
         {
             _countUnknownRounds++;
-            // 页面上可能有未分类弹窗：有推进词先按 A 清掉；连按几轮不动说明这枚遮挡物也落在
-            // 国服网页层（A 被吞），改鼠标点按钮，再不动就按 B 收掉（实机 2026-11-07 12:15：
-            // 赛后小结弹窗上 A 连按 42 次画面不动，旧逻辑会一直空按到用户手动停止）
+            // 页面上可能有未分类弹窗：走国服键序（① RT → ② A → ③ 鼠标点按钮）清掉；多轮到 8 轮
+            // 仍不动就按 B 收掉（实机 2026-11-07 12:15：赛后小结弹窗上 A 连按 42 次画面不动，
+            // 旧逻辑会一直空按到用户手动停止）
             if (obs.Ocr.ContainsJoined("下一步") || obs.Ocr.ContainsJoined("确定") ||
                 obs.Ocr.ContainsJoined("确认") || obs.Ocr.FindButton("OK") is not null)
             {
                 if (_countUnknownRounds >= 8)
                 {
-                    _log("[天梯巅峰赛] 活动主页遮挡物多轮按 A 无效，B 收掉后重读场次", LogLevel.Warn);
+                    _log("[天梯巅峰赛] 活动主页遮挡物 RT/A/鼠标均无效，B 收掉后重读场次", LogLevel.Warn);
                     await _engine.Pad.Back();
                     return 2400;
                 }
-                if (_countUnknownRounds >= 3 &&
-                    PeakLadderBrain.FindAdvanceWord(obs.Ocr, "确认", "确定", "下一步", "OK") is { } adv)
-                {
-                    _log("[天梯巅峰赛] 活动主页遮挡物按 A 无效，改鼠标点按钮", LogLevel.Warn);
-                    await MouseClickAsync(adv, adv.CenterX, adv.CenterY, "遮挡物按钮", ct);
-                    return 2400;
-                }
-                _log("[天梯巅峰赛] 活动主页上有弹窗：A 清掉后再读场次", LogLevel.Info);
-                await _engine.Pad.Confirm();
-                return 2200;
+                return await CnAdvance.AdvanceAsync(_engine, _mouse, _countUnknownRounds, "活动主页遮挡物",
+                    "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, ct);
             }
             if (_countUnknownRounds == 8)
             {
@@ -463,65 +459,80 @@ public sealed class PeakLadderScenario : IScenario
     }
 
     /// <summary>
+    /// 比赛页签 → 天梯巅峰赛卡（主页导航的第二步）。2026-11-21 01:53 实机：旧实现把
+    /// 上×2/左×4/右/下/A 当一串盲按，三轮画面都停在比赛页——手柄焦点进卡行后，再按「下」
+    /// 会把焦点移出卡行，最后那记 A 落在空处（或页签上），永远到不了天梯。改成：
+    ///   1) 后台鼠标直接点卡面标题「天梯巅峰赛」——不依赖焦点链，实测 2026-11-21 02:16
+    ///      点 (0.5, 0.72) 一次就进模式选择页；OCR 锚到卡面标题时点标题中心，锚不到用兜底坐标。
+    ///   2) 鼠标两轮没反应（极少数帧 OCR 读不到卡面标题）才退回手柄：上×1 归位页签行 →
+    ///      下进卡行 → A。绝不再按「下×1 就 A」当主路径。
+    /// </summary>
+    private async Task<int> EnterLadderFromCardRowAsync(Observation obs, CancellationToken ct)
+    {
+        if (++_attempts > 4)
+        {
+            _log("[天梯巅峰赛] 比赛页签多轮进不去天梯巅峰赛，暂停 8s 后重试（若反复出现请回报日志）", LogLevel.Error);
+            _attempts = 0;
+            return 8000;
+        }
+        // 主页提示弹窗（2026-11-21 实机：首次点「比赛」页签弹出的「来试试技巧提升吧」）：
+        // 只认鼠标点击——手柄 A 按了不生效，方向键也被弹窗全吃掉，画面永远停在主页；
+        // 旧实现就在这上面无限「主页导航」。先鼠标点掉「确定」再进天梯。
+        if (PeakLadderBrain.FindAdvanceWord(obs.Ocr, "确定", "确认", "知道了") is { } popupOk)
+        {
+            _log("[天梯巅峰赛] 主页有提示弹窗，鼠标点「确定」关掉后再进天梯", LogLevel.Info);
+            await MouseClickAsync(null, popupOk.CenterX, popupOk.CenterY, "主页弹窗确定", ct);
+            return 2400;
+        }
+        if (_attempts <= 2)
+        {
+            var tile = PeakLadderBrain.FindLadderTileWord(obs.Ocr);
+            await MouseClickAsync(tile, PeakLadderBrain.LadderTileFallbackX, PeakLadderBrain.LadderTileFallbackY,
+                tile is null ? "天梯巅峰赛卡面（兜底坐标）" : "天梯巅峰赛卡面", ct);
+            return 3200;
+        }
+        _log("[天梯巅峰赛] 卡面点击未生效：改手柄 上×1 归位 → 下进卡行 → A", LogLevel.Warn);
+        await _engine.Pad.Dpad(PadDir.Up);
+        await _engine.Pad.Dpad(PadDir.Down);
+        await _engine.Pad.Wait(350, ct); // 等卡行焦点动画落定，A 才吃得到
+        await _engine.Pad.Confirm();
+        return 3200;
+    }
+
+    /// <summary>
     /// 国服天梯「网页层」结算页（赛后小结 / 段位积分页）推进。
     /// 这两页是国服客户端里的网页 UI：虚拟手柄 A/B 都不生效（实机 2026-11-07：白银联赛页
     /// A×5 + B×6 画面不动；赛后小结弹窗 A 连按 42 次不动），只有鼠标点击（或它自己印在按钮上的
-    /// 键盘键）能推进——用户反馈「右下角的下一步点不到」即此。每轮依次用 OCR 按钮词 → 右下
-    /// YOLO 确认框 → 兜底坐标定位按钮；三轮点不动按页面印的键盘键（段位积分页 = C），再不动
-    /// 改手柄 A，五轮仍不动才 B 逃生，绝不无限点同一处。
+    /// 键盘键）能推进——用户反馈「右下角的下一步点不到」即此。按用户 2026-11-21 规则走国服键序：
+    /// 第 1 轮 RT（底栏印的提示键）→ 第 2 轮 A → 第 3 轮起鼠标点击（OCR 推进词 → 右下 YOLO
+    /// 确认框 → 兜底坐标）→ 第 6 轮再试页面上印的键盘键（段位积分页旧版为 C）→ 8 轮仍不动才 B 逃生。
     /// </summary>
     /// <param name="buttonWords">该页的推进按钮文字（段位积分页只有「下一步」，赛后小结多一个「确认」）。</param>
-    /// <param name="fallback">OCR/检测都定位不到时的兜底坐标；null = 该页没有把握的固定位置（改按 A）。</param>
+    /// <param name="fallback">OCR/检测都定位不到时的兜底坐标；null = 用国服通用右下落点。</param>
     /// <param name="keyVirtual">该页按钮上印的键盘提示键（如段位积分页的 C）；0 = 该页没有键盘提示。</param>
     private async Task<int> HandleWebLayerPageAsync(Observation obs, string[] buttonWords,
         (double X, double Y)? fallback, string what, CancellationToken ct, int keyVirtual = 0)
     {
         int attempt = ++_attempts;
-        if (attempt >= 6)
+        if (attempt >= 8)
         {
-            _log($"[天梯巅峰赛] {what}多轮点不动，按 B 退出交回共享流程（若反复出现请回报日志）", LogLevel.Warn);
+            _log($"[天梯巅峰赛] {what}：RT/A/鼠标/提示键全部无效（{attempt} 轮），按 B 退出交回共享流程（若反复出现请回报日志）", LogLevel.Warn);
             _attempts = 0;
             await _engine.Pad.Back();
             return 2400;
         }
-        if (attempt == 4 && keyVirtual != 0)
+        if (attempt == 6 && keyVirtual != 0)
         {
             var winKey = _engine.Window;
             if (winKey is not null)
             {
-                _log($"[天梯巅峰赛] {what}：鼠标点击未生效，按页面上印的键盘键「{(char)keyVirtual}」", LogLevel.Warn);
+                _log($"[天梯巅峰赛] {what}：RT/A/鼠标均未推进，按页面上印的键盘键「{(char)keyVirtual}」", LogLevel.Warn);
                 await _keyboard.TapAsync(winKey.Handle, keyVirtual, ct: ct);
                 return 2400;
             }
         }
-        if (attempt >= 4)
-        {
-            _log($"[天梯巅峰赛] {what}：鼠标点击未生效，改手柄 A", LogLevel.Warn);
-            await _engine.Pad.Confirm();
-            return 2400;
-        }
-        var word = PeakLadderBrain.FindAdvanceWord(obs.Ocr, buttonWords);
-        if (word is not null)
-        {
-            // 按钮文字就在按钮正中：落点不再下移（MouseClickAsync 的 +0.02 是给卡面标题用的，
-            // 在 47px 高的蓝条上会把落点顶到边缘）
-            await MouseClickAsync(null, word.CenterX, word.CenterY, $"{what}·{word.NormText}", ct);
-            return 2400;
-        }
-        var box = PeakLadderBrain.FindBottomConfirm(obs.Detections);
-        if (box is not null)
-        {
-            await MouseClickAsync(null, box.CenterX, box.CenterY, $"{what}·右下按钮框", ct);
-            return 2400;
-        }
-        if (fallback is { } fb)
-        {
-            await MouseClickAsync(null, fb.X, fb.Y, $"{what}·兜底坐标", ct);
-            return 2400;
-        }
-        _log($"[天梯巅峰赛] {what}：OCR 与检测都没定位到按钮，先按 A", LogLevel.Warn);
-        await _engine.Pad.Confirm();
-        return 2400;
+        return await CnAdvance.AdvanceAsync(_engine, _mouse, attempt, what, "天梯巅峰赛", _log,
+            obs.Ocr, obs.Detections, fallback, ct, buttonWords);
     }
 
     /// <summary>后台鼠标点击：优先 OCR 锚定词位置（其中心下方 0.02 落在卡面内），

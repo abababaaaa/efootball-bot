@@ -94,6 +94,15 @@ internal sealed class MatchSessionTracker
     /// <summary>「须见菜单」的门最多挡这么久：某些场景（国服周活动/天梯巅峰赛）没有显式的
     /// 主页回调，死守会变成永远不开赛。结算链一般 1~3 分钟，5 分钟足够兜住。</summary>
     internal static readonly TimeSpan MenuGateMaxWait = TimeSpan.FromMinutes(5);
+    /// <summary>
+    /// 「回到菜单」关场的最小时长：60 秒。
+    /// 真比赛一场 6~20 分钟，绝无可能 60 秒内打完；但进球庆祝/回放 CG 只要几秒就能骗出一次
+    /// 菜单类判定（2026-11-20 实机 00:34:35：进球后庆祝 CG 被判 MatchHub，一场走了 21 秒的
+    /// 「比赛」被计入完成场次，用户反馈「进球后 CG 误判成比赛结束」）。这条门只挡单帧误判，
+    /// 不挡真流程——真回菜单的场次用时都远超这个数。
+    /// 拦下的那一轮不改任何状态：继续观察，真回到菜单的话「5 分钟无比赛特征」会兜底收尾。
+    /// </summary>
+    internal static readonly TimeSpan MenuCloseMinDuration = TimeSpan.FromSeconds(60);
 
     internal bool Active => _active;
     /// <summary>本场首次被判为 InMatch 的时间（null = 未开赛）。只打关键比赛用它算时钟走了多久。</summary>
@@ -109,6 +118,9 @@ internal sealed class MatchSessionTracker
     /// <summary>这次「结束」是否可信（见到终场页或直接回到菜单）。超时不算——
     /// 调用方据此决定要不要计入完成场次。</summary>
     internal bool LastEndTrusted => LastEndReason is MatchEndReason.FullTime or MatchEndReason.Menu;
+    /// <summary>本轮是否因为「本场才刚开始」把一次菜单类关场拦下了（供 MatchPlay 打日志：
+    /// 用户在日志里能看到「判到 MatchHub 但只走了 00:21，按误判处理」而不是凭空少一场）。</summary>
+    internal bool MenuCloseSuppressed { get; private set; }
     /// <summary>最近一场用时的 mm:ss 文本（无记录时 --:--）。</summary>
     internal string LastDurationText =>
         LastDuration is TimeSpan d ? $"{d.Minutes:00}:{d.Seconds:00}" : "--:--";
@@ -119,6 +131,7 @@ internal sealed class MatchSessionTracker
     internal bool Observe(MatchScreen screen, DateTime now, bool sawKeyMatchHint = false, bool isHome = true)
     {
         if (sawKeyMatchHint) _sawKeyMatch = true;
+        MenuCloseSuppressed = false;
         // 回到菜单/主页：解除「必须先见菜单才能开下一场」的门
         bool atMenu = screen == MatchScreen.MatchHub || screen == MatchScreen.MainMenu ||
                       (screen == MatchScreen.LeaguePage && isHome);
@@ -143,6 +156,16 @@ internal sealed class MatchSessionTracker
             || screen == MatchScreen.MainMenu
             || (screen == MatchScreen.LeaguePage && isHome);
         bool timedOut = (now - _lastInMatchAt).TotalMinutes >= 5;
+        // 「回到菜单」类关场的最小感知时长（2026-11-20 用户：进球庆祝 CG 被判 MatchHub，
+        // 一场 21 秒的「比赛」凭空计入完成场次）。真比赛不可能 60 秒打完，所以这里拦下的
+        // 一定是误判：不改任何状态、不解须见菜单的门，继续观察；若是真的回到菜单，
+        // 5 分钟无比赛特征会照常兜底收尾（那条路径本来就「不计场次」）。
+        if (backToMenus && !timedOut && StartedAt is DateTime started
+            && now - started < MenuCloseMinDuration)
+        {
+            backToMenus = false;
+            MenuCloseSuppressed = true;
+        }
         if (matchOver || backToMenus || timedOut)
         {
             _active = false;

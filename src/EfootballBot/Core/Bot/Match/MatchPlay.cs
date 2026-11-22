@@ -41,6 +41,9 @@ public sealed class MatchPlay
     private readonly Random _rnd = new();
 
     private DateTime _lastIdleTapLogAt = DateTime.MinValue;
+
+    /// <summary>「菜单类关场被拦下」日志的节流时间戳（进球 CG 可能连续几帧都像菜单，别刷屏）。</summary>
+    private DateTime _lastMenuVetoLogAt = DateTime.MinValue;
     /// <param name="engine">引擎（取挂机节奏配置、累计场次、微信动态）。</param>
     /// <param name="module">日志前缀里的模块名（如「天梯巅峰赛」）。</param>
     /// <param name="log">日志回调（用引擎的 LogInternal）。</param>
@@ -77,6 +80,14 @@ public sealed class MatchPlay
         bool ended = _session.Observe(screen, now, sawKeyMatchHint, isHome);
         if (!wasActive && _session.Active)
             _log($"[{_module}] 比赛开始：{startNote}", LogLevel.Info);
+        // 菜单类关场被最小感知时长拦下：让日志说清「哪一帧被判成菜单、本场走了多久」，
+        // 下次再有「进球 CG 当比赛结束」的反馈，不必从上百行时间戳里倒推（2026-11-20）。
+        if (!ended && _session.MenuCloseSuppressed && now - _lastMenuVetoLogAt > TimeSpan.FromSeconds(30))
+        {
+            _lastMenuVetoLogAt = now;
+            _log($"[{_module}] 判到「{screen}」但本场才走了 {_session.LastDurationText}（<1 分钟）——按识别误判处理，不计场次（真正的比赛结束会见到终场页或回菜单）",
+                LogLevel.Warn);
+        }
         if (!ended) return new MatchTick(false, false, false, false, _session.LastDurationText);
         string duration = _session.LastDurationText;
         if (!_session.LastEndTrusted)
@@ -90,7 +101,15 @@ public sealed class MatchPlay
         bool key = _session.WasKeyMatch;
         _engine.Stats.MatchesDone++;
         if (key) _engine.Stats.KeyMatches++;
-        _log($"[{_module}] 一场比赛结束（{(key ? "关键比赛，" : "")}用时 {duration}，累计 {_engine.Stats.MatchesDone} 场）",
+        // 结尾补关场依据：Menu = 回到菜单判结束（没见过终场页），FullTime = 见过终场页。
+        // 之前只写「用时 xx:xx」，出现场次对不上时无法判断是哪条路径关的场（2026-11-20）。
+        string reason = _session.LastEndReason switch
+        {
+            MatchEndReason.FullTime => "终场页",
+            MatchEndReason.Menu => $"回到 {screen}",
+            _ => "超时",
+        };
+        _log($"[{_module}] 一场比赛结束（{(key ? "关键比赛，" : "")}用时 {duration}，累计 {_engine.Stats.MatchesDone} 场；判定依据：{reason}）",
             LogLevel.Success);
         _engine.ReportMatchDone(key);
         return new MatchTick(false, true, true, key, duration);

@@ -82,6 +82,26 @@ public static class RegionProbe
     }
 
     /// <summary>
+    /// 区域内红色像素计数（红点 / 红色叹号徽章 / 红色告警块）：R≥80 且比 G、B 均高出 45 以上。
+    /// 2px 步进采样。★阈值放低到 R≥80 是实机校准出来的：弹窗打开时整页会被压暗，
+    /// 同一个红色徽章会从 (255,32,26) 掉到 (112,26,21)——按 R&gt;140 判会在弹窗帧上漏检。
+    /// </summary>
+    public static int CountRed(FrameData f, double x0, double x1, double y0, double y1)
+    {
+        if (!Valid(f, out int w, out int h)) return 0;
+        var bgra = f.Bgra;
+        int count = 0;
+        for (int y = Math.Max(0, (int)(h * y0)); y < Math.Min(h, (int)(h * y1)); y += 2)
+            for (int x = Math.Max(0, (int)(w * x0)); x < Math.Min(w, (int)(w * x1)); x += 2)
+            {
+                int i = (y * w + x) * 4;
+                int b = bgra[i], g = bgra[i + 1], r = bgra[i + 2];
+                if (r >= 80 && r > g + 45 && r > b + 45) count++;
+            }
+        return count;
+    }
+
+    /// <summary>
     /// 区域内亮度中位数（3px 步进采样）。用中位数抗文字/图标干扰，
     /// 用于「聚焦白卡 vs 未聚焦深灰卡」这类整体明暗判别。
     /// </summary>
@@ -122,4 +142,8 @@ public static class RegionProbe
     /// <summary>绿色像素计数（换算到 1280×720 基准；720p 下与原值完全一致）。</summary>
     public static int CountGreenRef(FrameData f, double x0, double x1, double y0, double y1)
         => ToReference(CountGreen(f, x0, x1, y0, y1), f);
+
+    /// <summary>红色像素计数（换算到 1280×720 基准；720p 下与原值完全一致）。</summary>
+    public static int CountRedRef(FrameData f, double x0, double x1, double y0, double y1)
+        => ToReference(CountRed(f, x0, x1, y0, y1), f);
 }

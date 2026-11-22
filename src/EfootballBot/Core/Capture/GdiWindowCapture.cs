@@ -24,6 +24,10 @@ public sealed class GdiWindowCapture : ICaptureProvider
     private volatile int _minFrameIntervalMs = 33;
     private long _lastProduceTick;
 
+    /// <summary>上一帧的像素指纹与「连续同图」计数（陈旧帧检测）。</summary>
+    private long _frameSig;
+    private int _sameSigStreak;
+
     private Thread? _thread;
     private volatile bool _stopRequested;
 
@@ -42,6 +46,21 @@ public sealed class GdiWindowCapture : ICaptureProvider
     /// <summary>累计成功帧数（首帧验证与"报就绪但从未出帧"的诊断用）。</summary>
     public long FrameCount => Interlocked.Read(ref _frameCount);
     private long _frameCount;
+
+    /// <summary>
+    /// 连续多少帧与上一帧**像素完全一致**。GDI PrintWindow 在部分全屏 D3D 场景会反复返回
+    /// 同一张旧画面：链路并未报错（LastError=null、帧数照涨），但画面永远停在某一刻，
+    /// 下游的「画面变没变」判断（输入活性探针、页面识别）会被它整体带偏。
+    /// 引擎只在比赛中读本值做告警——菜单页静止是合法状态，不能当故障。
+    /// </summary>
+    public int StaleFrameStreak => Volatile.Read(ref _sameSigStreak);
+
+    /// <summary>重置陈旧帧计数（引擎在切后端/重建捕获后调用）。</summary>
+    public void ResetStaleTracking()
+    {
+        _frameSig = 0;
+        Volatile.Write(ref _sameSigStreak, 0);
+    }
 
     /// <summary>
     /// 启动并等待首帧（最多 timeoutMs）。返回 true=已出帧，可对外宣称"GDI 就绪"；
@@ -213,10 +232,34 @@ public sealed class GdiWindowCapture : ICaptureProvider
             finally { ReleaseDC(nint.Zero, sdc); }
         }
 
+        UpdateFrameSignature(full);
+
         var data = WindowCapture.DownscaleIfNeeded(full, w, h, out int ow, out int oh);
         _latest = new FrameData(data, ow, oh, Environment.TickCount64);
         FrameUpdated?.Invoke(this, EventArgs.Empty);
         return true;
+    }
+
+    /// <summary>像素指纹（FNV-1a，质数步长采样）：只为回答「这一帧和上一帧是不是同一张图」。
+    /// 步长取质数，避免与画面行宽/对齐周期共振导致漏检。</summary>
+    private void UpdateFrameSignature(byte[] bgra)
+    {
+        const int Step = 4099;
+        long sig = 1469598103934665603L;
+        for (int i = 0; i < bgra.Length; i += Step)
+        {
+            sig ^= bgra[i];
+            sig *= 1099511628211L;
+        }
+        if (sig == _frameSig)
+        {
+            Interlocked.Increment(ref _sameSigStreak);
+        }
+        else
+        {
+            _frameSig = sig;
+            Volatile.Write(ref _sameSigStreak, 0);
+        }
     }
 
     /// <summary>粗黑帧判定：跳过标题栏（非客户区可正常取到），从 1/4 高度起隔行采样，

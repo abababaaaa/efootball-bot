@@ -3,6 +3,7 @@ using EfootballBot.Core.Capture;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Inference;
 using EfootballBot.Core.Input;
+using EfootballBot.Core.Bot.Match;
 using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Bot.Scenarios.Weekly;
 using EfootballBot.Core.Bot.Scenarios.CnWeekly;
@@ -78,6 +79,8 @@ public sealed class BotEngine : IDisposable
     public const string CnProcessName = "eFootballOnline";
     /// <summary>路径分隔符集合（文件名提取用；避免 System.IO 命名空间遮蔽问题）。</summary>
     private static readonly char[] PathSeparatorChars = { '\\', '/' };
+    /// <summary>GDI 连续同图多少帧算陈旧帧（30 帧/秒下约 3 秒；比赛画面不可能 3 秒一个像素都不变）。</summary>
+    private const int StaleFrameWarnStreak = 90;
 
     private readonly AppConfig _cfg;
 
@@ -110,6 +113,15 @@ public sealed class BotEngine : IDisposable
     private bool _gdiFallbackTried;
     /// <summary>黑帧暂停告警上次输出时间（30s 节流）。</summary>
     private DateTime _lastBlackLogAt;
+    /// <summary>陈旧帧告警上次输出时间（5 分钟节流）。</summary>
+    private DateTime _lastStaleWarnAt;
+    /// <summary>连续识别到掉线重连弹窗的轮数（连不上时按轮次升级日志，连着上就归零）。</summary>
+    private int _reconnectRounds;
+    /// <summary>掉线重连日志上次输出时间（30s 节流，避免一夜几千行）。</summary>
+    private DateTime _lastReconnectLogAt;
+    /// <summary>掉线弹窗连轮判定：文字证据一票通过，只有版式证据时要连成两轮才按键
+    /// （2026-11-20 15:23 天梯活动页被单帧版式证据误判成掉线弹窗，连按「下 + A」）。</summary>
+    private readonly ReconnectWatch _reconnectWatch = new();
     /// <summary>当前场景插件（null = 纯感知观察模式）。</summary>
     public IScenario? Scenario { get; set; }
     // 暂停标志：置位后主循环不再观察/操作，且立即清空手柄输出防残留半按状态
@@ -209,6 +221,13 @@ public sealed class BotEngine : IDisposable
     private long _stuckActionBase;
 
     private bool _livenessProbed;
+
+    /// <summary>「判死」冷却到期时间（TickCount64）：探针两轮都没反应时先不停挂机，
+    /// 安静等这么久再复核一次——加载慢/过场长的场景一次误判就白丢整晚（2026-11-20 00:52）。</summary>
+    private long _livenessRetryAt;
+
+    /// <summary>连续判死轮次：1 = 只警告并进入冷却；2 = 真停。签名一变（画面终于动了）就清零。</summary>
+    private int _livenessDeadStreak;
 
     // ---- 玩家 1 归属巡检（P0-2）：启动验证过一次，运行中每 5 分钟再确认 ----
     private long _lastWitnessTick;
@@ -473,6 +492,42 @@ public sealed class BotEngine : IDisposable
                             await Task.Delay(1000, token);
                             continue;
                         }
+                        // 掉线重连弹窗（系统级）：与服务器通讯中断时游戏自己弹出，盖在任何界面上
+                        // （实机 2026-11-20 11:10：天梯巅峰赛跑到一半弹出「要重新连接吗？」
+                        //   和 实况足球 进行通讯时发生未知错误 / 上＝取消（默认焦点）、下＝重试）。
+                        // 场景层对此页只有「Unknown → 盲按」，而盲按 A 正好落在「取消」上 = 放弃重连，
+                        // 游戏随后退回标题/黑屏，挂机整夜空转。统一在引擎层拦截：向下挪一格到
+                        // 「重试」再 A，场内场外、所有模块都逃不掉。识别不到就不碰（绝不盲按）。
+                        // 判定分三档（ReconnectWatch）：文字证据（弹窗带里的标题整词 + 「重试」整词）
+                        // 一票通过；只有版式证据要连成两轮才动手；没证据就什么都不做。
+                        // 2026-11-20 15:23 实机：天梯活动页被老版「四周暗 + 中央亮」判成掉线弹窗，
+                        // 于是每 6 秒「下 + A」在活页面上乱点 —— 单帧版式证据从此一律不按键。
+                        var reconnectVerdict = _reconnectWatch.Observe(obs.Frame, obs.Ocr, out bool reconnectText);
+                        if (reconnectVerdict == ReconnectVerdict.None)
+                        {
+                            // 弹窗消失 = 已连回服务器，连着上的计数清零
+                            _reconnectRounds = 0;
+                        }
+                        else if (reconnectVerdict == ReconnectVerdict.Pending)
+                        {
+                            // 只版式、才第一轮：加载页/过场页会闪出同样的版式，先观察一轮
+                            if ((DateTime.Now - _lastReconnectLogAt).TotalSeconds >= 30)
+                            {
+                                _lastReconnectLogAt = DateTime.Now;
+                                LogInternal("[掉线重连] 画面版式像掉线弹窗，但没有文字证据：先观察一轮，暂不按键",
+                                    LogLevel.Warn);
+                            }
+                            RecordPerf(roundStartTick, actionStartMs);
+                            await Task.Delay(1200, token);
+                            continue;
+                        }
+                        else
+                        {
+                            await HandleReconnectDialogAsync(obs, reconnectText);
+                            RecordPerf(roundStartTick, actionStartMs);
+                            await Task.Delay(2500, token);
+                            continue;
+                        }
                         int delayMs = 300;
                         if (Scenario is not null)
                             delayMs = await Scenario.RunOnceAsync(token);
@@ -481,6 +536,7 @@ public sealed class BotEngine : IDisposable
                         // 这一件事的两面——前者看按键有没有效果，后者看槽位还是不是我们的。
                         await CheckInputLivenessAsync(obs, token);
                         await CheckPadOwnershipAsync(token);
+                        CheckCaptureStaleness();
                         // 只打关键比赛：场景判定当前场次是普通比赛后置位，这里集中执行重启
                         // （捕获/停靠/窗口状态全部由引擎自己管，场景侧只管判定与统计）。
                         // 重启本身耗时长（启动+登录+回联赛约 1~2 分钟），不计入 failStreak。
@@ -768,7 +824,17 @@ public sealed class BotEngine : IDisposable
                         || HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count == 0)
                         LogInternal("真实手柄已暂时禁用（虚拟手柄独占输入）", LogLevel.Success);
                     else
-                        LogInternal("自动禁用未完全生效——真实手柄可能仍在向游戏输入（若蓝牙手柄仍响应请手动关闭其电源，详见 data\\pad-control.log）", LogLevel.Warn);
+                    {
+                        // 2026-11-19 反馈包：这里原来只打一行 Warn 就继续，GUI 侧栏与弹窗都是空的，
+                        // 用户看到的是「手柄接管成功」，实际玩家 1 被非物理设备长期占用、按键全部落空。
+                        // 把提权任务写下的最后一条结论翻出来，并且写进 Stats 让界面能看见。
+                        string tail = Input.PhysicalPadControl.LastControlLogLine() ?? "（data\\pad-control.log 无记录）";
+                        string msg = "自动禁用未完全生效——玩家 1 仍被占用（可能被其他虚拟手柄软件/非物理设备占用），" +
+                            "真实手柄若仍响应请手动关闭其电源。pad-hide 最后一条：" + tail;
+                        LogInternal(msg, LogLevel.Warn);
+                        Stats.LastError = "真实手柄禁用未完全生效：" + tail;
+                        EmitStats();
+                    }
                 }
             }
             // 代理模式：XInput 已被进程内代理隔离，但 DirectInput / raw HID（国服客户端的
@@ -792,29 +858,53 @@ public sealed class BotEngine : IDisposable
                     LogLevel.Success);
                 if (!((ProxyPad)Pad360).WaitForProxy(ProxyPad.DefaultProbeTimeoutMs))
                 {
-                    LogInternal(
-                        "代理尚未被游戏读取：请确认 xinput1_3.dll 已投放到游戏的 Binaries/Win64 目录" +
-                        "（设置 → 手柄与输入 → 投放代理到游戏目录），或换回 ViGEmBus 接管。",
+                    // 2026-11-19 反馈包 R4：代理没被游戏加载时只打一行 Warn 就继续跑，
+                    // 之后每一次按键都落空、画面停在同一个菜单页 —— 现场表现就是「挂机卡死」。
+                    // 现在：先把目录现状说清楚，再自动换回 ViGEmBus；换不上就停机并写错误。
+                    string? binDir = null;
+                    try { binDir = GameSettingsLocator.LocateGameBinDir(!_cnSession); } catch { }
+                    string where = binDir ?? "（未能定位游戏的 Binaries\\Win64 目录）";
+                    LogInternal(GameSettingsLocator.HasProxyDll(binDir)
+                            ? $"代理尚未被游戏读取：{where} 里已有 {GameSettingsLocator.ProxyDllName}，" +
+                              "但游戏没加载它（替换 DLL 后必须重启游戏才会生效）。"
+                            : $"代理尚未被游戏读取：{where} 里缺少 {GameSettingsLocator.ProxyDllName}。" +
+                              "设置 → 手柄与输入 → 投放代理到游戏目录 可一键投放。",
                         LogLevel.Warn);
+
+                    LogInternal("尝试换回 ViGEmBus 虚拟手柄接管…", LogLevel.Warn);
+                    bool recovered = false;
+                    try
+                    {
+                        try { Pad360.Dispose(); } catch { }
+                        Pad360 = CreatePad(PadBackendKind.Vigem);
+                        Pad = new Pad(Pad360, _cfg.Timing);
+                        Pad360.Connect();
+                        recovered = true;
+                    }
+                    catch (Exception ex)
+                    {
+                        LogInternal("换回 ViGEmBus 失败：" + ex.Message, LogLevel.Error);
+                    }
+
+                    if (!recovered)
+                    {
+                        const string fail = "手柄接管失败：进程内代理未被游戏读取，换回 ViGEmBus 也连不上 —— " +
+                            "游戏现在收不到任何按键，本次挂机不启动（先修好手柄接管再开始）。";
+                        Stats.LastError = fail;
+                        EmitStats();
+                        try { Pad360.Dispose(); } catch { }
+                        throw new PadTakeoverBlockedException(PadTakeoverBlockedException.Code + " " + fail);
+                    }
+
+                    LogInternal("已改用 ViGEmBus 虚拟手柄接管（代理 DLL 可留待下次重启游戏后再生效）。", LogLevel.Warn);
+                    // 换回 ViGEm 后必须重新验证玩家 1 归属：代理模式下真实手柄没被禁用，
+                    // 换回虚拟手柄正好可能撞上真实手柄占着 slot0 的情况。
+                    await VerifyVirtualPadSlotAsync();
                 }
             }
             else
             {
-                LogInternal("虚拟手柄已连接（Xbox 360 形态，需占玩家 1 才能被游戏消费）",
-                    LogLevel.Success);
-                // 连上之后验证「玩家 1 到底是虚拟手柄还是真实手柄」：真实手柄晚到/抢槽的兜底。
-                var (outcome, message) = await PadSlotWitness.EnsureVirtualPadInSlot0Async(
-                    () => Pad360, _cfg.HidHide.HidePhysicalGamepad, _cfg.DryRun, LogInternal);
-                if (outcome == PadSlotWitness.YieldOutcome.AbortAskUser)
-                {
-                    string diag = Input.PadDiagnostics.Collect(_cfg.HidHide.HidePhysicalGamepad, Pad360);
-                    LogInternal("手柄接管失败诊断：" + Environment.NewLine + diag, LogLevel.Error);
-                    try { Pad360.Disconnect(); } catch { }
-                    throw new PadTakeoverBlockedException(
-                        PadTakeoverBlockedException.Code + " " + message + Environment.NewLine + diag);
-                }
-                if (outcome is PadSlotWitness.YieldOutcome.Ready or PadSlotWitness.YieldOutcome.Recovered)
-                    LogInternal("玩家 1 归属已确认：虚拟手柄独占游戏输入", LogLevel.Success);
+                await VerifyVirtualPadSlotAsync();
             }
         }
         else
@@ -848,6 +938,27 @@ public sealed class BotEngine : IDisposable
     /// 连接虚拟手柄。单后端后无回退可言（保留换实例重连的骨架：连接失败时重建一次实例再试，
     /// ViGEm 客户端连接态异常时重建实例可跳过损坏的控制器对象）。
     /// </summary>
+    /// <summary>连上虚拟手柄后验证「玩家 1 到底是虚拟手柄还是真实手柄」（真实手柄晚到/抢槽的兜底）。
+    /// 归属不对就带结构化诊断整体停机——游戏收不到输入时继续跑只会把画面停在原地。</summary>
+    private async Task VerifyVirtualPadSlotAsync()
+    {
+        LogInternal("虚拟手柄已连接（Xbox 360 形态，需占玩家 1 才能被游戏消费）", LogLevel.Success);
+        var (outcome, message) = await PadSlotWitness.EnsureVirtualPadInSlot0Async(
+            () => Pad360, _cfg.HidHide.HidePhysicalGamepad, _cfg.DryRun, LogInternal);
+        if (outcome == PadSlotWitness.YieldOutcome.AbortAskUser)
+        {
+            string diag = Input.PadDiagnostics.Collect(_cfg.HidHide.HidePhysicalGamepad, Pad360);
+            LogInternal("手柄接管失败诊断：" + Environment.NewLine + diag, LogLevel.Error);
+            Stats.LastError = "手柄接管失败：玩家 1 不是本程序的虚拟手柄";
+            EmitStats();
+            try { Pad360.Disconnect(); } catch { }
+            throw new PadTakeoverBlockedException(
+                PadTakeoverBlockedException.Code + " " + message + Environment.NewLine + diag);
+        }
+        if (outcome is PadSlotWitness.YieldOutcome.Ready or PadSlotWitness.YieldOutcome.Recovered)
+            LogInternal("玩家 1 归属已确认：虚拟手柄独占游戏输入", LogLevel.Success);
+    }
+
     private async Task ConnectPadWithFallbackAsync()
     {
         PadBackendKind[] chain = PadBackendInfo.FallbackChain(_cfg.Pad.Backend);
@@ -1053,6 +1164,46 @@ public sealed class BotEngine : IDisposable
     }
 
     /// <summary>
+    /// 处理「要重新连接吗？」掉线弹窗：焦点默认停在「取消」上，直接 A 就是放弃重连
+    /// （游戏退回标题/黑屏，挂机整夜空转）。按 <see cref="PopupBrain.DecideReconnect"/>
+    /// 的焦点判定把光标挪到「重试」再 A；焦点读不出就按按钮上下关系挪一格。
+    /// 日志 30s 一条，第 6 / 30 轮各升级一次（连不上时让用户知道该手动看网络了）。
+    /// <paramref name="textEvidence"/> 只是日志用：说明本轮是画面文字认出来的，还是版式兜底认出来的。
+    /// </summary>
+    private async Task HandleReconnectDialogAsync(Observation obs, bool textEvidence)
+    {
+        _reconnectRounds++;
+        var action = PopupBrain.DecideReconnect(obs.Frame, obs.Ocr, out string note);
+        bool due = _reconnectRounds == 1 || _reconnectRounds == 6 || _reconnectRounds == 30 ||
+                   (DateTime.Now - _lastReconnectLogAt).TotalSeconds >= 30;
+        if (due)
+        {
+            _lastReconnectLogAt = DateTime.Now;
+            LogInternal($"[掉线重连] 检测到游戏掉线弹窗（第 {_reconnectRounds} 轮，依据：{(textEvidence ? "画面文字" : "画面版式")}）：{note}",
+                _reconnectRounds >= 6 ? LogLevel.Error : LogLevel.Warn);
+        }
+        if (_reconnectRounds == 6)
+            LogInternal("[掉线重连] 已连续 6 轮点「重试」仍未连上：若持续无进展，请手动确认网络/服务器状态（挂机保持运行，连上会自动继续）",
+                LogLevel.Error);
+        switch (action)
+        {
+            case PopupAction.DownThenConfirm:
+                await Pad.Dpad(PadDir.Down);
+                await Pad.Confirm();
+                break;
+            case PopupAction.UpThenConfirm:
+                await Pad.Dpad(PadDir.Up);
+                await Pad.Confirm();
+                break;
+            default:
+                await Pad.Confirm();
+                break;
+        }
+        Stats.LastError = "游戏掉线：已点「重试」重连";
+        EmitStats();
+    }
+
+    /// <summary>
     /// 运行期手柄级自愈：断开→重建控制器→（Connect 内部）重新探测槽位。
     /// 提交失败多为 ViGEm 客户端与总线驱动通信失效（设备掉线/服务重启），
     /// 重建实例可跳过损坏的控制器对象。失败不抛——交回主循环退避，
@@ -1206,14 +1357,29 @@ public sealed class BotEngine : IDisposable
         // 上次运行的本机判定（data\capture-backend.json）：Wgc 模式下直连已验证的后端，
         // 免撞完整探测链（虚拟显示器/无输出显卡机器上探测全程曾需约 1 分钟）。
         // 用户显式选择 DXGI 模式时不消费记忆——那是"我就要用 DXGI"的明确意图。
-        if (_cfg.CaptureMode == CaptureMode.Wgc && CaptureBackendMemory.Load() is { } remembered)
+        CaptureBackendMemory.Entry? remembered =
+            _cfg.CaptureMode == CaptureMode.Wgc ? CaptureBackendMemory.Load() : null;
+        // 2026-11-19 反馈包 R6：这条记忆一旦写入就永久生效，机器被钉死在 GDI PrintWindow 上；
+        // 而 GDI 在全屏 D3D 场景会成片返回陈旧帧 → 画面停更 → 输入活性探针误判「游戏没响应」。
+        // 给判定加有效期与消费上限：过期就强制重探一次（探不过自然会再落一次盘）。
+        if (remembered is not null && CaptureBackendMemory.ShouldReprobe(remembered))
+        {
+            LogInternal($"上次的 GDI 判定已过期或已被复用 {remembered.Hits} 次" +
+                $"（判定于 {remembered.At:yyyy-MM-dd HH:mm}），本次重新探测捕获后端", LogLevel.Info);
+            remembered = null;
+        }
+        if (remembered is not null)
         {
             switch (remembered.Kind)
             {
                 case CaptureBackendKind.Gdi:
                     LogInternal($"上次运行判定本机 WGC 捕获始终无帧（{remembered.At:yyyy-MM-dd HH:mm}），" +
                         "本次直接使用 GDI 捕获。若显卡驱动已修复，删除 data\\capture-backend.json 可恢复自动探测", LogLevel.Info);
-                    if (await TryStartGdiCaptureAsync(w, h)) return;
+                    if (await TryStartGdiCaptureAsync(w, h))
+                    {
+                        CaptureBackendMemory.NoteHit();
+                        return;
+                    }
                     LogInternal("GDI 捕获启动失败，忽略上次判定，走完整探测链", LogLevel.Warn);
                     break;
                 case CaptureBackendKind.Warp:
@@ -1485,6 +1651,7 @@ public sealed class BotEngine : IDisposable
         {
             _stuckText = "";
             _livenessProbed = false;
+            _livenessDeadStreak = 0;
             return;
         }
         string sig = InputLivenessProbe.TextSignature(obs.Ocr);
@@ -1495,13 +1662,25 @@ public sealed class BotEngine : IDisposable
             _livenessProbed = false;
             return;
         }
+        // 只有水印的一屏（加载/开赛过场）与满屏球场的画面（进球庆祝/回放/镜头切换）都不吃
+        // 下/A/B 这三下，文字也天然不变——拿它们做活性判据必然误判。2026-11-20 00:52 实机：
+        // 国服开赛加载停在球场全景，OCR 只剩「实况足球在线 | X | 11.1.0.1…」，签名长度够长，
+        // 45 秒后探针判「手柄输入已死」直接停掉挂机（用户看到的是"没出错却自己停了"）。
+        if (InputLivenessProbe.IsWatermarkPage(obs.Ocr) || ScreenProbe.LooksLikePitch(obs.Frame))
+        {
+            _stuckText = "";
+            _livenessProbed = false;
+            return;
+        }
         long now = Environment.TickCount64;
+        if (now < _livenessRetryAt) return; // 上一次判死已进入冷却，等复核点
         if (sig != _stuckText)
         {
             _stuckText = sig;
             _stuckSinceTick = now;
             _stuckActionBase = Pad.ActionCount;
             _livenessProbed = false;
+            _livenessDeadStreak = 0; // 画面文字终于变了：之前的"无响应"结论作废
             return;
         }
         if (_livenessProbed) return;                       // 本轮卡住只探一次，避免反复按键
@@ -1515,6 +1694,7 @@ public sealed class BotEngine : IDisposable
         {
             LogInternal($"[输入自检] 输入正常（{r.Detail}），继续挂机", LogLevel.Info);
             _stuckText = "";
+            _livenessDeadStreak = 0;
             return;
         }
         // 给"刚好在加载/过场"留一条退路：等 2 秒看页面文字会不会自己更新（加载页的提示语、
@@ -1533,11 +1713,37 @@ public sealed class BotEngine : IDisposable
         {
             LogInternal($"[输入自检] 输入正常（第二轮：{r2.Detail}），继续挂机", LogLevel.Info);
             _stuckText = "";
+            _livenessDeadStreak = 0;
+            return;
+        }
+        // 判死前最后一道复核：探针前后已经花掉 6 秒，画面可能刚好切进加载/过场
+        var last = await ObserveAsync(ct, forceOcr: true);
+        if (InputLivenessProbe.IsWatermarkPage(last.Ocr) || ScreenProbe.LooksLikePitch(last.Frame))
+        {
+            LogInternal("[输入自检] 复核时画面已进入加载/过场（水印或球场），判定输入正常，继续挂机", LogLevel.Info);
+            _stuckText = "";
+            _livenessDeadStreak = 0;
+            return;
+        }
+        _livenessDeadStreak++;
+        if (_livenessDeadStreak < 2)
+        {
+            // 一次判死就停挂机会白丢整晚（加载慢/过场长/国服网络抖动都可能让按键"没反应"）：
+            // 先停机不安置，改成"安静等 3 分钟再复核"，期间不盲按（恢复轮询节奏由签名变化/冷却到期触发）。
+            LogInternal($"[输入自检] 两轮按键都没反应（{r.Detail} / 二轮 {r2.Detail}），" +
+                $"但先不停挂机：安静等 {LivenessRetryCooldownMs / 60_000} 分钟再复核一次" +
+                "（加载慢/长过场也会这样；确实已死的话下一轮会停）", LogLevel.Warn);
+            _livenessRetryAt = Environment.TickCount64 + LivenessRetryCooldownMs;
+            _stuckText = "";
+            _livenessProbed = false;
             return;
         }
         LogInternal($"[输入自检] 输入无响应（{r.Detail} / 二轮 {r2.Detail}）", LogLevel.Error);
         throw new InputNotRespondingException(InputLivenessProbe.DeadMessage);
     }
+
+    /// <summary>判死后的复核冷却：第一次只警告并等这么久，第二次才真停。</summary>
+    private const long LivenessRetryCooldownMs = 3 * 60_000;
 
     /// <summary>
     /// 玩家 1 归属巡检（P0-2）：启动时用摇杆微码验证过一次，但真实手柄蓝牙重连、
@@ -1725,6 +1931,23 @@ public sealed class BotEngine : IDisposable
             if (bgra[i] < 8 && bgra[i + 1] < 8 && bgra[i + 2] < 8) dark++;
         }
         return total > 0 && dark * 100 / total >= 99;
+    }
+
+    /// <summary>
+    /// GDI 陈旧帧告警。菜单页静止是合法状态，只在比赛中判断：比赛画面不可能连续 3 秒像素完全一致，
+    /// 一旦如此就是捕获在反复返回同一张旧图。这种故障不抛异常（LastError 为空、帧数照涨），
+    /// 只会让所有「画面变没变」的判断整体失效，现场表现就是挂机卡在某一页 —— 必须变成可见告警。
+    /// </summary>
+    private void CheckCaptureStaleness()
+    {
+        if (Scenario is not { InMatch: true }) return;
+        if (Observation.Provider is not GdiWindowCapture gdi) return;
+        if (gdi.StaleFrameStreak < StaleFrameWarnStreak) return;
+        if ((DateTime.Now - _lastStaleWarnAt).TotalMinutes < 5) return;
+        _lastStaleWarnAt = DateTime.Now;
+        LogInternal($"捕获疑似陈旧帧：GDI 已连续 {gdi.StaleFrameStreak} 帧画面完全一致（比赛中不应出现）。" +
+            "画面可能已停止更新，按键与识别都在基于旧画面判断 —— 请改用 WGC/DXGI 捕获，" +
+            "或删除 data\\capture-backend.json 让程序下次重新探测", LogLevel.Warn);
     }
 
     private void EmitStats() => StatsChanged?.Invoke(Stats);

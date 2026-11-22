@@ -381,9 +381,9 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                 break;
             }
             case MatchActionKind.PadConfirm:
-                _log($"[我的联赛] 手柄 A：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Confirm();
-                break;
+                // 「下一步/确认」的按键动作由场景决定：国际服 = 直接 A；国服子类覆盖成
+                // 国服键序 RT → A → 鼠标点击（见 CnMyLeagueScenario.AdvanceConfirmAsync）
+                return await AdvanceConfirmAsync(action, obs, _streak, ct);
             case MatchActionKind.PadMoveRight:
                 _log($"[我的联赛] 比赛页右移：{action.Target}", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Right);
@@ -607,7 +607,9 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
     protected virtual MatchScreen ClassifyScreen(Observation obs, bool matchContext) =>
         MatchBrain.Classify(obs.Detections, obs.Ocr, ScreenProbe.CornerHasContent(obs.Frame),
             matchContext, ScreenProbe.IsMostlyLightPage(obs.Frame),
-            MatchShared.LoginRecovery(_memory, DateTime.Now));
+            MatchShared.LoginRecovery(_memory, DateTime.Now),
+            // 画面还是球场（进球庆祝/回放过场）→ 一律按比赛中处理（2026-11-20 虚计场次事故）
+            ScreenProbe.LooksLikePitch(obs.Frame));
     /// <summary>日志里的界面显示名（国服子类把主页 Unknown 显示成国服页签名，便于远程排障）。</summary>
     protected virtual string DescribeScreen(MatchScreen screen) => screen.ToString();
     /// <summary>
@@ -616,6 +618,19 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
     /// </summary>
     protected virtual Task<int?> InterceptAsync(Observation obs, MatchScreen screen, int streak, bool inMatchRecently)
         => Task.FromResult<int?>(null);
+    /// <summary>
+    /// 共享决策里「下一步 / 确认」（PadConfirm）的实际按键动作与下一轮延时。
+    /// 国际服就是直接按 A（国际服客户端不吃后台鼠标，也不印 RT 提示）；国服子类覆盖成国服键序
+    /// <c>① RT → ② A → ③ 后台鼠标点击</c>（共享层 CnAdvance）。单列成钩子，是因为国服网页层
+    /// 结算页（段位积分页 / 赛后小结）只吃鼠标、A 按多少轮都不动，逻辑不该散在各个 switch 里。
+    /// </summary>
+    protected virtual async Task<int> AdvanceConfirmAsync(MatchAction action, Observation obs, int streak,
+        CancellationToken ct)
+    {
+        _log($"[我的联赛] 手柄 A：{action.Target}", LogLevel.Info);
+        await _engine.Pad.Confirm();
+        return action.WaitMs;
+    }
     // ---------------- 我的联赛道具购买状态机 ----------------
     /// <summary>
     /// 购买流程编排（实机 flow_1~8，2026-10-10）：

@@ -29,6 +29,11 @@ build.bat                 :: 需要 x64 Native Tools Command Prompt
 
 产物：`xinput1_3.dll`（x64，约 30–60 KB）+ `xinput_proxy.ini`。
 
+> 分发形态：主程序把这两个 DLL 作为 `EmbeddedResource`（逻辑名 `EfootballBot.Proxy.xinput1_3.dll` /
+> `EfootballBot.Proxy.xinput1_4.dll`）打进单文件 exe，运行时由 `Core/Input/PadProxyAssets.cs` 解压到
+> `%TEMP%\EfootballBot\proxy\v{版本}\` 再投放。所以**分发只需要 EfootballBot.exe 一个文件**，
+> 不用再随包带 dll；现场核对可跑 `EfootballBot.exe --proxy-assets`。
+
 ## 安装（只投目标目录，不动 System32）
 
 ```

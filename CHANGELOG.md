@@ -3,6 +3,119 @@
 正式版每次发版的内容写在这里，CI 发 Release 时自动把对应版本段落贴进 GitHub Release 正文。
 格式约定：`## v<版本号>` 开头的段落，段内可用 `-` 列点；CI 按 tag 名精确匹配段落。
 
+## v7.4.0
+
+- **新：界面外观变成「可选世界」，默认仍是 v7.3 的 Windows 11 观感** —— 社区 PR #4（Apple Glass 主题）的视觉改造不再单向覆盖主支，而是被拆成第二个「外观世界」：左栏底部「主题与外观」里除三张亮度卡（暗色 / 亮色 / 深蓝）外，新增「外观风格」一行，在 **Windows 11（云母）** 与 **Apple Glass（黑玻璃）** 之间切换，落盘 `config.json` 的 `Appearance.World`。老配置没有这个字段 → Fluent，不偷偷换皮肤；切换即时生效，不用重启
+  - **两世界共用一套版式**：`Controls.xaml` / `Surfaces.xaml` / `Templates.xaml` / `MainWindow.xaml` 只有一份，差异全在 token 上（`SelectFill/SelectBorder/SelectBar/SelectFg`、`SubTabSel*`、`ChipFill/ChipStroke`、`ComboBg/ComboPopupBg`、`PrimaryBtnFrom/Mid/To`、`TextOnPrimary`、`PrimaryBtnStroke`、`BtnFlash`、`TopBarBg`、`GlassFillTop/Mid/Bottom`、`CardShadowEffect`、`DitherNoiseBrush`）。以前是硬编码的 `#FF1C1C1E`（玻璃按钮深字）、`#FF9A9AA0`（悬停压暗层）、白描边、卡片投影，现在全部走 token —— 否则换回 Fluent 会剩下一块「还是白玻璃」
+  - **ThemePalette 变六张表**（2 世界 × 3 亮度），只跟世界走的 token 由新增的 `ApplyWorldTokens` 一次派生：Fluent 侧从既有 token 推出（`SelectBar = Accent` 蓝色指示条、主按钮 = 实心强调色、卡片无投影、顶栏透明），Glass 侧给玻璃数值（浅灰选中、白玻璃主按钮、渐变卡片、淡投影）。`Validate()` 现在校验 6 张派生后的表名一致，启动自检日志会点名到「世界/亮度」粒度
+  - **ThemeManager 一次下发颜色 + 复合资源**：`GlassFill` / `PrimaryBtnFill` 按三停重建、`CardShadowEffect`（Fluent 换零强度投影）、`DitherNoiseBrush`（Fluent 换透明）；外壳不透明度按世界区分（Fluent 0xF2 云母薄透 / Glass 0x8C 黑玻璃明显透出），Glass 世界强制 Acrylic（Mica 只有纸感）
+  - **Apple Glass 世界**：近纯黑毛玻璃 + 中性浅灰选中（不靠色相）+ 玻璃渐变卡片 + 细高光描边，并用 `Assets/dither-noise.png` 平铺在最底层打散 8bit 深色渐变的色带
+- **版式与交互优化（两世界共用，来自实机反馈与 PR #4）**
+  - 功能分类页签从横向 StackPanel 改成 `WrapPanel`：窄窗自动折行，全部可见、不再挤成一行文字重叠；中栏最小宽 430→580、右栏 380~520→360~460、窗口最小 1244→1300，最小窗口下「运行设置」三个下拉框 + 单位不再被截断
+  - 右栏收起窄条 30→42px 重新设计：去掉竖排「实时画面」四字（窄条里根本读不出来），只留 18px 展开箭头 + 32px 圆角图标框 + 悬停高亮
+  - 首页标题区加品牌眉题「eFootball 挂机助手」与顶栏呼应；顶栏副标题从「Windows 11 · 控制台」改为中性的「自动化控制台」（现在有两个世界了）；左栏模块卡 12→14px、页签 12.5→15px 并加大内距，字号阶梯整体上调一档
+  - 卡片标题前的 3px 竖条换成 6px 小圆点（`CardTitleBar`）；Chip 从椭圆药丸改成方形深玻璃；卡片圆角 8→12、控件 4→8~9
+- **修：设置页「画面与性能 / 手柄与输入 / 挂机与日志」三个页签点了不切换、选中态也不常驻** —— 后三个镜像页签误用了 `SubTab_Checked`，而它的 `ShowByTag` 只认 `Imp1/2/3`，`RbSet*` 落到默认分支上把内容显隐交给了一个不认识自己的处理器；改成统一走 `SecTab_Checked`，`ShowSetSection` 按 `isImp` 分支处理（Imp 走 Important 块内子分段，其余三个走各自独立内容块）
+- **修：进入设置页总被强制跳回第一个页签** —— `NavigateTo` 里无条件的 `SubRbImp1.IsChecked = true` 会覆盖用户上次的选择；改成「没有任何可见设置页签被选中时才点亮第一项」
+- **修：顶部镜像页签与内容区源页签共用一个 `GroupName`，RadioButton 全局互斥导致选中态互相挤掉** —— 镜像页签独立分组（`IntlMirror` / `CnMirror` / `SettingsMirror`），内容区源页签保持原分组
+- **修：更新下载中重复点「立即更新」会把同一版本下载两次** —— 开启「自动下载安装」时横幅与更新面板两个入口都会调 `ApplyAsync`，且没有「进行中」守卫。加 `_updateInProgress`：下载/应用期间任一入口再点直接忽略、两个按钮禁用、下载期间隐藏横幅，失败后自动恢复横幅供重试
+- **修：入场/过场动画要看完才会开球** —— 比赛上下文（最近见过比赛特征）下若画面上**没有比分板时钟**，说明这是入场分镜 / 阵容特写 / 进球回放，改以 350ms 快节奏连按 A 瞬间切断；只有 Live Match（左上角时钟常在）才回到 `MatchIdleTap` 拟人化慢节奏，避免比赛中乱传球。`Unknown` 分支同样加一层「比赛上下文 + 词少（≤5）+ streak<8」的快按 A，缩短开赛过渡期的 4 秒死等；**始终不按 B**（B 在比赛里是铲球键）。水印加载页仍优先走等待（不吃任何键）
+- **重构：周活动按「小活动」拆文件，以后改一个不碰另一个** —— 周活动里其实是好几种形态各异的小活动（常规周活动 / 挑战活动 / 阵容挑战 Team Effort / 单场周活动；国服还有「晋级挑战·教练签下」与「巡回赛主要奖励核验」），以前挤在 2 个大文件里（`WeeklyBrain` 672 行、`WeeklyEventScenario` 1883 行），改一个必然踩到另一个的字段和分支
+  - **国际服 `Scenarios/Weekly/` → 9 个 partial**：`WeeklyBrain.cs`（共用分类/主页/列表/设置解析）+ `.Entry.cs`（进活动：介绍页焦点、比赛页磁贴扫描、锦标赛页）+ `.Pick.cs`（赛事等级 / 难度 / 「选择地区」「选择球队」/ Y 随机）+ `.Challenge.cs`（解锁弹窗、挑战清单、卡扫描、锁/勾探针、卡号消失判定）+ `.SquadPlan.cs`（阵容挑战主页、球员卡限制弹窗、阵容侧边栏、比赛计划红点）；场景侧 `WeeklyEventScenario.cs`（主循环 + `WkPhase` 分发 + 导航 + 通用件）+ `.SingleMatch.cs`（活动设置核验、赛事等级下拉、单场周活动难度页）+ `.Challenge.cs`（挑战子流程 + 地区/球队选择前置）+ `.SquadPlan.cs`（比赛计划失效修复的 `PlanStep` 状态机）
+  - **国服 `Scenarios/CnWeekly/` → 10 个 partial**：`CnWeeklyBrain.cs` / `CnWeeklyScenario.cs` 留分类与状态机骨架，其余按小活动分到 `.Challenge.cs`（清单选卡/卡页判定/撤退重进）、`.Coach.cs`（教练签下链）、`.Reward.cs`（巡回赛主要奖励核验与撤退）、`.Difficulty.cs`（难度卡片行判定与确认）
+  - **私有状态跟着小活动走**：`_ch*`（挑战清单游标/拉黑/重扫）、`_pick*`（选择页随机与逃生）、`_plan*`（比赛计划修复步进）都搬进各自的 partial，主文件只留跨活动共用的阶段、连击数、场次与 memory
+  - 纯搬迁、无行为变更：按成员名逐个搬 + 同名重复校验（拆完对四对类型各查一遍字段/方法零重复），并与 HEAD 成员表对比确认一个都没丢；`docs/MODULES.md` 新增 §1.1「周活动子活动分工」，写明「加一个新小活动 = 加一对新文件，主文件只加一个 case」- 回归用例：`RecogWalkHardeningTests` +2（无时钟 → 快按 A 且 ≤500ms；带时钟 → MatchIdleTap），`MlFlowMemoryTests` / `SharedMatchLayerTests` / `CnWeeklyChallengeGuardTests` 改为带时钟的真实比赛帧（空 OCR 的 InMatch 帧在真实流程里不存在）；`dotnet build` 0 错误，arch-guard 11 条规则通过，全量测试见下
+- 文档：`DESIGN.md` 增补 §3.4「视觉世界（World）」与 §6.1.1「加一个视觉世界」，说明为什么样式里不准出现颜色字面量
+## v7.3.6
+
+- **修：国服「天梯赛」卡在段位积分页的「RT 下一步」上，一直按 A 画面一动不动**——用户 2026-11-21 反馈（截图：大师联赛 / 天梯积分 2401 / 右下「RT 下一步」；日志停在 `[国服周活动] 手柄 A：确定/下一步` 之后）。这一页是国服客户端里的「网页层」UI：虚拟手柄 A 不生效（实机 2026-11-07 段位积分页 A×5 + B×6 不动），底栏印的 RT 才是它的键。旧逻辑每个国服模块各写一套阶梯（天梯：先鼠标再 A；周活动：先 A 再 RT；我的联赛：A 按 10 轮才试 RT），三处不一致且都轮不到真正能吃键的那一个
+  - **新增共享件 `Core/Bot/Match/CnAdvance`**（共享层，国服三个模块共用一份）：国服键序 `① RT（页面所印提示键）→ ② A → ③ 后台鼠标点击`；`StepOf(attempt)` 是纯函数（1→RT、2→A、≥3→鼠标），`FindButton(ocr, dets, words)` 先找下半屏推进词（下一步/确认/确定/OK，取最靠下、同高取最右），OCR 整帧漏读按钮字时退回右下角 `btn_confirm` 检测框，再不行用兜底坐标
+  - **天梯巅峰赛**（`PeakLadderScenario`）：比赛起始页、`HasConfirm` 页、活动主页遮挡物、赛前确认弹窗、网页层结算页（赛后小结 / 段位积分页）全部改走国服键序；网页层页面在鼠标之后仍不动时第 6 轮按页面印的键盘键（旧版段位积分页为 C）、第 8 轮才 B 逃生（旧版第 6 轮就 B，抢在鼠标之前）。`HasConfirm` 的 B 逃生阈值 5 → 8，同样让位给鼠标那一轮
+  - **国服周活动**（`CnWeeklyScenario`）：比赛起始页、对阵表「RT 下一步」（Flow 与赛后回对阵表两条路径）、共享决策的 `PadConfirm` 分支改走国服键序
+  - **我的联赛（国服）**（`CnMyLeagueScenario`）：共享流程的 `PadConfirm` 分支改成虚钩子 `AdvanceConfirmAsync`（国际服仍直接 A），国服实现走国服键序；起始页同改；`HasConfirm` 页的「A 十轮才试 RT / 三十轮 B」换成键序各跑几遍后的死页逃生（12 轮）
+  - **比赛中不掺进来**：比赛内回放/中场小弹窗只按 A（比赛里 RT 有游戏内含义）
+  - **仅限国服**：国际服客户端不吃后台鼠标，国际服模块（周活动 / 我的联赛 / AI 天梯）保持原样
+  - 回归用例 `CnAdvanceTests`（10 条）：键序阶梯 0/1→RT、2→A、3+→鼠标、阈值常量与阶梯一致；按钮锚定（右下推进词、上半屏词不当按钮、OCR 漏字退检测框、都找不到返回 null）；`PeakLadderBrain.FindBottomConfirm` 改为转发同一实现（单一定义），`PeakLadderBrainTests` 原 26 条保持绿
+
+- **修：国际服「阵容挑战 / Team Effort」赛后弹「无法进行比赛」，点掉弹窗再点前往比赛又弹，整夜零场次**——用户 2026-11-22 实机六帧（弹窗帧、主页红点帧、主页干净帧、比赛计划编辑页三帧）。根因两条：① 这枚弹窗盖在主页上、主页词（前往比赛/赛程/赛事等级/奖励）全可读，旧逻辑把它当「入场弹窗」盲按 A（弹窗是关掉了，但比赛计划仍失效）；②「比赛计划里有球员卡失效」这件事在 UI 上只有一个**红色叹号**（底栏 Y 比赛计划按钮右上角），没有任何文字，旧逻辑完全不认，于是一直按「前往比赛」，游戏一直拒绝
+  - **分类新增**：`WkScreen.MatchPlanInvalidPopup`（标题「无法进行比赛」/ 副标题「不能在后续比赛中使用」+ 屏中部 OK，**先于**一切主页判定）、`WkScreen.SquadLineupEdit`（底栏 Y 比赛计划打开的阵容页：左列侧边栏「自动配置球员」+「实时更新评价/球员详细数据」）、`WkScreen.AutoConfigOptions`（同页盖着「重视能力值」选项弹窗，**先于**编辑页判定）
+  - **新像素探针** `RegionProbe.CountRed/CountRedRef`（R≥80 且比 G/B 高 45；阈值压低是因为弹窗打开时整页压暗，同一枚徽章会从 (255,32,26) 掉到 (112,26,21)）+ `WeeklyBrain.DetectPlanBadge`（底栏读到「比赛计划」按钮词 + 徽章区 x 0.700~0.800 / y 0.865~0.965 红像素 ≥60；实机红点帧 ≈198、干净主页 0、压暗帧 ≈180）/ `WeeklyBrain.DetectFocusedSidebarItem`（侧边栏聚焦行白底 255 vs 未聚焦 41）
+  - **新流程** `WkPhase.MatchPlanSetup`（用户逐步规则）：赛后「无法进行比赛」→ A 继续 → 回主页看红点 → 有红点 Y 进比赛计划（途中弹窗走 `PopupBrain`）→ 阵容页左移到侧边栏、下选「自动配置球员」→ A → 选项弹窗下×1 选「重视能力值」→ A 下一步 → B 完成 → 回主页红点消失才开赛。侧边栏导航按屏幕状态走（读到高亮项就据此决定左移/下移，读不出先左×4、第三次起改下×1），不盲按固定次数
+  - **防死循环**：同一处红点最多修 3 次（超限停止挂机并提示手动检查比赛计划——比赛计划失效时游戏恒定拒绝开赛）；「无法进行比赛」弹窗连按 A 5 次未消失回 Flow 重判；选项弹窗只下移一次（重复下移会把光标挪到别的选项，配置出的阵容和用户要的不一致）
+  - 回归用例 `TeamEffortRealFrameTests` +4 条（红点只命中有叹号的主页、侧边栏白底只认「自动配置球员」、无法进行比赛弹窗单键直按 A、侧边栏顺序锚定），`Classify` 用例外扩到新增 6 帧；周活动/弹窗/探针相关 218 条全绿
+
+## v7.3.5
+
+- **修：单文件发布只带走 exe，换一台电脑就投不了代理（exe 里没有 xinput1_3.dll）**——用户反馈 2026-11-20：别的电脑下载的 exe 里没有 dll，「投放代理到游戏目录」直接报「程序目录缺少 xinput1_3.dll」。根因是发布形态：`PublishSingleFile=true` + 两个 DLL 标了 `ExcludeFromSingleFile`，只留在 `build_local\publish-stage\`，而 `build.bat` 只拷 `EfootballBot.exe` 进 `publish\`
+  - **两个代理 DLL 内嵌进 exe**：csproj 增两条 `EmbeddedResource`（`LogicalName="EfootballBot.Proxy.xinput1_3.dll"` / `xinput1_4.dll`，仍带 `Exists()` 条件，没构建代理时不影响主程序构建）
+  - **新增 `Core/Input/PadProxyAssets`**：`ResolveSource(name)` 取可复制的源——exe 同级同名文件优先（本地调试 / 手动换 DLL 热修），否则把内嵌副本解压到 `data\tmp\proxy\v{程序版本}\`（版本一换就换目录，不会吃到上版旧 DLL）；`data\` 不可写（装 Program Files）时退到 `%TEMP%\EfootballBot\proxy\v{版本}\`。解压先写唯一 `.tmp` 再 `File.Move` 换名，A/B 档案同时首投也不会读到写了一半的 PE；换名撞占用时直接用临时副本顶一次，1 小时前的残留 `.tmp` 自动清理
+  - **设置页**：`DeployProxyTo` 的 1_3 / 1_4 都改走 `PadProxyAssets.ResolveSource`；状态行分成「已就绪（exe 同级 dll）」「内嵌在 exe 里（首次投放自动解压）」「缺失（构建时 tools\xinput-proxy 未产出）」三档；「撤回代理」一并删除之前漏掉的 `xinput1_4.dll`
+  - 回归用例 `PadProxyTests.ProxyDlls_AreEmbeddedAndExtractAsLoadablePe`（两个 DLL 都内嵌、解压结果 >64KB 且以 `MZ` 开头、重复调用复用不重写不留 `.tmp`）+ `PadProxyAssets_UnembeddedName_ReturnsNothing`
+
+- **修：进程内代理（xinput1_3.dll）投放了却没被游戏读取时，挂机照常开跑，整场一个键都按不进去**——反馈包 2026-11-19 09:04（v7.3.0）：日志里 `进程内代理已接管（xinput1_3.dll）` 之后紧跟 `代理尚未被游戏读取`，之后 40 分钟按键全无回显，用户只看到「挂机在跑、游戏不动」。原逻辑把「代理没被读取」当成一句提示日志，继续用这个谁都不读的虚拟手柄跑下去
+  - **代理没被读取就不再往下跑**：`BotEngine.ConnectPadWithFallbackAsync` 的 `PadBackendKind.XInputProxy` 分支在 `WaitForProxy` 超时后自动回退——`Pad360.Dispose()` → 换 `CreatePad(PadBackendKind.Vigem)` → 重建 `Pad` → `Connect()` → 走一次 `VerifyVirtualPadSlotAsync()`（代理模式没禁用真实手柄，换回 ViGEm 正好可能撞 slot0）
+  - **回退也连不上就直接停机**：`Stats.LastError` 写「手柄接管失败：进程内代理未被游戏读取，换回 ViGEmBus 也连不上 —— 游戏现在收不到任何按键，本次挂机不启动（先修好手柄接管再开始）。」+ `EmitStats()` + `Dispose()` + `throw PadTakeoverBlockedException`，界面立刻看到停机原因，而不是「在跑但不动」
+  - **商店版（Steam/Epic/Xbox）也能找到游戏目录**：新增 `GameSettingsLocator.ProxyDllName`（`xinput1_3.dll`）、`LocateGameBinDir(bool intl)`（先按运行中进程映像目录 `GameProcessDir`，再退回 `LocateGameExe` 的所在目录）、`GameProcessDir(string processName)`（`GetProcessImagePath` 后校验文件名）、`HasProxyDll(string? binDir)`；提示按「已有 DLL 但没加载 = 需重启游戏」与「缺 DLL = 去设置页投放」分开说，不再一律指向一个猜出来的路径。★注意 `Locate(string gameProcessName, …)` 解析的是 `Settings.exe` 不是游戏本体，游戏目录必须走 `LocateGameExe`
+
+- **修：真实手柄禁用没生效时只打一条 WARN，用户看不到「虚拟手柄没独占输入」**——原 `BotEngine` 在等待设备消失超时后只写日志与 `data\pad-control.log`，界面状态栏毫无变化，而这种情况下手柄与虚拟手柄会同时往游戏里灌按键（表现为随机乱跳菜单）
+  - 新增 `PhysicalPadControl.LastControlLogLine()`：提权工具是独立进程，Worker 拿不到返回值，只能回读 `data\pad-control.log` 末尾 8192 字节的最后一条非空行
+  - 超时分支改为 `Stats.LastError = 真实手柄禁用未完全生效：<提权进程原话>` + `EmitStats()`，把失败原因（含提权进程自己的报错）直接顶到界面上
+
+- **修：GDI 捕获被判为「永久可用」，之后游戏更新/换窗口句柄就一直吃到陈旧帧；且没有任何地方提示画面已经不再刷新**——`CaptureBackendMemory` 只记一次判定，`ObservationService.RememberWorkingBackend` 每次出帧还会重写它，判定时间被无限刷新，等于永不重新探测
+  - **记忆会衰减**：`CaptureBackendMemory.Entry` 增 `Hits`，`ReprobeAfter = 7 天`、`MaxHits = 20`，`ShouldReprobe(entry)` 只对 GDI 判定生效（WGC/DXGI 永不过期）；`Save` 在**同一个后端**重复保存时保留原始 `At`/`Hits`（否则每次出帧都刷新时间，衰减永远差一点点），`NoteHit()` 单独把命中数 +1
+  - 引擎按 `ShouldReprobe` 丢弃过期判定并打一条 INFO（带上判定时间与命中次数），GDI 成功启用的路径改为 `TryStartGdiCaptureAsync` 成功后调 `NoteHit()`
+  - **陈旧帧可见**：`GdiWindowCapture` 在 `DownscaleIfNeeded` 之前对整帧算 FNV-1a 指纹（`Step = 4099`），同值累加 `_sameSigStreak`，对外暴露 `StaleFrameStreak` / `ResetStaleTracking()`；`BotEngine.CheckCaptureStaleness()` 在场内且后端是 GDI、连续 `StaleFrameWarnStreak = 90` 帧完全一致时打 WARN（5 分钟节流）：「请改用 WGC/DXGI 捕获，或删除 data\capture-backend.json」
+
+- 回归用例 `CaptureBackendMemoryTests` +6 条：新判定不重探、过期判定重探（临时把 `ReprobeAfter` 置零）、命中数到上限重探、WGC 判定永不重探、同后端重复 `Save` 保留原时间与命中数、`NoteHit` 只加命中数不动时间；`dotnet build` 0 错误，`ArchitectureTests` 与手柄/捕获相关 72 条全绿（全量 917 条亦全绿）
+
+- **修：教练天梯赛「请选择参赛模式」弹窗被判成掉线弹窗（v7.3.4 的版式闸照样中招）**——实机 2026-11-20 16:04（截图：暗红活动页上浮起一枚居中浅灰面板，「请选择参赛模式 / 即刻进入教练天梯巅峰赛 / 当前剩余参赛场次：14」+ 单场比赛 / 连续比赛 / 取消，取消填充青蓝 = 焦点）：这一屏的几何和真弹窗一模一样——同一套 `PopupBrain.PanelRect` 量出来 x 0.212–0.787 / y 0.189–0.812、面板内中位亮度 230、色度 0、底下还是青蓝焦点键；当时只靠 v7.3.4 的「OCR 词数 ≤12」偶然拦住（实机 35 词），某轮 OCR 一退化就会在「取消」上「下 + A」，落点正好是「连续比赛」
+  - **反向文字证据**：新增 `PopupBrain.LooksLikeOtherDialog`——弹窗带里读到别的弹窗的字就一律不认：动作词 `ForeignDialogWords`（单场 / 连续比赛 / 确定 / 确认 / 进入 / 继续 / 开始 / 下一步 / 退出 / 结束 / 领取 / 获得 / 购买 / 关闭 / 重来 / 重新开始）或标题语义 `ForeignDialogTitles`（选择 / 是否 / 提示 / 奖励 / 失败 / 成功 / 注意 / 请稍候）。先放行掉线弹窗自己的词（含「重试」、`ReconnectTitleWords`、或「重新」+「连接/连线」），换皮标题「是否重新连接？」不会被误杀
+  - **词数闸收紧**：`StructuralMaxOcrWords` 12 → 6（真弹窗实测最多五六个词：标题 + 正文 + 取消 + 重试）
+  - **版式闸补第五道「面板外几乎全黑」**：新增 `OutsideDarkShareOf(frame, panel)`（4px 网格、跳过面板内部、暗像素 = 亮度 ≤12），要求暗像素占比 ≥ `OutsideDarkShare` = 0.90。黑遮罩上的真弹窗实测 0.999，天梯这一帧 0.614（面板外还浮着活动页卡片和金色文字）。★**这一条不能用「面板外中位亮度」**：真弹窗 0.0、天梯帧 3.0，分不开——天梯帧的 PanelRect 已经把大半个页面框进面板，剩下的大片本身就是黑的，只有占比能分开
+  - 实机帧入库 `tests/EfootballBot.Tests/TestData/cnmatch/cn_ladder_mode_select_20261120.png`；`PopupBrainTests` +3 条（合成版式 + 文字双闸都拦、实机帧真 OCR 读出 35 词不判且 `OcrResult.Empty` 也不判、`ReconnectWatch` 连看 4 轮全 `None` 且 `StructuralHits` 保持 0）；重连弹窗既有 11 条用例仍全绿，`PopupBrainTests` 26 条全绿
+  - 教训：v7.3.4 的版式闸只能证明「这是一枚居中浅色面板」，证明不了「这是掉线弹窗」——同一套几何在活动页、结算页、选择页都成立，最终判据只能是文字，版式只配给「整屏读不出字」兜底
+
+## v7.3.4
+
+- **修：天梯活动页被误判成掉线弹窗，每 6 秒「下 + A」在活页面上乱点**——实机 2026-11-20 15:23（截图：教练天梯巅峰赛页，暗红黑底 + 金色徽章 + 满屏字；日志 15:23:59 与 15:24:19 各一条「[掉线重连] 检测到游戏掉线弹窗（第 1 轮）：没读到「重试」按钮…→ 下移一格再 A」，与「界面：天梯巅峰赛.ActivityHome」交替）：上一版的两道证据都太松——文字证据是「整屏拼接文本的子串」（满屏噪声词凑出「重新」+「连接」，再撞上一个含「重试」的碎词就成立），版式证据只有「四周暗 + 中央亮」（深色活动页、过场图全能过）；而 `DecideReconnect` 又用「任意位置子串」找「重试」，找不到就走默认「下移一格再 A」，于是在一张完全正常的活动页上按了一整轮
+  - **文字证据必须是弹窗带里的整词**：`PopupBrain.FindTitleWord`（排版行聚合后的词块，落在 x 0.18–0.82 / y 0.20–0.85、长度 ≤12 字、含「重新连接/重新连线」或同行同时有「重新」与「连接/连线」）+ `FindRetryWord`（`Core(norm)=="重试"` 整词），且标题与「重试」纵向距离 ≤0.45。`DecideReconnect` 改用同一套取词，判得出才按得着
+  - **版式兜底加词数闸** `StructuralMaxOcrWords = 12`（v7.3.5 收紧到 6）：弹窗盖黑整屏后只剩自己那几行字；读出十几个以上的词说明画面还完整，此时版式再像也不认
+  - **版式判据收紧成「一枚居中矩形面板」**：四条边框近黑之外，还要求沿 9 条横线 / 9 条竖线取的亮段（min/max extent，不能用最长连续 run——面板内的标题和按钮会把纵向亮段打断）收敛到同一枚矩形（≥60% 的线对得上、漂移 ≤0.06）、矩形外一圈近黑、矩形内部浅灰低饱和（中位亮度 ≥150、色度 ≤32，金色徽章 / 彩色海报 / 渐变加载图全被挡掉）。实机 191 张 TestData 帧里只有 7 张能过这道版式闸，且都还要再过词数闸
+  - **单帧版式证据不再按键**：新增 `ReconnectWatch`（`ReconnectVerdict.None/Pending/Act`）——文字证据一票通过，只有版式证据时要连续 `StructuralConfirmRounds = 2` 轮都成立才动手（加载页 / 过场页会闪出同样的版式），弹窗一消失计数立刻清零。引擎主循环按三档接线，Pending 轮只打一条 30s 节流的 WARN「画面版式像掉线弹窗，但没有文字证据：先观察一轮，暂不按键」，日志里同时标出这一轮的依据是「画面文字」还是「画面版式」
+  - 回归用例 `PopupBrainTests` +6 条（该类共 23 条）：活动页满屏噪声词不误判（并断言整屏拼接文本里确实凑得出「重新」「连接」「重试」——老逻辑就是这么判成立的）、同一枚暗底面板但读出 20 个词不判、版式证据两轮 Pending→Act、文字证据首轮就 Act、弹窗消失后连轮计数清零、事故页连看 5 轮一次都不动手；既有 17 条用例（含实机帧 `TestData/cnmatch/cn_reconnect_popup_20261120.png`）保持绿
+
+- **修：掉线重连弹窗被「直接 A」按在「取消」上，挂机整夜空转**——实机 2026-11-20 11:10（截图：天梯巅峰赛跑到一半，画面被「要重新连接吗？/ 和 实况足球 进行通讯时发生未知错误。」盖住，日志 10:10:38 只剩「界面：Unknown」）：弹窗两枚按钮上下排列，**上＝取消（默认焦点，填充青蓝）、下＝重试**。共享弹窗决策的推进键词表里没有「重试」，于是判成「多按钮但没有推进键 → 直接 A」，A 正好落在默认焦点的「取消」上 = 放弃重连；游戏随即退回标题/黑屏，而场景层对这一页只会盲按 A/B，一夜就这么耗掉
+  - **共享层加识别** `PopupBrain.IsReconnectDialog(frame, ocr)`：文字证据优先（标题「重新连接/重新连线」+ 按钮「重试」），OCR 整屏读不出字时用版式兜底（四周近黑 + 中央浅色面板 = 浮在黑屏上的系统弹窗）；纯黑帧（GDI 取不到画面）仍然不认，绝不盲按
+  - **共享层加决策** `PopupBrain.DecideReconnect(frame, ocr, out note)`：焦点靠**色相**判（实机焦点键是填充青蓝 RGB(33,150,243)，未聚焦是纯白 255 —— 老的亮度阈值 120 两枚都过，会把白色「重试」错认成焦点）。焦点在「重试」→ 直接 A；焦点在「取消」或判不出 → **先下移一格再 A**；「重试」在上方（换皮版式）→ 上移一格
+  - **引擎层统一拦截** `BotEngine` 主循环在场景决策之前先过这道闸（`HandleReconnectDialogAsync`）：场内场外、任何模块（天梯/周活动/我的联赛/国际服）都逃不掉；日志 30s 一条、第 6/30 轮升级为 Error 提示「持续连不上请看网络」，弹窗一消失计数归零。识别不到就不碰
+  - 回归用例 `PopupBrainTests` +9 条：重连弹窗文字识别、普通弹窗不误判、OCR 全灭时版式兜底仍命中、纯黑帧不误判、取消高亮→下移再 A、重试高亮→直接 A、按钮读不出时**绝不直接 A**、换皮版式（重试在上）→上移，以及**实机事故帧** `TestData/cnmatch/cn_reconnect_popup_20261120.png` 直接断言「认得出 + 动手是下移再 A」（该帧 OCR 读不全也能靠版式命中）
+
+## v7.3.3
+
+- **修：国服周活动刷满后不接力，原地空转 8 小时**——实机 2026-11-20 01:50→09:53（日志 `publish/logs/bot-20261120-015029-55744.yml`）：「全部完成后 = 天梯巅峰赛」跑了一夜，天梯一次都没接手，场次停在 4。原因是活动列表的槽位逻辑没有封顶：主要奖励核验判满 → 退回活动列表 → `_slotIndex++` → 按 `右移 _slotIndex 次` 定位下一个活动卡；而卡行到末尾后多余右移只是**饱和**（光标停在最后一张卡上），于是每轮都重新进**同一张已满卡** → 又判满 → 槽位再 +1……槽位从 1 涨到 306，单轮右移按键数跟着从 1 次涨到 306 次（20s→75s 一轮），"全部刷完 → 接力" 这条唯一出口永远走不到
+  - **卡位上限硬闸** `CnWeeklyScenario.MaxEventSlots = 6`：进卡右移次数改为 `Math.Clamp(_slotIndex, 0, MaxEventSlots)`（饱和右移按满值也够）；槽位涨过上限即认定「再右移也不会换卡」，直接 `FinishAllEventsAsync("槽位已刷到 N（卡位上限 6）…")` 退页交接。不依赖 OCR，读字全灭也能收尾
+  - **活动卡指纹** `CnWeeklyBrain.CardSignature(ocr)`（活动名 + 总活动积分，如 `全新版本巡回赛|9548`）+ `TryParseTotalPoints`（只认标签右侧/正下方的**纯数字词**，避免把同行的「赛事等级奖励 2,156」当积分）：一张卡判满退场时记下指纹，下次再判满时**指纹相同**就说明又回到了刚刷满的那张卡 —— 不再「退列表换下一槽」，而是把槽位顶过上限、走同一条已验证的退场路径（主页→介绍页→活动列表）交给卡位闸收尾。正常情形两轮内就能接力，最多 8 轮
+  - `_lastFullCardSig` 是**跨卡**记忆，故意不放进 `ResetRewardCheckState()`（那个方法每换一张卡都会调用，放进去等于关掉这道保护）；每场比赛结束清零（进度已变，旧指纹不可比）
+  - 回归用例 `CnWeeklyBrainTests` +5 条：同卡指纹跨 OCR 抖动稳定、换卡指纹不同、积分读不出时退化成 `名字|?`、只有固定噪声词时返回空串（交给卡位上限兜底）、积分解析只吃标签附近的纯数字词
+
+## v7.3.2
+
+- **修：加载/过场页被当成「手柄输入已死」，挂机自己停掉**——实机 2026-11-20 00:52：国服开赛加载停在球场全景，画面其实在正常渲染，但 OCR 只剩水印词（`实况足球在线 | X | 11.1.0.1.124916…`），拼出来的文字指纹 60 多字符，骗过了「指纹长度 ≥12 就算可读页」的检查；加载页本来不吃下/A/B，于是被判「页面卡住 45 秒 + 按键全无响应」→「游戏未响应手柄输入」→ 挂机停机（用户看到的是一夜白挂，而这局根本没开起来）
+  - **水印页识别** `InputLivenessProbe.IsWatermarkPage`：把每个词剥掉「实况足球在线/实况足球/国际服/eFootball/PES/KONAMI/online/手游/版本」等水印词后只留字母，**一个真字都不剩**才算水印页（剩 ≥2 个字母，或剩 1 个汉字，都算真内容）；水印页与满屏球场（`ScreenProbe.LooksLikePitch`）一律不参与输入活性判定
+  - **暗光球场兜底** `ScreenProbe.LooksLikePitch` 增补下半屏「偏绿占比 ≥60%」判据：夜场/球场入场 CG 的草地被压到 RGB(18,21,11) 这种亮度，原「亮草地绿 ≥30%」全灭，而这一屏正是 00:52 停机时保存的异常画面（`圣西罗球场` + 两队 logo + 版本号）；新判据只看 G≥R 且 G−B≥5 的色相关系，实机 187 张测试帧里只有这一帧因此转真，菜单/主页/终场页仍是 0.000~0.025
+  - **判死改成两击制**：仍然两轮按键都没反应时，第一次只打 WARN「先不停挂机，安静等 3 分钟再复核一次」，冷却到期再验一次才抛 `InputNotRespondingException`；判死前还会重新取一帧复核，已进入加载/过场就直接判为正常
+  - **共享决策不再对加载页按 A/B** `MatchBrain.Decide` 的 Unknown 分支：水印页最多 20 轮（约 1.5 分钟）只等待不按键——00:51 那晚在加载页上按了 1 次 A 试探 + 15 次 B 逃生，按下去只会把还没走完的开赛流程取消掉；等满 20 轮仍一字不变才交回常规 A 试探/B 逃生
+  - 回归用例 `InputLivenessWatermarkTests` 11 条（含实机事故帧 `TestData/cnmatch/cn_input_dead_load_20261120.jpg` 直接断言「现在会被豁免」）：实机水印签名能通过长度检查但必须被认出、只有 logo/版本号算水印、真菜单页/加载页带提示语/英文菜单页不算水印、空 OCR 不算水印、水印页签名长度门槛护栏、共享决策对水印页只等待（1/3/6/12/20 轮）、等满 20+1 轮仍走 B 逃生、可读菜单页的 A 试探/B 逃生节奏不变
+
+## v7.3.1
+
+- **修：进球庆祝 CG 被当成一场比赛结束（场次虚计）**——实机 2026-11-20 00:34:35：进球后的过场动画里落了一帧，被判成比赛页 MatchHub，场次跟踪器把这帧当「回到菜单」直接关场，日志打出「一场比赛结束（用时 00:21，累计 1 场）」，而这场才走了 21 秒
+  - **场景层加球场探针** `ScreenProbe.LooksLikePitch`：中央区域草地绿占比 ≥30% 即认定「画面还是球场」。庆祝/回放/镜头切换都是满屏 3D 草地，而菜单、主页、终场页都是深色 UI 面板——同一口径实机标定：比赛帧 0.77~0.82、国服跳过横幅 0.98、赛前起始页 0.38，全部菜单/主页/终场页 ≤0.04，阈值两边都留足余量
+  - **分类器** `MatchBrain.Classify` 新增 `pitchLike` 参数，在一切菜单类判定（MatchHub / LeaguePage / btn_back / 我的联赛兜底）之前返回 `InMatch`；终场页、确认弹窗等强证据判定仍在它之前，赛后回放里的终场词照旧关场
+  - **共享层加时长门** `MatchSessionTracker`：只有「回到菜单」这类弱证据关场要求本场已走满 60 秒，不到的只标记 `MenuCloseSuppressed` 并继续观察（真回菜单由「5 分钟无比赛特征」兜底，那条路径本就不计场次）；见到终场页不受影响
+  - **日志说清关场来由**：成功关场末尾追加「判定依据：终场页 / 回到 {界面}」；被时长门拦下时打 WARN「判到「MatchHub」但本场才走了 00:21（<1 分钟）——按识别误判处理，不计场次」（30 秒节流），下次反馈不必再从时间戳倒推
+  - 回归用例 `GoalCutsceneFalseEndTests` 10 条：21 秒被判 MatchHub 不关场/不伪造用时、连续几帧都拦下、真回菜单（>60s）照常计场次、终场页不受门影响、球场探针在比赛帧为真而在 hub/新 UI hub/终场页为假、国服跳过横幅仍算球场、比赛页风格 OCR 带球场标志时判 `InMatch`、赛后的「比赛结束」词仍判 `FullTime`
+
 ## v7.3.0
 
 - **换视觉世界：Windows 11 Fluent + 毛玻璃（纯视觉，功能零改动）**

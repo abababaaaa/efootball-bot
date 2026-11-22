@@ -125,6 +125,35 @@ public class PeakLadderBrainTests
         Assert.Equal(PlScreen.None, PeakLadderBrain.Classify(ocr));
     }
 
+    // ---------------- 比赛页签卡面锚点（2026-11-21 实机：主页反复「上×2 左×4 右 下 A」进不去天梯） ----------------
+
+    [Fact]
+    public void FindLadderTileWord_PrefersCardTitleOverTopTab()
+    {
+        // 比赛页签：卡面标题印在天梯卡下部（0.5, 0.70），顶栏同名词不算锚点
+        var ocr = Ocr(W("推荐 比赛 签约 商店", 0.5, 0.075),
+            W("天梯巅峰赛", 0.5, 0.70), W("2026 S6赛季", 0.5, 0.76));
+        var w = PeakLadderBrain.FindLadderTileWord(ocr);
+        Assert.NotNull(w);
+        Assert.Equal(0.70, w!.CenterY, 3);
+    }
+
+    [Fact]
+    public void FindLadderTileWord_IgnoresRecommendedPageTiles()
+    {
+        // 推荐页签的天梯巅峰赛磁贴在左栏（x≈0.15），不是比赛页签卡面 → 不锚（否则会点错页签的卡）
+        var ocr = Ocr(W("推荐 比赛 签约 商店", 0.5, 0.075), W("天梯巅峰赛", 0.15, 0.78));
+        Assert.Null(PeakLadderBrain.FindLadderTileWord(ocr));
+    }
+
+    [Fact]
+    public void FindLadderTileWord_IgnoresWordsAboveCardRow()
+    {
+        // 只有页头/弹窗里的同名词（y<0.45）时返回 null，场景层改用卡面兜底坐标
+        var ocr = Ocr(W("天梯巅峰赛", 0.5, 0.2));
+        Assert.Null(PeakLadderBrain.FindLadderTileWord(ocr));
+    }
+
     // ---------------- 场次解析 ----------------
 
     [Fact]

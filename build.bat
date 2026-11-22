@@ -39,6 +39,22 @@ if errorlevel 1 (
 )
 
 :deployed
+rem Verify the deployed exe is the same size as the freshly published one.
+rem 2026-11-21: an interrupted copy left publish\EfootballBot.exe at 124,518,400 B
+rem (exactly 1900 x 64 KiB, a clean prefix of the 131,328,209 B build). The .NET
+rem single-file host then aborts with "Failure processing application bundle ...
+rem Arithmetic overflow" before any app code runs, so double-clicking the bot did
+rem nothing: no window, no gui-error.log, only an Application event 1023 from
+rem ".NET Runtime". Never leave a size-mismatched exe in publish\ - fail loudly.
+for %%F in ("%STAGE%\EfootballBot.exe") do set "SRC_EXE_SIZE=%%~zF"
+for %%F in ("%~dp0publish\EfootballBot.exe") do set "DST_EXE_SIZE=%%~zF"
+if not "%SRC_EXE_SIZE%"=="%DST_EXE_SIZE%" (
+    echo ERROR: publish\EfootballBot.exe is %DST_EXE_SIZE% bytes but the build is %SRC_EXE_SIZE% bytes.
+    echo        That copy was truncated; the bot would fail to start with a bundle error.
+    echo        Re-run this script; make sure nothing is writing publish\EfootballBot.exe.
+    goto :fail
+)
+
 rem Prune old backups: keep only the single newest EfootballBot.old-*.exe.
 rem Each backup is ~120-140MB, and rename-aside leaves one per build while the
 rem bot is running; without this the folder grows by >100MB on every build.

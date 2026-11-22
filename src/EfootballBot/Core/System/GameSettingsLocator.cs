@@ -115,6 +115,61 @@ public static class GameSettingsLocator
     /// （比文档里的常规布局多一层 eFootball），所以按候选表逐个试，最后再用限深递归兜底。
     /// 国服固定 {级}\eFootball\Binaries\Win64\eFootballOnline.exe。
     /// </summary>
+    /// <summary>进程内代理 DLL 名（游戏只从自己的 Binaries\Win64 加载同名 DLL）。</summary>
+    public const string ProxyDllName = "xinput1_3.dll";
+
+    /// <summary>
+    /// 定位游戏真正加载 DLL 的目录（国际服/国服都是 ...\Binaries\Win64）。
+    /// 2026-11-19 反馈包需要它：代理没被游戏读取时，要能明确指出「哪个目录里缺 xinput1_3.dll」；
+    /// 原来只有一句「请确认已投放」，用户无从核对，只能反复试。
+    /// 顺序：运行中进程的映像目录 → 已保存/扫描到的 exe 目录（含 Steam 库与默认路径兜底）。
+    /// </summary>
+    public static string? LocateGameBinDir(bool intl)
+    {
+        string exeName = intl ? IntlGameExeName : CnGameExeName;
+
+        // ① 运行中的游戏进程：读映像路径（跨提权可读）。这才是 DLL 真被加载的地方。
+        if (GameProcessDir(exeName) is { Length: > 0 } fromProcess) return fromProcess;
+
+        // ② 游戏没开：走「快速打开游戏」的定位链（国际服含 Steam 库打分 + 默认路径回退）
+        return LocateGameExe(intl) is { Length: > 0 } exe
+               && Path.GetDirectoryName(exe) is { Length: > 0 } dir
+            ? dir
+            : null;
+    }
+
+    /// <summary>按进程名读运行中游戏的映像目录（进程名与 exe 名一致：eFootball / eFootballOnline）。</summary>
+    private static string? GameProcessDir(string processName)
+    {
+        try
+        {
+            foreach (var proc in Process.GetProcessesByName(processName))
+            {
+                try
+                {
+                    var exe = GetProcessImagePath(proc.Id);
+                    if (string.IsNullOrEmpty(exe)) continue;
+                    if (!Path.GetFileName(exe).Equals(processName + ".exe", StringComparison.OrdinalIgnoreCase)) continue;
+                    return Path.GetDirectoryName(exe);
+                }
+                catch { /* 下一个进程 */ }
+                finally { proc.Dispose(); }
+            }
+        }
+        catch { /* 进程枚举失败走下一级 */ }
+        return null;
+    }
+
+    /// <summary>指定目录里是否已有代理 DLL。目录为空/无权限一律按「没有」处理。</summary>
+    public static bool HasProxyDll(string? binDir)
+    {
+        try
+        {
+            return !string.IsNullOrWhiteSpace(binDir) && File.Exists(Path.Combine(binDir!, ProxyDllName));
+        }
+        catch { return false; }
+    }
+
     public static string? FindGameExeNear(string? startDir, bool intl)
     {
         if (string.IsNullOrWhiteSpace(startDir)) return null;

@@ -153,6 +153,48 @@ public class PadProxyTests
     public void LooksLikePad_RecognisesControllers(string name, bool expected)
         => Assert.Equal(expected, PadNodeHygiene.LooksLikePad(name));
 
+    // 2026-11-20 用户反馈：单文件发布只带走 EfootballBot.exe（ExcludeFromSingleFile 的两个 DLL
+    // 留在 publish-stage），换一台电脑只拷 exe 时设置页投放直接报「程序目录缺少 xinput1_3.dll」。
+    // 现在两个代理 DLL 内嵌在 exe 里 —— 解压出来必须是可加载的 PE，否则游戏 LoadLibrary 就是闪退。
+    [Fact]
+    public void ProxyDlls_AreEmbeddedAndExtractAsLoadablePe()
+    {
+        foreach (var name in new[] { PadProxyAssets.Dll13, PadProxyAssets.Dll14 })
+        {
+            Assert.True(PadProxyAssets.IsEmbedded(name), name + " 没有内嵌进 exe（tools/xinput-proxy 未构建？）");
+            Assert.True(PadProxyAssets.HasSource(name));
+
+            string dir = Path.Combine(Path.GetTempPath(), "EfootballBot.Tests.proxy", Guid.NewGuid().ToString("N"));
+            try
+            {
+                string? extracted = PadProxyAssets.Extract(name, dir);
+                Assert.NotNull(extracted);
+                byte[] bytes = File.ReadAllBytes(extracted!);
+                Assert.True(bytes.Length > 64 * 1024, name + " 解压出来只有 " + bytes.Length + " 字节");
+                Assert.Equal((byte)'M', bytes[0]);
+                Assert.Equal((byte)'Z', bytes[1]);
+
+                // 重复调用：长度一致直接复用，不重复落盘、也不留临时文件
+                Assert.Equal(extracted, PadProxyAssets.Extract(name, dir));
+                Assert.Empty(Directory.GetFiles(dir, "*.tmp"));
+            }
+            finally
+            {
+                try { Directory.Delete(dir, true); } catch { /* 句柄没关干净也不影响测试结论 */ }
+            }
+        }
+    }
+
+    [Fact]
+    public void PadProxyAssets_UnembeddedName_ReturnsNothing()
+    {
+        Assert.Equal("EfootballBot.Proxy.xinput1_3.dll", PadProxyAssets.ResourceName(PadProxyAssets.Dll13));
+        Assert.False(PadProxyAssets.IsEmbedded("xinput9_1_0.dll"));
+        Assert.False(PadProxyAssets.HasSource("xinput9_1_0.dll"));
+        Assert.Null(PadProxyAssets.Extract("xinput9_1_0.dll",
+            Path.Combine(Path.GetTempPath(), "EfootballBot.Tests.proxy", Guid.NewGuid().ToString("N"))));
+    }
+
     [Theory]
     [InlineData(@"USB\VID_045E&PID_028E\01", true)]
     [InlineData(@"HID\VID_045E&PID_028E&IG_00\3&34F4D81E&0&0000", true)]

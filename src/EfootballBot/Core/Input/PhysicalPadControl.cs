@@ -109,6 +109,35 @@ public static class PhysicalPadControl
         RunTaskSilently(PadHideTaskName);
     }
 
+    /// <summary>
+    /// 提权任务（另一个进程）写下的最后一条手柄控制结论，形如
+    /// 「[pad-hide 2026-11-19 08:29:05] 失败：已禁用 3 个节点但玩家 1 仍被占用（可能被非物理设备占据）」。
+    /// Worker 自己拿不到提权进程的返回值，只能回读这条日志——2026-11-19 反馈包里
+    /// 「真实手柄禁用未完全生效」只打了一行 Warn，用户完全不知道是哪个节点没禁掉。
+    /// 读不到就返回 null，调用方按「无记录」处理。
+    /// </summary>
+    public static string? LastControlLogLine()
+    {
+        try
+        {
+            string path = Path.Combine(AppPaths.DataDir, "pad-control.log");
+            if (!File.Exists(path)) return null;
+            using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            long from = Math.Max(0, fs.Length - 8192);
+            fs.Seek(from, SeekOrigin.Begin);
+            using var reader = new StreamReader(fs);
+            string text = reader.ReadToEnd();
+            var lines = text.Split('\n', StringSplitOptions.RemoveEmptyEntries);
+            for (int i = lines.Length - 1; i >= 0; i--)
+            {
+                string line = lines[i].Trim();
+                if (line.Length > 0) return line;
+            }
+            return null;
+        }
+        catch { return null; }
+    }
+
     /// <summary>静默触发指定提权任务（无 UAC；任务不存在时 schtasks 静默失败）。
     /// waitForExit=false 为火后不管——停止挂机的 pad-restore 不应拖慢停止流程
     /// （等待会把 Worker 的 stop 处理拉长到数秒，放大 GUI 关闭竞态）。</summary>

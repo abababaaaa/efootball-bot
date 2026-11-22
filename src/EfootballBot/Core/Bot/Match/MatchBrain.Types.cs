@@ -158,6 +158,12 @@ public static partial class MatchBrain
     /// </summary>
     public const int ConfirmRepositionRounds = 2;
     /// <summary>
+    /// 「水印页」（只有 logo/版本号可读的加载与过场）最多等这么多轮再不按键地干等，
+    /// 之后才交回常规 A 试探 / B 逃生。~3~6s/轮 ≈ 1.5 分钟，够慢机器走完国服开赛加载；
+    /// 真卡死（无网络的黑加载页）也仍会走到 B 逃生，不会无限等。
+    /// </summary>
+    public const int WatermarkWaitGraceStreak = 20;
+    /// <summary>
     /// 认不出的界面连续该轮数后按一次 A 试探。A 在各页都是「选中/推进」，比空等到 B 逃生
     /// 更接近人手；按下后画面若推进，下一轮自然换判定，若没推进由 B 逃生收尾。
     /// </summary>

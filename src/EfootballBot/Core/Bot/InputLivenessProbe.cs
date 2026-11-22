@@ -50,6 +50,48 @@ public static class InputLivenessProbe
     /// <summary>页面文字够不够"可读"（太短视为加载页/黑屏，不参与活性判定）。</summary>
     public static bool IsReadable(string signature) => signature.Length >= MinSignatureChars;
 
+    /// <summary>
+    /// 判断这一屏是不是"只有水印"：游戏加载页 / 开赛过场 / 黑屏的常见形态是
+    /// 只剩「实况足球在线」「eFootball」和版本号（11.1.0.1.124916…），别的一个字都没有。
+    ///
+    /// 为什么必须单独识别（2026-11-20 00:52 实机事故）：这类页面的文字拼接起来有好几十个字符，
+    /// 长度检查骗得过 <see cref="IsReadable"/>，于是被当成"可读页面卡住 45 秒"→ 按下/A/B
+    /// 全无反应（加载页本来就不吃这些键）→ 判「手柄输入已死」把挂机停了。实际游戏正在
+    /// 渲染进球后的球场全景/开赛加载，画面完全正常，用户看到的是"没出错却自己停了"。
+    /// 水印页/加载页不参与活性判定，交给球场探针与上层超时兜底。
+    /// </summary>
+    public static bool IsWatermarkPage(OcrResult ocr)
+    {
+        if (ocr.Words.Count == 0) return false; // 完全空页交给 IsReadable 处理
+        foreach (var w in ocr.MergedWords)
+        {
+            string rest = StripWatermark(w.NormText.ToLowerInvariant());
+            if (rest.Length >= 2) return false;                    // 两个以上字母/汉字 = 真内容
+            if (rest.Length == 1 && IsCjk(rest[0])) return false;  // 单个汉字也算真内容
+            // 剩下的单个拉丁字母（OCR 把 logo 读成 X / O / V）算水印噪声
+        }
+        return true;
+    }
+
+    /// <summary>水印/版本号片段：去掉这些之后还剩字，就说明这一屏有真内容。</summary>
+    private static readonly string[] WatermarkFragments =
+    {
+        "实况足球在线", "实况足球", "国际服", "efootballonline", "efootball", "proevolutionsoccer",
+        "pes", "konami", "football", "online", "手游", "版本",
+    };
+
+    /// <summary>剥掉水印词、版本号里的数字与标点，只留字母/汉字（留 2 个字以上就说明有真内容）。</summary>
+    private static string StripWatermark(string text)
+    {
+        foreach (var frag in WatermarkFragments) text = text.Replace(frag, "");
+        var sb = new global::System.Text.StringBuilder(text.Length);
+        foreach (char ch in text)
+            if (char.IsLetter(ch)) sb.Append(ch); // 数字与标点是版本号，不算内容
+        return sb.ToString();
+    }
+
+    private static bool IsCjk(char ch) => ch >= 0x4E00 && ch <= 0x9FFF;
+
     /// <summary>探测结论：是否活着 + 每一步的观测文本（日志/排障用）。</summary>
     public readonly record struct Result(bool Alive, string Detail);
 
