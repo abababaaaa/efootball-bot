@@ -44,7 +44,7 @@ namespace EfootballBot.Core.Bot.Scenarios.CnWeekly;
 /// 判定只用固定 UI 词（对阵电脑/教练入场/前往比赛/活动设置/球队阵容列表/活动加成…），
 /// 活动名每周轮换禁作判定点。
 /// </summary>
-public sealed class CnWeeklyScenario : IScenario
+public sealed partial class CnWeeklyScenario : IScenario
 {
     /// <summary>菜单侧流程阶段（屏幕驱动；每阶段独立失败预算，超限 B 逃生回 Flow 重导航）。</summary>
     private enum CwPhase
@@ -132,6 +132,15 @@ public sealed class CnWeeklyScenario : IScenario
     private string _chLastVisibleCards = "";
     /// <summary>当前挂机的活动槽位（0 起，活动列表卡行从左数；主要奖励刷满退列表后 +1）。</summary>
     private int _slotIndex;
+    /// <summary>活动列表卡位上限：一周活动卡数远小于此。右移次数按 _slotIndex 给，光标到卡行末尾后
+    /// 多余右移只是饱和（停在最后一张卡），所以槽位涨过上限就说明「再右移也不会换卡」——按全部刷完收尾。
+    /// 实机 2026-11-20 教训：没有这道闸，槽位从 1 涨到 306，每轮都进同一张已满卡，挂机 7 小时没接力。</summary>
+    private const int MaxEventSlots = 6;
+    /// <summary>上一张「主要奖励全满、退场」活动卡的指纹（<see cref="CnWeeklyBrain.CardSignature"/>）。
+    /// 又回到同一张卡 = 右移已到卡行末尾饱和，已没有未刷满的新卡 → 全部完成走接力。
+    /// 比赛结束后清零（进度已变，旧指纹不再可比）。注意：不要放进 ResetRewardCheckState——
+    /// 那个方法每换一张卡都会被调用，清零就等于关掉这道保护。</summary>
+    private string _lastFullCardSig = "";
 
     // ---- 主页 → 比赛活动列表 导航（2026-11-05 实机：老配方三拍永远到不了目的地） ----
     /// <summary>比赛页卡行策略阶梯（先下 N 次再左 M 次）。新版 UI 卡序/行数变了就换下一档，
@@ -189,6 +198,8 @@ public sealed class CnWeeklyScenario : IScenario
         // 角区探针兜底 InMatch 需比赛上下文（同我的联赛场景）
         bool corner = ScreenProbe.CornerHasContent(obs.Frame);
         bool light = ScreenProbe.IsMostlyLightPage(obs.Frame);
+        // 画面还是球场（进球庆祝/回放过场）→ 共享分类一律按比赛中处理（2026-11-20 虚计场次事故）
+        bool pitch = ScreenProbe.LooksLikePitch(obs.Frame);
         bool matchContext = _memory.SawWithin(MatchScreen.InMatch, TimeSpan.FromSeconds(90), now) ||
                             _memory.SawWithin(MatchScreen.MatchStartPage, TimeSpan.FromSeconds(90), now);
         // 国服周活动界面先判：命中时 ml 记 Unknown（由状态机处理，不走共享决策），
@@ -196,7 +207,7 @@ public sealed class CnWeeklyScenario : IScenario
         var cw = CnWeeklyBrain.Classify(obs.Detections, obs.Ocr);
         var ml = cw == CwScreen.None
             ? MatchBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light,
-                MatchShared.LoginRecovery(_memory, now))
+                MatchShared.LoginRecovery(_memory, now), pitch)
             : MatchScreen.Unknown;
         _memory.Record(ml, now);
         if (!_takeoverLogged)
@@ -218,6 +229,8 @@ public sealed class CnWeeklyScenario : IScenario
             _skipBlockedThisMatch = false;
             // 主要奖励进度只在比赛后变化：解除「未拿满」门控，下次回主页再核验一次
             _rewardContinueUntilMatch = false;
+            // 打完比赛进度已变：上一张满卡的指纹不再可比，清掉（下一张全满卡重新记）
+            _lastFullCardSig = "";
             if (_challengeMode && _chCurrentCard > 0)
             {
                 _chCurPlays++;
@@ -250,21 +263,17 @@ public sealed class CnWeeklyScenario : IScenario
             _log($"[国服周活动] 界面：{screenName}", LogLevel.Info);
         }
         // ---- 国服菜单侧状态机：接管国服周活动界面与阶段内无特征界面 ----
-        // 国服比赛起始页：底栏印「设置|球场|RT 下一步」，但 A 同样生效（用户 2026-11-11 实测：
-        // 国服凡印 RT 的 下一步/确认/确定，按 A 一样推进）。默认 A；同一页连续多轮按 A 画面
-        // 不动才换 RT 兜底。拦截仍先于状态机：画面不变的起始页会让共享决策转静默等待
-        // （实机 2026-10-14 00:53：起始页无人按键卡死 6 分钟）。
+        // ---- 国服比赛起始页：底栏印「设置|球场|RT 下一步」。按用户 2026-11-21 规则，国服
+        //      「下一步/确认/确定」一律走国服键序：① RT（页面所印提示键）→ ② A → ③ 后台鼠标点击
+        //      （共享层 CnAdvance）。拦截仍先于状态机：画面不变的起始页会让共享决策转静默等待
+        //      （实机 2026-10-14 00:53：起始页无人按键卡死 6 分钟）。
         if (ml == MatchScreen.MatchStartPage)
         {
             if (_streak < 1) return 800; // 过渡帧防抖
-            bool alt = _streak >= 3;
-            _log(alt
-                ? "[国服周活动] 起始页：A 三轮未推进，改按 RT 下一步（底栏所印键）"
-                : "[国服周活动] 起始页：A 下一步开赛（底栏印 RT，A 同样生效）", LogLevel.Info);
-            if (alt) await _engine.Pad.RT(); else await _engine.Pad.Confirm();
-            return alt ? 3400 : 3000;
+            return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, "起始页", "国服周活动", _log,
+                obs.Ocr, obs.Detections, (0.850, 0.920), ct);
         }
-        int? cnWait = await HandleCnAsync(cw, ml, obs);
+        int? cnWait = await HandleCnAsync(cw, ml, obs, ct);
         if (cnWait is > 0) return cnWait.Value;
         if (cnWait is not null) return 1500;
         // cw==None 且阶段已交回共享流程：走共用决策（比赛中/终场/弹窗/逃生）
@@ -313,9 +322,17 @@ public sealed class CnWeeklyScenario : IScenario
                     return await NavigateToEventListAsync("主菜单");
                 return await EscapeUnknownPageAsync(obs, "不是主页特征");
             case MatchActionKind.PadConfirm:
-                _log($"[国服周活动] 手柄 A：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Confirm();
-                break;
+                // 国服键序（用户 2026-11-21）：① RT（页面所印提示键）→ ② A → ③ 后台鼠标点击。
+                // 段位积分页 / 赛后小结这类国服网页层页面只吃鼠标，旧逻辑每轮空按 A 就卡死在这里。
+                // 比赛中的回放/中场小弹窗不掺进来——比赛里 RT 有游戏内含义，只按 A。
+                if (_matchSession.Active)
+                {
+                    _log($"[国服周活动] 比赛中弹窗 A：{action.Target}", LogLevel.Info);
+                    await _engine.Pad.Confirm();
+                    break;
+                }
+                return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, action.Target,
+                    "国服周活动", _log, obs.Ocr, obs.Detections, null, ct);
             case MatchActionKind.PadUpConfirm:
                 _log($"[国服周活动] 弹窗上移确认：{action.Target}", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Up);
@@ -357,7 +374,7 @@ public sealed class CnWeeklyScenario : IScenario
 
     // ---------------- 国服菜单侧状态机 ----------------
     /// <summary>返回正数/0=本轮已处理（下一轮延时）；null=未接管（走共享决策）。</summary>
-    private async Task<int?> HandleCnAsync(CwScreen cw, MatchScreen ml, Observation obs)
+    private async Task<int?> HandleCnAsync(CwScreen cw, MatchScreen ml, Observation obs, CancellationToken ct)
     {
         if (cw != CwScreen.None) _navUnknown = 0; // 认出任何国服界面 = 脱离未知页，逃生预算清零
         switch (_phase)
@@ -408,19 +425,10 @@ public sealed class CnWeeklyScenario : IScenario
                             await _engine.Pad.Back();
                             return 2400;
                         }
-                        // 「RT 下一步」页按 A 即可（用户 2026-10-14 实机确认）；A 连续两次未生效
-                        // 换 RT 一次（防焦点在页签上 A 被页签吃掉），仍不行再回 A
-                        if (_attempts == 3)
-                        {
-                            _log("[国服周活动] 对阵表：A 两次未生效，改按 RT 下一步", LogLevel.Info);
-                            await _engine.Pad.RT();
-                        }
-                        else
-                        {
-                            _log("[国服周活动] 对阵表：A 下一步进活动主页", LogLevel.Info);
-                            await _engine.Pad.Confirm();
-                        }
-                        return 3200;
+                        // 国服键序（用户 2026-11-21）：① RT（底栏所印「RT 下一步」）→ ② A →
+                        // ③ 后台鼠标点右下按钮（对阵表也是国服网页层，A 被页签吃掉时只能点）
+                        return await CnAdvance.AdvanceAsync(_engine, _mouse, _attempts, "对阵表下一步",
+                            "国服周活动", _log, obs.Ocr, obs.Detections, (0.900, 0.920), ct);
                     case CwScreen.EventHome:
                         if (_streak < 1) return 800; // 过渡帧防抖
                         if (_challengeMode || WeeklyBrain.IsChallengeCardHome(obs.Ocr) ||
@@ -697,11 +705,10 @@ public sealed class CnWeeklyScenario : IScenario
                 }
                 if (cw == CwScreen.Bracket)
                 {
-                    // 赛后可能回到对阵表：下一步回活动主页再开赛（「RT 下一步」页按 A 即可）
+                    // 赛后可能回到对阵表：下一步回活动主页再开赛（国服键序 RT → A → 鼠标）
                     if (_streak < 2) return 900;
-                    _log("[国服周活动] 对阵表：A 下一步", LogLevel.Info);
-                    await _engine.Pad.Confirm();
-                    return 3200;
+                    return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, "对阵表下一步",
+                        "国服周活动", _log, obs.Ocr, obs.Detections, (0.900, 0.920), ct);
                 }
                 if (cw == CwScreen.Squad || cw == CwScreen.SquadMenu)
                 {
@@ -790,6 +797,11 @@ public sealed class CnWeeklyScenario : IScenario
     private async Task<int> EnterEventAsync()
     {
         if (_streak < 1) return 800; // 过渡帧防抖
+        // 卡位上限（硬闸，不依赖 OCR）：卡行末尾之后右移只是饱和，光标永远停在最后一张卡上。
+        // 槽位涨过上限 = 后面没有新的活动卡了，直接按全部刷完收尾，否则会在同一张卡上无限打转。
+        if (_slotIndex > MaxEventSlots)
+            return await FinishAllEventsAsync(
+                $"槽位已刷到 {_slotIndex}（卡位上限 {MaxEventSlots}）：活动列表右移不会再换卡，可见活动已全部刷完");
         if (++_attempts > 4)
         {
             if (_slotIndex > 0)
@@ -799,12 +811,13 @@ public sealed class CnWeeklyScenario : IScenario
             await _engine.Pad.Back();
             return 2400;
         }
-        _log(_slotIndex > 0
-            ? $"[国服周活动] 活动列表：下进卡行 → 左×6 归位 → 右×{_slotIndex} 到槽位 {_slotIndex} → A 进活动"
+        int slot = Math.Clamp(_slotIndex, 0, MaxEventSlots);
+        _log(slot > 0
+            ? $"[国服周活动] 活动列表：下进卡行 → 左×6 归位 → 右×{slot} 到槽位 {slot} → A 进活动"
             : "[国服周活动] 活动列表：下进卡行 → 左×6 归位第一张 → A 进活动", LogLevel.Info);
         await _engine.Pad.Dpad(PadDir.Down);
         await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-        if (_slotIndex > 0) await _engine.Pad.DpadRepeat(PadDir.Right, _slotIndex);
+        if (slot > 0) await _engine.Pad.DpadRepeat(PadDir.Right, slot);
         await _engine.Pad.Confirm();
         return 2800;
     }
@@ -851,622 +864,6 @@ public sealed class CnWeeklyScenario : IScenario
         return 2200;
     }
 
-    /// <summary>「选择比赛难度」页（2026-10-17 实机 cn_tour_difficulty，前往比赛后弹出）：
-    /// 与我的联赛难度核对同一守则——读当前选中（白底高亮卡）与配置比对：相同/读不到/
-    /// 目标不在卡行 = 直接确认，绝不盲导航；不同 = 按规范难度序左右移差值后确认。
-    /// 底栏写 RT 确定，A 通常同样生效（对阵表「RT 下一步」同款实测）：A 两次未生效换 RT。</summary>
-    private async Task<int> HandleCnDifficultyAsync(Observation obs)
-    {
-        if (_streak < 1) return 800; // 页面淡入防抖
-        if (++_attempts > 4)
-        {
-            _log("[国服周活动] 难度页确认多次未生效，B 返回重走流程", LogLevel.Warn);
-            SetPhase(CwPhase.Flow);
-            await _engine.Pad.Back();
-            return 2400;
-        }
-        string wanted = _engine.Config.CnWeekly.Difficulty;
-        string? selected = CnWeeklyBrain.DetectSelectedCnDifficulty(obs.Frame, obs.Ocr);
-        if (selected is not null && selected != wanted)
-        {
-            int from = Array.IndexOf(MatchBrain.Difficulties, selected);
-            int to = Array.IndexOf(MatchBrain.Difficulties, wanted);
-            if (from >= 0 && to >= 0)
-            {
-                int steps = to - from;
-                _log($"[国服周活动] 难度核对：当前 {selected} → 目标 {wanted}，{(steps > 0 ? "右" : "左")}×{Math.Abs(steps)} 后确认", LogLevel.Info);
-                await _engine.Pad.DpadRepeat(steps > 0 ? PadDir.Right : PadDir.Left, Math.Abs(steps));
-                await ConfirmDifficultyAsync();
-                return 3000;
-            }
-        }
-        string why = selected is null ? "未读出当前难度" : selected == wanted ? $"已是 {wanted}" : "目标难度不在卡行";
-        _log($"[国服周活动] 难度核对：{why}，直接确认", LogLevel.Info);
-        await ConfirmDifficultyAsync();
-        return 3000;
-    }
-
-    /// <summary>难度页确认键：默认 A，连续两次未生效换 RT 一次（底栏标 RT 确定），仍不行回 A。</summary>
-    private async Task ConfirmDifficultyAsync()
-    {
-        if (_attempts == 3)
-        {
-            _log("[国服周活动] 难度页：A 两次未生效，改按 RT 确定", LogLevel.Info);
-            await _engine.Pad.RT();
-        }
-        else
-        {
-            await _engine.Pad.Confirm();
-        }
-    }
-
-    // ---------------- 教练签下链（2026-11-04 实机 晋级挑战） ----------------
-    /// <summary>
-    /// 教练选择页（2026-11-04 实机：卡上评价 80 / 81，选数字更大的那位）。
-    /// ★2026-11-05 实机：这一页只认**鼠标点击**——手柄 Dpad 左右 + A 完全没反应
-    /// （日志里连续三拍「左归位→右×1→A」都停在原页）。改为鼠标点评价最大的那张卡：
-    /// 点评价字下方一点（评价字在卡头，下方仍是同一张卡的卡面）；
-    /// 第一次点 y+0.09，重试再往下到 +0.18，都不通就转手柄兜底（防鼠标通道被拦）。
-    /// </summary>
-    private async Task<int> HandleCoachSelectAsync(Observation obs)
-    {
-        if (_streak < 1) return 800; // 卡片淡入/评价数字渲染防抖
-        if (++_attempts > 5)
-        {
-            _log("[国服周活动] 教练选择页多次点击未进入教练资料，B 返回重走流程", LogLevel.Warn);
-            SetPhase(CwPhase.Flow);
-            await _engine.Pad.Back();
-            return 2400;
-        }
-        var cards = CnWeeklyBrain.ScanCoachCards(obs.Ocr);
-        var best = CnWeeklyBrain.FindBestCoachCardWord(obs.Ocr);
-        if (best is not { } h)
-        {
-            _log("[国服周活动] 教练选择：未读出评价数字，鼠标点屏幕中部兜底", LogLevel.Warn);
-            await ClickAtAsync(0.5, 0.35);
-            return 2800;
-        }
-        // 第 3 拍起改用键盘/手柄兜底（鼠标可能被游戏吞掉）
-        if (_attempts >= 3)
-        {
-            int slot = Math.Max(0, cards.FindIndex(c => c.Rating == h.Rating));
-            _log($"[国服周活动] 教练选择：鼠标点两次未生效，转手柄：左归位 → 右×{slot} → A", LogLevel.Warn);
-            await _engine.Pad.DpadRepeat(PadDir.Left, 3);
-            if (slot > 0) await _engine.Pad.DpadRepeat(PadDir.Right, slot);
-            await _engine.Pad.Confirm();
-            return 3000;
-        }
-        double dy = _attempts <= 1 ? 0.09 : 0.18;
-        string all = string.Join(" / ", cards.Select(c => $"{c.Rating}"));
-        _log($"[国服周活动] 教练选择：读到 {cards.Count} 位教练评价（{all}），选最大 {h.Rating}，" +
-             $"鼠标点击评价字下方（{h.CenterX:F3},{Math.Min(0.95, h.CenterY + dy):F3}）", LogLevel.Info);
-        await ClickAtAsync(h.CenterX, h.CenterY + dy);
-        return 3000;
-    }
-
-    /// <summary>后台鼠标点击（国服须本程序提权后 PostMessage 才被游戏处理，与天梯点教练卡同款）。</summary>
-    private async Task ClickAtAsync(double nx, double ny)
-    {
-        var win = _engine.Window;
-        if (win is null)
-        {
-            _log("[国服周活动] 游戏窗口句柄缺失，鼠标点击无法执行", LogLevel.Error);
-            return;
-        }
-        var (w, h) = EfootballBot.Core.System.GameWindow.GetClientSize(win.Handle);
-        if (w <= 0 || h <= 0) (w, h) = (1280, 720);
-        await _engine.Pad.HumanWait(150, 320, CancellationToken.None);  // 拟人预停顿
-        await _mouse.ClickNormalizedAsync(win.Handle, nx, ny, w, h, downHoldMs: 70);
-    }
-
-    /// <summary>教练资料页（用户 2026-11-04 实机）：A 下一步 → 弹签下确认。底栏写
-    /// 「RT 确认选择」，A 两次未生效换 RT（对阵表/难度页同款经验）。</summary>
-    private async Task<int> HandleCoachDetailAsync()
-    {
-        if (_streak < 1) return 800; // 资料页淡入防抖
-        if (++_attempts > 4)
-        {
-            _log("[国服周活动] 教练资料页确认多次未生效，B 返回重走流程", LogLevel.Warn);
-            SetPhase(CwPhase.Flow);
-            await _engine.Pad.Back();
-            return 2400;
-        }
-        if (_attempts >= 3)
-        {
-            _log("[国服周活动] 教练资料页：A 两次未生效，改按 RT 确认选择", LogLevel.Info);
-            await _engine.Pad.RT();
-        }
-        else
-        {
-            _log("[国服周活动] 教练资料页：A 确认选择（下一步）", LogLevel.Info);
-            await _engine.Pad.Confirm();
-        }
-        return 3200;
-    }
-
-    /// <summary>
-    /// 签下确认弹窗（用户 2026-11-04 实机：「签下确认」+ 确认/取消，蓝色高亮的「确认」是
-    /// 默认焦点）：直接 A。A 两次弹窗仍在 = 焦点掉到取消或其他位置，上移一次纠正后再 A。
-    /// </summary>
-    private async Task<int> HandleSignConfirmAsync()
-    {
-        if (_streak < 1) return 900; // 弹窗淡入防抖
-        _coachSigns++;
-        if (_coachSigns > 3)
-        {
-            _log("[国服周活动] 签下教练后仍反复回到签下确认页，停止挂机（请手动检查活动状态）", LogLevel.Error);
-            _engine.StopWithError("教练签下反复出现");
-            return 0;
-        }
-        if (++_attempts > 4)
-        {
-            _log("[国服周活动] 签下确认弹窗多次未关闭，B 关闭后重走流程", LogLevel.Warn);
-            SetPhase(CwPhase.Flow);
-            await _engine.Pad.Back();
-            return 2400;
-        }
-        if (_attempts >= 2)
-        {
-            _log("[国服周活动] 签下确认：A 未生效，上移纠正焦点 → A 确认", LogLevel.Info);
-            await _engine.Pad.Dpad(PadDir.Up);
-        }
-        else
-        {
-            _log("[国服周活动] 签下确认：A 确认（默认焦点在确认）", LogLevel.Info);
-        }
-        await _engine.Pad.Confirm();
-        if (!_coachSigned)
-        {
-            _coachSigned = true;
-            _log("[国服周活动] 教练签下完成，继续开赛流程", LogLevel.Success);
-        }
-        return 3200;
-    }
-
-    // ---------------- 巡回赛主要奖励核验（主页勾 → i 信息弹窗 x/x） ----------------
-    /// <summary>
-    /// 巡回赛主页主要奖励核验步（用户 2026-10-17 流程，仅巡回赛型）：主页右栏勾 = 已有
-    /// 主要奖励被领过，不代表拿满（主页 高光定向券×1 带勾时 i 弹窗里仍是 1/2）。右移进 i →
-    /// A 打开信息弹窗 → RewardPopup 读 x/x：全满 → 关闭后从主页退上上页回活动列表换
-    /// 下一个活动；没满 → 关闭+左移回前往比赛继续刷。弹窗打不开超 2 次：放弃核验按
-    /// 未拿满继续刷（保守不提前退场）。★挑战活动短路不核验——i 弹窗是本周全部活动卡
-    /// 的合计进度（实机 挑战赛弹窗 金币 30/90、高光定向券 0/2），对单个活动卡永远读不满；
-    /// 挑战完成判定只走挑战清单扫描。返回 null = 本轮不在核验流程，调用方继续常规逻辑。
-    /// </summary>
-    private async Task<int?> TourRewardCheckStepAsync(Observation obs)
-    {
-        if (_rewardCheckStage == 3)
-        {
-            // 弹窗已确认全满：从主页 B 退上上页（主页→介绍页→活动列表，见 Retreating）
-            _rewardCheckStage = 0;
-            SetPhase(CwPhase.Retreating);
-            _log("[国服周活动] 主要奖励已拿满（i 弹窗 x/x 全满），退回活动列表换下一个活动", LogLevel.Success);
-            await _engine.Pad.Back();
-            return 2200;
-        }
-        // ★挑战活动绝不进 i 查看奖励：i 弹窗的 主要奖励 x/x 是本周全部活动卡的合计进度
-        //（实机 2026-10-17 挑战赛弹窗 金币 30/90、高光定向券 0/2），对单个活动卡永远读不满，
-        // 拿它判满会无限空转。挑战活动的完成判定只走挑战清单扫描（全勾/全锁→重进→全部完成停止）
-        if (_challengeMode || _rewardContinueUntilMatch || _rewardPopupGaveUp ||
-            !CnWeeklyBrain.MainRewardHasCheck(obs.Frame))
-            return null;
-        if (_rewardCheckStage == 0)
-        {
-            _rewardCheckStage = 1;
-            _attempts = 0;
-            _log("[国服周活动] 主页主要奖励带勾：右移进 i → A 打开信息弹窗核对 x/x", LogLevel.Info);
-            await _engine.Pad.Dpad(PadDir.Right); // 前往比赛 → i
-            return 1500;
-        }
-        if (_rewardCheckStage == 1)
-        {
-            _rewardCheckStage = 2;
-            _log("[国服周活动] A 打开信息弹窗", LogLevel.Info);
-            await _engine.Pad.Confirm();
-            return 2200;
-        }
-        // stage 2：A 已按过，弹窗仍未出现（光标不在 i 等），重试
-        if (++_attempts > 2)
-        {
-            _rewardPopupGaveUp = true;
-            _rewardCheckStage = 0;
-            _attempts = 0;
-            _log("[国服周活动] 信息弹窗多次未打开，放弃 x/x 核验，按未拿满继续刷", LogLevel.Warn);
-            await _engine.Pad.Dpad(PadDir.Left); // i → 前往比赛，恢复常规流程
-            return 1200;
-        }
-        _log("[国服周活动] 信息弹窗未出现，重按 A 打开", LogLevel.Info);
-        await _engine.Pad.Confirm();
-        return 2200;
-    }
-
-    /// <summary>i 信息弹窗（主要奖励 x/x 进度）：全满 → B 关闭，stage=3 由主页核验步退场；
-    /// 没满/读不出 → B 关闭 + 左移回前往比赛继续刷（读不出按未拿满，保守不提前退场）。
-    /// 进度词只取 主要奖励 头与 活动时间 头之间（活动日期 2026/10/16 三段式不吃）。</summary>
-    private async Task<int> HandleRewardPopupAsync(Observation obs)
-    {
-        if (_streak < 1) return 800; // 弹窗淡入防抖
-        var (readable, allDone) = CnWeeklyBrain.ParseMainRewardProgress(obs.Ocr);
-        if (!readable && ++_attempts <= 2) return 1200; // 进度词未读全，再认一拍
-        _rewardCheckStage = 0;
-        _attempts = 0;
-        await _engine.Pad.Back(); // B 关闭弹窗（光标回 i）
-        if (allDone)
-        {
-            _rewardCheckStage = 3;
-            _log("[国服周活动] 主要奖励全部拿满（x/x 全等），关闭弹窗后退回活动列表", LogLevel.Success);
-            return 2400;
-        }
-        // 未拿满：本场打完前不再重复核验（勾会一直挂在主页，否则原地循环）
-        _rewardContinueUntilMatch = true;
-        _log($"[国服周活动] 主要奖励未拿满（{(readable ? "进度未全满" : "进度未读出")}），左移回前往比赛继续刷；本场结束后再复核", LogLevel.Info);
-        await _engine.Pad.Dpad(PadDir.Left); // i → 前往比赛
-        return 2400;
-    }
-
-    /// <summary>主要奖励已拿满后的退场：B 清介绍页/设置面板/弹窗回活动列表（上上页），
-    /// 槽位 +1 换下一个活动；途中确认弹窗（奖励领取类）按 A 清掉。</summary>
-    private async Task<int?> HandleRetreatingAsync(CwScreen cw, MatchScreen ml, Observation obs)
-    {
-        if (cw == CwScreen.EventsList)
-        {
-            _slotIndex++;
-            // 换下一个活动：挑战/奖励核验/设置核验/阵容子状态全部复位——都是活动级状态，
-            // 带进下一个活动会乱套（周顺序 [挑战赛,巡回赛] 时残留挑战态会在巡回赛主页乱按 B；
-            // 上个活动放弃过的弹窗核验会压制下个活动的核验）
-            ResetChallengeState();
-            ResetRewardCheckState();
-            _tourReady = false;
-            _tourSettingsTries = 0;
-            _tourPanelReopens = 0;
-            _squadConfigured = false;
-            _menuApplied = false;
-            _squadTries = 0;
-            _coachSigned = false; // 活动级状态：下一个活动可能是要重新签教练的另一张卡
-            SetPhase(CwPhase.Flow);
-            _log($"[国服周活动] 已退回活动列表，改刷槽位 {_slotIndex}", LogLevel.Success);
-            return 800;
-        }
-        if (cw is CwScreen.EventHomeTour or CwScreen.ChallengeCardHome or CwScreen.EventHome or
-            CwScreen.EventIntro or CwScreen.EventSettings or CwScreen.RewardPopup or
-            CwScreen.CoachSelect or CwScreen.CoachDetail or CwScreen.SignConfirm)
-        {
-            if (++_attempts > 5) { SetPhase(CwPhase.Flow); return 700; }
-            await _engine.Pad.Back();
-            return 2200;
-        }
-        if (ml == MatchScreen.HasConfirm)
-        {
-            if (++_attempts > 6) { SetPhase(CwPhase.Flow); return 700; }
-            // ★统一弹窗规则：有 取消/关闭 先上移到推进键再按 A
-            bool dismissable = obs.Ocr.ContainsJoined("取消") || obs.Ocr.ContainsJoined("关闭");
-            _log("[国服周活动] 退场途中弹窗：A 确认（可能是奖励领取）", LogLevel.Info);
-            if (dismissable) await _engine.Pad.Dpad(PadDir.Up);
-            await _engine.Pad.Confirm();
-            return 2200;
-        }
-        if (++_attempts > 8) SetPhase(CwPhase.Flow);
-        return 1500;
-    }
-
-    // ---------------- 挑战型活动子流程（2026-10-17 实机） ----------------
-    /// <summary>进入挑战子流程：激活挑战模式并切到清单阶段（游戏默认光标已在待挑战卡上）。</summary>
-    private int EnterChallengeListPhase()
-    {
-        if (!_challengeMode)
-        {
-            _challengeMode = true;
-            _log("[国服周活动] 检测到挑战清单：进入挑战子流程（默认光标即待挑战卡，评估后直接进入）", LogLevel.Success);
-        }
-        SetPhase(CwPhase.ChallengeList);
-        return 1200;
-    }
-
-    /// <summary>
-    /// 挑战卡详情页通关判定步（杯赛/巡回赛主页样式通用）：右栏胜场读满（"1/1" 经 Norm 成
-    /// "11"，进行中 "0/1"→"01" 不命中）或通关探针漏读但本卡已打满 2 局 → 记忆已通关并
-    /// B 回清单换下一张。同一卡再次判通关 = 光标不在待挑战卡上（勾探针漏读的已通关卡），
-    /// 走重进清单复位光标。未通关返回 null，调用方继续正常开赛流程。
-    /// </summary>
-    private async Task<int?> ChallengeCardDoneStepAsync(Observation obs)
-    {
-        _challengeMode = true; // 半途启动直接落在卡详情页也激活挑战模式
-        // 右栏奖励勾像素探针（2026-10-17 实机 (0.96,0.51)）：奖励已领取=本卡已完成，
-        // B 回清单换下一张。★比「首次以后的奖励」词探针可靠——OCR 常漏读该词
-        //（23:21 实机 24 词帧漏读后再次空开比赛）
-        if (CnWeeklyBrain.ChallengeRewardClaimed(obs.Frame))
-        {
-            if (_chCurrentCard > 0) _chLocalDone.Add(_chCurrentCard);
-            _chCurPlays = 0;
-            SetPhase(CwPhase.ChallengeList);
-            _log("[国服周活动·挑战] 卡详情页右栏奖励带勾=本卡已完成，B 回清单换下一张", LogLevel.Info);
-            await _engine.Pad.Back();
-            return 2200;
-        }
-        // 选错卡信号（用户 2026-10-17 实机）：奖励栏「首次以后的奖励」=重复奖励=该卡已打过。
-        // 拉黑后 B 回清单换下一张（游标探测失败的兜底——勾卡在清单上可能仍是白色聚焦）
-        if (obs.Ocr.ContainsJoined("首次以后") && _chCurrentCard > 0 &&
-            !_chLocalDone.Contains(_chCurrentCard))
-        {
-            _chLocalDone.Add(_chCurrentCard);
-            _chCurPlays = 0;
-            SetPhase(CwPhase.ChallengeList);
-            _log($"[国服周活动·挑战] 卡 {_chCurrentCard:00} 奖励为「首次以后的奖励」=已打过，拉黑后 B 回清单换下一张", LogLevel.Warn);
-            await _engine.Pad.Back();
-            return 2200;
-        }
-        bool progressDone = WeeklyBrain.ChallengeProgressDone(obs.Ocr);
-        // ★积分/进度可读且未达标（积分 3/4 等）：绝不定通关——「已打满 2 局」兜底在
-        // 积分制卡上会漏拿主要奖励（用户 2026-10-31 实机卡 03 积分 3/4 被误判通关）。
-        // 护栏压过胜场读满：页面上若出现 3/4 类比值说明目标还没到，胜场探针读满可能是
-        // 别处数字误命中
-        if (CnWeeklyBrain.ChallengeScoreBehind(obs.Ocr))
-        {
-            if (_chCurPlays >= 2)
-                _log($"[国服周活动·挑战] 卡 {_chCurrentCard:00} 已打 {_chCurPlays} 局但积分/进度未达标，继续打（不按兜底判通关）", LogLevel.Info);
-            return null;
-        }
-        if (!progressDone && _chCurPlays < 2) return null;
-        bool repeat = _chCurrentCard > 0 && _chLocalDone.Contains(_chCurrentCard);
-        if (_chCurrentCard > 0) _chLocalDone.Add(_chCurrentCard);
-        _chCurPlays = 0;
-        if (repeat)
-            return await RefreshChallengeListAsync("已通关的卡再次进入（光标不在待挑战卡上）");
-        SetPhase(CwPhase.ChallengeList);
-        _log($"[国服周活动·挑战] 卡 {_chCurrentCard:00} 已通关（{(progressDone ? "右栏胜场读满" : "已打满 2 局按通关处理")}），B 返回清单换下一张",
-            LogLevel.Success);
-        await _engine.Pad.Back();
-        return 2200;
-    }
-
-    /// <summary>
-    /// 挑战清单（用户 2026-10-17 晚实机规则）：目标卡 = 最后带勾的后一张 = 第一张上锁的
-    /// 前一张（顺序结构）。★游标不信任——打完的勾卡可能仍是白色聚焦+参赛中，探测聚焦白卡
-    /// 位置差值导航到目标卡再 A（读不出聚焦卡则直接 A 试）。看见绿勾直接拉黑；进入时可能
-    /// 弹「参加新的挑战？」（默认焦点在取消），上移选进入再 A。★卡数不固定且可见卡≠全部卡：
-    /// 可见全勾/全锁 ≠ 真没有——盲点右移翻页（连续 3 次可见集无变化=真末尾）后才重进刷新；
-    /// 重进仍无 = 全部完成，停止挂机。
-    /// </summary>
-    private async Task<int?> HandleChallengeListAsync(CwScreen cw, MatchScreen ml, Observation obs)
-    {
-        // 按进卡详情页成功：交回 Flow（开赛流程 + 通关拦截都在那边）
-        if (cw is CwScreen.EventHomeTour or CwScreen.EventHome or CwScreen.ChallengeCardHome)
-        {
-            _chStaleA = 0;
-            _chRefreshs = 0;
-            SetPhase(CwPhase.Flow);
-            return 600;
-        }
-        if (cw == CwScreen.EventSettings) { SetPhase(CwPhase.Flow); return 700; }
-        if (cw == CwScreen.EventsList) { SetPhase(CwPhase.Flow); return 800; }
-        if (cw == CwScreen.EventIntro)
-        {
-            // 清单被关掉了（异常按键/全通关自动退场）：A 重进清单
-            if (++_attempts > 6) { SetPhase(CwPhase.Flow); return 600; }
-            _log("[国服周活动·挑战] 清单已关闭，A 重进", LogLevel.Info);
-            await _engine.Pad.Confirm();
-            return 2600;
-        }
-        // 比赛上下文（A 直落比赛/结算弹窗链）：交回共享流程，清完自会回清单/卡页
-        if (ml is MatchScreen.InMatch or MatchScreen.MatchStartPage or MatchScreen.FullTime or MatchScreen.TitleScreen)
-        {
-            SetPhase(CwPhase.Flow);
-            return null;
-        }
-        if (ml == MatchScreen.HasConfirm)
-        {
-            if (++_attempts > 6) { SetPhase(CwPhase.Flow); return 600; }
-            // ★统一弹窗规则：有 取消/关闭 先上移到推进键再按 A（参加新的挑战弹窗
-            // 有专属分支在更早处，走不到这里）
-            bool dismissable = obs.Ocr.ContainsJoined("取消") || obs.Ocr.ContainsJoined("关闭");
-            _log("[国服周活动·挑战] 清单弹窗：A 确认", LogLevel.Info);
-            if (dismissable) await _engine.Pad.Dpad(PadDir.Up);
-            await _engine.Pad.Confirm();
-            return 2200;
-        }
-        if (cw != CwScreen.ChallengeList)
-        {
-            if (++_attempts > 10) { SetPhase(CwPhase.Flow); return 600; } // 过场/未知帧超预算：回屏幕驱动自愈
-            return 1200;
-        }
-        if (_streak < 1) return 800; // 开场动画/淡入防抖（卡号 OCR 空帧同此等待）
-        // 「参加新的挑战？」确认弹窗（进入下一张卡时可能弹出，2026-10-17 实机）：弹窗默认
-        // 焦点在底部的「取消」上——盲按 A 会取消进入、留在已通关的卡上。必须先上移选
-        // 「进入」再 A（若焦点已在进入上，上移不动、A 等效）
-        if (obs.Ocr.ContainsJoined("参加新的挑战") ||
-            (obs.Ocr.ContainsJoined("进入") && obs.Ocr.ContainsJoined("取消")))
-        {
-            if (++_attempts > 6) { SetPhase(CwPhase.Flow); return 600; }
-            _log("[国服周活动·挑战] 参加新挑战弹窗：上移选「进入」→ A", LogLevel.Info);
-            await _engine.Pad.Dpad(PadDir.Up);
-            await _engine.Pad.Confirm();
-            return 2600;
-        }
-        var cards = CnWeeklyBrain.ScanChallengeCards(obs.Ocr, obs.Frame);
-        // 看见绿勾直接拉黑（用户 2026-10-17 规则）：勾卡=已通关，本运行内绝不再进
-        foreach (var c in cards.Where(c => c.Checked))
-            _chLocalDone.Add(c.Index);
-        // 可见卡集变化（翻页显出屏外卡/重进刷新复位）：边界探测归零
-        string visible = string.Join(",", cards.Select(c => c.Index).OrderBy(i => i));
-        if (visible != _chLastVisibleCards) _chEdgeProbes = 0;
-        _chLastVisibleCards = visible;
-        var playable = cards
-            .Where(c => !c.Locked && !c.Checked &&
-                        !_chLocalDone.Contains(c.Index) && !_chBlocked.Contains(c.Index))
-            .ToList();
-        if (playable.Count == 0)
-        {
-            // ★清单卡数不固定且可见卡≠全部卡（实机 01-03 全勾仍有第 4 卡屏外残边）：
-            // 可见全勾/全锁 ≠ 真没有——盲点右移翻页，直到连续 3 次可见卡集无变化
-            //（= 已在最末卡上，Right 无效）才允许重进刷新/报全部完成
-            if (_chEdgeProbes < 3)
-            {
-                _chEdgeProbes++;
-                _log($"[国服周活动·挑战] 可见卡 {visible} 无可挑战：右移翻页确认是否有屏外卡（第 {_chEdgeProbes} 次）", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Right);
-                return 2200;
-            }
-            return await RefreshChallengeListAsync("清单上没有可挑战的卡（全勾/全锁）");
-        }
-        if (_chStaleA >= 3)
-            return await RefreshChallengeListAsync("连续按 A 未进入挑战卡");
-        // 目标卡 = 最后带勾的后一张 = 第一张上锁的前一张（顺序结构下即第一张无勾无锁卡）。
-        // ★游标不信任：清单打开时光标可能停在刚打完的勾卡上（实机勾卡仍是白色聚焦+参赛中），
-        // 探测白色聚焦卡位置，差值导航到目标卡再 A；读不出聚焦卡则保持旧行为直接按 A
-        var target = playable[0];
-        int steps = 0;
-        int? focused = CnWeeklyBrain.DetectFocusedChallengeCard(obs.Ocr, obs.Frame);
-        if (focused is not null)
-        {
-            var cursorCard = cards.FirstOrDefault(c => c.Index == focused.Value);
-            if (cursorCard is not null)
-                steps = target.Slot - cursorCard.Slot;
-        }
-        _chStaleA++;
-        // 同一张卡反复进入却始终没有比赛开始：应已通关而勾/胜场探针均未读出（完成态
-        // 探针未校准的兜底），按通关跳过——否则 清单↔卡页 无限打转
-        if (_chCurrentCard == target.Index && !_chMatchSinceEnter)
-        {
-            _chRepeatEnters++;
-            if (_chRepeatEnters >= 2)
-            {
-                _chLocalDone.Add(target.Index);
-                _chRepeatEnters = 0;
-                _log($"[国服周活动·挑战] 卡 {target.Index:00} 反复进入却始终没有比赛开始（应已通关，完成态未读出），按通关跳过", LogLevel.Warn);
-                return await RefreshChallengeListAsync($"卡 {target.Index:00} 反复进入无比赛开始");
-            }
-        }
-        else
-        {
-            _chRepeatEnters = 0;
-        }
-        _chMatchSinceEnter = false;
-        _chCurrentCard = target.Index;
-        _chCurPlays = 0;
-        if (steps > 0)
-        {
-            _log($"[国服周活动·挑战] 游标在勾卡上：右移×{steps} 到待挑战卡 {target.Index:00}（上锁的前一张）→ A", LogLevel.Info);
-            await _engine.Pad.DpadRepeat(PadDir.Right, steps);
-        }
-        else if (steps < 0)
-        {
-            _log($"[国服周活动·挑战] 游标在目标右侧：左移×{-steps} 回待挑战卡 {target.Index:00} → A", LogLevel.Info);
-            await _engine.Pad.DpadRepeat(PadDir.Left, -steps);
-        }
-        else
-        {
-            _log(focused is not null
-                ? $"[国服周活动·挑战] 进入卡 {target.Index:00}（游标已在待挑战卡上）"
-                : $"[国服周活动·挑战] 进入卡 {target.Index:00}（游标位置未读出，按 A 试）", LogLevel.Info);
-        }
-        await _engine.Pad.Confirm();
-        return 2600;
-    }
-
-    /// <summary>B 退介绍页重进清单：游戏会把光标复位到待挑战卡并刷新锁态（通关后解锁有延迟）。
-    /// 超过 3 次仍无进展则停止挂机——最后原因是无可挑战卡 = 全部完成（报成功），否则报错误。</summary>
-    private async Task<int> RefreshChallengeListAsync(string reason)
-    {
-        bool noPlayable = reason.Contains("没有可挑战");
-        _chRefreshs++;
-        _chStaleA = 0;
-        if (_chRefreshs > 3)
-        {
-            ResetChallengeState();
-            if (noPlayable)
-            {
-                // 全部挑战已完成：与活动列表刷完同一条收尾路径（配了接力模块就继续挂机）
-                return await FinishAllEventsAsync("重进清单仍无可挑战的卡：全部挑战已完成");
-            }
-            _log("[国服周活动] 挑战清单多次刷新仍无法进入挑战卡，停止挂机（请手动检查活动状态）", LogLevel.Error);
-            _engine.StopWithError("挑战清单多次刷新仍无法进卡");
-            return 0;
-        }
-        _chRetreatReenter = true;
-        SetPhase(CwPhase.ChallengeRetreat);
-        _log($"[国服周活动·挑战] {reason}，B 重进清单刷新（第 {_chRefreshs} 次）", LogLevel.Info);
-        await _engine.Pad.Back();
-        return 2200;
-    }
-
-    /// <summary>挑战退出/重进：B 到介绍页；重进模式在介绍页按 A 回清单（光标复位+锁态刷新）；
-    /// 退到活动列表 = 非预期路径（刷新流程到不了这里），停止挂机并报错误。</summary>
-    private async Task<int?> HandleChallengeRetreatAsync(CwScreen cw, MatchScreen ml, Observation obs)
-    {
-        if (cw == CwScreen.ChallengeList)
-        {
-            if (++_attempts > 6) { SetPhase(CwPhase.Flow); return 800; }
-            await _engine.Pad.Back();
-            return 2000;
-        }
-        if (cw == CwScreen.EventIntro)
-        {
-            if (_chRetreatReenter)
-            {
-                _chRetreatReenter = false;
-                SetPhase(CwPhase.ChallengeList);
-                _log("[国服周活动·挑战] 重进清单（光标复位到待挑战卡）", LogLevel.Info);
-                await _engine.Pad.Confirm(); // 介绍页光标默认在「进入」
-                return 2600;
-            }
-            if (++_attempts <= 4)
-            {
-                await _engine.Pad.Back();
-                return 2200;
-            }
-            SetPhase(CwPhase.Flow);
-            return 800;
-        }
-        if (cw == CwScreen.EventsList)
-        {
-            ResetChallengeState();
-            _log("[国服周活动] 已退出挑战活动，停止挂机（若非预期请回报日志）", LogLevel.Error);
-            _engine.StopWithError("挑战活动异常退出");
-            return 0;
-        }
-        if (ml == MatchScreen.HasConfirm)
-        {
-            // 退出途中的确认弹窗：先 A 清（可能是通关奖励弹窗），多次不消改 B（退出确认类）。
-            // ★统一弹窗规则：有 取消/关闭 先上移到推进键再按 A
-            if (++_attempts <= 5)
-            {
-                bool dismissable = obs.Ocr.ContainsJoined("取消") || obs.Ocr.ContainsJoined("关闭");
-                _log("[国服周活动·挑战] 退出途中弹窗：A 确认", LogLevel.Info);
-                if (dismissable) await _engine.Pad.Dpad(PadDir.Up);
-                await _engine.Pad.Confirm();
-                return 2000;
-            }
-            await _engine.Pad.Back();
-            return 2000;
-        }
-        if (++_attempts > 8) SetPhase(CwPhase.Flow);
-        return 1500;
-    }
-
-    /// <summary>主要奖励核验状态复位（换活动时调用：x/x 结论与「弹窗放弃」标记都是活动级状态）。</summary>
-    private void ResetRewardCheckState()
-    {
-        _rewardCheckStage = 0;
-        _rewardPopupGaveUp = false;
-        _rewardContinueUntilMatch = false;
-    }
-
-    /// <summary>挑战子流程状态复位（停止挂机/换活动收尾时调用）。</summary>
-    private void ResetChallengeState()
-    {
-        _challengeMode = false;
-        _chLocalDone.Clear();
-        _chBlocked.Clear();
-        _chCurrentCard = 0;
-        _chCurPlays = 0;
-        _chStaleA = 0;
-        _chRefreshs = 0;
-        _chRetreatReenter = false;
-        _chRepeatEnters = 0;
-        _chMatchSinceEnter = false;
-        _chEdgeProbes = 0;
-        _chLastVisibleCards = "";
-    }
 
     private void SetPhase(CwPhase phase)
     {
@@ -1474,7 +871,5 @@ public sealed class CnWeeklyScenario : IScenario
         _attempts = 0;
     }
 }
-
-
 
 

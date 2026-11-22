@@ -633,6 +633,71 @@ public class WeeklyBrainTests
         Assert.Null(WeeklyBrain.FindActivityTileOffset(ocr));
     }
 
+    // ---------------- 阵容挑战 / Team Effort（2026-11-19 用户实机三帧） ----------------
+
+    [Fact]
+    public void Classify_TeamEffortHome_ByScheduleAndNextMatchWords()
+    {
+        // 实机帧 weekly_teameffort_home：左列「前往比赛」+「赛程」，右栏「下一场比赛 /
+        // 赛事等级 / 奖励（挑战1..3）」，底栏「B 返回 / X 活动设置 / Y 比赛计划」。
+        // 整页没有任何积分栏词（总活动积分/胜场积分/球员加分/主要奖励）——旧逻辑恒判 None。
+        var ocr = Ocr(
+            W("Team Effort", 0.21, 0.10), W("任务", 0.85, 0.08),
+            W("下一场比赛", 0.40, 0.22), W("赛事等级", 0.80, 0.22),
+            W("前往比赛", 0.13, 0.24), W("挑战1", 0.39, 0.26), W("传奇", 0.84, 0.26),
+            W("赛程", 0.09, 0.38), W("奖励", 0.38, 0.38),
+            W("建议", 0.11, 0.66), W("随机位置代币×1", 0.47, 0.68),
+            W("返回", 0.10, 0.93), W("活动设置", 0.31, 0.93), W("比赛计划", 0.58, 0.93));
+        Assert.Equal(WkScreen.TeamEffortHome, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.True(WeeklyBrain.IsTeamEffortHome(ocr));
+    }
+
+    [Fact]
+    public void Classify_PointsEventHome_IsNotTeamEffortHome()
+    {
+        // 积分版活动主页（有「总活动积分/主要奖励」但没有「赛程 + 下一场比赛」）仍判 EventHome，
+        // 不得被阵容挑战规则抢走——否则老活动一律走「跳过设置直接开赛」的快车道
+        var ocr = Ocr(W("前往比赛", 0.13, 0.24), W("总活动积分", 0.39, 0.21),
+            W("离获得主要奖励还差3000点积分", 0.77, 0.60), W("建议", 0.13, 0.80));
+        Assert.Equal(WkScreen.EventHome, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.False(WeeklyBrain.IsTeamEffortHome(ocr));
+    }
+
+    [Fact]
+    public void Classify_TeamEffortHome_NeedsSchedulePanel()
+    {
+        // 「赛程」面板标签被 OCR 漏读（只剩前往比赛 + 下一场比赛 + 赛事等级）：不猜，交共享分类
+        var ocr = Ocr(W("前往比赛", 0.13, 0.24), W("下一场比赛", 0.40, 0.22), W("赛事等级", 0.80, 0.22));
+        Assert.Equal(WkScreen.None, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Classify_PlayerCardRestrictPopup_BeatsTeamEffortHome()
+    {
+        // 实机帧 weekly_teameffort_cardrestrict：弹窗盖在阵容挑战主页上，背后「前往比赛 /
+        // 赛程 / 事等级（"赛"被弹窗裁掉）」仍被 OCR 读到——必须先判弹窗，否则落主页分支
+        // 去按 X/前往比赛，全被单键弹窗吃掉（旧逻辑干等到预算耗尽再 B 退回列表）
+        var ocr = Ocr(
+            W("Team Effort", 0.21, 0.10), W("前往比赛", 0.13, 0.24), W("传奇", 0.84, 0.26),
+            W("赛程", 0.09, 0.38), W("球员卡限制", 0.50, 0.50),
+            W("在之前胜场中使用的球员卡,将无法在后续比赛中使用。", 0.49, 0.60),
+            W("OK", 0.50, 0.69), W("随机加成代币×2", 0.85, 0.68),
+            W("返回", 0.09, 0.93), W("活动设置", 0.31, 0.93), W("比赛计划", 0.58, 0.93));
+        Assert.Equal(WkScreen.PlayerCardRestrictPopup, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.True(WeeklyBrain.IsPlayerCardRestrictPopup(ocr));
+    }
+
+    [Fact]
+    public void Classify_PlayerCardRestrictPopup_BodyNeedsCenteredOk()
+    {
+        // 标题漏读：固定副标题 + 屏中部 OK 才判弹窗；只有副标题（帮助页正文等）不算
+        var body = W("在之前胜场中使用的球员卡,将无法在后续比赛中使用。", 0.49, 0.60);
+        Assert.True(WeeklyBrain.IsPlayerCardRestrictPopup(Ocr(body, W("OK", 0.50, 0.69))));
+        Assert.False(WeeklyBrain.IsPlayerCardRestrictPopup(Ocr(body)));
+        // 底栏 OK（y≈0.93 处「B 返回」蓝框常被读成 OK）不算弹窗按钮证据
+        Assert.False(WeeklyBrain.IsPlayerCardRestrictPopup(Ocr(body, W("OK", 0.50, 0.93))));
+    }
+
     [Fact]
     public void IsTournamentPage_ByDescriptionOrCustomTournament()
     {

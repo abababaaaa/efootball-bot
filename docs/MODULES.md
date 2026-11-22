@@ -27,13 +27,14 @@ Core/Bot/
 │   ├── MatchFlowMemory.cs      流程帧记忆 + 场次跟踪器（MatchSessionTracker）
 │   ├── MatchShared.cs          标题宽限 / 比赛上下文 / 掉线重登窗口 / 决策快照
 │   ├── ScreenProbe.cs          整帧像素探针（角区内容、整页亮底、绿勾）
+│   ├── CnAdvance.cs            ★国服推进键序：① RT（页面所印提示键）→ ② A → ③ 后台鼠标点击
 │   └── PopupBrain.cs           弹窗高光/按钮判定（三模块共用）
 │
 └── Scenarios/                  模块层（三层：每个模块只认自己的界面与状态机）
-    ├── Weekly/        国际服·周活动（WeeklyBrain + WeeklyEventScenario）
+    ├── Weekly/        国际服·周活动（WeeklyBrain + WeeklyEventScenario，按小活动拆 partial，见 §1.1）
     ├── AiLadder/      国际服·AI 天梯联赛
     ├── MyLeague/      国际服·我的联赛（+ 满级换人巡检），国服我的联赛继承它
-    ├── CnWeekly/      国服·周活动
+    ├── CnWeekly/      国服·周活动（同样按小活动拆 partial，见 §1.1）
     ├── CnMyLeague/    国服·我的联赛（继承国际服基类，只覆写三个钩子）
     ├── PeakLadder/    国服·天梯巅峰赛
     ├── Stud/          国际服·种马（购买/培训）
@@ -48,6 +49,45 @@ Core/Bot/
 | 共享层 `Match` | 引擎公开接口（Pad/Ocr/Observation/Stats） | 任何模块（`Scenarios.*`） |
 | 模块 `Scenarios.X` | 注册表契约 + 共享层 + 引擎 | **其他模块**（曾经的 `CnWeeklyScenario` 里直接用 `MyLeagueScenario.CornerHasContent` 就是反例） |
 
+### 1.1 周活动子活动分工（partial 拆分）
+
+周活动里其实是**好几个形态各异的小活动**（常规周活动 / 挑战活动 / 阵容挑战 Team Effort /
+单场周活动；国服还多「晋级挑战（教练签下）」与「巡回赛主要奖励核验」）。它们以前挤在
+一个 1800 行的文件里，改一个就会碰到另一个的字段和分支。现在按小活动拆成同类型 partial：
+
+**国际服 `Scenarios/Weekly/`**
+
+| 文件 | 装什么 | 改什么时候只动它 |
+|---|---|---|
+| `WeeklyBrain.cs` | 界面分类 `Classify` + 活动主页/活动列表/设置解析/主要奖励（所有小活动共用） | 共用判定 |
+| `WeeklyBrain.Entry.cs` | 进活动：介绍页「进入/详情」焦点、比赛页磁贴扫描、锦标赛页/建议面板 | 进活动入口 |
+| `WeeklyBrain.Pick.cs` | 选择页：赛事等级 / 难度档 / 「选择地区」「选择球队」/ Y 随机 | 单场周活动的选页 |
+| `WeeklyBrain.Challenge.cs` | 挑战活动：解锁弹窗、挑战清单、卡扫描、锁/勾探针、卡号消失判定 | 挑战活动 |
+| `WeeklyBrain.SquadPlan.cs` | 阵容挑战：主页/球员卡限制弹窗/阵容页侧边栏/比赛计划红点 | 阵容挑战 |
+| `WeeklyEventScenario.cs` | 主循环、`WkPhase` 分发、导航、弹窗/按键通用件 | 状态机骨架 |
+| `WeeklyEventScenario.SingleMatch.cs` | 活动设置核验、赛事等级下拉、单场周活动难度页（issue #1） | 单场周活动 |
+| `WeeklyEventScenario.Challenge.cs` | 挑战活动子流程 + 地区/球队选择前置（含它自己的 `_ch*` / `_pick*` 字段） | 挑战活动 |
+| `WeeklyEventScenario.SquadPlan.cs` | 阵容挑战「比赛计划失效」修复（`PlanStep` 状态机 + `_plan*` 字段） | 阵容挑战 |
+
+**国服 `Scenarios/CnWeekly/`**
+
+| 文件 | 装什么 |
+|---|---|
+| `CnWeeklyBrain.cs` / `CnWeeklyScenario.cs` | 分类 + 状态机骨架 + 活动列表/主页导航（共用） |
+| `*.Challenge.cs` | 挑战型活动：挑战清单选卡、卡页完成判定、撤退重进 |
+| `*.Coach.cs` | 晋级挑战的教练签下链（选教练 → 看属性 → 签下确认，含后台鼠标点击） |
+| `*.Reward.cs` | 巡回赛主要奖励核验（主页勾 → i 信息弹窗 x/x）与撤退 |
+| `*.Difficulty.cs` | 赛事等级/难度卡片行判定与确认 |
+
+规则（拆完继续照这个走）：
+
+- **加一个新小活动 = 加一对新文件**（`XxxBrain.<小活动>.cs` + `XxxEventScenario.<小活动>.cs`），
+  主文件只加一个 `case`／一次委托，不去别的 partial 里改代码；
+- **字段跟着小活动走**：`_ch*` / `_pick*` / `_plan*` 这类私有状态放在它自己的 partial 里，
+  主文件只留跨小活动共用的（阶段、连击数、场次、memory）；
+- 小活动之间**只通过主文件的公共方法/字段交互**；不要在一个 partial 里直接调另一个
+  partial 的私有 helper（同类型能编过，但改动又会互相打扰）。
+
 ---
 
 ## 2. 模块清单（= 注册表内容）
@@ -57,7 +97,7 @@ Core/Bot/
 | id | 名称 | 类型 | 可接力 | 说明 |
 |---|---|---|---|---|
 | `intl` | 我的联赛 | 场景 | ✅ | 道具核验/难度选择/开赛/满级换人巡检 |
-| `intlweekly` | 周活动 | 场景 | — | 活动列表/介绍页/挑战清单/赛后活动地图 |
+| `intlweekly` | 周活动 | 场景 | — | 活动列表/介绍页/挑战清单/阵容挑战（Team Effort，含赛后「无法进行比赛」→ Y 比赛计划修阵容）/赛后活动地图 |
 | `intlladder` | AI天梯联赛 | 场景 | ✅ | 组别主页→比赛循环 |
 | `intlstudbuy` | 种马购买 | 场景 | — | 合同页筛选/购买/到手确认 |
 | `intlstudtrain` | 种马培训 | 场景 | — | 筛选 + 技巧训练 |
@@ -122,6 +162,7 @@ Core/Bot/
 | 标题宽限 / 比赛上下文 / 掉线窗口 | `MatchShared.TitleGrace / MatchContext / LoginRecovery` | 全部模块 |
 | 像素探针 | `ScreenProbe.CornerHasContent / IsMostlyLightPage / CountGreen` | 全部模块 |
 | 弹窗按键判定 | `PopupBrain.Decide / DecideUpDown` | 我的联赛 / 种马 / 共享决策 |
+| 国服「下一步/确认」推进 | `CnAdvance.AdvanceAsync / StepOf / FindButton`（① RT → ② A → ③ 后台鼠标；仅国服，国际服不吃鼠标） | 国服天梯巅峰赛 / 国服周活动 / 我的联赛（国服） |
 | 赛后活动地图 | `PostMatchActivityController`（可选能力，模块自己决定要不要接） | 国际服周活动 / AI 天梯 / 我的联赛 |
 
 「赛前快捷设置」不是引擎场景：它是 `ModuleKind.Tool`，只做启动游戏/打开设置工具/开目录，

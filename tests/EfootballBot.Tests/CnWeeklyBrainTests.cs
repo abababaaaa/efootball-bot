@@ -609,4 +609,62 @@ public class CnWeeklyBrainTests
         Assert.True(CnWeeklyBrain.IsSignConfirmPopup(ocr));
         Assert.Equal(CwScreen.SignConfirm, CnWeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
     }
+
+    // ---------------- 活动卡指纹（防空转：刷满退列表后右移仍回同一张卡） ----------------
+    // 合成布局照抄实机 cn_tour 主页 OCR（2026-11-20 日志原文）：
+    // 顶部 实况足球在线 / 全新版本巡回赛 / 教练模式；右栏 总活动积分 9,548
+
+    private static OcrResult TourHome(string name, string points, double jitter = 0)
+        => Ocr(W("实况足球在线", 0.60, 0.03), W(name, 0.70, 0.10),
+            W("教练模式", 0.62, 0.14),
+            W("总活动积分", 0.42, 0.55), W(points, 0.50 + jitter, 0.62),
+            W("赛事等级奖励", 0.60, 0.55), W("2,156", 0.90, 0.55),
+            W("前往比赛", 0.50, 0.92));
+
+    [Fact]
+    public void CardSignature_SameCard_StableAcrossOcrJitter()
+    {
+        // 同一张卡两次 OCR 的行内位移/无关数字变化不该改变指纹（否则防不住空转）
+        string a = CnWeeklyBrain.CardSignature(TourHome("全新版本巡回赛", "9,548"));
+        string b = CnWeeklyBrain.CardSignature(TourHome("全新版本巡回赛", "9,548", 0.02));
+        Assert.NotEqual("", a);
+        Assert.Equal(a, b);
+        Assert.Equal("全新版本巡回赛|9548", a);
+    }
+
+    [Fact]
+    public void CardSignature_DifferentCard_Differs()
+    {
+        string a = CnWeeklyBrain.CardSignature(TourHome("全新版本巡回赛", "9,548"));
+        string b = CnWeeklyBrain.CardSignature(TourHome("传奇挑战赛", "3,120"));
+        Assert.NotEqual(a, b);
+        Assert.Equal("传奇挑战赛|3120", b);
+    }
+
+    [Fact]
+    public void CardSignature_PointsMissing_KeepsNameOnly()
+    {
+        // 积分读不出时仍要能给指纹（名字 + ?），只靠名字也能认出「又进了同一张卡」
+        var ocr = Ocr(W("实况足球在线", 0.60, 0.03), W("全新版本巡回赛", 0.70, 0.10),
+            W("教练模式", 0.62, 0.14), W("前往比赛", 0.50, 0.92));
+        Assert.Equal("全新版本巡回赛|?", CnWeeklyBrain.CardSignature(ocr));
+    }
+
+    [Fact]
+    public void CardSignature_NoActivityName_Empty()
+    {
+        // 只有固定噪声词（游戏名/模式/表头）→ 空串，调用方只用卡位上限兜底
+        var ocr = Ocr(W("实况足球在线", 0.60, 0.03), W("教练模式", 0.62, 0.14),
+            W("总活动积分", 0.42, 0.55), W("9,548", 0.50, 0.62));
+        Assert.Equal("", CnWeeklyBrain.CardSignature(ocr));
+    }
+
+    [Fact]
+    public void TryParseTotalPoints_TakesValueRightOfLabel_IgnoresFarNumbers()
+    {
+        // 实机：6,437（日志里也有 9,548）。标签右侧最近的数字才算，右栏远处的 2,156 不吃
+        Assert.Equal(9548L, CnWeeklyBrain.TryParseTotalPoints(TourHome("全新版本巡回赛", "9,548")));
+        Assert.Null(CnWeeklyBrain.TryParseTotalPoints(
+            Ocr(W("总活动积分", 0.42, 0.55), W("2,156", 0.96, 0.55))));
+    }
 }
