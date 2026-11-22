@@ -171,8 +171,8 @@ public sealed class FrameDumpConfig
 /// </summary>
 public sealed class LearningConfig
 {
-    /// <summary>是否自动收集可疑帧。默认开——只写图片、不影响挂机动作。</summary>
-    public bool CollectSuspicious { get; set; } = true;
+    /// <summary>是否自动收集可疑帧。默认关——需要时在「工具→开发者」主动开启；只写图片、不影响挂机动作。</summary>
+    public bool CollectSuspicious { get; set; } = false;
 
     /// <summary>同一类问题的转储节流秒数，防同一帧刷屏。</summary>
     public int ThrottleSeconds { get; set; } = 60;

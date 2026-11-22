@@ -45,4 +45,36 @@ public static class HubTileLocator
             return "eFootball联赛";
         return null;
     }
+
+    // ---------------- 主菜单底部磁贴行定位 ----------------
+    /// <summary>主菜单底部卡片行的固定标签词（用户实机 2026-11-23 截图：
+    /// 比赛 / 我的球队 / 合约 / 任务 / 每日小游戏，横向排列，文字在图标下方）。</summary>
+    private static readonly string[] MainMenuLabels =
+        { "比赛", "我的球队", "合约", "任务", "每日小游戏" };
+
+    /// <summary>
+    /// 主菜单「比赛」磁贴在底部卡片行的格位（0 起，按屏幕从左到右）。
+    /// 只在底部行 y≈0.62~0.92 且认出 ≥3 个不同标签时才可信；否则返回 null 让调用方
+    /// 回退原「下×2→左×6」饱和归位——主菜单标签 OCR 偶发读不全，绝不瞎猜格位。
+    /// </summary>
+    public static int? FindMainMenuMatchOffset(OcrResult ocr)
+    {
+        var tiles = new List<(double X, string Label)>();
+        foreach (var w in ocr.Words)
+        {
+            // 底部卡片行：标签文字在图标下方，实机 y≈0.75~0.88；放宽到 0.62~0.92
+            if (w.CenterY is < 0.62 or > 0.92) continue;
+            string norm = w.NormText.Replace(" ", "");
+            // 精确匹配固定标签（"比赛"须整词，避免"比赛记录/前往比赛"混入——那些 y 更高）
+            string? label = MainMenuLabels.FirstOrDefault(l => norm == l);
+            if (label is null) continue;
+            if (tiles.Any(t => Math.Abs(t.X - w.CenterX) < 0.02)) continue;
+            tiles.Add((w.CenterX, label));
+        }
+        // 交叉验证：至少认出 3 个不同标签，才认为这帧的底部行读全了
+        if (tiles.Select(t => t.Label).Distinct().Count() < 3) return null;
+        tiles.Sort((a, b) => a.X.CompareTo(b.X));
+        int idx = tiles.FindIndex(t => t.Label == "比赛");
+        return idx >= 0 ? idx : null;
+    }
 }

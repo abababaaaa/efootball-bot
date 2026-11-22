@@ -72,6 +72,8 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
     private readonly HashSet<MyLeagueBrain.MlItemTarget> _bought = new();
     /// <summary>物品页当前光标所在行（1 起；0=未知需锚定）。增量下移导航用。</summary>
     private int _itemRow;
+    /// <summary>逐行 OCR 扫描定位目标的已下移格数（0=起点/未开始；扫描完归零）。</summary>
+    private int _itemScanSteps;
     /// <summary>智能接管提示是否已记录（每次运行一次）。</summary>
     private bool _takeoverLogged;
     /// <summary>TitleScreen 首次出现时间（比赛上下文中按 X 前 30s 宽限，区分加载画面与真标题）。</summary>
@@ -384,12 +386,22 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         switch (action.Kind)
         {
             case MatchActionKind.PadEnterMatch:
-                // 主菜单 → 底部卡片行 → 最左"比赛" → A（v1.2 修订，用户 2026-10-19 实测：
-                // 新 UI 需 下×2 才进底部卡行，第 1 下离开页签行/第 2 下进卡行；左到头多按无害）
-                _log("[我的联赛] 主菜单导航：下×2→左×6→A 进比赛页", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.DpadRepeat(PadDir.Left, 6);
+                // 主菜单 → 底部卡片行 → "比赛"磁贴 → A。OCR 实时定位"比赛"在第几格后精确右移；
+                // 读不全（<3个底部标签）则回退原「左×6」饱和归位到最左——绝不瞎猜格位。
+                await _engine.Pad.DpadRepeat(PadDir.Down, 5); // 饱和下按到底部卡行（到底停住，防下少了按错）
+                int matchOff = HubTileLocator.FindMainMenuMatchOffset(obs.Ocr) ?? 0;
+                if (matchOff > 0)
+                {
+                    _log($"[我的联赛] 主菜单导航：下×5→归位最左→右×{matchOff}→A（OCR 定位比赛在第 {matchOff + 1} 格）", LogLevel.Info);
+                    await _engine.Pad.DpadRepeat(PadDir.Left, 6);
+                    await _engine.Pad.DpadRepeat(PadDir.Right, matchOff);
+                }
+                else
+                {
+                    _log("[我的联赛] 主菜单导航：下×5→左×6→A（OCR 未读全底部磁贴，回退饱和归位）", LogLevel.Info);
+                    _engine.DumpSuspiciousFrame(obs.Frame, "menu_tile_ocr_incomplete", "主菜单底部磁贴 OCR 读不全，回退固定左×6 导航");
+                    await _engine.Pad.DpadRepeat(PadDir.Left, 6);
+                }
                 await _engine.Pad.Confirm();
                 break;
             case MatchActionKind.PadConfirm when action.Target is "前往比赛" or "下个赛季":
@@ -716,6 +728,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                     _phase = PurchasePhase.Buying;
                     _navAttempts = 0;
                     _itemRow = 0; // 未知行，Buying 首轮自动锚定顶部
+                    _itemScanSteps = 0;
                     _log("[我的联赛] 智能接管：已在物品页，继续购买", LogLevel.Info);
                     return 800;
                 }
@@ -843,22 +856,44 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                     _bought.Add(target);
                     return 1500;
                 }
-                // 固定行序增量导航（用户确认：状态1~3 / 经验4~6 / 主教练13，按行序升序购买）：
-                // 从当前行直接下移 (row - _itemRow) 格——如 第3行买完到第6行只下移3格，不回顶
-                int row = MyLeagueBrain.ExpectedItemRow(target);
+                // 逐行 OCR 扫描定位（2026-11-23 用户实机：物品页是滚动列表，4x 在中间需下滑
+                // 才显示，写死行号+Up归位首次会买错）。每下移一格读一次焦点行（白底高亮）文字，
+                // 认出目标再按 A；读不准/扫描超限则回退原固定行号逻辑，绝不空按。
                 if (_itemRow < 1)
                 {
-                    await _engine.Pad.DpadRepeat(PadDir.Up, 16);
+                    await _engine.Pad.DpadRepeat(PadDir.Up, 16); // 锚定列表顶部作为扫描起点
                     _itemRow = 1;
+                    _itemScanSteps = 0;
+                    return 1200;
                 }
-                int down = row - _itemRow;
-                _log($"[我的联赛] 购买 {DescribeItem(target)}（第 {row} 行，自第 {_itemRow} 行下移 {Math.Max(down, 0)} 格）", LogLevel.Info);
-                _bought.Add(target);
-                _itemRow = row;
-                if (down > 0)
-                    await _engine.Pad.DpadRepeat(PadDir.Down, down);
-                await _engine.Pad.Confirm();
-                return 2500;
+                string? focusText = MyLeagueBrain.DetectFocusedItemText(frame, ocr);
+                bool isTarget = focusText is not null && ItemLineMatches(focusText, target);
+                if (isTarget)
+                {
+                    _log($"[我的联赛] 逐行扫描命中目标「{DescribeItem(target)}」（焦点行：{focusText}），按 A 购买", LogLevel.Info);
+                    _engine.DumpSuspiciousFrame(frame, "item_scan_hit", $"逐行扫描命中 {DescribeItem(target)}（扫描 {_itemScanSteps} 格，焦点行：{focusText}）");
+                    _bought.Add(target);
+                    _itemScanSteps = 0;
+                    await _engine.Pad.Confirm();
+                    return 2500;
+                }
+                const int MaxItemScan = 14; // 列表约十几行，扫完仍无则回退固定行号
+                if (_itemScanSteps >= MaxItemScan)
+                {
+                    int row = MyLeagueBrain.ExpectedItemRow(target);
+                    _log($"[我的联赛] 逐行扫描 {MaxItemScan} 格未命中（焦点：{focusText ?? "读不准"}），回退固定行号第 {row} 行", LogLevel.Warn);
+                    _engine.DumpSuspiciousFrame(frame, "item_scan_miss", $"逐行扫描 {MaxItemScan} 格未命中 {DescribeItem(target)}（焦点：{focusText ?? "读不准"}），回退固定行号");
+                    _bought.Add(target);
+                    _itemScanSteps = 0;
+                    // 回到顶部再按固定行号下移，尽量修正扫描已走过的位移
+                    await _engine.Pad.DpadRepeat(PadDir.Up, 16);
+                    if (row > 1) await _engine.Pad.DpadRepeat(PadDir.Down, row - 1);
+                    await _engine.Pad.Confirm();
+                    return 2500;
+                }
+                _itemScanSteps++;
+                await _engine.Pad.Dpad(PadDir.Down); // 下一行，下一轮再读
+                return 900;
             }
             case PurchasePhase.Returning:
             {
@@ -1004,6 +1039,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         _log($"[我的联赛] 购买流程退出：{reason}", LogLevel.Warn);
         _phase = PurchasePhase.Idle;
         _navAttempts = 0;
+        _itemScanSteps = 0;
         if (_verifyRetries > 2)
         {
             _purchaseSatisfied = true;
@@ -1060,8 +1096,24 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         MyLeagueBrain.MlItemKind.ConditionBoost => $"状态加成 {t.Level}",
         _ => t.Kind.ToString(),
     };
-}
 
+    /// <summary>焦点行文字是否就是目标道具（且非「使用中」）。逐行扫描命中判定。</summary>
+    private static bool ItemLineMatches(string lineText, MyLeagueBrain.MlItemTarget target)
+    {
+        if (lineText.Contains("使用中")) return false; // 已拥有，不需购买
+        string norm = lineText.Replace(" ", "").ToLowerInvariant(); // OCR 可能读出大写 4X/x4
+        string level = target.Level.ToLowerInvariant();
+        return target.Kind switch
+        {
+            MyLeagueBrain.MlItemKind.ExpBoost =>
+                norm.Contains("经验值") && (norm.Contains(level) ||
+                    (level.Length >= 2 && norm.Contains(level[1] + level[0].ToString()))), // 4x / x4
+            MyLeagueBrain.MlItemKind.CoachBoost => norm.Contains("教练"),
+            MyLeagueBrain.MlItemKind.ConditionBoost => norm.Contains("状态") && norm.Contains(target.Level),
+            _ => false,
+        };
+    }
+}
 
 
 

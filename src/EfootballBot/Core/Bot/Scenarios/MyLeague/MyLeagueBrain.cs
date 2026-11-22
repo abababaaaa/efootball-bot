@@ -210,6 +210,47 @@ public static class MyLeagueBrain
         return new MlItemRow(index, hit.Text, hit.CenterY, inUse);
     }
 
+    /// <summary>
+    /// 检测物品列表当前焦点行（白色高亮条）的文字。逐行 OCR 扫描定位用：
+    /// 焦点行背景是近白（实机 ≈230+）、未聚焦是深灰（≈40~60），采样每条 OCR 行中心附近的
+    /// 背景亮度取最亮者，且须明显高于次高，否则认为读不准返回 null。
+    /// 返回该行文字（如「经验值:4x 有效场数:5场 使用中」）；读不准返回 null。
+    /// </summary>
+    public static string? DetectFocusedItemText(FrameData frame, OcrResult ocr)
+    {
+        var (w, h, bgra) = (frame.Width, frame.Height, frame.Bgra);
+        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return null;
+        double RegionAvg(double x0, double x1, double y0, double y1)
+        {
+            long sum = 0; int n = 0;
+            for (int y = (int)(h * y0); y < (int)(h * y1); y += 2)
+                for (int x = (int)(w * x0); x < (int)(w * x1); x += 2)
+                {
+                    int cx = x < 0 ? 0 : (x >= w ? w - 1 : x);
+                    int cy = y < 0 ? 0 : (y >= h ? h - 1 : y);
+                    int i = (cy * w + cx) * 4;
+                    sum += (bgra[i] + bgra[i + 1] + bgra[i + 2]) / 3;
+                    n++;
+                }
+            return n == 0 ? 0 : (double)sum / n;
+        }
+        // 只取物品列表区的行（排除标题/顶部积分栏/底部按键提示）
+        var lines = ocr.Lines.Where(l => l.CenterY is > 0.20 and < 0.88).ToList();
+        if (lines.Count == 0) return null;
+        var scored = new List<(OcrLine Line, double Avg)>();
+        foreach (var l in lines)
+        {
+            // 采样行右侧空白背景（价格数字右边到卡片右缘，x≈0.86~0.94）：焦点行白底、
+            // 未聚焦深灰。避开左侧绿色 Exp. 图标（未聚焦也绿，会污染判定）和白色文字笔画。
+            double avg = RegionAvg(0.86, 0.94, l.CenterY - l.H * 0.5, l.CenterY + l.H * 0.5);
+            scored.Add((l, avg));
+        }
+        var top = scored.OrderByDescending(s => s.Avg).ToList();
+        // 焦点行须明显亮于次高（白底 ≈230 vs 深灰 ≈50，间隙极大；要求差 ≥40 防误判）
+        if (top.Count < 2 || top[0].Avg - top[1].Avg < 40 || top[0].Avg < 140) return null;
+        return top[0].Line.Text;
+    }
+
     /// <summary>行文本里的加成数字位（游戏格式"4x"，OCR 偶见"x4"；无则 null）。</summary>
     private static string? LevelDigit(string lineText)
     {
