@@ -193,7 +193,7 @@ public static partial class MatchBrain
             case MatchScreen.PurchaseDialog:
             {
                 // 购买弹窗：焦点默认在「取消」→ 上移一格点上方带数字（积分价）的确认按钮。
-                // 上移+A 是唯一买法，退避只放慢不停手
+                // 上移+A 是买法；上移与 A 之间需留延时让游戏刷新焦点（见各模块 PadUpConfirm 执行）。
                 return new MatchAction(MatchActionKind.PadUpConfirm,
                     screenStreak >= StuckStreak ? 5000 : 2500, "购买确认（上移→数字按钮）");
             }

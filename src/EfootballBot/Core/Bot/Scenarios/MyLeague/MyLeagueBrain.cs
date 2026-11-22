@@ -237,17 +237,26 @@ public static class MyLeagueBrain
         // 只取物品列表区的行（排除标题/顶部积分栏/底部按键提示）
         var lines = ocr.Lines.Where(l => l.CenterY is > 0.20 and < 0.88).ToList();
         if (lines.Count == 0) return null;
+        // 整行横向扫描取亮度中位数：焦点行整条白底、未聚焦深灰。用中位数而非平均值，
+        // 抗行内白色文字笔画/绿色图标的局部亮点（旧版只采右侧窄带 x0.86~0.94 落在卡片外黑区
+        // 或边缘，实机读不准 → 14 格扫描全 miss）。
+        double RowMedian(double cy, double hh)
+        {
+            var vals = new List<double>();
+            for (double yy = cy - hh * 0.5; yy <= cy + hh * 0.5; yy += 0.004)
+                for (double xx = 0.10; xx <= 0.90; xx += 0.006)
+                    vals.Add(RegionAvg(xx, xx + 0.005, yy, yy + 0.004));
+            if (vals.Count == 0) return 0;
+            vals.Sort();
+            return vals[vals.Count / 2];
+        }
         var scored = new List<(OcrLine Line, double Avg)>();
         foreach (var l in lines)
-        {
-            // 采样行右侧空白背景（价格数字右边到卡片右缘，x≈0.86~0.94）：焦点行白底、
-            // 未聚焦深灰。避开左侧绿色 Exp. 图标（未聚焦也绿，会污染判定）和白色文字笔画。
-            double avg = RegionAvg(0.86, 0.94, l.CenterY - l.H * 0.5, l.CenterY + l.H * 0.5);
-            scored.Add((l, avg));
-        }
+            scored.Add((l, RowMedian(l.CenterY, l.H)));
         var top = scored.OrderByDescending(s => s.Avg).ToList();
-        // 焦点行须明显亮于次高（白底 ≈230 vs 深灰 ≈50，间隙极大；要求差 ≥40 防误判）
-        if (top.Count < 2 || top[0].Avg - top[1].Avg < 40 || top[0].Avg < 140) return null;
+        // 焦点行须明显亮于次高（白底 ≈230 vs 深灰 ≈50，间隙极大）；放宽绝对线到 110
+        // 并保留差值 ≥45，兼容捕获整体偏暗的机器。
+        if (top.Count < 2 || top[0].Avg - top[1].Avg < 45 || top[0].Avg < 110) return null;
         return top[0].Line.Text;
     }
 

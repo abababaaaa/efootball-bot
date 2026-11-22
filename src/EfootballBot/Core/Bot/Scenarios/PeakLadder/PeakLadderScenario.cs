@@ -202,6 +202,7 @@ public sealed class PeakLadderScenario : IScenario
             case MatchActionKind.PadUpConfirm:
                 _log($"[天梯巅峰赛] 弹窗上移确认：{action.Target}", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Up);
+                await Task.Delay(250); // 上移后留时给游戏刷新焦点，否则A落在旧焦点(取消)
                 await _engine.Pad.Confirm();
                 break;
             case MatchActionKind.PadDownConfirm:
