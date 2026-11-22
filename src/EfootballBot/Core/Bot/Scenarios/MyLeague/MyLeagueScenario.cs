@@ -172,15 +172,31 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         // 冷启动直接落在真实比赛中由比分框时钟主判据覆盖，不依赖角区兜底。
         bool matchContext = MatchShared.MatchContext(_memory, now);
         var screen = ClassifyScreen(obs, matchContext);
+        // 周活动页被 YOLO 误检成 main_menu 框时，共享分类会判 MainMenu（实机 2026-11-23：
+        // 对阵AI/Team Effort 卡片页检测 main_menu 0.72~0.88）→ 引导误认"已到主页"不接管，
+        // 于是执行主菜单导航跑偏。用周活动 Brain 分类 + OCR 专有特征双重判据纠正为 Unknown，
+        // 让引导走 B 退回。OCR 特征：顶部「对阵AI/对阵玩家」页签 + 活动卡（Team Effort/阵容挑战/
+        // 巡回活动/结束倒数）——真正主菜单没有这些词，不会误伤。
+        bool weeklyPageByBrain = WeeklyBrain.Classify(obs.Detections, obs.Ocr,
+            ScreenProbe.CornerHasContent(obs.Frame), matchContext,
+            ScreenProbe.IsMostlyLightPage(obs.Frame)) != WkScreen.None;
+        bool weeklyPageByOcr = (obs.Ocr.ContainsJoined("对阵AI") || obs.Ocr.ContainsJoined("对阵玩家"))
+            && (obs.Ocr.ContainsJoined("Team Effort") || obs.Ocr.ContainsJoined("阵容挑战")
+                || obs.Ocr.ContainsJoined("巡回活动") || obs.Ocr.ContainsJoined("结束倒数"));
+        if (screen == MatchScreen.MainMenu && SupportsOcrTileNav && (weeklyPageByBrain || weeklyPageByOcr))
+        {
+            _log("[我的联赛] 界面纠正：YOLO 误检 main_menu 的周活动页 → Unknown（交引导 B 退回）", LogLevel.Warn);
+            _engine.DumpSuspiciousFrame(obs.Frame, "main_menu_misdetect_weekly",
+                "周活动页被YOLO误检main_menu判成主菜单，纠正交引导退回");
+            screen = MatchScreen.Unknown;
+        }
         _memory.Record(screen, now);
         // 启动引导（国际服）：若游戏停在其他模块页（周活动/天梯/巅峰赛），先 B 收敛回主页，
         // 否则共享分类会把该页当"前往比赛"直接开赛，导致从别的模块页启动本模块时永远到不了。
         // 借其他模块 Brain 认残留页（架构锁允许只读借用 Brain.Classify）；本模块页/主页/比赛中跳过。
         if (SupportsOcrTileNav) // 国际服标志（国服子类有自己的残留页兜底，关闭此引导）
         {
-            bool otherModule = WeeklyBrain.Classify(obs.Detections, obs.Ocr,
-                                    ScreenProbe.CornerHasContent(obs.Frame), matchContext,
-                                    ScreenProbe.IsMostlyLightPage(obs.Frame)) != WkScreen.None
+            bool otherModule = weeklyPageByBrain || weeklyPageByOcr // OCR 特征提取在上文已算，覆盖 YOLO 误检
                                 || AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
                                 || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None;
             // 联赛自有页：主页 LeaguePage / 积分 PointsPage / 物品 ItemList /

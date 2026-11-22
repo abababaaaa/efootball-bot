@@ -53,8 +53,10 @@ public static class PopupBrain
     /// <summary>两枚按钮都偏亮/偏暗时，靠亮度差判聚焦（差值够大才算数）。</summary>
     public const int FocusedButtonLumaGap = 40;
     /// <summary>推进键词素（规范化 + 去尾部数字后整词比较）。</summary>
+    // 「覆盖」：购买道具替换已有物品确认弹窗（"要覆盖目前的物品吗？"覆盖/取消），
+    // 2026-11-23 实机——焦点默认在下方蓝色「取消」，需上移到上方白底「覆盖」才是确认。
     private static readonly string[] ConfirmWords =
-        { "确认", "確定", "确定", "下一步", "进行", "进入", "继续", "领取", "获取", "ok", "yes", "next", "confirm" };
+        { "确认", "確定", "确定", "下一步", "进行", "进入", "继续", "领取", "获取", "覆盖", "ok", "yes", "next", "confirm" };
     /// <summary>非推进键词素：命中这些一律视为「不该按的键」。</summary>
     private static readonly string[] CancelWords =
         { "取消", "返回", "关闭", "稍后", "否", "离开", "退出", "cancel", "back", "close", "no" };
