@@ -170,6 +170,12 @@ public partial class MainWindow
         int dumpIdx = Array.IndexOf(dumpMsValues, _cfg.FrameDump.IntervalMs);
         CmbFrameDumpInterval.SelectedIndex = dumpIdx >= 0 ? dumpIdx : 2; // 缺省 10 秒
 
+        // 可疑帧收集
+        ChkCollectSuspicious.IsChecked = _cfg.Learning.CollectSuspicious;
+        int[] suspendSecValues = { 10, 30, 60, 120, 300 };
+        int suspendIdx = Array.IndexOf(suspendSecValues, _cfg.Learning.ThrottleSeconds);
+        CmbSuspiciousThrottle.SelectedIndex = suspendIdx >= 0 ? suspendIdx : 2; // 缺省 60 秒
+
         // OCR 引擎（下拉项：0=SimdPaddle 默认 / 1=RapidV6 / 2=Unlimited-OCR 外部服务；
         // 旧配置 Windows 值已删引擎，一并落 SimdPaddle）
         CmbOcrEngine.SelectedIndex = _cfg.OcrEngine switch
@@ -394,6 +400,13 @@ public partial class MainWindow
         {
             int[] dumpMs = { 2000, 5000, 10000, 30000, 60000 };
             _cfg.FrameDump.IntervalMs = dumpMs[CmbFrameDumpInterval.SelectedIndex];
+        }
+        // 可疑帧收集
+        _cfg.Learning.CollectSuspicious = ChkCollectSuspicious.IsChecked == true;
+        if (CmbSuspiciousThrottle.SelectedIndex >= 0)
+        {
+            int[] suspendSec = { 10, 30, 60, 120, 300 };
+            _cfg.Learning.ThrottleSeconds = suspendSec[CmbSuspiciousThrottle.SelectedIndex];
         }
         // 下拉项 → 引擎（0=SimdPaddle 默认 / 1=RapidV6-small / 2=Unlimited-OCR 外部服务）
         _cfg.OcrEngine = CmbOcrEngine.SelectedIndex switch
@@ -899,6 +912,21 @@ public partial class MainWindow
         catch (Exception ex)
         {
             AppendLog($"打开存帧目录失败：{ex.Message}", LogLevel.Warn);
+        }
+    }
+
+    /// <summary>打开可疑帧目录 data\suspicious\（不存在则先创建）。</summary>
+    private void BtnOpenSuspicious_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string dir = Path.Combine(Core.System.AppPaths.DataDir, "suspicious");
+            Directory.CreateDirectory(dir);
+            _ = OpenPathAsync(dir);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"打开可疑帧目录失败：{ex.Message}", LogLevel.Warn);
         }
     }
 

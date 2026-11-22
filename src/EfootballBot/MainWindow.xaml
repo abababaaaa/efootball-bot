@@ -2532,6 +2532,44 @@
                             </Grid>
                         </StackPanel>
                     </Border>
+                    <Border Style="{StaticResource Card}" Margin="0,2,0,12">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Text="可疑帧收集（排障）" Style="{StaticResource H2}"/>
+                            </StackPanel>
+                            <Grid Margin="0,6,0,0" MaxWidth="560" HorizontalAlignment="Left">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}" TextWrapping="Wrap"
+                                           Text="挂机遇到低置信度 / 判定卡住 / 残留页 B 退回时自动保存当前画面 JPG + 原因说明，供反馈定位问题。只写图片，不改变任何挂机动作。"/>
+                            </Grid>
+                            <CheckBox x:Name="ChkCollectSuspicious" Content="启用：自动收集可疑帧" Margin="0,12,0,0"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <TextBlock Text="同类节流" Style="{StaticResource FieldLabel}" Width="104" VerticalAlignment="Center"/>
+                                <ComboBox x:Name="CmbSuspiciousThrottle" Width="110" Margin="10,0,0,0" SelectedIndex="2">
+                                    <ComboBoxItem Content="10 秒"/>
+                                    <ComboBoxItem Content="30 秒"/>
+                                    <ComboBoxItem Content="60 秒"/>
+                                    <ComboBoxItem Content="120 秒"/>
+                                    <ComboBoxItem Content="300 秒"/>
+                                </ComboBox>
+                                <Button x:Name="BtnOpenSuspicious" Content="打开可疑帧目录" Margin="10,0,0,0" Height="30"
+                                        Style="{StaticResource GhostBtn}" Click="BtnOpenSuspicious_Click"/>
+                            </StackPanel>
+                            <Grid Margin="0,8,0,0" MaxWidth="560" HorizontalAlignment="Left">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="保存到 exe 同级 "/><Run Text="data\suspicious\日期\"/><Run Text="；同类问题按节流间隔去重，避免刷屏。更改下次挂机生效"/></TextBlock>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>
