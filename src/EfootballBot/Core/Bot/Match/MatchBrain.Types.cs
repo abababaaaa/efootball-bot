@@ -93,6 +93,10 @@ public enum MatchActionKind
     PadEnterMatch,
     PadConfirm,
     GamepadBack,
+    /// <summary>B 逃生失败多次（画面不变）后换招：先按上移把焦点从「取消」移到确认键，
+    /// 再按 A 确认，最后按 B 返回。用于"反复 B 却关不掉"的胶着页——直接按 A 可能落在
+    /// 「取消」上导致继续死循环，必须先上移避开取消。</summary>
+    GamepadBackAfterConfirm,
     /// <summary>比赛选择页右移一格（寻找「我的联赛」磁贴，OCR 未看到焦点在其上时）。</summary>
     PadMoveRight,
     /// <summary>比赛中挂机点击：按 A + 用户设定的随机间隔（挂机节奏，拟人化防零输入判定）。</summary>
@@ -140,6 +144,10 @@ public static partial class MatchBrain
     /// 升级为周期性按 B 逃生（清盖层/回上级重新导航）。此前导航屏在 StuckStreak 后永久等待，
     /// OCR 漏读焦点词即无限空转——v2.0.7 弹窗链 8 小时事故同款模式的补齐（2026-10-17 评审）。</summary>
     public const int NavEscapeStreak = 20;
+    /// <summary>按 B 逃生连续失败这么多次（画面/分类不变）后，升级为「上 → A → B」换招。
+    /// 针对 B 关不掉的确认弹窗/胶着页：先上移把焦点从取消移到确认键，再 A 确认，最后 B 退出
+    /// （直接 A 会落在取消键上继续死循环）。之后每 3 次 B 再换一次招。</summary>
+    public const int BackFailEscalations = 3;
     /// <summary>HasConfirm 弹窗连续该轮数仍无进展时周期性按 B 逃生。正常奖励弹窗链 9+ 页
     /// （每页 1~2 轮）远到不了该值；A 永不生效的「RT 下一步」型页面（实机 2026-10-14 对阵表）
     /// 靠它脱困。数值与国服 CnMyLeague 的 B@30 一致，国服侧其保险先行接管不叠加。</summary>

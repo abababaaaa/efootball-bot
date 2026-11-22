@@ -4,6 +4,8 @@ using EfootballBot.Core.Capture;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 using EfootballBot.Core.Bot.Match;
+using EfootballBot.Core.Bot.Scenarios.AiLadder;
+using EfootballBot.Core.Bot.Scenarios.PeakLadder;
 
 // ===========================================================================
 // 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
@@ -143,7 +145,11 @@ public sealed partial class WeeklyEventScenario : IScenario
         _engine = engine;
         _log = log;
         _matchPlay = new MatchPlay(engine, "周活动", log);
+        _homeGuide = new ReturnToHomeGuide("周活动", log, engine.DumpSuspiciousFrame);
     }
+
+    /// <summary>启动引导：停在其他模块页时先 B 收敛回主页。</summary>
+    private readonly ReturnToHomeGuide _homeGuide;
 
     public async Task<int> RunOnceAsync(CancellationToken ct)
     {
@@ -168,6 +174,16 @@ public sealed partial class WeeklyEventScenario : IScenario
                 MatchShared.LoginRecovery(_memory, now), pitch)
             : MatchScreen.Unknown;
         _memory.Record(ml, now);
+        // 启动引导：停在其他模块页（我的联赛/天梯/巅峰赛）时先 B 收敛回主页，
+        // 否则共享分类会把该页当"前往比赛"直接开赛，导致从别的模块页启动周活动到不了。
+        bool otherModule = AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
+                           || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None
+                           || (wk == WkScreen.None &&
+                               ml is MatchScreen.LeaguePage or MatchScreen.PointsPage or MatchScreen.ItemList);
+        int? guideWait = await _homeGuide.StepAsync(obs.Frame,
+            ml == MatchScreen.MainMenu, wk != WkScreen.None, otherModule,
+            () => _engine.Pad.Back());
+        if (guideWait is not null) return guideWait.Value;
         if (!_takeoverLogged)
         {
             _takeoverLogged = true;
@@ -264,6 +280,12 @@ public sealed partial class WeeklyEventScenario : IScenario
             case MatchActionKind.GamepadBack:
                 _log($"[周活动] {action.Target}", LogLevel.Warn);
                 await _engine.Pad.Back();
+                break;
+            case MatchActionKind.GamepadBackAfterConfirm:
+                _log($"[周活动] {action.Target}", LogLevel.Warn);
+                await _engine.Pad.Dpad(PadDir.Up); // B 多次无效：先上移把焦点从「取消」移到确认键
+                await _engine.Pad.Confirm(); // 再 A 确认（直接 A 可能落在取消键上继续死循环）
+                await _engine.Pad.Back(); // 最后 B 返回
                 break;
             case MatchActionKind.MatchIdleTap:
                 // 比赛中挂机点击：按 A + 用户「挂机节奏」区间随机间隔（共享层 MatchPlay，拟人化）

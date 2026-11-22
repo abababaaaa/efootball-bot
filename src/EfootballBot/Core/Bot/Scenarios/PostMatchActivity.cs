@@ -213,11 +213,14 @@ public sealed class PostMatchActivityController
         Action<string, LogLevel> log, string module, CancellationToken ct = default)
         => StepAsyncCore(obs.Ocr, autoAdvance,
             countReader: token => PostMatchActivityBrain.ReadAdvanceCountAsync(engine, obs, token),
-            pad: new EnginePmActivityPad(engine.Pad), log, module, ct);
-    /// <summary>核心状态机（OCR/手柄全部参数化，可单测）。countReader 仅在首次进入且开启自动推进时调用。</summary>
+            pad: new EnginePmActivityPad(engine.Pad), log, module, ct,
+            dump: reason => engine.DumpSuspiciousFrame(obs.Frame, "pm_activity_stuck", reason));
+    /// <summary>核心状态机（OCR/手柄全部参数化，可单测）。countReader 仅在首次进入且开启自动推进时调用。
+    /// dump 可选：卡住时收集可疑帧供诊断，单测不传即无副作用。</summary>
     internal async Task<int?> StepAsyncCore(OcrResult ocr, bool autoAdvance,
         Func<CancellationToken, Task<int?>>? countReader, IPmActivityPad pad,
-        Action<string, LogLevel> log, string module, CancellationToken ct = default)
+        Action<string, LogLevel> log, string module, CancellationToken ct = default,
+        Action<string>? dump = null)
     {
         var screen = PostMatchActivityBrain.Classify(ocr);
         if (screen == PmScreen.None)
@@ -239,6 +242,9 @@ public sealed class PostMatchActivityController
                 _phase = Phase.Exit;
                 return 2200;
             }
+            // 首次认定为活动地图时留一帧：IsMap 靠全文"当前位置+下一步/奖励"判定，
+            // 若这其实是我方活动页/导航页的误判，这一帧就是定位证据。
+            dump?.Invoke("first_enter:首次判定为赛后活动地图，供核对IsMap是否误判");
             if (!autoAdvance)
             {
                 log($"[{module}] 赛后活动地图：未开启自动推进，直接退出（→ 下一步）", LogLevel.Info);
@@ -308,6 +314,9 @@ public sealed class PostMatchActivityController
                 if (++_exitRetries > 6)
                 {
                     log($"[{module}] 赛后活动地图：退出动作未生效，重试（→ 下一步）", LogLevel.Warn);
+                    // 卡住实帧收集：退出无效通常意味着"这根本不是赛后活动图，IsMap 误判"，
+                    // 留下画面供人工核对判定词，不自动改规则。
+                    dump?.Invoke("exit_retry:退出动作6轮未生效，疑似活动图误判");
                     return await ExitAsync(pad, log, module);
                 }
                 return 1500;

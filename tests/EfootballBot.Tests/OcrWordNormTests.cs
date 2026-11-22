@@ -29,4 +29,30 @@ public class OcrWordNormTests
         Assert.True(ocr.Contains("前往比赛"));
         Assert.True(ocr.ContainsJoined("前往比赛"));
     }
+
+    [Fact]
+    public void FindButton_PrefersHigherConfidence_WhenMultipleHits()
+    {
+        // 同一关键词命中多处时，取置信度更高的（如弹窗按钮 vs 背景文字）
+        var ocr = new OcrResult([
+            new OcrWord("确定", 0.1, 0.2, 0.08, 0.04, Confidence: 0.32),
+            new OcrWord("确定", 0.7, 0.8, 0.08, 0.04, Confidence: 0.96),
+        ], 1280, 720);
+        var hit = ocr.FindButton("确定");
+        Assert.NotNull(hit);
+        Assert.Equal(0.7, hit.X, 5); // 命中高置信度那个（靠右下）
+    }
+
+    [Fact]
+    public void FindButton_KeepsFirstHit_WhenConfidenceTied()
+    {
+        // 兼容契约：置信度相同（含默认 1.0）时稳定返回首个命中，既有行为不变
+        var ocr = new OcrResult([
+            new OcrWord("确定", 0.1, 0.2, 0.08, 0.04),
+            new OcrWord("确定", 0.7, 0.8, 0.08, 0.04),
+        ], 1280, 720);
+        var hit = ocr.FindButton("确定");
+        Assert.NotNull(hit);
+        Assert.Equal(0.1, hit.X, 5); // 仍是第一个
+    }
 }

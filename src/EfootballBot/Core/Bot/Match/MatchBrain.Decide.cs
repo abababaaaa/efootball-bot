@@ -44,7 +44,7 @@ public static partial class MatchBrain
                 // 焦点异常，按 B 清一次盖层（主菜单 B 最坏情况是弹退出确认窗 → HasConfirm 上移+确认
                 // 退出 → 标题画面 X 重进，仍可自愈），此后每 5 轮一次——好过静默死等。
                 if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 2400, "主菜单导航失效，B 清盖层重试");
+                    return PeriodicBackAction(screenStreak, NavEscapeStreak, "主菜单导航失效，B 清盖层重试");
                 return new MatchAction(MatchActionKind.PadEnterMatch,
                     screenStreak >= StuckStreak ? 5000 : 3000, "主菜单→比赛卡片");
             }
@@ -57,7 +57,7 @@ public static partial class MatchBrain
                 // 滚入、标签完整可读。误读提前按 A 的最坏情况是进错卡详情页，其分类不再是
                 // MatchHub，B 逃生自愈。焦点词整排漏读时 ≥NavEscapeStreak 按 B 回主菜单重导航。
                 if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 2400, "比赛页导航失效，B 回主菜单重导航");
+                    return PeriodicBackAction(screenStreak, NavEscapeStreak, "比赛页导航失效，B 回主菜单重导航");
                 bool focused = ocr.Lines.Any(l => l.Text.Contains("我的联赛"));
                 if (focused)
                     return new MatchAction(MatchActionKind.PadConfirm,
@@ -76,7 +76,7 @@ public static partial class MatchBrain
             {
                 // 物品列表：A 选中当前焦点行；多轮无效（≥NavEscapeStreak）B 退出由购买状态机重导航
                 if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 2400, "物品列表多轮无进展，B 退出重进");
+                    return PeriodicBackAction(screenStreak, NavEscapeStreak, "物品列表多轮无进展，B 退出重进");
                 return new MatchAction(MatchActionKind.PadConfirm,
                     screenStreak >= StuckStreak ? 5000 : 2500, "物品列表焦点行");
             }
@@ -91,7 +91,7 @@ public static partial class MatchBrain
                 // 超过退避轮数只放慢不停手：弹窗链的第 9+ 页仍需要 A 推进（见 StuckStreak 注释）。
                 // 到 ConfirmEscapeStreak 仍无进展（A 永不生效的 RT 型页）：B 退出该页自愈。
                 if (screenStreak >= ConfirmEscapeStreak && (screenStreak - ConfirmEscapeStreak) % 5 == 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 2400, "弹窗久按无效，B 逃生");
+                    return PeriodicBackAction(screenStreak, ConfirmEscapeStreak, "弹窗久按无效，B 逃生");
                 bool slow = screenStreak >= StuckStreak;
                 // 弹窗按键规则（用户 2026-11-10）：单按钮直接 A；多按钮看白底高光那枚是不是
                 // 确认/进行/OK/下一步 这类推进键，是 → 直接 A，不是 → 按上下关系挪一格再 A。
@@ -123,8 +123,13 @@ public static partial class MatchBrain
             {
                 // 「前往比赛」= 联赛主页主按钮；「下个赛季」= 赛季结束替换词（实机 next_season：
                 // 前往比赛位置变为"下个赛季"，另有"前往下个赛季"，含"下个赛季"即覆盖）
+                // 「对阵AI类别/对阵玩家类别」= eFootball™联赛类别选择页（实机 2026-11-22：
+                // 我的联赛从比赛页按 A 进到该页后，OCR 只有「eFootball™联赛|对阵AI类别」，
+                // 旧词表无匹配 → 一直 Wait 卡死。本模块无前置 Brain，此页落到 LeaguePage，
+                // 补上类别词即可按 A 进入；AI天梯有自己的 AiLadderBrain 先认，不受此影响。）
                 var go = FindLine(ocr, "下一步", "开始比赛", "开赛", "继续", "前往比赛",
-                    "进入比赛", "下个赛季", "开始");
+                    "进入比赛", "下个赛季", "开始",
+                    "对阵AI类别", "对阵玩家类别", "AI类别", "玩家类别");
                 if (go is not null)
                     return new MatchAction(MatchActionKind.PadConfirm, 2500, go);
                 // 关键词里没有、但底栏确实印着一枚推进键（新版换了文案/整行被并读成本页
@@ -197,7 +202,7 @@ public static partial class MatchBrain
                 // 积分页：进入「我的联赛物品」（右选项）。导航序列由场景层校验重试；
                 // ≥NavEscapeStreak 按 B 回退重新导航（此前永久等待）
                 if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 2400, "积分页导航失效，B 回退重导航");
+                    return PeriodicBackAction(screenStreak, NavEscapeStreak, "积分页导航失效，B 回退重导航");
                 return new MatchAction(MatchActionKind.PadConfirm,
                     screenStreak >= StuckStreak ? 5000 : 2500, "积分页→我的联赛物品");
             }
@@ -280,7 +285,7 @@ public static partial class MatchBrain
                 // 焦点（白底高亮）——直接 A 推进领奖，绝不上移（左下角 Y=详情，无关）。
                 // 退避只放慢不停手（弹窗链页通用）；久按无效周期 B 逃生（A 被吞时自愈）
                 if (screenStreak >= ConfirmEscapeStreak && (screenStreak - ConfirmEscapeStreak) % 5 == 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 2400, "活动奖励页久按无效，B 逃生");
+                    return PeriodicBackAction(screenStreak, ConfirmEscapeStreak, "活动奖励页久按无效，B 逃生");
                 return new MatchAction(MatchActionKind.PadConfirm,
                     screenStreak >= StuckStreak ? 5000 : 2200, "活动奖励页→A 继续");
             }
@@ -342,10 +347,28 @@ public static partial class MatchBrain
                     screenStreak < escapeAt && ocr.Words.Count > 0)
                     return new MatchAction(MatchActionKind.PadConfirm, 2000, "认不出的界面：按 A 试探");
                 if (screenStreak >= escapeAt && ocr.Words.Count > 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 3000, "B 键逃生");
+                    // 用周期换招替代裸 B：非比赛 6 轮起、比赛上下文 30 轮起，每 2 轮一次 B，
+                    // 第 3 次（非比赛约 10 轮）升级为「上→A→B」。水印/加载页已在前面 return，不会误触发。
+                    return PeriodicBackAction(screenStreak, escapeAt, "B 键逃生", period: 2);
                 return MatchAction.Wait(4000);
             }
         }
+    }
+
+    /// <summary>
+    /// 周期性 B 逃生动作：每 Period(5) 轮按一次 B；连续按 B 失败（界面/分类一直没变，
+    /// 表现为 screenStreak 持续增长）达到 BackFailEscalations 次后，升级为「上 → A → B」换招
+    /// ——先上移把焦点从「取消」移到确认键（直接 A 会落在取消上继续死循环），再 A 确认、最后 B 退出。
+    /// 之后每 3 次 B 再换一次，避免一直重复换招。
+    /// 纯函数、复用 screenStreak，不引入 OCR 复核开销。
+    /// </summary>
+    private static MatchAction PeriodicBackAction(int screenStreak, int threshold, string backTarget, int period = 5)
+    {
+        int k = (screenStreak - threshold) / Math.Max(1, period); // 第几次周期 B（0 起）
+        bool escalate = k >= BackFailEscalations - 1 && (k - (BackFailEscalations - 1)) % BackFailEscalations == 0;
+        return escalate
+            ? new MatchAction(MatchActionKind.GamepadBackAfterConfirm, 3000, backTarget + "（B 多次无效，上→A→B 换招）")
+            : new MatchAction(MatchActionKind.GamepadBack, 2400, backTarget);
     }
 
     /// <summary>

@@ -262,12 +262,7 @@ public static partial class WeeklyBrain
     private const int SidebarFocusedLumaGap = 40;
 
 
-    // ---------------- 比赛页（大活动页）磁贴定位（2026-11-13 用户实机） ----------------
-    /// <summary>比赛页磁贴行里可作为格位锚点的标题词（新 UI 实机 2026-11-13 用户截图：
-    /// 最左「锦标赛」/ 第二「活动」/ 第三「eFootball™联赛」/ 第四「我的联赛」；
-    /// 标题是大字印在卡片下半部，描述句在下一行）。</summary>
-    private static readonly string[] HubTileTitles = { "锦标赛", "活动", "我的联赛" };
-
+    // 比赛页磁贴定位已抽到共享层 Core.Bot.Match.HubTileLocator（周活动/AI天梯共用）。
 
     /// <summary>介绍页直接 A 连续这么多次都没推进 → 不论探针怎么说都先上移归位（自愈兜底：
     /// 探针误读成「进入」而实际光标在「详情」时，绝不能永远重复同一个无效动作）。</summary>

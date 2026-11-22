@@ -4,6 +4,9 @@ using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 using System.IO; // Core.System 命名空间遮蔽：裸 Path/File/Directory 必须靠本 using（global:: 前缀在此工程报 CS0103）
 using EfootballBot.Core.Bot.Match;
+using EfootballBot.Core.Bot.Scenarios.Weekly;
+using EfootballBot.Core.Bot.Scenarios.AiLadder;
+using EfootballBot.Core.Bot.Scenarios.PeakLadder;
 
 // ===========================================================================
 // 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
@@ -44,8 +47,14 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
     private MatchSessionTracker _matchSession => _matchPlay.Session;
     /// <summary>赛后活动任务页（全屏活动地图）状态机：仅国际服（国服子类关闭）。</summary>
     private readonly PostMatchActivityController _postMatch = new();
+    /// <summary>启动引导：停在其他模块页时先 B 收敛回主页（国服子类有自己的残留页兜底，不用这个）。</summary>
+    private readonly ReturnToHomeGuide _homeGuide;
     /// <summary>是否处理赛后活动任务页。国服子类覆盖为 false（该功能仅国际服独享）。</summary>
     protected virtual bool SupportsPostMatchActivity => true;
+
+    /// <summary>比赛页是否用 OCR 实时定位「我的联赛」磁贴卡位（国际服开；国服有自己的导航覆盖关闭）。
+    /// 磁贴随活动增减会左右漂移，写死右移次数会按错卡。</summary>
+    protected virtual bool SupportsOcrTileNav => true;
     /// <summary>
     /// 是否支持「只打关键比赛」（杀进程跳过普通比赛）。仅国际服：国服比赛中有
     /// 「跳过比赛」菜单项，不需要重启游戏；且国服进程重启会连带启动器行为差异较大。
@@ -118,6 +127,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         _engine = engine;
         _log = log;
         _matchPlay = new MatchPlay(engine, "我的联赛", log);
+        _homeGuide = new ReturnToHomeGuide("我的联赛", log, engine.DumpSuspiciousFrame);
         _swapTestOnly = swapTestOnly;
         // 焦点检测亮度明细 → Debug 日志（导航错判时日志直接给出各磁贴实际亮度/阈值/判定）
         MyLeagueBrain.FocusDiag = s => _log($"[我的联赛] {s}", LogLevel.Debug);
@@ -155,6 +165,23 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         bool matchContext = MatchShared.MatchContext(_memory, now);
         var screen = ClassifyScreen(obs, matchContext);
         _memory.Record(screen, now);
+        // 启动引导（国际服）：若游戏停在其他模块页（周活动/天梯/巅峰赛），先 B 收敛回主页，
+        // 否则共享分类会把该页当"前往比赛"直接开赛，导致从别的模块页启动本模块时永远到不了。
+        // 借其他模块 Brain 认残留页（架构锁允许只读借用 Brain.Classify）；本模块页/主页/比赛中跳过。
+        if (SupportsOcrTileNav) // 国际服标志（国服子类有自己的残留页兜底，关闭此引导）
+        {
+            bool otherModule = WeeklyBrain.Classify(obs.Detections, obs.Ocr,
+                                    ScreenProbe.CornerHasContent(obs.Frame), matchContext,
+                                    ScreenProbe.IsMostlyLightPage(obs.Frame)) != WkScreen.None
+                                || AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
+                                || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None;
+            bool ownPage = screen is MatchScreen.MatchStartPage or MatchScreen.InMatch or MatchScreen.DifficultyPage
+                           or MatchScreen.HasConfirm or MatchScreen.LeagueInfoPage;
+            int? guideWait = await _homeGuide.StepAsync(obs.Frame,
+                screen == MatchScreen.MainMenu, ownPage, otherModule,
+                () => _engine.Pad.Back());
+            if (guideWait is not null) return guideWait.Value;
+        }
         // 识别走查（2026-11-18）：连续多轮认不出的界面把实机帧 + OCR 摘要落 datadump。
         // 新版改版后「哪一屏认不出来」只能靠用户口述，反馈包里没有那一帧，远程只能猜；
         // 现在用户下次反馈直接带图。节流 120s、要求帧里确实有字（黑帧/加载帧不转存）。
@@ -303,6 +330,20 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         // 模块自有界面拦截（国服子类在此接管主页导航与 RT 确认键）：返回非 null = 本轮已处理
         int? customWait = await InterceptAsync(obs, screen, _streak, inMatchRecently);
         if (customWait is not null) return customWait.Value;
+        // 比赛页：OCR 实时定位「我的联赛」磁贴卡位（国际服）。磁贴随活动增减左右漂移，
+        // 原共享逻辑靠"焦点词读全"右移，读不全就一直晃/盲按（识别走查主要僵局）。
+        // 这里按 x 排序认出卡位后一次归位+右移到位再按 A，读不全(null)则回退原逻辑。
+        // 超过 NavEscapeStreak 仍未离开比赛页时回退原逻辑（保留其周期性 B 逃生兜底，防卡死）
+        if (SupportsOcrTileNav && screen == MatchScreen.MatchHub &&
+            _streak < MatchBrain.NavEscapeStreak &&
+            HubTileLocator.FindTileOffset(obs.Ocr, "我的联赛") is int tileOffset)
+        {
+            _log($"[我的联赛] 比赛页：OCR 定位「我的联赛」在第 {tileOffset + 1} 卡 → 归位最左后右×{tileOffset} → A", LogLevel.Info);
+            await _engine.Pad.DpadRepeat(PadDir.Left, 6);
+            if (tileOffset > 0) await _engine.Pad.DpadRepeat(PadDir.Right, tileOffset);
+            await _engine.Pad.Confirm();
+            return 2800;
+        }
         var action = MatchBrain.Decide(screen, obs.Ocr, _streak, inMatchRecently, obs.Frame);
         MatchShared.DecisionSnapshot(_log, "我的联赛", screen, _streak, action, obs.Ocr);
         // 标题画面宽限（共享实现，含赛后弹窗链 90s 档，见 MatchShared.TitleGrace）：
@@ -391,6 +432,12 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
             case MatchActionKind.GamepadBack:
                 _log("[我的联赛] 无特征界面连续多轮，按 B 逃生", LogLevel.Warn);
                 await _engine.Pad.Back();
+                break;
+            case MatchActionKind.GamepadBackAfterConfirm:
+                _log($"[我的联赛] {action.Target}", LogLevel.Warn);
+                await _engine.Pad.Dpad(PadDir.Up); // B 多次无效：先上移把焦点从「取消」移到确认键
+                await _engine.Pad.Confirm(); // 再 A 确认（直接 A 可能落在取消键上继续死循环）
+                await _engine.Pad.Back(); // 最后 B 返回
                 break;
             case MatchActionKind.PadUpConfirm:
                 _log($"[我的联赛] 弹窗上移确认：{action.Target}", LogLevel.Info);

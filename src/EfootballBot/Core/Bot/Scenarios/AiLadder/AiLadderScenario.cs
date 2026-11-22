@@ -1,5 +1,6 @@
 using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Bot.Scenarios.Weekly;
+using EfootballBot.Core.Bot.Scenarios.PeakLadder;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 using EfootballBot.Core.Bot.Match;
@@ -59,6 +60,9 @@ public sealed class AiLadderScenario : IScenario
     private int _hubTry;
     /// <summary>比赛页整轮扫描（4 格）失败后 B 退主菜单重进的次数。</summary>
     private int _hubRound;
+    /// <summary>本轮由 OCR 从磁贴行定位到的 eFootball联赛格位（null=未定位/走原固定扫描）。
+    /// 磁贴随活动增减会左移（2026-11-22 活动结束后联赛从第3卡移到第2卡），故优先用实时定位。</summary>
+    private int? _hubOcrPinned;
     /// <summary>组别主页整轮盲试（5 次盲归位开赛+B 退出）失败后由类别页重进的次数：识别退化
     /// 机器上主页永不被认出，靠它防 类别页↔主页 无限循环（>3 轮暂停回报）。</summary>
     private int _homeRound;
@@ -86,7 +90,11 @@ public sealed class AiLadderScenario : IScenario
         _engine = engine;
         _log = log;
         _matchPlay = new MatchPlay(engine, "AI天梯联赛", log);
+        _homeGuide = new ReturnToHomeGuide("AI天梯联赛", log, engine.DumpSuspiciousFrame);
     }
+
+    /// <summary>启动引导：停在其他模块页时先 B 收敛回主页。</summary>
+    private readonly ReturnToHomeGuide _homeGuide;
 
     public async Task<int> RunOnceAsync(CancellationToken ct)
     {
@@ -113,6 +121,16 @@ public sealed class AiLadderScenario : IScenario
                 MatchShared.LoginRecovery(_memory, now), pitch)
             : MatchScreen.Unknown;
         _memory.Record(ml, now);
+        // 启动引导：停在其他模块页（周活动/巅峰赛/我的联赛）时先 B 收敛回主页。
+        bool otherModule = wk != WkScreen.None
+                           || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None
+                           || (al == AlScreen.None &&
+                               ml is MatchScreen.LeaguePage or MatchScreen.PointsPage or MatchScreen.ItemList);
+        bool ownPage = al != AlScreen.None || ml is MatchScreen.MatchStartPage or MatchScreen.InMatch
+                       or MatchScreen.DifficultyPage or MatchScreen.HasConfirm;
+        int? guideWait = await _homeGuide.StepAsync(obs.Frame,
+            ml == MatchScreen.MainMenu, ownPage, otherModule, () => _engine.Pad.Back());
+        if (guideWait is not null) return guideWait.Value;
         if (!_takeoverLogged)
         {
             _takeoverLogged = true;
@@ -210,6 +228,12 @@ public sealed class AiLadderScenario : IScenario
                 _log($"[AI天梯联赛] {action.Target}", LogLevel.Warn);
                 await _engine.Pad.Back();
                 break;
+            case MatchActionKind.GamepadBackAfterConfirm:
+                _log($"[AI天梯联赛] {action.Target}", LogLevel.Warn);
+                await _engine.Pad.Dpad(PadDir.Up); // B 多次无效：先上移把焦点从「取消」移到确认键
+                await _engine.Pad.Confirm(); // 再 A 确认（直接 A 可能落在取消键上继续死循环）
+                await _engine.Pad.Back(); // 最后 B 返回
+                break;
             case MatchActionKind.MatchIdleTap:
                 // 比赛中挂机点击：按 A + 用户「挂机节奏」区间随机间隔（共享层 MatchPlay，拟人化）
                 return await _matchPlay.IdleTapAsync(ct);
@@ -234,6 +258,10 @@ public sealed class AiLadderScenario : IScenario
                     ml is MatchScreen.LeaguePage or MatchScreen.HasConfirm or MatchScreen.PointsPage or MatchScreen.ItemList)
                 {
                     _log($"[AI天梯联赛] 打开的是其他板块页面（{ml}），B 退回比赛页继续找 eFootball™联赛", LogLevel.Info);
+                    // OCR 定位命中却仍进错：说明该格定位有偏差，下一轮换一格试（不重复按同一格）
+                    if (_hubOcrPinned is int pinned && pinned + 1 < 4)
+                        _hubTry = pinned + 1 - HubStartSlot; // 使下轮固定扫描 slot=pinned+1
+                    _hubOcrPinned = null;
                     await _engine.Pad.Back();
                     return 2200;
                 }
@@ -300,8 +328,23 @@ public sealed class AiLadderScenario : IScenario
                         await _engine.Pad.Back();
                         return 2500;
                     }
-                    int slot = (HubStartSlot + _hubTry) % 4;
-                    _log($"[AI天梯联赛] 比赛页：归位最左后右×{slot} → A（找 eFootball™联赛，试第 {slot + 1} 卡）", LogLevel.Info);
+                    // 磁贴行随活动增减会左右漂移（2026-11-22 实机：活动卡消失后 eFootball™联赛
+                    // 从第3卡移到第2卡，写死右×2 每次都按进「我的联赛」）。优先 OCR 实时定位。
+                    int? ocrSlot = HubTileLocator.FindTileOffset(obs.Ocr, "eFootball联赛");
+                    int slot;
+                    if (ocrSlot is int os)
+                    {
+                        slot = os;
+                        _hubOcrPinned = os;
+                        _log($"[AI天梯联赛] 比赛页：OCR 定位「eFootball™联赛」在第 {slot + 1} 卡 → 右×{slot} → A", LogLevel.Info);
+                    }
+                    else
+                    {
+                        // OCR 读不全时回退原固定扫描（读不到就不瞎猜）
+                        slot = (HubStartSlot + _hubTry) % 4;
+                        _hubOcrPinned = null;
+                        _log($"[AI天梯联赛] 比赛页：磁贴行读不全，回退固定扫描 右×{slot} → A（试第 {slot + 1} 卡）", LogLevel.Info);
+                    }
                     await _engine.Pad.DpadRepeat(PadDir.Left, 6);
                     if (slot > 0) await _engine.Pad.DpadRepeat(PadDir.Right, slot);
                     await _engine.Pad.Confirm();

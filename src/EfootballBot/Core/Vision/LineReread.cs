@@ -162,7 +162,8 @@ public static class LineReread
             Math.Clamp(px / frame.Width, 0, 1),
             Math.Clamp(py / frame.Height, 0, 1),
             Math.Clamp(pw / frame.Width, 0, 1),
-            Math.Clamp(ph / frame.Height, 0, 1));
+            Math.Clamp(ph / frame.Height, 0, 1),
+            w.Confidence);
     }
 
     /// <summary>与 <see cref="OcrResult.Lines"/> 完全一致的行聚类（中心 Y 邻近 + 高度容差）。</summary>

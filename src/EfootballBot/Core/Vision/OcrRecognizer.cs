@@ -5,8 +5,10 @@ using SkiaSharp;
 
 namespace EfootballBot.Core.Vision;
 
-/// <summary>OCR 词块，坐标已归一化到 0~1。</summary>
-public sealed record OcrWord(string Text, double X, double Y, double W, double H)
+/// <summary>OCR 词块，坐标已归一化到 0~1。
+/// <paramref name="Confidence"/> 为引擎给出的识别置信度(0~1)；默认 1.0 = 未知/最高可信，
+/// 保证无 score 的后端(VLM)与既有测试构造无需改动。仅用于多候选择优，不做全局硬阈值过滤。</summary>
+public sealed record OcrWord(string Text, double X, double Y, double W, double H, double Confidence = 1.0)
 {
     public double CenterX => X + W / 2;
     public double CenterY => Y + H / 2;
@@ -95,7 +97,9 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
             if (text.Length < 2) continue;
             double x0 = ordered.Min(w => w.X), y0 = ordered.Min(w => w.Y);
             double x1 = ordered.Max(w => w.X + w.W), y1 = ordered.Max(w => w.Y + w.H);
-            result.Add(new OcrWord(text, x0, y0, x1 - x0, y1 - y0));
+            // 合并行置信度取最低：整行文本里只要有一个碎词可疑，合并结果就应降权（保守）
+            double conf = ordered.Min(w => w.Confidence);
+            result.Add(new OcrWord(text, x0, y0, x1 - x0, y1 - y0, conf));
         }
         return result;
     }
@@ -158,9 +162,13 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
         }
     }
 
-    /// <summary>按钮词匹配的第一个命中（规则见 <see cref="FindButtonWords"/>）。</summary>
+    /// <summary>
+    /// 按钮词命中（规则见 <see cref="FindButtonWords"/>）。多个命中时取置信度最高的那个：
+    /// 同一关键词在画面出现多处时（如弹窗按钮 + 背景文字），引擎 score 更高的更可能是真按钮。
+    /// MaxBy 在 score 相同时稳定返回首个命中，故单候选与无 score（默认 1.0）场景行为完全不变。
+    /// </summary>
     public OcrWord? FindButton(string normalizedKeyword)
-        => FindButtonWords(normalizedKeyword).FirstOrDefault();
+        => FindButtonWords(normalizedKeyword).MaxBy(w => w.Confidence);
 }
 
 /// <summary>文字规范化，对抗 OCR 的空格 / 全半角 / 常见误识。</summary>
@@ -482,7 +490,8 @@ internal sealed class RapidV6OcrBackend : IOcrBackend
                             Math.Clamp(minX / frame.Width, 0, 1),
                             Math.Clamp(minY / frame.Height, 0, 1),
                             Math.Clamp((maxX - minX) / frame.Width, 0, 1),
-                            Math.Clamp((maxY - minY) / frame.Height, 0, 1)));
+                            Math.Clamp((maxY - minY) / frame.Height, 0, 1),
+                            block.BoxScore));
                     }
                 }
             }
@@ -563,7 +572,8 @@ internal sealed class SimdPaddleOcrBackend : IOcrBackend
                     Math.Clamp(minX / frame.Width, 0, 1),
                     Math.Clamp(minY / frame.Height, 0, 1),
                     Math.Clamp((maxX - minX) / frame.Width, 0, 1),
-                    Math.Clamp((maxY - minY) / frame.Height, 0, 1)));
+                    Math.Clamp((maxY - minY) / frame.Height, 0, 1),
+                    line.RecognitionScore));
             }
             return new OcrResult(words, frame.Width, frame.Height);
         }, ct);

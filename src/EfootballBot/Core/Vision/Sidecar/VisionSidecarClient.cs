@@ -201,7 +201,7 @@ public sealed class VisionSidecarClient : IAsyncDisposable
         if (reply.Ev == "error")
             throw new InvalidOperationException($"sidecar OCR 失败：{reply.Text}");
         var words = (reply.Words ?? new List<SidecarWord>())
-            .Select(w => new OcrWord(w.T, w.X, w.Y, w.W, w.H))
+            .Select(w => new OcrWord(w.T, w.X, w.Y, w.W, w.H, w.S))
             .ToList();
         return new OcrResult(words, frame.Width, frame.Height);
     }

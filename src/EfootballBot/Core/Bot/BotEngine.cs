@@ -208,6 +208,9 @@ public sealed class BotEngine : IDisposable
 
     private long _lastFrameDumpTick;
 
+    /// <summary>可疑帧转储节流（按 tag 分别计时），key=tag，value=上次转储的 TickCount64。</summary>
+    private readonly global::System.Collections.Generic.Dictionary<string, long> _suspiciousDumpTicks = new();
+
     // ---- 性能埋点（P1-14）：上一次观察的各段耗时（毫秒），由主循环汇总进 Perf ----
     private long _lastFrameWaitMs, _lastHashMs, _lastOcrMs, _lastYoloMs;
 
@@ -1903,6 +1906,53 @@ public sealed class BotEngine : IDisposable
                 }
             }
             catch { /* 存帧失败静默 */ }
+        });
+    }
+
+    /// <summary>
+    /// 可疑帧自动收集：判定卡住/低置信度时把当前画面存到 data\suspicious\日期\，
+    /// 供用户抽查后补进 OcrText 替换表/探针。只写图，不读回、不改任何判定行为，失败静默。
+    /// 按 tag 分别节流（默认60s），防同一问题刷屏。线程安全：供各场景状态机调用。
+    /// </summary>
+    public void DumpSuspiciousFrame(FrameData f, string tag, string reason)
+    {
+        var cfg = _cfg.Learning;
+        if (!cfg.CollectSuspicious) return;
+        long now = Environment.TickCount64;
+        int throttleMs = Math.Max(5, cfg.ThrottleSeconds) * 1000;
+        lock (_suspiciousDumpTicks)
+        {
+            if (_suspiciousDumpTicks.TryGetValue(tag, out long last) && now - last < throttleMs) return;
+            _suspiciousDumpTicks[tag] = now;
+        }
+        var pixels = (byte[])f.Bgra.Clone();
+        string dir = Path.Combine(AppPaths.DataDir, "suspicious", DateTime.Now.ToString("yyyyMMdd"));
+        string safeTag = string.IsNullOrWhiteSpace(tag) ? "frame" : tag.Replace(' ', '_');
+        string stamp = DateTime.Now.ToString("HHmmss_fff");
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                Directory.CreateDirectory(dir);
+                string basePath = Path.Combine(dir, $"{stamp}_{safeTag}");
+                var info = new SKImageInfo(f.Width, f.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
+                unsafe
+                {
+                    fixed (byte* p = pixels)
+                    {
+                        using var bmp = new SKBitmap();
+                        if (!bmp.InstallPixels(info, (nint)p, info.RowBytes)) return;
+                        using var img = SKImage.FromBitmap(bmp);
+                        using var data = img.Encode(SKEncodedImageFormat.Jpeg, 88);
+                        using var fs = File.Create(basePath + ".jpg");
+                        data.SaveTo(fs);
+                    }
+                }
+                // 同名 .txt 记原因，抽查时一眼看出是哪类问题
+                File.WriteAllText(basePath + ".txt",
+                    $"tag={safeTag}\nreason={reason}\ntime={DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            }
+            catch { /* 收集失败静默，绝不影响挂机 */ }
         });
     }
 

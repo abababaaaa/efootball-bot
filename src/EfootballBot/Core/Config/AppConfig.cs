@@ -165,6 +165,19 @@ public sealed class FrameDumpConfig
     public int IntervalMs { get; set; } = 10000;
 }
 
+/// <summary>
+/// 可疑帧自动收集（半自动学习闭环的输入）：判定卡住/低置信度时把当前画面存到
+/// data\suspicious\日期\，供用户抽查后补进 OcrText 替换表/探针。只存图，不改任何判定行为。
+/// </summary>
+public sealed class LearningConfig
+{
+    /// <summary>是否自动收集可疑帧。默认开——只写图片、不影响挂机动作。</summary>
+    public bool CollectSuspicious { get; set; } = true;
+
+    /// <summary>同一类问题的转储节流秒数，防同一帧刷屏。</summary>
+    public int ThrottleSeconds { get; set; } = 60;
+}
+
 /// <summary>全局热键配置（低级钩子实现：支持键盘任意键与鼠标键，可不带修饰键）。
 /// 主热键语义：第一次按=暂停，暂停中再按=彻底停止；恢复热键：从暂停恢复。</summary>
 public sealed class HotkeyConfig
@@ -676,6 +689,9 @@ public sealed class AppConfig
 
     // —— 训练数据采集 ——
     public FrameDumpConfig FrameDump { get; set; } = new();
+
+    // —— 可疑帧自动收集（半自动学习的输入；只存图不改判定）——
+    public LearningConfig Learning { get; set; } = new();
 
     // —— 设置面板：结束行为 ——
     public bool AutoCloseWhenDone { get; set; } = false;
