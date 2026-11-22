@@ -233,6 +233,27 @@ public class RecogWalkHardeningTests
             ("Y当前位置", 0.50, 0.93, 0.10, 0.03));
         Assert.Null(MatchBrain.FindBottomPushWord(ocr));
     }
+
+    // ---------------- 开赛入场与过场动画快速跳过 ----------------
+
+    [Fact]
+    public void Decide_InMatch_NoScoreboard_SkipsAnimationFast()
+    {
+        // 比赛上下文 + 无比分板时钟 = 入场/过场分镜（队名特写）：快按 A 切断，等不超过 500ms
+        var ocr = Ocr(("REAL MADRID", 0.30, 0.40, 0.15, 0.04), ("BARCELONA", 0.60, 0.40, 0.15, 0.04));
+        var action = MatchBrain.Decide(MatchScreen.InMatch, ocr, 0, inMatchRecently: true);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
+        Assert.True(action.WaitMs <= 500);
+    }
+
+    [Fact]
+    public void Decide_InMatch_WithScoreboardClock_DoesNormalIdleTap()
+    {
+        // 有比分板时钟 = 真正在踢：回到拟人化挂机节奏，别乱按 A 传球
+        var ocr = Ocr(("12:34", 0.15, 0.08, 0.08, 0.035), ("RMA", 0.08, 0.08, 0.05, 0.035));
+        var action = MatchBrain.Decide(MatchScreen.InMatch, ocr, 0, inMatchRecently: true);
+        Assert.Equal(MatchActionKind.MatchIdleTap, action.Kind);
+    }
 }
 
 

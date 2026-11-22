@@ -26,8 +26,8 @@
     <ApplicationManifest>app.manifest</ApplicationManifest>
     <ApplicationIcon>app.ico</ApplicationIcon>
     <!-- 测试版版本号按 4 段测试版约定（未发版，仅本地构建）；正式版按 x.y 递增 -->
-    <Version Condition="'$(ChildSessionBeta)' != 'true'">7.3.0</Version>
-    <Version Condition="'$(ChildSessionBeta)' == 'true'">7.3.0.1</Version>
+    <Version Condition="'$(ChildSessionBeta)' != 'true'">7.4.0</Version>
+    <Version Condition="'$(ChildSessionBeta)' == 'true'">7.4.0.1</Version>
     <DefineConstants Condition="'$(ChildSessionBeta)' == 'true'">$(DefineConstants);CHILD_SESSION_BETA</DefineConstants>
     <Product>eFootball 挂机助手</Product>
     <Company>EfootballBot</Company>
@@ -48,7 +48,19 @@
   </PropertyGroup>
 
   <!-- 进程内手柄代理：构建产物里带上它，设置页「投放代理到游戏目录」才有源文件。
+       同时以嵌入资源打进 exe —— 单文件发布只分发 EfootballBot.exe，
+       ExcludeFromSingleFile 的两个 DLL 不会跟着走，别的电脑上就「程序目录缺少 xinput1_3.dll」。
+       内嵌后走 Core/Input/PadProxyAssets.cs 首投时解压。
        源码/构建脚本在 tools/xinput-proxy（未构建时不存在 → 条件跳过，不影响构建）。 -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\..\tools\xinput-proxy\xinput1_3.dll"
+                      Condition="Exists('..\..\tools\xinput-proxy\xinput1_3.dll')"
+                      LogicalName="EfootballBot.Proxy.xinput1_3.dll" />
+    <EmbeddedResource Include="..\..\tools\xinput-proxy\xinput1_4.dll"
+                      Condition="Exists('..\..\tools\xinput-proxy\xinput1_4.dll')"
+                      LogicalName="EfootballBot.Proxy.xinput1_4.dll" />
+  </ItemGroup>
+
   <ItemGroup>
     <None Include="..\..\tools\xinput-proxy\xinput1_4.dll"
           Condition="Exists('..\..\tools\xinput-proxy\xinput1_4.dll')"
@@ -68,6 +80,7 @@
     <!-- 主窗口 / exe 图标（Resource 供 WPF 窗口 Icon 引用，ApplicationIcon 供 exe 资源） -->
     <Resource Include="app.ico" />
     <Resource Include="Assets\autoswap_guide.png" />
+    <Resource Include="Assets\dither-noise.png" />
   </ItemGroup>
 
   <ItemGroup>

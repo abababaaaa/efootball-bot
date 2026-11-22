@@ -16,9 +16,16 @@
 - **注意力只给动作**：一屏最多一个实心主按钮（PrimaryBtn）；危险操作永远描边（DangerOutlineBtn）。
 - **动效克制**：切页 180ms 淡入 + 4px 上浮；按钮按压缩放到 0.97。没有弹跳、没有视差。
 
-视觉语言（v7.3 起）：**Windows 11 Fluent**。云母/亚克力窗口材质 + 半透明分层 + 1px 发丝描边 + 4px（控件）/8px（卡片）圆角；
-强调色是系统色（深色 #60CDFF / 浅色 #0067C0），文字用 Segoe UI Variable，中文回落雅黑 UI。
-三套主题：暗色（默认）/ 亮色 / 深蓝，三套都必须给齐同一组 token。
+视觉语言（v7.4 起）：**两个可选「外观世界」，共用同一套版式**。
+
+- **Fluent（默认）**：Windows 11 云母/亚克力 + 系统强调蓝（深色 #60CDFF / 浅色 #0067C0）——
+  v7.3 的原始观感，老配置没有 `World` 字段时一律落在这里，不偷偷换皮肤；
+- **Glass**：Apple 黑玻璃 —— 近纯黑毛玻璃 + 中性浅灰选中（不靠色相）+ 玻璃渐变卡片 + 抖色噪点。
+
+版式、字体阶梯、圆角、间距、响应式布局、页签体系两个世界**共用**（v7.4 的统一优化）；
+只有颜色 / 材质 / 投影 / 噪点 / 窗口不透明度随世界变。亮度仍三套：暗色（默认）/ 亮色 / 深蓝，
+所以 token 表是 **2 世界 × 3 亮度 = 6 张**。
+入口：左栏底部「主题与外观」→ 主题卡 + 外观风格卡；落盘为 `config.json` 的 `Theme` 与 `Appearance.World`。
 
 ---
 
@@ -34,8 +41,8 @@
 | `MainWindow.xaml` | 外壳：顶栏 / 左栏导航 / 右栏实时辅助 / 中栏容器（3.3k 行，内容页正在陆续搬出） | 改外壳布局 |
 | `Views/*.xaml` | 独立页面（UserControl），自带 code-behind | **加/改一个页面** |
 | `MainWindow.Shell.cs` | **路由表**：一个页面在壳里的全部接线，一行数据 | **加一个页面 / 改导航** |
-| `Core/UI/ThemePalette.cs` | 三套主题的 token 值（纯数据） | **改配色 / 加 token** |
-| `Core/UI/ThemeManager.cs` | 应用主题、窗口材质、token 完整性自检 | 极少动 |
+| `Core/UI/ThemePalette.cs` | 6 张 token 表（2 世界 × 3 亮度）+ 世界维度派生（`ApplyWorldTokens`） | **改配色 / 加 token** |
+| `Core/UI/ThemeManager.cs` | 应用 (主题, 世界)：写 token、重建渐变/投影/噪点、窗口材质与不透明度、完整性自检 | 加一个世界才动 |
 
 **一条硬规则**：`BasedOn="{StaticResource X}"` 只认同一个 ResourceDictionary 或上游字典里的 `X`。
 所以互相 BasedOn 的样式必须同文件（例：`ModuleRadio` 的三个派生样式都在 Controls.xaml）。
@@ -44,18 +51,21 @@
 
 ## 3. 颜色与材质：只有 token，没有字面量
 
-### 3.0 层级（v7.3 · Win11）
+### 3.0 层级（v7.4 · 两世界共用）
 
 ```
 DWM 亚克力/云母          ← 系统层，窗外内容被模糊（WindowBackdropType="Acrylic"）
-  WindowBg 95%           ← 根容器：整窗底色，材质从它后面透出来
+  WindowBg               ← 根容器：Fluent 0xF2 不透明（云母薄透）/ Glass 0x8C（黑玻璃明显透出）
+    根 Grid = Transparent ← 不再叠第二层窗口底色，否则两层叠加会把透明度吃掉
+      DitherNoiseBrush   ← 抖色噪点（仅 Glass）：打散 8bit 深色渐变的色带，不参与命中测试
     ContentBg            ← 内容层（保留 token；Win11 的做法是"外框玻璃 + 内容近实色"）
-    SideLeftBg / SideRightBg  ← 左右栏：更暗的半透明层
-      CardBg / Surface2  ← 卡片：5–8% 白叠加 + 1px CardBorder
-        ControlFill      ← 控件底（按钮/输入/选中态）
+    TopBarBg / SideLeftBg / SideRightBg  ← 顶栏 / 左右栏：Glass 用同一张淡黑玻璃 ChromeGlass，Fluent 顶栏透明
+      GlassFill（渐变）/ CardBg / Surface2  ← 卡片：Fluent 三停同色 = 平铺底色；Glass 顶亮底透 + CardShadowEffect
+        SelectFill / ControlFill         ← 控件底与选中态
 ```
 
 材质开关：`Appearance.Backdrop`（默认 `Acrylic`，可 `Mica`/`Tabbed`/`Auto`/`None`）。
+Glass 世界强制 Acrylic（Mica 只有"纸感"，做不出透过去的黑玻璃），不支持的机器照旧回退纯色。
 
 页面里**一律**写 `{DynamicResource AccentBg}` 这种 token 名，不写 `#FF0FA968`。
 `#RRGGBB` 只允许出现在两个地方：`Themes/Tokens.xaml` 与 `Core/UI/ThemePalette.cs`。
@@ -72,17 +82,23 @@ DWM 亚克力/云母          ← 系统层，窗外内容被模糊（WindowBack
 | `Info` / `Amber` / `Orange` / `Teal` / `Success` | 状态点与模块色条 |
 | `Banner*` / `Hero*` / `Brand*` | 首页英雄区与横幅渐变 |
 | `Divider` / `HairlineStrong` / `CardBorder` / `InputBorder` | 描边三级 |
+| `SelectFill` / `SelectFillStrong` / `SelectBorder` / `SelectFg` / `SelectBar` | 选中态（底 / 强底 / 描边 / 文字 / 指示条）——**世界维度** |
+| `SubTabSelFill` / `SubTabSelStroke` / `ChipFill` / `ChipStroke` / `ComboBg` / `ComboPopupBg` | 页签选中、Chip、下拉选择卡 |
+| `PrimaryBtnFrom/Mid/To` / `TextOnPrimary` / `PrimaryBtnStroke` / `BtnFlash` | 主按钮的渐变 / 文字 / 顶高光 / 悬停层——**世界维度** |
+| `GlassFillTop/Mid/Bottom` / `CardShadowEffect` / `DitherNoiseBrush` / `TopBarBg` | 玻璃渐变 / 卡片投影 / 噪点 / 顶栏蒙版——**世界维度** |
 | `Scrim` / `ScrimSoft` | 遮罩 |
 | `*Color`（自动生成） | 同名颜色的 `Color` 版本，**渐变停点只能用这个** |
 
-### 3.2 加一个 token（两步，缺一不可）
+### 3.2 加一个 token（三步，缺一不可）
 
-1. `Themes/Tokens.xaml` 加默认（暗色）值：
+1. `Themes/Tokens.xaml` 加默认（Glass 暗色）值：
    `<SolidColorBrush x:Key="Xxx" Color="#FFxxxxxx"/>`
-2. `Core/UI/ThemePalette.cs` 的 `DarkColors` / `LightColors` / `DeepBlueColors` **各加一行**。
+2. `Core/UI/ThemePalette.cs` 里 **Fluent 与 Glass 各自三张表**（共 6 张）各加一行。
+3. 如果它只跟世界走（不需要每个亮度单独调色），别写 6 遍 —— 加进 `ApplyWorldTokens`，
+   Fluent 侧由既有 token 派生、Glass 侧给常数，各写一次就够。
 
-漏第 2 步不会崩，但那个主题下这块区域会退回暗色值 —— 所以启动时会自检并写日志：
-`主题 Token 不完整：亮色 缺 Xxx…`（见 `data\app.log`）。
+漏第 2 步不会崩，但那个主题下这块区域会退回默认值 —— 所以启动时会自检并写日志：
+`主题 Token 不完整：Apple Glass（黑玻璃)/亮色 缺 Xxx…`（见 `data\app.log`）。
 
 ### 3.3 渐变怎么写
 
@@ -97,9 +113,28 @@ DWM 亚克力/云母          ← 系统层，窗外内容被模糊（WindowBack
 
 **允许颜色字面量的三个例外**（都写在注释里，别"顺手改成 token"）：
 
-1. 主题选择覆盖层里的三张预览卡（`MainWindow.xaml` 末尾）—— 它们画的就是另外两套主题长什么样，必须固定；
-2. 实心按钮顶部内高光 `#24FFFFFF / #00FFFFFF`（`Controls.xaml` PrimaryBtn）—— 与主题无关的中性高光；
-3. 横幅里的白底绿字按钮 `BannerBtn`（`Templates.xaml`）—— 永远压在绿色横幅上，三套主题一致。
+1. 主题选择覆盖层里的三张亮度预览卡（`MainWindow.xaml` 末尾）—— 它们画的就是另外两套主题长什么样，必须固定；
+2. 横幅里的白底绿字按钮 `BannerBtn`（`Templates.xaml`）—— 永远压在绿色横幅上，两世界一致。
+3. 玻璃噪点图 `Assets/dither-noise.png` 本身（不是颜色，是资源）。
+
+主按钮的顶高光描边、悬停压暗层、卡片投影这些**以前是字面量的**，v7.4 已全部 token 化
+（`PrimaryBtnStroke` / `BtnFlash` / `CardShadowEffect`），换世界时不会有一块"还是白玻璃"。
+
+### 3.4 视觉世界（World）
+
+| 概念 | 值 | 影响范围 |
+|---|---|---|
+| 亮度 `Theme` | `Dark`（默认）/ `Light` / `DeepBlue` | 全部颜色 token |
+| 世界 `Appearance.World` | `Fluent`（默认）/ `Glass` | 颜色 token + 渐变 + 投影 + 噪点 + 窗口不透明度 + 材质选型 |
+
+- 两个世界**共用一份** `Controls/Surfaces/Templates/MainWindow.xaml`。所以样式里只准引用 token：
+  写死 `#FF1C1C1E`（玻璃按钮上的深字）或 `Background="#FF9A9AA0"`（悬停层）都会让另一个世界变脏。
+- `ThemeManager.ApplyTheme(theme, world)` 负责一次下发全部：颜色 Brush+Color、`GlassFill` 与
+  `PrimaryBtnFill`（运行时按三停重建）、`CardShadowEffect`（Fluent 换成零强度投影）、
+  `DitherNoiseBrush`（Fluent 换成透明）。
+- 窗口不透明度在 `ApplyWindowBackdrop(window, backdrop, world)` 里：Fluent 0xF2 / Glass 0x8C。
+- 想知道"当前是什么世界"：`ThemeManager.IsGlassWorld(world)`，别自己比字符串。
+
 
 除此之外，页面/字典里出现 `#RRGGBB` 就是 bug。当前基线：`MainWindow.xaml` 24 处（全部在预览卡内），
 `Surfaces/Controls/Templates/Views` 共 4 处（上面 2、3 两条）。
@@ -131,9 +166,11 @@ DWM 亚克力/云母          ← 系统层，窗外内容被模糊（WindowBack
 
 ## 5. 控件清单（都在 `Themes/Controls.xaml`）
 
-- **按钮层级**：`PrimaryBtn`（实心主题色，一屏一个）→ `GhostBtn`（透明描边）→ `LinkBtn`（文字）。
+- **按钮层级**：`PrimaryBtn`（一屏一个：Fluent 实心强调色 / Glass 白玻璃渐变，文字与描边也是 token）→ `GhostBtn`（透明描边）→ `LinkBtn`（文字）。
   危险：`DangerBtn`（运行中"一键结束"）、`DangerOutlineBtn`（重置/清空类）。
-- **页签**：`SegTab` + `TabTrack`（一级分段）、`SubTab`（左栏三级页签，选中 = 主题色底 + 主题色描边）。
+- **页签**：`SegTab` + `TabTrack`（一级分段）、`SubTab`（功能分类页签，选中 = `SubTabSelFill` 灰色磨砂方框）。
+- **选中态**：统一语言 = `SelectFill` 底 + `SelectBorder` 描边 + `SelectBar` 左侧细指示条 + `SelectFg` 文字。
+  Fluent 下 `SelectBar` = 强调蓝、玻璃里 = 与文字同色的白条，所以两个世界都不用改样式。
 - **开关**：默认 `CheckBox` 是胶囊拨片（开 = 白轨 + 深滑块）；`CheckTick` 是方框对勾。
 - **输入**：`TextBox`（聚焦亮边 1.5px）、`ComboBox`（自绘下拉面板 + 浮层阴影）。
 - **容器**：`Card`（扁平分区：只留上发丝线，不画闭合框）、`Inset`（凹槽）、`RailCard`（操作栏）、`StatTile`（右栏统计格）、`Chip`（胶囊标签）。
@@ -148,8 +185,15 @@ DWM 亚克力/云母          ← 系统层，窗外内容被模糊（WindowBack
 ## 6. 加东西的配方（照抄即可）
 
 ### 6.1 改一个颜色
-1. `Themes/Tokens.xaml`（默认 = 暗色）→ 2. `ThemePalette.cs` 同名列三套值。
-页面不用动（都是 `DynamicResource`）。
+1. `Themes/Tokens.xaml`（默认值）→ 2. `ThemePalette.cs` 同名列（Fluent / Glass 各三张）。
+只跟世界走的颜色 → 只改 `ApplyWorldTokens`。页面不用动（都是 `DynamicResource`）。
+
+### 6.1.1 加一个视觉世界
+1. `ThemeManager` 加 `WorldXxx` 常量与 `Worlds` 数组；`IsGlassWorld` 改为按世界查表；
+2. `ThemePalette` 加这个世界的三张表 + `ApplyWorldTokens` 里的分支（渐变/投影/噪点/主按钮）；
+3. `ApplyWindowBackdrop` 里给它一个外壳不透明度与材质选型；
+4. `MainWindow.xaml` 主题覆盖层加一张世界卡（`CardWorldXxx` + `HighlightWorldCard`）。
+样式层**不用动** —— 前提是样式里没有颜色字面量。
 
 ### 6.2 改一个控件的观感
 只动 `Themes/Controls.xaml` 里那一个 `Style`。全应用所有用到它的地方一起变。
@@ -225,6 +269,15 @@ pwsh -File tools\ui-crop.ps1 -In "_reference\shots\check\page-settings.png" `
 ---
 
 ## 8. 变更记录
+
+### 2026-11-21 修「问题反馈弹窗整张白」
+
+- **现象**：点「发现问题手动停止」→ 弹「问题反馈（可选补充说明）」窗口，整窗白底，只有输入框里一根光标，两个按钮也看不见；用户提了截图。
+- **根因**：`NotePromptWindow` 直接 `new Window()`。WPF 默认 `Window.Background = SystemColors.WindowBrush`（= 白），而 App.xaml 的深色世界只落在显式写了 `Background` 的窗口（`MainWindow` / `ConnectionOverlay`）上。这个弹窗既没设 `Background` 也没设 `Foreground`，正文 `TextBlock` 又显式写了 `FontSize`，于是「白底 + 12.5px 白字」→ 只剩光标可见；两个 `Button` 同样吃了 `Controls.xaml` 里不设默认态颜色的模板，白底白字。
+- **修法**（不改设计系统，只让这个窗口进入系统）：`Background` 绑 `WindowBg`、`Foreground` 绑 `TextPrimary`、`FontFamily` 绑 `UiFont`；标题用 `PageTitle`（压到 15）、正文用 `BodyText`、按钮用 `PrimaryBtn` / `GhostBtn`；窗口类换成 `Wpf.Ui.Controls.FluentWindow`（标题栏跟 WPF-UI Dark 基底走）。
+- **顺手补的交互**：打开即聚焦输入框；回车 = 生成反馈包（`IsDefault`）、Esc = 取消；输入框内容顶对齐（原来是居中，多行文字浮在框中间）。
+- **排查记录（只验证了编译与单测，未做真机截图）**：本机桌面截图通道对本程序无效——主窗口在 `CopyFromScreen` 下全白，`PrintWindow(PW_RENDERFULLCONTENT)` 全白（本机开了 DWM 毛玻璃外壳，抓不到 DWM 合成后的内容）；UIA 也探不到任何按钮（WPF-UI `FluentWindow` 关闭了默认可达性）。真机视觉回归要走 `tools/ui-shots.ps1` 的置顶+强制尺寸路线。
+- **验证**：`dotnet build` 0 错误（3 个历史可空警告）、`dotnet test` 全量通过（含 `ArchitectureTests`）。本机 `arch-guard` 没法跑：脚本是 UTF-8 无 BOM，Windows PowerShell 5.1 按 GBK 解析会报语法错（要用 `pwsh` 7，本机 PowerShell 7 没装）；`Directory.Build.targets` 里写死调用 `pwsh`，本机必然 MSB3073/9009。这是工具链问题，不是规则违规；本次只改了 `NotePromptWindow.cs` 与本文档，不触任何 arch-guard 规则。
 
 ### v7.3.0 换视觉世界：Windows 11 Fluent + 毛玻璃（纯视觉，功能零改动）
 

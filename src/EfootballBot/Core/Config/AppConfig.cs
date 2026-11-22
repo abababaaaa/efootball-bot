@@ -592,6 +592,14 @@ public sealed class MonitorConfig
 /// </summary>
 public sealed class AppearanceConfig
 {
+    /// <summary>
+    /// 视觉世界：Fluent（默认，Windows 11 云母 + 系统强调蓝，v7.3 的原始观感）/
+    /// Glass（Apple 黑玻璃：近纯黑毛玻璃 + 中性浅灰选中 + 玻璃渐变卡片）。
+    /// 只影响颜色/材质/投影/噪点与窗口不透明度，版式与字体阶梯两个世界共用。
+    /// 由左栏「主题外观」里的「外观风格」切换，改完即时生效，不需要重启。
+    /// </summary>
+    public string World { get; set; } = "Fluent";
+
     /// <summary>窗口材质：Acrylic（默认，毛玻璃）/ Mica / Tabbed / Auto（Win11 用 Mica）/ None。Win10 自动回退纯色。</summary>
     public string Backdrop { get; set; } = "Acrylic";
 

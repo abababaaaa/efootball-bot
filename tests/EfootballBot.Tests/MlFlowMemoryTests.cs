@@ -117,8 +117,9 @@ public class MlFlowMemoryTests
         t.Observe(MatchScreen.InMatch, T0);
         Assert.False(t.Observe(MatchScreen.LeaguePage, T0.AddSeconds(2), isHome: false));
         Assert.True(t.Active);
-        // 回到真主页（含前往比赛）才关场
-        Assert.True(t.Observe(MatchScreen.LeaguePage, T0.AddSeconds(30), isHome: true));
+        // 回到真主页（含前往比赛）才关场。时间用 2 分钟：本场不足 60 秒的菜单类关场
+        // 一律按识别误判拦下（2026-11-20 进球 CG 被判 MatchHub 虚计一场），30 秒那版会被拦。
+        Assert.True(t.Observe(MatchScreen.LeaguePage, T0.AddMinutes(2), isHome: true));
     }
 
     // ---------------- 只打关键比赛：Abort / StartedAt ----------------
@@ -246,8 +247,8 @@ public class MlFlowMemoryTests
     {
         var t = new MatchSessionTracker();
         t.Observe(MatchScreen.InMatch, T0);
-        Assert.True(t.Observe(MatchScreen.MainMenu, T0.AddMinutes(1)));
-        Assert.False(t.Observe(MatchScreen.MainMenu, T0.AddMinutes(2))); // 关场只报一次
+        Assert.True(t.Observe(MatchScreen.MainMenu, T0.AddMinutes(2)));
+        Assert.False(t.Observe(MatchScreen.MainMenu, T0.AddMinutes(3))); // 关场只报一次
         Assert.False(t.Observe(MatchScreen.InMatch, T0.AddMinutes(10))); // 第二场开赛
         Assert.True(t.Observe(MatchScreen.MatchHub, T0.AddMinutes(35))); // 第二场结束
     }
@@ -293,9 +294,12 @@ public class MlFlowMemoryTests
     [Fact]
     public void Decide_Unknown_InMatchContext_Patient()
     {
-        // 最近见过比赛特征：无特征界面 6 轮不按 B（单帧丢时钟），30 轮才逃生
+        // 比赛上下文下的少词画面 = 开赛入场/过场分镜（字幕、队名等），快按 A 跳过（不是 B——
+        // B 是铲球键，无论过场还是逃生都不能在这种情况下误按到比赛里）。
+        // 前几轮（streak<8）走开赛过场快跳 PadConfirm；到 UnknownEscapeStreakInMatch(30) 仍认不出
+        // 才算导航失控，GamepadBack 逃生。整条链路始终不按 B 进比赛乱踢。
         var ocr = Ocr(("过场字幕", 0.5, 0.5));
-        Assert.Equal(MatchActionKind.Wait,
+        Assert.Equal(MatchActionKind.PadConfirm,
             MatchBrain.Decide(MatchScreen.Unknown, ocr, MatchBrain.UnknownEscapeStreak, inMatchRecently: true).Kind);
         Assert.Equal(MatchActionKind.GamepadBack,
             MatchBrain.Decide(MatchScreen.Unknown, ocr, MatchBrain.UnknownEscapeStreakInMatch, inMatchRecently: true).Kind);

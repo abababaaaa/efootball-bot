@@ -34,6 +34,7 @@ public partial class MainWindow
     private bool _previewOn;
     private bool _starting;
     private string _pendingTheme = ThemeManager.Dark;
+    private string _pendingWorld = ThemeManager.WorldFluent;
 
     // 代码颜色统一在 MainWindow.Logs.cs 定义（运行时从 Application 资源读取，跟随主题）
 
@@ -49,13 +50,13 @@ public partial class MainWindow
     }
 
     /// <summary>
-    /// 应用窗口材质。切换主题后必须重新调用：<see cref="ThemeManager.ApplyTheme"/> 会把
+    /// 应用窗口材质。切换主题/外观世界后必须重新调用：<see cref="ThemeManager.ApplyTheme"/> 会把
     /// WindowBg 复原成纯色，材质就不透了。
     /// </summary>
     private void ApplyWindowAppearance()
     {
         if (!IsInitialized) return;
-        ThemeManager.ApplyWindowBackdrop(this, _cfg.Appearance.Backdrop);
+        ThemeManager.ApplyWindowBackdrop(this, _cfg.Appearance.Backdrop, _cfg.Appearance.World);
     }
 
     public MainWindow()
@@ -72,7 +73,9 @@ public partial class MainWindow
         // 首次启动（无 Theme 字段或为空）→ 显示主题选择覆盖层
         if (string.IsNullOrWhiteSpace(_cfg.Theme))
             _cfg.Theme = ThemeManager.Dark;
-        ThemeManager.ApplyTheme(_cfg.Theme);
+        // 外观世界：老配置没有这个字段 = Fluent（保持 v7.3 观感，不偷偷换成新皮肤）
+        _cfg.Appearance.World = ThemeManager.NormalizeWorld(_cfg.Appearance.World);
+        ThemeManager.ApplyTheme(_cfg.Theme, _cfg.Appearance.World);
 
         // 窗口材质（Mica/Acrylic）：句柄就绪后才应用到 DWM；不支持的系统自动回退纯色
         SourceInitialized += (_, _) =>

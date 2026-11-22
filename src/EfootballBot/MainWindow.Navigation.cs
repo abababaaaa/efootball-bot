@@ -129,14 +129,21 @@ public partial class MainWindow
             return;
         }
 
-        SetTabImportant.Visibility = Visibility.Visible;
-        SetTabDisplay.Visibility = Visibility.Collapsed;
-        SetTabInput.Visibility = Visibility.Collapsed;
-        SetTabDaily.Visibility = Visibility.Collapsed;
+        // 设置页镜像页签：Imp1/2/3 走 Important 块内的子分段；
+        // RbSetDisplay/Input/Daily 走各自独立的内容块。之前后三个误用 SubTab_Checked，
+        // 其 ShowByTag 不认识 RbSet*，导致内容不切换、选中态也不常驻 —— 这里统一处理。
+        bool isImp = target.StartsWith("Imp");
+        SetTabImportant.Visibility = isImp ? Visibility.Visible : Visibility.Collapsed;
+        SetTabDisplay.Visibility = target == "RbSetDisplay" ? Visibility.Visible : Visibility.Collapsed;
+        SetTabInput.Visibility = target == "RbSetInput" ? Visibility.Visible : Visibility.Collapsed;
+        SetTabDaily.Visibility = target == "RbSetDaily" ? Visibility.Visible : Visibility.Collapsed;
         SetTabDev.Visibility = Visibility.Collapsed;
-        foreach (UIElement child in SetTabImportant.Children)
-            if (child is FrameworkElement fe2 && fe2.Tag is string tg && tg.StartsWith("Imp"))
-                fe2.Visibility = tg == target ? Visibility.Visible : Visibility.Collapsed;
+        if (isImp)
+        {
+            foreach (UIElement child in SetTabImportant.Children)
+                if (child is FrameworkElement fe2 && fe2.Tag is string tg && tg.StartsWith("Imp"))
+                    fe2.Visibility = tg == target ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     /// <summary>只显示某个工具页滚动内容里的第 idx 段。</summary>
@@ -279,11 +286,13 @@ public partial class MainWindow
 
     // ---------------- 主题选择 ----------------
 
-    /// <summary>显示主题选择覆盖层，current 为当前生效主题（高亮选中）。</summary>
-    private void ShowThemeOverlay(string current)
+    /// <summary>显示主题选择覆盖层，current 为当前生效主题（高亮选中），world 为当前外观世界。</summary>
+    private void ShowThemeOverlay(string current, string? world = null)
     {
         _pendingTheme = current;
+        _pendingWorld = ThemeManager.NormalizeWorld(world ?? _cfg.Appearance.World);
         HighlightThemeCard(current);
+        HighlightWorldCard(_pendingWorld);
         ThemeOverlay.Visibility = Visibility.Visible;
         BtnThemeConfirm.Visibility = Visibility.Visible;
     }
@@ -295,13 +304,15 @@ public partial class MainWindow
 
     private void HighlightThemeCard(string theme)
     {
-        // 重置三张卡片
-        CardDark.Background = Brushes.Transparent;
-        CardDark.BorderBrush = (Brush)Application.Current.Resources["CardBorder"];
-        CardLight.Background = Brushes.Transparent;
-        CardLight.BorderBrush = (Brush)Application.Current.Resources["CardBorder"];
-        CardDeepBlue.Background = Brushes.Transparent;
-        CardDeepBlue.BorderBrush = (Brush)Application.Current.Resources["CardBorder"];
+        void Reset(Border card)
+        {
+            card.Background = Brushes.Transparent;
+            card.BorderBrush = (Brush)Application.Current.Resources["CardBorder"];
+        }
+
+        Reset(CardDark);
+        Reset(CardLight);
+        Reset(CardDeepBlue);
 
         var selected = theme switch
         {
@@ -309,6 +320,23 @@ public partial class MainWindow
             ThemeManager.DeepBlue => CardDeepBlue,
             _ => CardDark,
         };
+        selected.Background = (Brush)Application.Current.Resources["AccentLight"];
+        selected.BorderBrush = (Brush)Application.Current.Resources["Accent"];
+    }
+
+    /// <summary>外观风格（视觉世界）卡片选中态：Fluent = Win11 云母，Glass = Apple 黑玻璃。</summary>
+    private void HighlightWorldCard(string world)
+    {
+        void Reset(Border card)
+        {
+            card.Background = Brushes.Transparent;
+            card.BorderBrush = (Brush)Application.Current.Resources["CardBorder"];
+        }
+
+        Reset(CardWorldFluent);
+        Reset(CardWorldGlass);
+
+        var selected = ThemeManager.IsGlassWorld(world) ? CardWorldGlass : CardWorldFluent;
         selected.Background = (Brush)Application.Current.Resources["AccentLight"];
         selected.BorderBrush = (Brush)Application.Current.Resources["Accent"];
     }
@@ -322,10 +350,21 @@ public partial class MainWindow
         }
     }
 
+    private void WorldCard_Click(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        if (sender is Border { Tag: string tag })
+        {
+            _pendingWorld = ThemeManager.NormalizeWorld(tag);
+            HighlightWorldCard(_pendingWorld);
+        }
+    }
+
     private void BtnThemeConfirm_Click(object sender, RoutedEventArgs e)
     {
         _cfg.Theme = _pendingTheme;
-        ThemeManager.ApplyTheme(_pendingTheme);
+        _cfg.Appearance.World = ThemeManager.NormalizeWorld(_pendingWorld);
+        // 两个轴一起下发：颜色 Token + 渐变/投影/噪点 + 窗口不透明度都由 ApplyTheme 重建
+        ThemeManager.ApplyTheme(_cfg.Theme, _cfg.Appearance.World);
         ApplyWindowAppearance();   // ApplyTheme 复原了纯色外壳，材质要重新贴上去
         _cfg.Save();
         HideThemeOverlay();
@@ -333,7 +372,7 @@ public partial class MainWindow
 
     private void BtnTheme_Click(object sender, RoutedEventArgs e)
     {
-        ShowThemeOverlay(_cfg.Theme);
+        ShowThemeOverlay(_cfg.Theme, _cfg.Appearance.World);
     }
 
     // ---------------- 环境检测 ----------------

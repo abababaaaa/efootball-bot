@@ -730,10 +730,12 @@ public partial class MainWindow
     /// <summary>把程序目录的代理 DLL + ini 写到指定目录。</summary>
     private void DeployProxyTo(string dir, string exeName, int targetId, System.Text.StringBuilder report)
     {
-        string src = Path.Combine(Core.System.AppPaths.ExeDir, "xinput1_3.dll");
-        if (!File.Exists(src))
+        // 源 = exe 同级 dll（本地调试 / 手动换 DLL）或 exe 内嵌副本（只分发 exe 的机器，见 PadProxyAssets）。
+        string? src = PadProxyAssets.ResolveSource(PadProxyAssets.Dll13);
+        if (src is null)
         {
-            report.AppendLine("程序目录缺少 xinput1_3.dll：先运行 tools\\xinput-proxy\\build.bat 构建。");
+            report.AppendLine("代理 DLL 缺失：本次构建既没有 exe 同级 xinput1_3.dll，也没有内嵌副本"
+                              + "（先在 tools\\xinput-proxy 跑 build.bat，再重新构建主程序）。");
             return;
         }
         try
@@ -754,8 +756,8 @@ public partial class MainWindow
 
             // 同时投放 1_4：SDL2 / 中间件是动态 LoadLibrary("XInput1_4.dll")，
             // 只有 1_3 只能覆盖游戏自身的静态导入。
-            string src14 = Path.Combine(Core.System.AppPaths.ExeDir, "xinput1_4.dll");
-            if (File.Exists(src14))
+            string? src14 = PadProxyAssets.ResolveSource(PadProxyAssets.Dll14);
+            if (src14 is not null)
             {
                 string dst14 = Path.Combine(dir, "xinput1_4.dll");
                 try { File.Copy(src14, dst14, overwrite: true); }
@@ -800,7 +802,8 @@ public partial class MainWindow
         var report = new System.Text.StringBuilder();
         foreach (var (dir, _, _) in ResolvePadTargets())
         {
-            foreach (var name in new[] { "xinput1_3.dll", "xinput_proxy.ini" })
+            // 1_4 也要撤：投放时一起写的，只删 1_3 会留下一个"半个代理"的目录
+            foreach (var name in new[] { PadProxyAssets.Dll13, PadProxyAssets.Dll14, PadProxyAssets.IniName })
             {
                 string path = Path.Combine(dir, name);
                 try
@@ -827,8 +830,13 @@ public partial class MainWindow
         var sb = new System.Text.StringBuilder();
         sb.AppendLine("当前后端：" + PadBackendInfo.DisplayName(_cfg.Pad.Backend) + "（切换后下次开始挂机生效）");
 
-        string src = Path.Combine(Core.System.AppPaths.ExeDir, "xinput1_3.dll");
-        sb.AppendLine(File.Exists(src) ? "程序目录代理：已就绪" : "程序目录代理：缺失（改用 install.ps1 手动投放）");
+        bool besideDll = File.Exists(Path.Combine(Core.System.AppPaths.ExeDir, PadProxyAssets.Dll13));
+        bool embeddedDll = PadProxyAssets.IsEmbedded(PadProxyAssets.Dll13);
+        sb.AppendLine(besideDll
+            ? "程序目录代理：已就绪（exe 同级 dll）"
+            : embeddedDll
+                ? "程序目录代理：内嵌在 exe 里（首次投放自动解压，无需随包带 dll）"
+                : "程序目录代理：缺失（本机构建时 tools\\xinput-proxy 未产出，需先构建代理再构建主程序）");
 
         // 游戏在跑：代理 DLL 已被映射，替换/首次投放都要重启游戏才生效
         bool gameRunning = false;
@@ -950,6 +958,9 @@ public partial class MainWindow
     // ================= 自动更新事件 =================
 
     private UpdateInfo? _pendingUpdate;
+    // 下载/应用更新进行中：防止「立即更新」被重复点击（横幅与更新面板两个入口）
+    // 在下载完成前再次触发，导致同一版本被下载两次。
+    private bool _updateInProgress;
 
     private async void BtnCheckUpdate_Click(object sender, RoutedEventArgs e)
     {
@@ -1065,6 +1076,8 @@ public partial class MainWindow
 
     private void BtnBannerUpdate_Click(object sender, RoutedEventArgs e)
     {
+        // 下载中忽略重复点击（横幅入口）
+        if (_updateInProgress) return;
         // 先跳转到更新面板，再执行更新
         NavigateTo(NavMode.Update);
         BtnApplyUpdate_Click(sender, e);
@@ -1072,9 +1085,15 @@ public partial class MainWindow
 
     private async void BtnApplyUpdate_Click(object sender, RoutedEventArgs e)
     {
+        // 守卫：正在下载/应用时再次点击（横幅或面板任一入口）直接忽略，
+        // 否则会重复调用 UpdateApplier.ApplyAsync 把同一版本下载两次。
+        if (_updateInProgress) return;
         if (_pendingUpdate is null) return;
+        _updateInProgress = true;
         BtnCheckUpdate.IsEnabled = false;
         BtnApplyUpdate.IsEnabled = false;
+        BtnBannerUpdate.IsEnabled = false;
+        HideUpdateBanner(); // 下载期间隐藏横幅，避免出现「还在提示更新」的误导
         PbUpdate.Visibility = Visibility.Visible;
         PbUpdate.Value = 0;
         TxtUpdateStatus.Text = $"下载 v{_pendingUpdate.Version}…";
@@ -1113,9 +1132,14 @@ public partial class MainWindow
         }
         finally
         {
+            _updateInProgress = false;
             PbUpdate.Visibility = Visibility.Collapsed;
             BtnCheckUpdate.IsEnabled = true;
             BtnApplyUpdate.IsEnabled = _pendingUpdate is not null;
+            // 更新失败时 _pendingUpdate 仍在，恢复横幅让用户能重试；
+            // 成功时进程马上退出，这里恢复与否都无影响。
+            BtnBannerUpdate.IsEnabled = _pendingUpdate is not null;
+            if (_pendingUpdate is not null) ShowUpdateBanner(_pendingUpdate);
         }
     }
 
