@@ -183,15 +183,20 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                                     ScreenProbe.IsMostlyLightPage(obs.Frame)) != WkScreen.None
                                 || AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
                                 || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None;
-            // 联赛自有页必须全部列入：主页 LeaguePage / 积分 PointsPage / 物品 ItemList /
-            // 首发站位 LeagueSquadPage / 说明页 等。漏了 LeaguePage 会把刚导航进入的
-            // 联赛主页误判成"其他模块残留页"→ B 退回主页死循环（2026-11-23 实机
-            // suspicious/014424 帧：主页上"赛事信息/建议/挑战"等词触发其它 Brain 误认）。
-            bool ownPage = screen is MatchScreen.LeaguePage or MatchScreen.PointsPage
+            // 联赛自有页：主页 LeaguePage / 积分 PointsPage / 物品 ItemList /
+            // 首发站位 LeagueSquadPage / 说明页 等，命中即跳过引导（半途续接）。
+            // ★LeaguePage 既可能是我的联赛主页，也可能是 AI天梯「对阵AI类别」页——
+            // 用联赛主页专有词区分：主页有「比赛记录/最近5场比赛/排名+赛程表」，类别页没有。
+            // 有专有词 → 本模块页（跳过引导，v7.5.1 误认死循环不复发）；
+            // 无专有词 + 其它 Brain 认出 → 其它模块残留页（B 退回，v8.0.x 类别页开错赛修复）。
+            bool leagueHomeWords = obs.Ocr.ContainsJoined("比赛记录") || obs.Ocr.ContainsJoined("最近5场比赛")
+                                   || (obs.Ocr.ContainsJoined("排名") && obs.Ocr.ContainsJoined("赛程表"));
+            bool ownPage = (screen is MatchScreen.LeaguePage ? leagueHomeWords :
+                           screen is MatchScreen.PointsPage
                            or MatchScreen.ItemList or MatchScreen.LeagueSquadPage
                            or MatchScreen.PurchaseDialog or MatchScreen.KeyMatchDialog
                            or MatchScreen.MatchStartPage or MatchScreen.InMatch or MatchScreen.FullTime
-                           or MatchScreen.DifficultyPage or MatchScreen.HasConfirm or MatchScreen.LeagueInfoPage;
+                           or MatchScreen.DifficultyPage or MatchScreen.HasConfirm or MatchScreen.LeagueInfoPage);
             int? guideWait = await _homeGuide.StepAsync(obs.Frame,
                 screen == MatchScreen.MainMenu, ownPage, otherModule,
                 () => _engine.Pad.Back());
