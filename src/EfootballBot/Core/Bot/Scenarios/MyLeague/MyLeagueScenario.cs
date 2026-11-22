@@ -175,8 +175,15 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                                     ScreenProbe.IsMostlyLightPage(obs.Frame)) != WkScreen.None
                                 || AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
                                 || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None;
-            bool ownPage = screen is MatchScreen.MatchStartPage or MatchScreen.InMatch or MatchScreen.DifficultyPage
-                           or MatchScreen.HasConfirm or MatchScreen.LeagueInfoPage;
+            // 联赛自有页必须全部列入：主页 LeaguePage / 积分 PointsPage / 物品 ItemList /
+            // 首发站位 LeagueSquadPage / 说明页 等。漏了 LeaguePage 会把刚导航进入的
+            // 联赛主页误判成"其他模块残留页"→ B 退回主页死循环（2026-11-23 实机
+            // suspicious/014424 帧：主页上"赛事信息/建议/挑战"等词触发其它 Brain 误认）。
+            bool ownPage = screen is MatchScreen.LeaguePage or MatchScreen.PointsPage
+                           or MatchScreen.ItemList or MatchScreen.LeagueSquadPage
+                           or MatchScreen.PurchaseDialog or MatchScreen.KeyMatchDialog
+                           or MatchScreen.MatchStartPage or MatchScreen.InMatch or MatchScreen.FullTime
+                           or MatchScreen.DifficultyPage or MatchScreen.HasConfirm or MatchScreen.LeagueInfoPage;
             int? guideWait = await _homeGuide.StepAsync(obs.Frame,
                 screen == MatchScreen.MainMenu, ownPage, otherModule,
                 () => _engine.Pad.Back());
