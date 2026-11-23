@@ -76,8 +76,20 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
     private int _itemScanSteps;
     /// <summary>比赛页右移找「我的联赛」卡的格数（卡排可横向滚动，最右卡初始被裁切读不到标题）。</summary>
     private int _hubScanMoves;
+    /// <summary>比赛页最多右移几格再放弃（磁贴行随活动增减，最多 5~6 张；超过说明标题读不出来）。</summary>
+    private const int MaxHubScanSteps = 6;
+    /// <summary>上一张卡按 A 进错了：回到比赛页先右移一格换焦点，否则定位器会在同一张卡上再按 A。</summary>
+    private bool _hubForceRight;
+    /// <summary>本次到达比赛页以来连续进错卡的次数（达上限 → B 回主菜单重新导航）。</summary>
+    private int _hubWrongEntries;
+    /// <summary>连续进错卡上限（4 张卡最多错 3 次，留余量；超了说明定位器读错了位置）。</summary>
+    private const int HubWrongEntryLimit = 6;
     /// <summary>刚从比赛页按 A 想进「我的联赛」——下一帧若落到其它模块页需 B 退回，不能在错误页面继续推进。</summary>
     private bool _enteredFromHub;
+    /// <summary>按 A 之后的核验轮数：认不出"确实进了我的联赛"时等几帧再判错（加载/过渡帧不算）。</summary>
+    private int _entryVerifyRounds;
+    /// <summary>进卡后遇到的第一个弹窗是否已交共享决策推进过（只让一次，再推不动就按错卡退回）。</summary>
+    private bool _entryDialogAdvanced;
     /// <summary>进错页后连续 B 退回仍停在该页的次数，达阈值换招「上→A→B」（同 B 逃生换招）。</summary>
     private int _wrongCardBacks;
     /// <summary>智能接管提示是否已记录（每次运行一次）。</summary>
@@ -241,19 +253,34 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
             // 既用于确认"正确进了我的联赛"，也用于避免主页被其它 Brain 误认成进错页。
             bool isMyLeagueHome = obs.Ocr.ContainsJoined("比赛记录") || obs.Ocr.ContainsJoined("最近5场比赛")
                                   || (obs.Ocr.ContainsJoined("排名") && obs.Ocr.ContainsJoined("赛程表"));
+            // 比赛页磁贴行（3~4 张卡时至少读出两枚标题；单枚「锦标赛」是子页而不是磁贴行）
+            bool isRealHub = screen == MatchScreen.MatchHub &&
+                             (HubTileLocator.VisibleTitleCount(obs.Ocr) >= 2 ||
+                              obs.Ocr.Lines.Any(l => l.Text.Replace(" ", "").Contains("我的联赛")));
+            // 误入比赛页第一张「锦标赛」卡（用户 2026-11-23 实机："经常会误入第一个卡片锦标赛然后卡死"）：
+            // 那一页没有任何模块特征词，Weekly/AiLadder/Peak 三个 Brain 全认不出，旧守卫因此不触发，
+            // 共享层「HasConfirm 一律按 A」就在这页乱按 → 卡死。这里补一组锦标赛页专有词
+            // （淘汰赛/小组赛/自定义锦标赛 只在锦标赛板块出现，联赛主页与弹窗都不带）；
+            // 读不出这些词也不要紧——下面的「3 帧确认不了就 B」兜底同样能脱困。
+            bool tournamentPage = obs.Ocr.ContainsJoined("自定义锦标赛") || obs.Ocr.ContainsJoined("参加锦标赛")
+                                  || obs.Ocr.ContainsJoined("淘汰赛") || obs.Ocr.ContainsJoined("小组赛");
             // 正确进了我的联赛主页 / 本模块流程 / 回到比赛页 → 结束监视，清退回计数
-            if (isMyLeagueHome || isLeagueFlow || screen == MatchScreen.MatchHub)
+            if (isMyLeagueHome || isLeagueFlow || isRealHub)
             {
                 _enteredFromHub = false;
                 _wrongCardBacks = 0;
+                _entryVerifyRounds = 0;
+                _entryDialogAdvanced = false;
+                if (isMyLeagueHome) _hubWrongEntries = 0; // 真进对了：错卡计数归零
             }
-            else if ((otherBrain || eventFeature) && !isLeagueFlow)
+            else if (tournamentPage || otherBrain || eventFeature)
             {
                 // 仍在错误页：B 退回；连续 3 次无效（画面不变）则换招「上→A→B」，
                 // 与 B 逃生换招同款——直接 A 可能落在取消键，先上移避开再 A 最后 B。
                 _wrongCardBacks++;
                 bool escalate = _wrongCardBacks >= 3;
-                _log($"[我的联赛] 比赛页进错板块（{screen}），{(escalate ? "B 连续无效，换招上→A→B" : $"B 退回重定位（{_wrongCardBacks}/3）")}", LogLevel.Warn);
+                _log($"[我的联赛] 比赛页进错板块（{screen}{(tournamentPage ? "·锦标赛页" : "")}），" +
+                     $"{(escalate ? "B 连续无效，换招上→A→B" : $"B 退回重定位（{_wrongCardBacks}/3）")}", LogLevel.Warn);
                 _engine.DumpSuspiciousFrame(obs.Frame, escalate ? "wrong_card_escape" : "wrong_card_entered",
                     $"比赛页按A后落到错误板块（{screen}），{(escalate ? "B连续3次无效换招上AB" : "B退回")}");
                 if (escalate)
@@ -267,12 +294,44 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                 {
                     await _engine.Pad.Back();
                 }
+                // 退回比赛页后换焦点重定位：磁贴定位器刚在这张卡上读到了「我的联赛」，
+                // 不右移就会在同一张卡上再按一次 A，永远进同一个错页。
+                _enteredFromHub = false;
+                _entryVerifyRounds = 0;
+                _hubForceRight = true;
+                _hubWrongEntries++;
                 return 2200;
             }
-            else if (screen != MatchScreen.MatchHub && !otherBrain && !eventFeature)
+            else if ((screen is MatchScreen.HasConfirm or MatchScreen.PurchaseDialog
+                      or MatchScreen.KeyMatchDialog) && !_entryDialogAdvanced)
             {
-                _enteredFromHub = false; // 普通弹窗/未知页无板块特征 → 结束监视交原流程
-                _wrongCardBacks = 0;
+                // 认不出是哪个页（加载/过渡/叫不出名字的板块页）：先等两帧再判错。
+                _entryVerifyRounds++;
+                // 普通弹窗（HasConfirm/PurchaseDialog/关键比赛预告）先让共享决策推进一次——
+                // 进联赛后常先弹赛季奖励/关键比赛预告，那是正常流程，不能一上来就 B 掉。
+                // 这里不 return：直接往下走，交共享决策按 A 推进这一轮。
+                _entryDialogAdvanced = true;
+                _log($"[我的联赛] 进卡后先弹窗（{screen}），交共享决策推进一次后继续核验", LogLevel.Info);
+            }
+            else
+            {
+                _entryVerifyRounds++;
+                // 3 帧仍确认不了"这是我的联赛"就按进错卡处理——宁可多 B 一次，
+                // 也不留在错页上被共享决策乱按（实机就是这个表现：进了错页卡死）。
+                if (_entryVerifyRounds < 3)
+                {
+                    _log($"[我的联赛] 比赛页按 A 后画面认不出（{screen}，第 {_entryVerifyRounds}/3 帧），再等一帧核验", LogLevel.Debug);
+                    return 1500;
+                }
+                _log($"[我的联赛] 比赛页按 A 后连续 {_entryVerifyRounds} 帧确认不了「我的联赛」，按进错卡 B 退回", LogLevel.Warn);
+                _engine.DumpSuspiciousFrame(obs.Frame, "wrong_card_unknown", $"按A后 {_entryVerifyRounds} 帧认不出（{screen}），B 退回");
+                await _engine.Pad.Back();
+                _enteredFromHub = false;
+                _entryVerifyRounds = 0;
+                _entryDialogAdvanced = false;
+                _hubForceRight = true;
+                _hubWrongEntries++;
+                return 2200;
             }
         }
         // 识别走查（2026-11-18）：连续多轮认不出的界面把实机帧 + OCR 摘要落 datadump。
@@ -429,10 +488,34 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         // （锦标赛/活动/eFootball联赛），「我的联赛」在最右被裁切、标题读不到；
         // 且卡排**只在焦点移到该卡时才滚动**，标题完整可读的那一刻焦点就已在其上。
         // 策略：读到标题 = 焦点已就位 → 直接按 A（不再归位重移，否则滚动后 offset 失准会移错）。
-        // 读不到 → 逐格右移切换焦点（到目标卡时卡排自会滚入），下一轮重读；4 格仍无则回退共享逻辑。
+        // 读不到 → 逐格右移切换焦点（到目标卡时卡排自会滚入），下一轮重读；扫满 MaxHubScanSteps
+        // 仍无则 B 回主菜单重新导航（不再回退共享逻辑的「盲按 A 试进当前卡」——那正是误入
+        // 第一张锦标赛卡的原因）。进错卡后由下方 _enteredFromHub 守卫核验并换焦点重试。
         if (SupportsOcrTileNav && screen == MatchScreen.MatchHub &&
             _streak < MatchBrain.NavEscapeStreak)
         {
+            // 上一张卡按 A 进错了（已 B 退回）：先右移一格换焦点再重新定位。
+            // 不换焦点的话定位器会在同一张卡上再次读到「我的联赛」并再按一次 A —— 实机表现
+            // 就是「反复进锦标赛，永远开不了赛」（用户 2026-11-23）。
+            if (_hubForceRight)
+            {
+                _hubForceRight = false;
+                _hubScanMoves = Math.Max(_hubScanMoves, 1) + 1;
+                _log($"[我的联赛] 比赛页：上一张卡进错，右移一格换焦点（第 {_hubScanMoves} 格）后重新定位", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Right);
+                return 1800;
+            }
+            // 同一轮比赛页里连续进错太多次：定位器把目标读在了错卡上，B 回主菜单重新导航，
+            // 让主菜单→比赛页的归位序列重置卡排焦点（总比无限进错页好）。
+            if (_hubWrongEntries >= HubWrongEntryLimit)
+            {
+                _hubWrongEntries = 0;
+                _hubScanMoves = 0;
+                _log($"[我的联赛] 比赛页：连续 {HubWrongEntryLimit} 次进错卡，B 回主菜单重新导航", LogLevel.Warn);
+                _engine.DumpSuspiciousFrame(obs.Frame, "hub_wrong_card_loop", $"比赛页连续 {HubWrongEntryLimit} 次进错卡，B 回主菜单");
+                await _engine.Pad.Back();
+                return 2600;
+            }
             int? tileOffset = HubTileLocator.FindTileOffset(obs.Ocr, "我的联赛");
             if (tileOffset is int to)
             {
@@ -440,22 +523,27 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                 await _engine.Pad.Confirm();
                 _hubScanMoves = 0;
                 _enteredFromHub = true; // 下一帧核验是否真进了我的联赛，进错则 B 退回
+                _entryVerifyRounds = 0;
+                _entryDialogAdvanced = false;
                 return 2800;
             }
             // 读不到标题：首次先归位最左，再逐格右移切换焦点（目标卡被焦点选中时才会滚入并读全）
             if (_hubScanMoves == 0)
                 await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-            if (_hubScanMoves < 4)
+            if (_hubScanMoves < MaxHubScanSteps)
             {
                 _hubScanMoves++;
-                _log($"[我的联赛] 比赛页：未读到「我的联赛」标题，右移切焦点第 {_hubScanMoves}/4 格后重读", LogLevel.Info);
+                _log($"[我的联赛] 比赛页：未读到「我的联赛」标题，右移切焦点第 {_hubScanMoves}/{MaxHubScanSteps} 格后重读", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Right);
                 return 1800; // 给卡排滚动动画 + 下一帧 OCR 留足时间
             }
-            // 4 格仍读不到：回退共享逻辑（其右移/盲按/B逃生兜底），重置扫描
+            // 扫完仍读不到：B 回主菜单重新导航（旧版这里回退共享逻辑，其「焦点词读不到就按 A」
+            // 会直接按在当前焦点卡上——实机正是这样误入第一张锦标赛卡）。
             _hubScanMoves = 0;
-            _log("[我的联赛] 比赛页：右移4格仍未读到「我的联赛」标题，回退共享导航", LogLevel.Warn);
-            _engine.DumpSuspiciousFrame(obs.Frame, "hub_tile_not_found", "比赛页右移4格仍未读到我的联赛标题（卡排裁切/布局异常）");
+            _log($"[我的联赛] 比赛页：右移 {MaxHubScanSteps} 格仍未读到「我的联赛」标题，B 回主菜单重新导航", LogLevel.Warn);
+            _engine.DumpSuspiciousFrame(obs.Frame, "hub_tile_not_found", $"比赛页右移 {MaxHubScanSteps} 格仍未读到我的联赛标题（卡排裁切/布局异常）");
+            await _engine.Pad.Back();
+            return 2600;
         }
         var action = MatchBrain.Decide(screen, obs.Ocr, _streak, inMatchRecently, obs.Frame);
         MatchShared.DecisionSnapshot(_log, "我的联赛", screen, _streak, action, obs.Ocr);

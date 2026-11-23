@@ -95,6 +95,15 @@ public static class PopupBrain
     /// </summary>
     public static PopupAction Decide(FrameData? frame, OcrResult ocr, out string note)
     {
+        // 替换物品确认弹窗（用户 2026-11-23 实机）：标题「要覆盖目前的物品吗？」+「覆盖」/「取消」，
+        // 焦点默认在下方「取消」。实测按钮词经常只读出「取消」一枚（「覆盖」被并进标题或漏读），
+        // 于是旧逻辑走进「单按钮 → 直接 A」，A 正好点掉取消 —— 购买白做、下一轮又弹同一个窗。
+        // 这类弹窗版式固定（覆盖在上、取消在下），不靠按钮 OCR，只认标题里的「覆盖」→ 上×1 再 A。
+        if (IsReplaceDialog(ocr))
+        {
+            note = "替换物品确认弹窗（标题含「覆盖」）→ 上×1 → A";
+            return PopupAction.UpThenConfirm;
+        }
         if (frame is null)
         {
             // 没有像素帧就判不了「白底高光」：交回调用方的旧规则（有取消/关闭就先上移），
@@ -135,6 +144,23 @@ public static class PopupBrain
         note = $"高光在「{focused.Label}」上，推进键「{confirm.Label}」在{(confirmBelow ? "下" : "上")}方" +
                $" → {(confirmBelow ? "下" : "上")}×1 → A（{Describe(buttons)}）";
         return confirmBelow ? PopupAction.DownThenConfirm : PopupAction.UpThenConfirm;
+    }
+
+    /// <summary>
+    /// 是不是「要覆盖目前的物品吗？」这类替换确认弹窗（购买道具时目标格已有同类物品）。
+    /// 只认弹窗文字带里的整词含「覆盖」——按钮词常漏读，标题一定读得到；
+    /// 带外（页眉/正文/角落提示）的「覆盖」不算。
+    /// </summary>
+    public static bool IsReplaceDialog(OcrResult ocr)
+    {
+        foreach (var w in ocr.MergedWords)
+        {
+            if (!InDialogBand(w)) continue;
+            string t = w.NormText;
+            if (t.Length == 0 || t.Length > TitleMaxChars) continue;
+            if (t.Contains("覆盖", StringComparison.Ordinal)) return true;
+        }
+        return false;
     }
 
     /// <summary>Buttons 的可读摘要（日志用）。</summary>

@@ -160,6 +160,13 @@ public static partial class MatchBrain
             ocr.Words.All(w => !w.Text.Any(ch => ch >= 0x2E80)) &&
             ocr.ContainsJoined("footbal"))
             return MatchScreen.TitleScreen;
+        // 「要覆盖目前的物品吗？」替换确认弹窗（购买道具时目标格已有同类物品，用户 2026-11-23 实机）：
+        // 弹窗叠在物品页上，YOLO 仍会检出物品行/确认键 —— 落到 ItemList 会继续下滑扫描（弹窗不动
+        // = 卡死），落到 HasConfirm 则走通用弹窗决策（按钮词只读出「取消」时直接 A = 点取消）。
+        // 标题固定含「覆盖目前的物品」，命中即按购买弹窗处理：与第一层「使用物品」同一套动
+        // 作（上移→A），按钮读不全也不影响。
+        if (ocr.ContainsJoined("覆盖目前的物品") || ocr.ContainsJoined("要覆盖"))
+            return MatchScreen.PurchaseDialog;
         if (Count("main_menu") >= 1) return MatchScreen.MainMenu;
         if (Count("item_row") >= 2 && Count("btn_back") >= 1) return MatchScreen.ItemList;
         // 全场结束（FullTime）终场判定：顶部「全场」+ 比分/球员评价页（实机 2026-10-10 截图：

@@ -21,6 +21,22 @@ public static class HubTileLocator
     /// <param name="target">目标标题，如「活动」「eFootball联赛」（归一后的形式）。</param>
     public static int? FindTileOffset(OcrResult ocr, string target)
     {
+        var tiles = CollectTiles(ocr);
+        if (tiles.Count < 2) return null; // 读不全不猜格位
+        tiles.Sort((a, b) => a.X.CompareTo(b.X));
+        int idx = tiles.FindIndex(t => t.Title == target);
+        return idx >= 0 ? idx : null;
+    }
+
+    /// <summary>
+    /// 这一帧认出几枚磁贴标题。用途：判断"画面真的是比赛页磁贴行"——从别的页（如锦标赛子页）
+    /// 按 B 退回时，单看分类可能仍判 MatchHub，但那一页只有一枚「锦标赛」标题，凑不出磁贴行。
+    /// </summary>
+    public static int VisibleTitleCount(OcrResult ocr) => CollectTiles(ocr).Count;
+
+    /// <summary>磁贴行里能认出的标题（x 升序未排序；同一格的碎词/合并整行只留第一次命中）。</summary>
+    private static List<(double X, string Title)> CollectTiles(OcrResult ocr)
+    {
         var tiles = new List<(double X, string Title)>();
         foreach (var w in ocr.Words)
         {
@@ -31,10 +47,7 @@ public static class HubTileLocator
             if (tiles.Any(t => Math.Abs(t.X - w.CenterX) < 0.02)) continue;
             tiles.Add((w.CenterX, title));
         }
-        if (tiles.Count < 2) return null; // 读不全不猜格位
-        tiles.Sort((a, b) => a.X.CompareTo(b.X));
-        int idx = tiles.FindIndex(t => t.Title == target);
-        return idx >= 0 ? idx : null;
+        return tiles;
     }
 
     /// <summary>磁贴标题归一：「eFootball™联赛」被拆写时也归为「eFootball联赛」。</summary>

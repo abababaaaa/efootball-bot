@@ -194,6 +194,11 @@ public static partial class MatchBrain
             {
                 // 购买弹窗：焦点默认在「取消」→ 上移一格点上方带数字（积分价）的确认按钮。
                 // 上移+A 是买法；上移与 A 之间需留延时让游戏刷新焦点（见各模块 PadUpConfirm 执行）。
+                // 连续 ConfirmEscapeStreak 轮仍停在弹窗（上移+A 也不生效，焦点可能不在取消上）→
+                // B 关掉弹窗让购买状态机重新走一遍，别死在该页（2026-11-23 用户实机「覆盖弹窗只
+                // 按到取消」的兜底：即使判断错了也要能退出，而不是无限重按）。
+                if (screenStreak >= ConfirmEscapeStreak && (screenStreak - ConfirmEscapeStreak) % 5 == 0)
+                    return PeriodicBackAction(screenStreak, ConfirmEscapeStreak, "购买弹窗久按无效，B 关掉重来");
                 return new MatchAction(MatchActionKind.PadUpConfirm,
                     screenStreak >= StuckStreak ? 5000 : 2500, "购买确认（上移→数字按钮）");
             }
