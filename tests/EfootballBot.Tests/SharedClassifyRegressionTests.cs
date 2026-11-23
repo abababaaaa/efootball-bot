@@ -97,11 +97,30 @@ public class SharedClassifyRegressionTests
     }
 
     [Fact]
-    public void LeaguePage_无联赛上下文时_不认底栏通用推进词()
+    public void LeaguePage_周活动证据页_不认底栏通用推进词()
     {
-        // 周活动页底栏同样印「继续」；门控必须挡住，否则误进活动
-        var onlyPush = Ocr("继续", "返回");
-        Assert.Equal(MatchActionKind.Wait, MatchBrain.Decide(MatchScreen.LeaguePage, onlyPush, 1).Kind);
+        // 周活动卡片页底栏/卡面同样印「继续/进入」，且带「对阵AI/对阵玩家」胶囊；
+        // 这类页即使因 OCR 漏读导航条被判 LeaguePage，也必须挡住，否则误进活动
+        var weekly = Ocr("继续", "返回", "对阵AI", "对阵玩家");
+        Assert.Equal(MatchActionKind.Wait, MatchBrain.Decide(MatchScreen.LeaguePage, weekly, 1).Kind);
+    }
+
+    [Fact]
+    public void LeaguePage_锦标赛证据页_不认底栏通用推进词()
+    {
+        // 锦标赛板块页（淘汰赛/小组赛）不在分类排除词里，靠决策层证据词兜住
+        var tournament = Ocr("进入", "淘汰赛", "小组赛");
+        Assert.Equal(MatchActionKind.Wait, MatchBrain.Decide(MatchScreen.LeaguePage, tournament, 1).Kind);
+    }
+
+    [Fact]
+    public void LeaguePage_联赛子页只印继续_仍按A推进()
+    {
+        // 用户确认：真联赛子页底栏只印「继续/进入」时，按 A 才是对的；
+        // 没有其它模块证据词就不得转 Wait（v8.0.16.1 放宽）
+        var leagueSubPage = Ocr("继续", "返回");
+        Assert.Equal(MatchActionKind.PadConfirm,
+            MatchBrain.Decide(MatchScreen.LeaguePage, leagueSubPage, 1).Kind);
     }
 
     [Fact]

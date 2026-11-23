@@ -123,8 +123,12 @@ public static partial class MatchBrain
             {
                 // v8.0.16 双保险：共享分类已把周活动/合约页排除出 LeaguePage，但万一有
                 // 其它模块页仍被判进来，这些页底栏也印「进入/开始/继续」，直接按 A 会误进活动。
-                // 只有 OCR 带联赛上下文才允许推进；否则 Wait → 连续 8 轮后 B 自愈。
-                // ★词表含类别选择页（v8.0.9 修的「对阵AI类别」卡死），否则会误伤它。
+                // ★v8.0.16.1 放宽（用户确认「真联赛子页只印继续/进入时该按 A」）：
+                //   旧版要求必须读到联赛词才推进，把只印「继续」的联赛子页也挡成 Wait→B；
+                //   现改为「证据拦截」——只有读到其它模块的证据词（周活动胶囊/赛事等级/
+                //   Team Effort/合约页专有词/锦标赛词）才拦，其余照旧按 A 推进。
+                // ★放行词仍含类别选择页（v8.0.9 修的「对阵AI类别」卡死），且类别词优先于
+                //   证据词（「对阵AI类别」同时含胶囊词「对阵AI」）。
                 bool leagueContext =
                     ocr.ContainsJoined("我的联赛") || ocr.ContainsJoined("前往比赛") ||
                     ocr.ContainsJoined("下个赛季") || ocr.ContainsJoined("赛程表") ||
@@ -137,9 +141,9 @@ public static partial class MatchBrain
                     // MyLeagueBrainTests.Decide_LeaguePage_NextStep_Confirms），必须保留。
                     ocr.ContainsJoined("下一步") || ocr.ContainsJoined("开始比赛") ||
                     ocr.ContainsJoined("开赛") || ocr.ContainsJoined("进入比赛");
-                if (!leagueContext)
+                if (!leagueContext && HasOtherModuleEvidence(ocr))
                     return screenStreak >= StuckStreak
-                        ? new MatchAction(MatchActionKind.GamepadBack, 3000, "非联赛上下文，B 返回自愈")
+                        ? new MatchAction(MatchActionKind.GamepadBack, 3000, "其它模块证据页，B 返回自愈")
                         : MatchAction.Wait(2500);
                 // 「前往比赛」= 联赛主页主按钮；「下个赛季」= 赛季结束替换词（实机 next_season：
                 // 前往比赛位置变为"下个赛季"，另有"前往下个赛季"，含"下个赛季"即覆盖）
@@ -387,6 +391,23 @@ public static partial class MatchBrain
     /// 之后每 3 次 B 再换一次，避免一直重复换招。
     /// 纯函数、复用 screenStreak，不引入 OCR 复核开销。
     /// </summary>
+    /// <summary>
+    /// 其它模块页的 OCR 证据（v8.0.16.1）：这些词只在周活动/合约/锦标赛板块出现，
+    /// 联赛流程任何页面都不带 —— 判成 LeaguePage 却读到这些词，说明是别的模块页误判进来，
+    /// 底栏「进入/开始/继续」不能盲按 A（周活动卡片页就是这样误进活动的）。
+    /// 词源：周活动（MyLeagueScenario eventFeature / WeeklyBrain 特征）、
+    /// 合约页（Classify v8.0.16 排除词）、锦标赛（MyLeagueScenario tournamentPage）。
+    /// 注意「对阵AI类别/对阵玩家类别」是联赛类别页，调用方必须先判联赛词再看本方法。
+    /// </summary>
+    private static bool HasOtherModuleEvidence(OcrResult ocr)
+        => (ocr.ContainsJoined("对阵AI") && !ocr.ContainsJoined("对阵AI类别"))
+           || (ocr.ContainsJoined("对阵玩家") && !ocr.ContainsJoined("对阵玩家类别"))
+           || ocr.ContainsJoined("赛事等级") || ocr.ContainsJoined("Team Effort")
+           || ocr.ContainsJoined("巡回活动") || ocr.ContainsJoined("结束倒数")
+           || ocr.ContainsJoined("特殊球员名单") || ocr.ContainsJoined("组合包")
+           || ocr.ContainsJoined("淘汰赛") || ocr.ContainsJoined("小组赛")
+           || ocr.ContainsJoined("自定义锦标赛") || ocr.ContainsJoined("参加锦标赛");
+
     private static MatchAction PeriodicBackAction(int screenStreak, int threshold, string backTarget, int period = 5)
     {
         int k = (screenStreak - threshold) / Math.Max(1, period); // 第几次周期 B（0 起）
