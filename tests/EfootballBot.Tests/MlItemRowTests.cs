@@ -197,4 +197,86 @@ public class MlItemRowTests
         Assert.True(MyLeagueBrain.ShowsItemsPanel(PanelOcr("Exp经验值4x")));
         Assert.True(MyLeagueBrain.ShowsChallengePanel(Ocr(("赛程表兑换积分挑战", 0.389, 0.368))));
     }
+
+    // ---------------- 逐行扫描购买导航决策（2026-11-23 用户实机规律）----------------
+    private static MyLeagueBrain.MlItemTarget Exp(string lvl)
+        => new(MyLeagueBrain.MlItemKind.ExpBoost, lvl);
+
+    [Fact]
+    public void ItemScan_目标4x_焦点在4x_停()
+    {
+        var ocr = Ocr(("经验值2x", 0.3, 0.5), ("经验值3x", 0.3, 0.6), ("经验值4x", 0.3, 0.7));
+        Assert.Equal(MyLeagueBrain.ItemScanAction.Stop,
+            MyLeagueBrain.ItemScanStepExpBoost(ocr, Exp("4x"), "经验值4x有效场数5场9000"));
+    }
+
+    [Fact]
+    public void ItemScan_目标3x_焦点在3x_停()
+    {
+        var ocr = Ocr(("经验值2x", 0.3, 0.5), ("经验值3x", 0.3, 0.6));
+        Assert.Equal(MyLeagueBrain.ItemScanAction.Stop,
+            MyLeagueBrain.ItemScanStepExpBoost(ocr, Exp("3x"), "经验值3x有效场数5场6000"));
+    }
+
+    [Fact]
+    public void ItemScan_目标2x_画面只有3x_上移一格兜底()
+    {
+        // 用户规律：2x 难读（数字小），画面只出现 3x（在 2x 下一行）→ 上移一格找 2x。
+        // 注意：若画面同时有 2x/3x，则 2x 已出现，应 Stop（见另一测试）。
+        var ocr = Ocr(("经验值3x", 0.3, 0.6));
+        Assert.Equal(MyLeagueBrain.ItemScanAction.Up,
+            MyLeagueBrain.ItemScanStepExpBoost(ocr, Exp("2x"), null));
+    }
+
+    [Fact]
+    public void ItemScan_目标2x_焦点在2x_停()
+    {
+        var ocr = Ocr(("经验值2x", 0.3, 0.5), ("经验值3x", 0.3, 0.6));
+        Assert.Equal(MyLeagueBrain.ItemScanAction.Stop,
+            MyLeagueBrain.ItemScanStepExpBoost(ocr, Exp("2x"), "经验值2x有效场数5场3000"));
+    }
+
+    [Fact]
+    public void ItemScan_焦点读不出_画面出现目标档位_停()
+    {
+        // 白框闪烁暗相位 → 焦点读不出，退回画面档位集合判断
+        var ocr = Ocr(("经验值4x", 0.3, 0.7));
+        Assert.Equal(MyLeagueBrain.ItemScanAction.Stop,
+            MyLeagueBrain.ItemScanStepExpBoost(ocr, Exp("4x"), null));
+    }
+
+    [Fact]
+    public void ItemScan_画面出现4x即停_符合用户首次出现即焦点规律()
+    {
+        // 用户 2026-11-23 明确：画面第一次出现 4x 时焦点就在 4x（逐格下滑每次滚一行）。
+        // 故即使焦点行探针读到别的（偶发误读），画面出现目标档位仍应 Stop。
+        var ocr = Ocr(("经验值3x", 0.3, 0.5), ("经验值4x", 0.3, 0.6));
+        Assert.Equal(MyLeagueBrain.ItemScanAction.Stop,
+            MyLeagueBrain.ItemScanStepExpBoost(ocr, Exp("4x"), null));
+    }
+
+    [Fact]
+    public void ItemScan_焦点读不出_只见更大档位_上移()
+    {
+        // 要 2x 但画面只有 3x/4x → 滑过头，上移逼近
+        var ocr = Ocr(("经验值3x", 0.3, 0.6), ("经验值4x", 0.3, 0.7));
+        Assert.Equal(MyLeagueBrain.ItemScanAction.Up,
+            MyLeagueBrain.ItemScanStepExpBoost(ocr, Exp("2x"), null));
+    }
+
+    [Fact]
+    public void ItemScan_还在状态加成区_继续下滑()
+    {
+        var ocr = Ocr(("状态普通1000", 0.3, 0.3), ("状态杰出5000", 0.3, 0.5));
+        Assert.Equal(MyLeagueBrain.ItemScanAction.Down,
+            MyLeagueBrain.ItemScanStepExpBoost(ocr, Exp("4x"), "状态杰出5000"));
+    }
+
+    [Fact]
+    public void ItemScan_非经验值目标_交回调用方()
+    {
+        var ocr = Ocr(("经验值4x", 0.3, 0.7));
+        Assert.Null(MyLeagueBrain.ItemScanStepExpBoost(ocr,
+            new MyLeagueBrain.MlItemTarget(MyLeagueBrain.MlItemKind.CoachBoost)));
+    }
 }

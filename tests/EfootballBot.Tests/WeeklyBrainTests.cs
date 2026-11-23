@@ -715,4 +715,62 @@ public class WeeklyBrainTests
         var intro = Ocr(W("巡回活动", 0.20, 0.26), W("进入", 0.20, 0.80), W("详情", 0.20, 0.86));
         Assert.False(WeeklyBrain.IsTournamentPage(intro));
     }
+
+    // ---------------- 赛事等级下拉蓝勾检测（2026-11-23 实机 bug）----------------
+    // 实机下拉帧：蓝勾在面板右缘 x≈0.92（非难度词旁），旧 DetectSelectedDifficulty 扫词 ±0.06
+    // 窗口 → null → 直接确认不改选 → 等级一直是"新手"。新探针扫行右缘，用合成帧锁住规律。
+    private static FrameData DropdownFrameWithCheck(string checkedLevel)
+    {
+        const int W = 1280, H = 759;
+        var px = new byte[W * H * 4];
+        // 难度行 y 中心（与实机下拉帧一致）
+        var rows = new (string Name, double Cy)[]
+        {
+            ("新手", 0.356), ("业余", 0.399), ("标准", 0.440), ("职业", 0.482),
+            ("顶尖球员", 0.524), ("超级球星", 0.566), ("传奇", 0.609),
+        };
+        foreach (var (name, cy) in rows)
+        {
+            if (name != checkedLevel) continue;
+            // 在 x 0.91~0.94、y±0.015 画蓝勾（B>120 且高于 R/G 40+）
+            int x0 = (int)(0.91 * W), x1 = (int)(0.94 * W);
+            int y0 = (int)((cy - 0.015) * H), y1 = (int)((cy + 0.015) * H);
+            for (int y = y0; y < y1; y++)
+                for (int x = x0; x < x1; x++)
+                {
+                    int i = (y * W + x) * 4;
+                    px[i] = 200; px[i + 1] = 60; px[i + 2] = 40; px[i + 3] = 255; // BGRA: i=B=200, i+1=G, i+2=R
+                }
+        }
+        return new FrameData(px, W, H, 0);
+    }
+
+    private static OcrResult DropdownOcr()
+    {
+        var words = new List<OcrWord>
+        {
+            W("赛事等级", 0.568, 0.241),
+            W("新手", 0.561, 0.356), W("业余", 0.562, 0.399), W("标准", 0.562, 0.440),
+            W("职业", 0.561, 0.482), W("顶尖球员", 0.575, 0.524),
+            W("超级球星", 0.574, 0.566), W("传奇", 0.562, 0.609),
+        };
+        return new OcrResult(words, 1280, 759);
+    }
+
+    [Theory]
+    [InlineData("新手")]
+    [InlineData("传奇")]
+    [InlineData("超级球星")]
+    public void DetectDropdownCheckedLevel_蓝勾在面板右缘_正确识别(string level)
+    {
+        var frame = DropdownFrameWithCheck(level);
+        Assert.Equal(level, WeeklyBrain.DetectDropdownCheckedLevel(frame, DropdownOcr()));
+    }
+
+    [Fact]
+    public void DetectDropdownCheckedLevel_无蓝勾_返回Null()
+    {
+        var frame = DropdownFrameWithCheck(""); // 不画任何勾
+        Assert.Null(WeeklyBrain.DetectDropdownCheckedLevel(frame, DropdownOcr()));
+    }
 }

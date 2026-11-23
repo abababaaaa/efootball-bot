@@ -122,6 +122,43 @@ public static partial class WeeklyBrain
     }
 
     /// <summary>
+    /// 活动设置浮层「赛事等级」下拉的当前勾选（蓝勾）——与难度页蓝勾位置不同：
+    /// 实机 2026-11-23 下拉帧（1280×759）蓝勾在**面板右缘 x≈0.914~0.929**，而非难度词旁
+    /// （MyLeagueBrain.DetectSelectedDifficulty 只扫词 ±0.06 窗口，此处返回 null → 误判"读不出"
+    /// 而直接确认、改选从未生效，正是"赛事等级设置未成功"的根因）。做法：对每个难度词的 y 带
+    /// 扫 x 0.85~0.98 的蓝像素（B&gt;120 且高于 R/G 40+），最多者即勾选行。返回 null=未检出。
+    /// </summary>
+    public static string? DetectDropdownCheckedLevel(FrameData frame, OcrResult ocr)
+    {
+        var (w, h, bgra) = (frame.Width, frame.Height, frame.Bgra);
+        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return null;
+        // 下拉选项行：难度词 x≈0.56（右侧面板），顶部选择框的"新手"也在 x≈0.56 但 y 更靠上；
+        // 蓝勾只出现在下拉列表行（y 0.34~0.65），逐个难度词 y 带扫右缘即可。
+        string? best = null;
+        int bestBlue = 0;
+        foreach (var diff in MatchBrain.Difficulties)
+        {
+            // 取该难度词在下拉列表区的匹配（y 0.32~0.66），避开顶部选择框的同名回显
+            var word = ocr.Words.FirstOrDefault(x =>
+                x.CenterX is > 0.45 and < 0.70 && x.CenterY is > 0.32 and < 0.66 &&
+                x.Text.Replace(" ", "").Contains(diff));
+            if (word is null) continue;
+            int blue = 0;
+            int y0 = (int)((word.CenterY - 0.020) * h), y1 = (int)((word.CenterY + 0.020) * h);
+            int xa = (int)(0.85 * w), xb = Math.Min(w, (int)(0.98 * w));
+            for (int y = Math.Max(0, y0); y < Math.Min(h, y1); y += 1)
+                for (int x = xa; x < xb; x += 1)
+                {
+                    int i = (y * w + x) * 4;
+                    if (bgra[i] > 120 && bgra[i] > bgra[i + 1] + 40 && bgra[i] > bgra[i + 2] + 40)
+                        blue++;
+                }
+            if (blue > bestBlue) { bestBlue = blue; best = diff; }
+        }
+        return bestBlue >= 20 ? best : null;
+    }
+
+    /// <summary>
     /// 难度页的最终确认弹窗：「是否要选择&lt;难度名&gt;？」+ 纵排按钮 进入(上)/取消(下)，
     /// ★默认焦点在「取消」——直接按 A 会取消回列表（用户 2026-10-30 实机）。必须 ↑ 后再 A。
     /// 判定：说明句「是否要选择」；或屏中部纵排「进入」+「取消」双词（x 0.4~0.6）兜底，

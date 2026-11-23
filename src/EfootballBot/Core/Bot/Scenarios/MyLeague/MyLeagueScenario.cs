@@ -74,6 +74,10 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
     private int _itemRow;
     /// <summary>逐行 OCR 扫描定位目标的已下移格数（0=起点/未开始；扫描完归零）。</summary>
     private int _itemScanSteps;
+    /// <summary>逐行扫描中「列表已到底」的连续静止轮数（画面 OCR 行集合连续不变=光标到列表底）。</summary>
+    private int _itemStallRounds;
+    /// <summary>上一轮扫描看到的 OCR 行文字（判列表到底用：连续相同则光标走不动了）。</summary>
+    private string? _itemLastRows;
     /// <summary>比赛页右移找「我的联赛」卡的格数（卡排可横向滚动，最右卡初始被裁切读不到标题）。</summary>
     private int _hubScanMoves;
     /// <summary>比赛页最多右移几格再放弃（磁贴行随活动增减，最多 5~6 张；超过说明标题读不出来）。</summary>
@@ -1076,35 +1080,75 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                     await _engine.Pad.DpadRepeat(PadDir.Up, 16); // 锚定列表顶部作为扫描起点
                     _itemRow = 1;
                     _itemScanSteps = 0;
+                    _itemStallRounds = 0;
+                    _itemLastRows = null;
                     return 1200;
                 }
                 string? focusText = MyLeagueBrain.DetectFocusedItemText(frame, ocr);
-                bool isTarget = focusText is not null && ItemLineMatches(focusText, target);
-                if (isTarget)
+                // 经验值道具：用用户给的「出现目标档位即停 / 2x 见 3x 上移一格」规律（纯函数决策）；
+                // 其它类别（教练/状态）：保持焦点行文字匹配。两条路都只在命中时按 A。
+                MyLeagueBrain.ItemScanAction step;
+                if (target.Kind == MyLeagueBrain.MlItemKind.ExpBoost)
                 {
-                    _log($"[我的联赛] 逐行扫描命中目标「{DescribeItem(target)}」（焦点行：{focusText}），按 A 购买", LogLevel.Info);
-                    _engine.DumpSuspiciousFrame(frame, "item_scan_hit", $"逐行扫描命中 {DescribeItem(target)}（扫描 {_itemScanSteps} 格，焦点行：{focusText}）");
+                    step = MyLeagueBrain.ItemScanStepExpBoost(ocr, target, focusText)
+                           ?? MyLeagueBrain.ItemScanAction.Down;
+                }
+                else
+                {
+                    bool isTarget = focusText is not null && ItemLineMatches(focusText, target);
+                    step = isTarget ? MyLeagueBrain.ItemScanAction.Stop
+                                    : MyLeagueBrain.ItemScanAction.Down;
+                }
+                if (step == MyLeagueBrain.ItemScanAction.Stop)
+                {
+                    // 经验值档位以「画面首次出现即焦点在该档」为准（用户实机规律），focusText 仅参考
+                    _log($"[我的联赛] 逐行扫描命中目标「{DescribeItem(target)}」（画面出现目标档位，焦点行参考：{focusText ?? "未读"}），按 A 购买", LogLevel.Info);
+                    _engine.DumpSuspiciousFrame(frame, "item_scan_hit", $"逐行扫描命中 {DescribeItem(target)}（扫描 {_itemScanSteps} 格，画面档位命中，焦点行：{focusText ?? "未读"}）");
                     _bought.Add(target);
                     _itemScanSteps = 0;
+                    _itemStallRounds = 0;
+                    _itemLastRows = null;
                     await _engine.Pad.Confirm();
                     return 2500;
                 }
-                const int MaxItemScan = 14; // 列表约十几行，扫完仍无则回退固定行号
-                if (_itemScanSteps >= MaxItemScan)
+                // 「一直往下滑直到焦点选中目标」——2026-11-23 用户要求：不再回退固定行号盲按 A
+                // （那会买错道具）。持续 Down/Up 逐行逼近，命中才 A。两种退出：
+                //   ① 列表到底（连续 3 轮行集合不变，光标走不动）；② 扫满 MaxItemScan 格保险。
+                // 退出都**不按 A**，只记日志 + 抓帧 + 回主页重新核验，绝不误买。
+                const int MaxItemScan = 40;   // 列表可能很长，放宽扫描预算
+                const int StallToBottom = 3;  // 连续 3 轮画面不变 = 已到列表底
+                string rowsNow = string.Join("|", ocr.Lines
+                    .Where(l => l.CenterY is > 0.20 and < 0.88)
+                    .Select(l => l.Text));
+                if (_itemLastRows is not null && rowsNow == _itemLastRows)
+                    _itemStallRounds++;
+                else
+                    _itemStallRounds = 0;
+                _itemLastRows = rowsNow;
+                bool atBottom = _itemStallRounds >= StallToBottom;
+                bool overBudget = _itemScanSteps >= MaxItemScan;
+                if (atBottom || overBudget)
                 {
-                    int row = MyLeagueBrain.ExpectedItemRow(target);
-                    _log($"[我的联赛] 逐行扫描 {MaxItemScan} 格未命中（焦点：{focusText ?? "读不准"}），回退固定行号第 {row} 行", LogLevel.Warn);
-                    _engine.DumpSuspiciousFrame(frame, "item_scan_miss", $"逐行扫描 {MaxItemScan} 格未命中 {DescribeItem(target)}（焦点：{focusText ?? "读不准"}），回退固定行号");
-                    _bought.Add(target);
+                    string why = atBottom ? $"列表已到底（连续 {StallToBottom} 轮画面不变）" : $"扫满 {MaxItemScan} 格";
+                    _log($"[我的联赛] 逐行扫描未命中目标「{DescribeItem(target)}」：{why}（焦点：{focusText ?? "读不准"}），不购买、回主页重新核验", LogLevel.Warn);
+                    _engine.DumpSuspiciousFrame(frame, "item_scan_miss", $"逐行扫描未命中 {DescribeItem(target)}：{why}（焦点：{focusText ?? "读不准"}），未购买");
                     _itemScanSteps = 0;
-                    // 回到顶部再按固定行号下移，尽量修正扫描已走过的位移
-                    await _engine.Pad.DpadRepeat(PadDir.Up, 16);
-                    if (row > 1) await _engine.Pad.DpadRepeat(PadDir.Down, row - 1);
-                    await _engine.Pad.Confirm();
-                    return 2500;
+                    _itemStallRounds = 0;
+                    _itemLastRows = null;
+                    // 未买到：不碰道具行，B 退回主页让上层重新核验/再导航（绝不落 _bought）
+                    _phase = PurchasePhase.Returning;
+                    await _engine.Pad.Back();
+                    return 2200;
                 }
                 _itemScanSteps++;
-                await _engine.Pad.Dpad(PadDir.Down); // 下一行，下一轮再读
+                // Up 兜底（2x 见 3x / 焦点档位过大）：上移一格；否则下移继续滑
+                if (step == MyLeagueBrain.ItemScanAction.Up)
+                {
+                    _log($"[我的联赛] 逐行扫描：焦点档位越过目标「{DescribeItem(target)}」（焦点行：{focusText ?? "画面档位"}），上移一格逼近", LogLevel.Info);
+                    await _engine.Pad.Dpad(PadDir.Up);
+                }
+                else
+                    await _engine.Pad.Dpad(PadDir.Down);
                 return 900;
             }
             case PurchasePhase.Returning:
@@ -1252,6 +1296,8 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         _phase = PurchasePhase.Idle;
         _navAttempts = 0;
         _itemScanSteps = 0;
+        _itemStallRounds = 0;
+        _itemLastRows = null;
         if (_verifyRetries > 2)
         {
             _purchaseSatisfied = true;

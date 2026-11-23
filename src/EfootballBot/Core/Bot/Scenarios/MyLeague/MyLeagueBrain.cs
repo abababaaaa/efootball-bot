@@ -32,6 +32,8 @@ public static class MyLeagueBrain
     public enum MlItemKind { ExpBoost, CoachBoost, ConditionBoost }
     /// <summary>一个待购道具目标：类别 + 档位（x2/x3/x4；普通/好/极佳；教练强化无档位置空）。</summary>
     public sealed record MlItemTarget(MlItemKind Kind, string Level = "");
+    /// <summary>逐行扫描购买：当前帧该往哪走 / 是否停下按 A。Stop=命中目标可购买。</summary>
+    public enum ItemScanAction { Down, Up, Stop }
     /// <summary>道具行匹配结果：行文本 + 该行在物品列表区的序号（0 起，自上而下）+ 是否使用中（已购买）。</summary>
     public sealed record MlItemRow(int Index, string Text, double CenterY, bool InUse);
     /// <summary>
@@ -253,11 +255,20 @@ public static class MyLeagueBrain
         var scored = new List<(OcrLine Line, double Avg)>();
         foreach (var l in lines)
             scored.Add((l, RowMedian(l.CenterY, l.H)));
-        var top = scored.OrderByDescending(s => s.Avg).ToList();
-        // 焦点行须明显亮于次高（白底 ≈230 vs 深灰 ≈50，间隙极大）；放宽绝对线到 110
-        // 并保留差值 ≥45，兼容捕获整体偏暗的机器。
-        if (top.Count < 2 || top[0].Avg - top[1].Avg < 45 || top[0].Avg < 110) return null;
-        return top[0].Line.Text;
+        // ★2026-11-23 修复「14 格扫描全 miss」：一张焦点卡会被 OCR 拆成多行——标题行
+        // （「主教练强化1000」）+ 副标题行（「有效场数10场」），两行落在**同一条白底**上，
+        // 实机 med 都是 255。旧判据「第一名比第二名亮 ≥45」此刻 255-255=0，误判成读不准。
+        // 改为组判据：先按绝对白底线圈出所有白底行，要求**白底组整体**显著亮于其余深灰行，
+        // 焦点物品名取白底组里最靠上的一行（标题在上、副标题在下）。深灰行实测 27~56、
+        // 白底行 239~255，组间差极大，组内多行不影响判定。
+        const double WhiteFloor = 150; // 白底绝对下限（深灰 ≤56，白底 ≥239）
+        const double WhiteGap = 45;    // 白底组最低分须高出深色组最高分
+        var bright = scored.Where(s => s.Avg >= WhiteFloor).ToList();
+        if (bright.Count == 0) return null;
+        double darkestRest = scored.Where(s => s.Avg < WhiteFloor)
+                                   .Select(s => s.Avg).DefaultIfEmpty(0).Max();
+        if (bright.Min(s => s.Avg) - darkestRest < WhiteGap) return null;
+        return bright.OrderBy(s => s.Line.CenterY).First().Line.Text;
     }
 
     /// <summary>行文本里的加成数字位（游戏格式"4x"，OCR 偶见"x4"；无则 null）。</summary>
@@ -271,6 +282,38 @@ public static class MyLeagueBrain
 
     private static string? ExpDigit(string level) =>
         level switch { "3x" => "3", "4x" => "4", _ => "2" };
+    /// <summary>
+    /// 逐行扫描购买的经验值道具导航决策（2026-11-23 用户实机规律）：
+    /// 物品页行序固定 普通+(1)/好+(2)/杰出(3)/2x(4)/3x(5)/4x(6)。用户要求「出现目标档位即停」：
+    ///   · 目标 3x/4x：画面 OCR 出现「经验值3x/4x」→ Stop（焦点就在该行，按 A 购买）。
+    ///   · 目标 2x：2x 在 3x 正上方——出现「经验值3x」说明滑过头一格 → Up（上移一格），
+    ///     下一轮读到「经验值2x」→ Stop。这是用户给的 2x 兜底（2x 数字小、OCR 常读不出）。
+    ///   · 未出现任何经验值档位（还在状态加成区/已滑过）→ Down 继续滑。
+    /// 只处理 ExpBoost；其它类别由调用方按焦点行/固定行号另行处理，返回 null。
+    /// </summary>
+    /// <returns>导航决策；目标非 ExpBoost 时返回 null（交给调用方）。</returns>
+    public static ItemScanAction? ItemScanStepExpBoost(OcrResult ocr, MlItemTarget target,
+                                                       string? focusedLine = null)
+    {
+        if (target.Kind != MlItemKind.ExpBoost) return null;
+        int want = int.Parse(ExpDigit(target.Level)!); // 2/3/4
+        // 收集当前画面里所有「经验值 Nx」档位
+        var seen = new HashSet<int>();
+        foreach (var l in ocr.Lines.Where(l => l.Text.Contains("经验值")))
+            if (LevelDigit(l.Text) is { } d && int.TryParse(d, out int n) && n >= 1 && n <= 9)
+                seen.Add(n);
+        // ★用户 2026-11-23 明确规律：「画面第一次出现 4x/3x 时，焦点当时就在 4x/3x」——
+        //   逐格下滑每次只滚一行，目标档位刚进入画面那一刻就是焦点行。故直接以画面 OCR 为准：
+        //   出现目标档位 → Stop（按 A 买它）；2x 难读时用「出现 3x 往上 1 格」兜底；
+        //   只见到更大档位（滑过头）→ Up 逼近；都没有 → Down 继续滑。
+        //   focusedLine 仅作签名保留（调用方日志用），不参与决策——避免焦点探针偶发误读干扰。
+        _ = focusedLine;
+        if (seen.Contains(want)) return ItemScanAction.Stop;
+        // 2x 兜底：看到 3x（在 2x 下一行）说明滑过头 → 上移一格
+        if (seen.Any(n => n > want)) return ItemScanAction.Up;
+        return ItemScanAction.Down;
+    }
+
     /// <summary>状态档位词（OCR 常把「普通+」的加号丢掉，匹配时去掉加号）。</summary>
     private static string CondWord(string level) => level.TrimEnd('+');
     /// <summary>状态档位序：普通 0 &lt; 好 1 &lt; 杰出 2（高档位满足低档位需求）。</summary>

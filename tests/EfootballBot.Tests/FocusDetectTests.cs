@@ -31,6 +31,38 @@ public class FocusDetectTests
         return (frame, TestOcr.Run(ocr, frame));
     }
 
+    // 物品列表焦点行（逐行扫描购买）：2026-11-23 实机「14 格全 miss」失败帧。
+    // 焦点卡白底被 OCR 拆成标题+副标题两行（都是 255），旧判据「第一名须亮过第二名
+    // ≥45」把 255-255=0 误判成读不准。修复后应返回最靠上的标题行「主教练强化1000」。
+    [Fact]
+    public void DetectFocusedItemText_白底焦点卡拆成多行_仍能识别标题行()
+    {
+        var (frame, ocr) = Load("item_scan_miss_20261123.jpg");
+        Assert.Equal("主教练强化1000", MyLeagueBrain.DetectFocusedItemText(frame, ocr));
+    }
+
+    // 2026-11-23 采集帧：画面同时有 3x/4x，但白底焦点在「积极性99」行——
+    // 证明「画面出现 4x」≠「焦点在 4x」，买 4x 必须以焦点行为准，否则会误买。
+    [Fact]
+    public void DetectFocusedItemText_画面有4x但焦点在别行_不误报4x()
+    {
+        var (frame, ocr) = Load("item_scan_4x_visible_focus_other.jpg");
+        var focus = MyLeagueBrain.DetectFocusedItemText(frame, ocr);
+        Assert.NotNull(focus);
+        Assert.Contains("积极性", focus);
+        Assert.DoesNotContain("4x", focus);
+    }
+
+    // 深灰底无焦点行时保守返回 null（不误判）——对照三张历史帧。
+    [Theory]
+    [InlineData("myleague_items_user_1.png")]
+    [InlineData("focus_fail_live.png")]
+    public void DetectFocusedItemText_无白底焦点行_返回Null(string file)
+    {
+        var (frame, ocr) = Load(file);
+        Assert.Null(MyLeagueBrain.DetectFocusedItemText(frame, ocr));
+    }
+
     [Theory]
     [InlineData("focus_state_1.png", "前往比赛")]
     [InlineData("focus_state_2.png", "i")]           // i 聚焦：图标区高亮，文字磁贴全暗

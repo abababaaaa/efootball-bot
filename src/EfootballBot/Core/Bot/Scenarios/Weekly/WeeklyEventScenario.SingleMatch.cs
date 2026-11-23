@@ -56,7 +56,9 @@ public sealed partial class WeeklyEventScenario : IScenario
                     await _engine.Pad.Confirm();
                     return 2200;
                 }
-                _log($"[周活动] 赛事等级改选未成功（当前 {s.Level}），继续用当前等级", LogLevel.Warn);
+                // 措辞写清楚是「设置未成功」——旧版曾误写成「设置成功」，让人以为按配置生效了；
+                // 把目标值/当前值/后果都写明，避免误解为「已按传奇开赛」。
+                _log($"[周活动] 赛事等级设置未成功：想要「{cfg.EventLevel}」但游戏仍为「{s.Level}」，本次按当前等级开赛（非配置等级）", LogLevel.Warn);
             }
             else if (s.Level == cfg.EventLevel)
             {
@@ -114,7 +116,11 @@ public sealed partial class WeeklyEventScenario : IScenario
     {
         string wanted = _engine.Config.Weekly.EventLevel;
         var options = MyLeagueBrain.DetectDifficultyOptions(ocr);
-        var selected = MyLeagueBrain.DetectSelectedDifficulty(frame, ocr);
+        // ★优先用活动设置浮层专用蓝勾探针（实机 2026-11-23 下拉帧：勾在面板右缘 x≈0.92，
+        //   旧 DetectSelectedDifficulty 只扫词 ±0.06 窗口 → null → 直接确认 → 改选从未生效）。
+        //   旧探针作兜底兼容其它布局。
+        var selected = WeeklyBrain.DetectDropdownCheckedLevel(frame, ocr)
+                       ?? MyLeagueBrain.DetectSelectedDifficulty(frame, ocr);
         SetPhase(WkPhase.Settings); // 选完（无论是否改选）都回浮层重新核验
         // 所选不在列表 / 蓝勾未检出：按游戏默认直接确认（同我的联赛守则，绝不乱按方向）
         if (!options.Contains(wanted) || selected is null)
