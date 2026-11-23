@@ -146,8 +146,10 @@ public sealed partial class WeeklyEventScenario : IScenario
     /// <summary>
     /// 比赛计划编辑页（用户 2026-11-22 规则）：向左移动光标到左列侧边栏 → 向下选
     /// 「自动配置球员」→ A 下一步。侧边栏聚焦行由白底探针判定（<see
-    /// cref="WeeklyBrain.DetectFocusedSidebarItem"/>）：读不出高亮 = 光标还在阵容板上，
-    /// 先左×4 饱和归位；读到其它项则每次下移一行。★只按屏幕状态走，绝不盲按固定次数。
+    /// cref="WeeklyBrain.DetectFocusedSidebarItem"/>）：读到别的项就下移一行；探针读不出
+    /// （实机 plan_editor 帧里四行中位亮度都是 41，只有真聚焦行才是 255）就走确定性配方：
+    /// 左×6 饱和进侧边栏 → 上×5 饱和到最顶「战术」→ 下×4 落到最后一项「自动配置球员」→ A。
+    /// 两种路径都不会无限左移/无限下移把自己卡在原地（吸收上游 v7.4.1 修复）。
     /// </summary>
     private async Task<int> HandlePlanLineupAsync(WkScreen wk, Observation obs)
     {
@@ -158,7 +160,7 @@ public sealed partial class WeeklyEventScenario : IScenario
             if (++_attempts > 8) return await AbandonPlanFixAsync($"阵容页不可见（{wk}）");
             return 1000;
         }
-        if (++_attempts > 14) return await AbandonPlanFixAsync("阵容页导航未到位（侧边栏没走到自动配置球员）");
+        if (++_attempts > 16) return await AbandonPlanFixAsync("阵容页导航未到位（侧边栏没走到自动配置球员）");
         var focus = WeeklyBrain.DetectFocusedSidebarItem(obs.Frame, obs.Ocr);
         const string target = "自动配置球员";
         if (focus == target)
@@ -167,27 +169,45 @@ public sealed partial class WeeklyEventScenario : IScenario
             _planStep = PlanStep.Options;
             _planOptionPicked = false;
             _attempts = 0;
+            _planBlindStep = 0;
             await _engine.Pad.Confirm();
             return 2400;
         }
-        if (focus is null)
+        if (focus is not null)
         {
-            // 前两轮先左移归位（焦点多半还在阵容板的 GK 光标框上）；仍读不出高亮行就是
-            // 白底探针没吃到侧边栏行块（实机 plan_editor 帧里四行中位亮度都是 41，
-            // 只有真聚焦行才是 255）——改下×1 试探，绝不无限左移把自己卡在原地。
-            if (_attempts >= 3)
-            {
-                _log("[周活动·阵容挑战] 侧边栏高亮探针读不出：改下×1 试探（假定光标已在侧边栏）", LogLevel.Warn);
-                await _engine.Pad.Dpad(PadDir.Down);
-                return 1100;
-            }
-            _log("[周活动·阵容挑战] 焦点还在阵容板上（侧边栏无白底高亮行）：左×4 归位左列侧边栏", LogLevel.Info);
-            await _engine.Pad.DpadRepeat(PadDir.Left, 4);
-            return 1200;
+            _planBlindStep = 0; // 探针回到可读状态：盲走进度作废，改按屏幕走
+            _log($"[周活动·阵容挑战] 侧边栏焦点「{focus}」：下×1（目标：自动配置球员）", LogLevel.Info);
+            await _engine.Pad.Dpad(PadDir.Down);
+            return 1100;
         }
-        _log($"[周活动·阵容挑战] 侧边栏焦点「{focus}」：下×1（目标：自动配置球员）", LogLevel.Info);
-        await _engine.Pad.Dpad(PadDir.Down);
-        return 1100;
+        // 白底探针读不出高亮行：走确定性盲走配方（每一步都在下一帧回到这里重新判，
+        // 中途探针恢复了就立刻改按屏幕走，不会把光标推到侧边栏外面去）。
+        switch (_planBlindStep)
+        {
+            case 0:
+                _planBlindStep = 1;
+                _log("[周活动·阵容挑战] 焦点还在阵容板上（侧边栏无白底高亮行）：左×6 饱和进左列侧边栏（到头多按无害）", LogLevel.Info);
+                await _engine.Pad.DpadRepeat(PadDir.Left, 6);
+                return 1200;
+            case 1:
+                _planBlindStep = 2;
+                _log("[周活动·阵容挑战] 侧边栏高亮探针读不出：上×5 饱和到最顶「战术」再下移（到头多按无害）", LogLevel.Warn);
+                await _engine.Pad.DpadRepeat(PadDir.Up, 5);
+                return 1100;
+            case 2:
+                _planBlindStep = 3;
+                _log("[周活动·阵容挑战] 「战术」→ 下×4 落到最后一项「自动配置球员」", LogLevel.Info);
+                await _engine.Pad.DpadRepeat(PadDir.Down, 4);
+                return 1100;
+            default:
+                _planBlindStep = 0;
+                _log("[周活动·阵容挑战] 盲走到位（战术→球队→替补球员→后备球员→自动配置球员）：A 下一步", LogLevel.Info);
+                _planStep = PlanStep.Options;
+                _planOptionPicked = false;
+                _attempts = 0;
+                await _engine.Pad.Confirm();
+                return 2400;
+        }
     }
 
     /// <summary>
@@ -250,6 +270,10 @@ public sealed partial class WeeklyEventScenario : IScenario
     /// <summary>本轮是否已经按过「下×1 + A」（选项弹窗里的「重视能力值」选择）；
     /// 已按过仍见弹窗就只补 A，绝不重复下移把光标挪到别的选项上。</summary>
     private bool _planOptionPicked;
+
+    /// <summary>本轮盲走进度：0=刚左移归位；1=已上饱和到「战术」；2=已下×4 到「自动配置球员」；
+    /// 3=下一步按 A。探针一旦读出高亮行立即清零（上游 v7.4.1）。</summary>
+    private int _planBlindStep;
 
     /// <summary>「无法进行比赛」弹窗连续按 A 未消失的次数（弹窗消失即清零）。</summary>
     private int _planInvalidPresses;

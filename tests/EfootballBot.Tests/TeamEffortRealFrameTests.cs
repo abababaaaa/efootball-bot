@@ -219,4 +219,15 @@ public class TeamEffortRealFrameTests
         Assert.Equal(new[] { "球队", "替补球员", "后备球员", "自动配置球员" },
             WeeklyBrain.SquadSidebarItems);
     }
+
+    [Fact]
+    public void PlanEditor_Takeover_OnlyBeforePlanSetup()
+    {
+        // 吸收自上游 v7.4.1（用户 2026-11-22 实测：卡一整天、不会向左进侧边栏，日志每秒刷
+        // 「接管比赛计划页」）：编辑页拦截只允许在「还没进修复子流程」时接管一次。已经在
+        // MatchPlanSetup 里还必须接管 = 每帧把子步骤重置成 Lineup 并 return，手柄发不出方向键。
+        Assert.True(WeeklyBrain.ShouldTakeOverPlanEditor(planEditorOnScreen: true, alreadyFixingPlan: false));
+        Assert.False(WeeklyBrain.ShouldTakeOverPlanEditor(true, alreadyFixingPlan: true));
+        Assert.False(WeeklyBrain.ShouldTakeOverPlanEditor(false, alreadyFixingPlan: false));
+    }
 }

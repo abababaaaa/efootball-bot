@@ -56,6 +56,15 @@ public static partial class WeeklyBrain
            (ocr.ContainsJoined("不能在后续比赛中使用") &&
             ocr.FindButton("OK") is { } ok && ok.CenterY < 0.85);
 
+    /// <summary>
+    /// 比赛计划编辑页 / 自动配置选项弹窗是否要「接管」进修复子流程（2026-11-22 用户实测回归）：
+    /// 只有还没进 MatchPlanSetup 时才接管；已经在子流程里必须把这一帧交回 PlanStep 状态机。
+    /// 旧写法无条件接管并立刻 return，等于每一帧都把子步骤重置成 Lineup，手柄一个方向键
+    /// 都发不出去、屏幕永远停在编辑页（用户实测卡一整天）。吸收自上游 v7.4.1 修复。
+    /// </summary>
+    public static bool ShouldTakeOverPlanEditor(bool planEditorOnScreen, bool alreadyFixingPlan)
+        => planEditorOnScreen && !alreadyFixingPlan;
+
     /// <summary>左列侧边栏固定项「自动配置球员」（x&lt;0.30 限定在侧边栏列，排除正文同名词）。</summary>
     private static bool HasSquadSidebar(OcrResult ocr)
         => ocr.Words.Any(w => w.CenterX < 0.30 && w.NormText.Contains("自动配置球员"));
