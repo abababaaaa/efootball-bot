@@ -121,6 +121,26 @@ public static partial class MatchBrain
             }
             case MatchScreen.LeaguePage:
             {
+                // v8.0.16 双保险：共享分类已把周活动/合约页排除出 LeaguePage，但万一有
+                // 其它模块页仍被判进来，这些页底栏也印「进入/开始/继续」，直接按 A 会误进活动。
+                // 只有 OCR 带联赛上下文才允许推进；否则 Wait → 连续 8 轮后 B 自愈。
+                // ★词表含类别选择页（v8.0.9 修的「对阵AI类别」卡死），否则会误伤它。
+                bool leagueContext =
+                    ocr.ContainsJoined("我的联赛") || ocr.ContainsJoined("前往比赛") ||
+                    ocr.ContainsJoined("下个赛季") || ocr.ContainsJoined("赛程表") ||
+                    ocr.ContainsJoined("比赛记录") || ocr.ContainsJoined("排名") ||
+                    ocr.ContainsJoined("兑换积分") || ocr.ContainsJoined("赛季纪") ||
+                    ocr.ContainsJoined("对阵AI类别") || ocr.ContainsJoined("对阵玩家类别") ||
+                    ocr.ContainsJoined("AI类别") || ocr.ContainsJoined("玩家类别") ||
+                    // 联赛流程专属的强推进词：周活动卡片页底栏用的是「进入/开始/继续」，
+                    // 这些词不放行；但「下一步」是联赛起始/结算页的历史契约（见
+                    // MyLeagueBrainTests.Decide_LeaguePage_NextStep_Confirms），必须保留。
+                    ocr.ContainsJoined("下一步") || ocr.ContainsJoined("开始比赛") ||
+                    ocr.ContainsJoined("开赛") || ocr.ContainsJoined("进入比赛");
+                if (!leagueContext)
+                    return screenStreak >= StuckStreak
+                        ? new MatchAction(MatchActionKind.GamepadBack, 3000, "非联赛上下文，B 返回自愈")
+                        : MatchAction.Wait(2500);
                 // 「前往比赛」= 联赛主页主按钮；「下个赛季」= 赛季结束替换词（实机 next_season：
                 // 前往比赛位置变为"下个赛季"，另有"前往下个赛季"，含"下个赛季"即覆盖）
                 // 「对阵AI类别/对阵玩家类别」= eFootball™联赛类别选择页（实机 2026-11-22：

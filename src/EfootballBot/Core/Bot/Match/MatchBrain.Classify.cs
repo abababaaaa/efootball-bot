@@ -51,8 +51,11 @@ public static partial class MatchBrain
     /// 具体内容）与加载期 OCR 退化的标志帧兜底。New Playing Style 网格页不在门控内
     /// （标题词唯一，有专用判定）。
     /// <paramref name="pitchLike"/> 来自草地绿占比探针（Scenario 计算，
-    /// <see cref="ScreenProbe.LooksLikePitch"/>）：画面还是球场（庆祝/回放过场）时一律按
-    /// 比赛中处理，先于一切菜单类判定——2026-11-20 实机进球 CG 被判 MatchHub 导致虚计一场。
+    /// <see cref="ScreenProbe.LooksLikePitch"/>）：画面还是球场（庆祝/回放过场）时按
+    /// 比赛中处理。位置在「强证据弹窗/菜单判定之后、磁贴与主页词兜底之前」——
+    /// 前面那些判定都要求固定标题词或按钮词，草地帧凑不齐；而 IsMatchHub 的磁贴词 +
+    /// 顶部含「比赛」的行很松，必须先被草地守卫拦住（2026-11-20 实机进球 CG 被判
+    /// MatchHub 导致虚计一场）。注：旧注释写「先于一切菜单类判定」与实现不符，已更正。
     /// </summary>
     public static MatchScreen Classify(IReadOnlyList<YoloDetection> dets, OcrResult ocr,
         bool topRightHasContent = false, bool allowCornerInMatch = true, bool mostlyLightPage = false,
@@ -252,7 +255,7 @@ public static partial class MatchBrain
         // 覆盖"弹窗叠在主页上、主页词同时可见"的情况（2026-10-11 用户实机回归）。
         if (ocr.ContainsJoined("前往比赛") || ocr.ContainsJoined("下个赛季"))
             return MatchScreen.LeaguePage;
-        if (Count("btn_back") >= 1) return MatchScreen.LeaguePage;
+        // 「btn_back→LeaguePage」兜底已下移到所有 OCR 兜底之后（v8.0.16），见下方说明。
         // 比赛页无 YOLO 训练特征时的兜底：含"我的联赛"且非主菜单（主菜单含"退出游戏"）
         bool hasMyLeague = ocr.Lines.Any(l => l.Text.Replace(" ", "").Contains("我的联赛"));
         bool hasExit = ocr.Lines.Any(l => l.Text.Replace(" ", "").Contains("退出游戏"));
@@ -264,6 +267,17 @@ public static partial class MatchBrain
         // 弹窗/按钮判定都没命中，认作主菜单比盲等安全。
         // ★不放在 main_menu 主判定处：否则弹窗页会被抢判成 MainMenu，反而推不动弹窗。
         if (HasMainMenuNavBar(ocr)) return MatchScreen.MainMenu;
+        // 联赛内部页兜底（v8.0.16 下移到此）：重训模型把 btn_back 召回提得很高，
+        // 周活动卡片列表页、国服合约页同样带左下返回按钮 —— 旧位置（紧接「前往比赛」
+        // 之后）会把它们判成 LeaguePage，Decide 再因底栏「进入/开始/继续」盲按 A 误进活动；
+        // 而且会遮蔽上面 hasMyLeague→MatchHub 与 HasMainMenuNavBar→MainMenu 两条兜底。
+        // ★显式排除其它模块页：周活动列表页固定带「对阵AI/对阵玩家」胶囊（4 帧实机验证），
+        //   合约页带「特殊球员名单/组合包」。不能用「合约」二字 —— 主菜单也有「合约」磁贴。
+        // 放到这一步后，主菜单/比赛页的 OCR 证据都已先认走，剩下的才是真联赛内部页。
+        bool otherModulePage =
+            (ocr.ContainsJoined("对阵AI") && ocr.ContainsJoined("对阵玩家")) ||
+            ocr.ContainsJoined("特殊球员名单") || ocr.ContainsJoined("组合包");
+        if (!otherModulePage && Count("btn_back") >= 1) return MatchScreen.LeaguePage;
         // 比赛辅助判据②：右上角（AI 徽标区）有画面内容——重播/庆祝/镜头切换等
         // 无比分框可读的比赛帧兜底为比赛中（只等待不按键）；菜单右上角为纯黑不会命中。
         // 无比赛上下文（allowCornerInMatch=false）时不兜底——菜单页右上角也可能有内容，
