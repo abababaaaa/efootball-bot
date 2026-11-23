@@ -356,6 +356,42 @@ public static class MyLeagueBrain
         return count;
     }
 
+    // ---------------- 联赛主页固定特征词（用户 2026-11-22 实机截图红框标注）----------------
+    // 那张主页截图用红框圈出了这一批固定词：前往比赛 / 排名 / 比赛记录 / 最近 5 场比赛 /
+    // 兑换积分 / 赛季纪录 / 赛事信息 / 建议，另外还有赛程表。版面固定、随赛季不会变。
+    // 用户要求「判断差不多就可以确定」：不必把这些词全读全，命中任意若干个就认作我的联赛主页。
+    // 用途：比赛页按 A 进卡后核验"确实进了我的联赛"，避免 OCR 偶发漏读某几个大字时
+    // 把正确进入误判成进错卡 B 退出。
+    // ★不收单个「赛事」「排名」这种过短词：赛事等级页/排名页也会命中，配合 ≥2 个词 +
+    // 场景层的其它模块特征排除才安全。
+    /// <summary>主页固定特征词（写全词，OCR 归一化会去掉空格，所以「最近 5 场比赛」写作「最近5场比赛」）。</summary>
+    public static readonly string[] LeagueHomeFixedWords =
+    {
+        "前往比赛", "下个赛季", "排名", "比赛记录", "最近5场比赛",
+        "兑换积分", "赛季纪录", "赛季记录", "赛事信息", "建议", "赛程表",
+    };
+    /// <summary>
+    /// 其中版面专有性最强的一批词：「排名」「建议」「前往比赛」在别的板块页也可能出现，
+    /// 光靠它们凑够两个词不足以确认是主页；必须至少有一个这种主页专有词才认。
+    /// </summary>
+    private static readonly string[] LeagueHomeStrongWords =
+    {
+        "比赛记录", "最近5场比赛", "兑换积分", "赛季纪录", "赛季记录", "赛事信息", "赛程表",
+    };
+
+    /// <summary>这一帧命中了几个主页固定特征词（去重按词表条目，同一词多处只算一次）。</summary>
+    public static int CountLeagueHomeWords(OcrResult ocr)
+        => LeagueHomeFixedWords.Count(w => ocr.ContainsJoined(w));
+
+    /// <summary>
+    /// 「差不多就是我的联赛主页」：命中 ≥2 个固定特征词，且其中至少一个是主页专有强词。
+    /// OCR 漏读一两个大字不影响判定；只在通用词（排名/建议/前往比赛）上凑够两个不认，
+    /// 避免周活动/天梯页蹭到一两个通用词就被当成主页、错过 B 退回。
+    /// </summary>
+    public static bool LooksLikeLeagueHome(OcrResult ocr, int minHits = 2)
+        => CountLeagueHomeWords(ocr) >= Math.Max(2, minHits) &&
+           LeagueHomeStrongWords.Any(w => ocr.ContainsJoined(w));
+
     // ---------------- 联赛主页光标检测与智能导航 ----------------
     /// <summary>主页可聚焦磁贴（固定 UI 词；「i」为前往比赛旁的信息图标，无文字不可检）。</summary>
     public static readonly (string Keyword, string Name)[] HomeTiles =

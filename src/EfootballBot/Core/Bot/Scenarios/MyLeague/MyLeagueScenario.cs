@@ -252,10 +252,6 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                                 or MatchScreen.LeagueSquadPage or MatchScreen.PointsPage or MatchScreen.ItemList
                                 or MatchScreen.MatchStartPage or MatchScreen.InMatch or MatchScreen.DifficultyPage
                                 or MatchScreen.FullTime or MatchScreen.MainMenu;
-            // 我的联赛主页专有词（排名/比赛记录/最近5场等固定词，用户实机确认）：
-            // 既用于确认"正确进了我的联赛"，也用于避免主页被其它 Brain 误认成进错页。
-            bool isMyLeagueHome = obs.Ocr.ContainsJoined("比赛记录") || obs.Ocr.ContainsJoined("最近5场比赛")
-                                  || (obs.Ocr.ContainsJoined("排名") && obs.Ocr.ContainsJoined("赛程表"));
             // 误入比赛页第一张「锦标赛」卡（用户 2026-11-23 实机："经常会误入第一个卡片锦标赛然后卡死"）：
             // 那一页没有任何模块特征词，Weekly/AiLadder/Peak 三个 Brain 全认不出，旧守卫因此不触发，
             // 共享层「HasConfirm 一律按 A」就在这页乱按 → 卡死。这里补一组锦标赛页专有词
@@ -263,26 +259,32 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
             // 读不出这些词也不要紧——下面的「3 帧确认不了就 B」兜底同样能脱困。
             bool tournamentPage = obs.Ocr.ContainsJoined("自定义锦标赛") || obs.Ocr.ContainsJoined("参加锦标赛")
                                   || obs.Ocr.ContainsJoined("淘汰赛") || obs.Ocr.ContainsJoined("小组赛");
+            // 其它模块页已被 Brain/特征词认出时，主页固定词不作为确认依据
+            bool noOtherModule = !otherBrain && !eventFeature && !tournamentPage;
+            // 用户 2026-11-22 实机截图红框标出的主页固定词（前往比赛/排名/比赛记录/最近5场比赛/
+            // 兑换积分/赛季纪录/赛事信息/建议/赛程表）版面固定、基本不变，用户要求"差不多就可以确定"：
+            // 命中 ≥2 个即确认进了我的联赛主页，不必把大字全读全。旧版只认「比赛记录/最近5场/
+            // 排名+赛程表」，OCR 漏读那几个大字时通用兜底会把**正确进入**的主页也 B 退出。
+            // 另保留一条唯一词强证据：共享分类里「前往比赛/下个赛季」只出现在联赛主页，
+            // 单独读到它（且分类为 LeaguePage）也确认无误。
+            bool mainButton = obs.Ocr.ContainsJoined("前往比赛") || obs.Ocr.ContainsJoined("下个赛季");
+            // ★词表证据不附加 noOtherModule：v7.5.1 实机事故的教训就是主页专有词命中却被
+            // 其它模块 Brain 误认成残留页、无限 B 退回。命中 ≥2 个固定词是无条件确认；
+            // 只有"仅读到一枚主按钮词"这种弱证据才要求排除其它模块特征。
+            bool isMyLeagueHome = MyLeagueBrain.LooksLikeLeagueHome(obs.Ocr) ||
+                                  (noOtherModule && mainButton && screen == MatchScreen.LeaguePage);
             // 比赛页磁贴行（3~4 张卡时至少读出两枚标题；单枚「锦标赛」是子页而不是磁贴行）
             bool isRealHub = screen == MatchScreen.MatchHub &&
                              (HubTileLocator.VisibleTitleCount(obs.Ocr) >= 2 ||
                               obs.Ocr.Lines.Any(l => l.Text.Replace(" ", "").Contains("我的联赛")));
-            // 联赛主页的第二条确认路径：共享分类里「前往比赛/下个赛季」只出现在我的联赛主页
-            // （见 MatchBrain.Classify 的注释与判定），比「比赛记录/最近5场」大字更常被读全。
-            // 只认专有词时，主页 OCR 偶发漏读大字 → 3 帧后 B 把**正确进入**的联赛主页也退掉了，
-            // 这是 v8.0.10 通用兜底带来的回归风险。补上这条后，只要主页按钮读得到就确认无误。
-            // 加 !otherBrain/!eventFeature/!tournamentPage 是防止别的模块页也带「前往比赛」时被误放行。
-            bool leagueHomeByPush = screen == MatchScreen.LeaguePage &&
-                                    (obs.Ocr.ContainsJoined("前往比赛") || obs.Ocr.ContainsJoined("下个赛季")) &&
-                                    !otherBrain && !eventFeature && !tournamentPage;
             // 正确进了我的联赛主页 / 本模块流程 / 回到比赛页 → 结束监视，清退回计数
-            if (isMyLeagueHome || isLeagueFlow || isRealHub || leagueHomeByPush)
+            if (isMyLeagueHome || isLeagueFlow || isRealHub)
             {
                 _enteredFromHub = false;
                 _wrongCardBacks = 0;
                 _entryVerifyRounds = 0;
                 _entryDialogAdvances = 0;
-                if (isMyLeagueHome || leagueHomeByPush) _hubWrongEntries = 0; // 真进对了：错卡计数归零
+                if (isMyLeagueHome) _hubWrongEntries = 0; // 真进对了：错卡计数归零
             }
             else if (tournamentPage || otherBrain || eventFeature)
             {
