@@ -405,8 +405,13 @@ public static partial class MatchBrain
            || ocr.ContainsJoined("赛事等级") || ocr.ContainsJoined("Team Effort")
            || ocr.ContainsJoined("巡回活动") || ocr.ContainsJoined("结束倒数")
            || ocr.ContainsJoined("特殊球员名单") || ocr.ContainsJoined("组合包")
-           || ocr.ContainsJoined("淘汰赛") || ocr.ContainsJoined("小组赛")
-           || ocr.ContainsJoined("自定义锦标赛") || ocr.ContainsJoined("参加锦标赛");
+           // 锦标赛板块页（实机 2026-11-23 用户截图）：标题「锦标赛」+ 卡片
+           // 「Championship Club Event / 已结束 / Round 3 Ranking Event」+ 卡上「查看」，
+           // 页面根本没有「淘汰赛/小组赛」词 —— 只靠赛事阶段词会漏，必须认标题词。
+           // 「锦标赛」已覆盖「自定义锦标赛/参加锦标赛」；英文卡名兜住标题 OCR 漏读。
+           || ocr.ContainsJoined("锦标赛")
+           || ocr.ContainsJoined("Championship")
+           || ocr.ContainsJoined("淘汰赛") || ocr.ContainsJoined("小组赛");
 
     private static MatchAction PeriodicBackAction(int screenStreak, int threshold, string backTarget, int period = 5)
     {

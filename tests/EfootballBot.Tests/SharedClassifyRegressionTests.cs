@@ -114,6 +114,16 @@ public class SharedClassifyRegressionTests
     }
 
     [Fact]
+    public void LeaguePage_锦标赛卡片页_无赛段词也拦()
+    {
+        // 实机 2026-11-23 用户截图：标题「锦标赛」+ 卡片「Championship Club Event / 已结束 /
+        // Round 3 Ranking Event」+ 卡上「查看」+ 左下「B 返回」——没有淘汰赛/小组赛词，
+        // 只靠赛段词会漏，必须靠标题词/英文卡名兜住，绝不按 A 点「查看」误进锦标赛
+        var cardPage = Ocr("锦标赛", "Championship Club Event", "已结束", "Round 3 Ranking Event", "查看", "返回");
+        Assert.Equal(MatchActionKind.Wait, MatchBrain.Decide(MatchScreen.LeaguePage, cardPage, 1).Kind);
+    }
+
+    [Fact]
     public void LeaguePage_联赛子页只印继续_仍按A推进()
     {
         // 用户确认：真联赛子页底栏只印「继续/进入」时，按 A 才是对的；
