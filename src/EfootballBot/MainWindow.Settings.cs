@@ -930,6 +930,21 @@ public partial class MainWindow
         }
     }
 
+    /// <summary>打开训练帧目录 data\trainingframes\（不存在则先创建）。</summary>
+    private void BtnOpenTrainFrames_Click(object sender, RoutedEventArgs e)
+    {
+        try
+        {
+            string dir = Path.Combine(Core.System.AppPaths.DataDir, "trainingframes");
+            Directory.CreateDirectory(dir);
+            _ = OpenPathAsync(dir);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"打开训练帧目录失败：{ex.Message}", LogLevel.Warn);
+        }
+    }
+
     // ================= 一键诊断（原 DiagReport.bat 内置版） =================
 
     /// <summary>诊断报告输出根目录：data\DiagReport\（数据全部收在程序目录内）。</summary>

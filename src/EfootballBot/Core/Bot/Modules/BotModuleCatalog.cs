@@ -95,6 +95,13 @@ public static class BotModuleCatalog
         },
         new()
         {
+            Id = ModuleIds.IntlTrainFrames, Server = ServerRegion.Intl, Kind = ModuleKind.Scenario,
+            DisplayName = "训练帧采集",
+            Summary = "自动导航到主菜单/比赛页/周活动/锦标赛/联赛主页抓训练样本后停止（开发者选项）",
+            Factory = (engine, log) => new TrainingFrameCollectScenario(engine, log),
+        },
+        new()
+        {
             Id = ModuleIds.IntlPreMatch, Server = ServerRegion.Intl, Kind = ModuleKind.Tool,
             DisplayName = "赛前快捷设置",
             Summary = "启动国际服本体/打开游戏自带设置工具/打开游戏目录",

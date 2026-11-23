@@ -2570,6 +2570,37 @@
                             </Grid>
                         </StackPanel>
                     </Border>
+                    <Border Style="{StaticResource Card}" Margin="0,2,0,12">
+                        <StackPanel>
+                            <StackPanel Orientation="Horizontal" Margin="0,0,0,8">
+                                <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                <TextBlock Text="训练帧自动采集" Style="{StaticResource H2}"/>
+                            </StackPanel>
+                            <Grid Margin="0,6,0,0" MaxWidth="560" HorizontalAlignment="Left">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}" TextWrapping="Wrap"
+                                           Text="点开始后机器人自己导航到主菜单、比赛页、周活动卡片、锦标赛卡片、我的联赛主页，每页抓一张训练样本，抓完自动停止。手柄占用期间请勿玩游戏。"/>
+                            </Grid>
+                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
+                                <Button x:Name="BtnCollectTrainFrames" Content="开始采集训练帧" Height="30"
+                                        Style="{StaticResource GhostBtn}" Click="BtnCollectTrainFrames_Click"/>
+                                <Button x:Name="BtnOpenTrainFrames" Content="打开训练帧目录" Margin="10,0,0,0" Height="30"
+                                        Style="{StaticResource GhostBtn}" Click="BtnOpenTrainFrames_Click"/>
+                            </StackPanel>
+                            <Grid Margin="0,8,0,0" MaxWidth="560" HorizontalAlignment="Left">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
+                                <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="保存到 exe 同级 "/><Run Text="data\trainingframes\日期\"/><Run Text="，文件名带页面标记，可直接挑进训练集标注。再点一次按钮＝停止。"/></TextBlock>
+                            </Grid>
+                        </StackPanel>
+                    </Border>
                     </StackPanel>
                 </StackPanel>
             </ScrollViewer>

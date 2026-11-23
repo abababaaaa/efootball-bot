@@ -1835,6 +1835,14 @@ public sealed class BotEngine : IDisposable
         var obs = new Observation(f, ocr, dets);
         _lastObs = obs;
         DumpFrame(f);
+        // 训练素材主动收集（fork 侧）：命中主要页面时转储到 data\suspicious\日期\ 当 YOLO 样本。
+        // 只在开关开启时判定；判定器纯读 OCR/dets、不读回不改行为，失败静默（见 DumpSuspiciousFrame）。
+        if (_cfg.Learning.CollectSuspicious)
+        {
+            var training = MatchBrain.CollectTrainingFrame(ocr, dets);
+            if (training is { } t)
+                DumpSuspiciousFrame(f, t.Tag, t.Reason);
+        }
         // ---------------- 事件派发 ----------------
         bool yoloOn = _perception.YoloEnabled;
         string summary = $"OCR {ocr.Words.Count} 词" + (yoloOn ? $" / 检测 {dets.Count} 框" : "");
@@ -1953,6 +1961,44 @@ public sealed class BotEngine : IDisposable
                     $"tag={safeTag}\nreason={reason}\ntime={DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             }
             catch { /* 收集失败静默，绝不影响挂机 */ }
+        });
+    }
+
+    /// <summary>
+    /// 训练帧采集专用落盘（v8.1.1）：与 DumpSuspiciousFrame 的区别——不受 CollectSuspicious 开关与
+    /// 节流限制（开发者选项按钮是显式触发，要保证「按一次按钮、每个目标页抓到一张」），
+    /// 写到独立的 data\trainingframes\日期\ 目录，文件名带 tag 便于直接挑进训练集。
+    /// 只写图 + 同名 reason 文本，不读回、不改任何判定/动作，失败静默。
+    /// </summary>
+    public void DumpTrainingFrame(FrameData f, string tag, string reason)
+    {
+        var pixels = (byte[])f.Bgra.Clone();
+        string dir = Path.Combine(AppPaths.DataDir, "trainingframes", DateTime.Now.ToString("yyyyMMdd"));
+        string safeTag = string.IsNullOrWhiteSpace(tag) ? "frame" : tag.Replace(' ', '_');
+        string stamp = DateTime.Now.ToString("HHmmss_fff");
+        _ = Task.Run(() =>
+        {
+            try
+            {
+                Directory.CreateDirectory(dir);
+                string basePath = Path.Combine(dir, $"{stamp}_{safeTag}");
+                var info = new SKImageInfo(f.Width, f.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
+                unsafe
+                {
+                    fixed (byte* p = pixels)
+                    {
+                        using var bmp = new SKBitmap();
+                        if (!bmp.InstallPixels(info, (nint)p, info.RowBytes)) return;
+                        using var img = SKImage.FromBitmap(bmp);
+                        using var data = img.Encode(SKEncodedImageFormat.Jpeg, 90);
+                        using var fs = File.Create(basePath + ".jpg");
+                        data.SaveTo(fs);
+                    }
+                }
+                File.WriteAllText(basePath + ".txt",
+                    $"tag={safeTag}\nreason={reason}\ntime={DateTime.Now:yyyy-MM-dd HH:mm:ss}");
+            }
+            catch { /* 采集失败静默，绝不影响挂机 */ }
         });
     }
 
