@@ -148,17 +148,28 @@ public static class PopupBrain
 
     /// <summary>
     /// 是不是「要覆盖目前的物品吗？」这类替换确认弹窗（购买道具时目标格已有同类物品）。
-    /// 只认弹窗文字带里的整词含「覆盖」——按钮词常漏读，标题一定读得到；
-    /// 带外（页眉/正文/角落提示）的「覆盖」不算。
+    /// ★这是共享层判据，所有模块的 HasConfirm 都会走，所以必须收紧，否则别的模块页面上
+    /// 出现「覆盖范围：全部球员」这类说明文字就会被误判成替换弹窗、白按一次「上 + A」：
+    /// ① 词必须落在弹窗文字带内；② 同屏必须读到「取消」按钮词（替换弹窗一定有）；
+    /// ③ 词必须是这句标题的说法（含 目前/物品/吗）或按钮整词「覆盖」，单看「覆盖」二字不算。
+    /// 标题被整行合并读长（超过 TitleMaxChars）时这里会漏，但 Classify 的全文拼接判据
+    /// 「覆盖目前的物品 / 要覆盖」仍会把它判成 PurchaseDialog，双保险不丢。
     /// </summary>
     public static bool IsReplaceDialog(OcrResult ocr)
     {
+        // 替换弹窗必带「取消」；没有就不是（也避免把普通说明页当弹窗）
+        if (!ocr.ContainsJoined("取消")) return false;
         foreach (var w in ocr.MergedWords)
         {
             if (!InDialogBand(w)) continue;
             string t = w.NormText;
             if (t.Length == 0 || t.Length > TitleMaxChars) continue;
-            if (t.Contains("覆盖", StringComparison.Ordinal)) return true;
+            if (!t.Contains("覆盖", StringComparison.Ordinal)) continue;
+            if (t.Contains("目前", StringComparison.Ordinal) ||
+                t.Contains("物品", StringComparison.Ordinal) ||
+                t.Contains("吗", StringComparison.Ordinal) ||
+                t.Equals("覆盖", StringComparison.Ordinal))
+                return true;
         }
         return false;
     }

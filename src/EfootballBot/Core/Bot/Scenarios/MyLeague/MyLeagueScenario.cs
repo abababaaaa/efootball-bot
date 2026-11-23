@@ -88,8 +88,11 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
     private bool _enteredFromHub;
     /// <summary>按 A 之后的核验轮数：认不出"确实进了我的联赛"时等几帧再判错（加载/过渡帧不算）。</summary>
     private int _entryVerifyRounds;
-    /// <summary>进卡后遇到的第一个弹窗是否已交共享决策推进过（只让一次，再推不动就按错卡退回）。</summary>
-    private bool _entryDialogAdvanced;
+    /// <summary>
+    /// 进卡后已交共享决策推进过的弹窗次数（上限 3；超过就按错卡 B 退回）。
+    /// 用计数而不是布尔：进联赛后常连着弹两三个奖励/预告窗，只放行一次会把第二个 B 掉。
+    /// </summary>
+    private int _entryDialogAdvances;
     /// <summary>进错页后连续 B 退回仍停在该页的次数，达阈值换招「上→A→B」（同 B 逃生换招）。</summary>
     private int _wrongCardBacks;
     /// <summary>智能接管提示是否已记录（每次运行一次）。</summary>
@@ -253,10 +256,6 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
             // 既用于确认"正确进了我的联赛"，也用于避免主页被其它 Brain 误认成进错页。
             bool isMyLeagueHome = obs.Ocr.ContainsJoined("比赛记录") || obs.Ocr.ContainsJoined("最近5场比赛")
                                   || (obs.Ocr.ContainsJoined("排名") && obs.Ocr.ContainsJoined("赛程表"));
-            // 比赛页磁贴行（3~4 张卡时至少读出两枚标题；单枚「锦标赛」是子页而不是磁贴行）
-            bool isRealHub = screen == MatchScreen.MatchHub &&
-                             (HubTileLocator.VisibleTitleCount(obs.Ocr) >= 2 ||
-                              obs.Ocr.Lines.Any(l => l.Text.Replace(" ", "").Contains("我的联赛")));
             // 误入比赛页第一张「锦标赛」卡（用户 2026-11-23 实机："经常会误入第一个卡片锦标赛然后卡死"）：
             // 那一页没有任何模块特征词，Weekly/AiLadder/Peak 三个 Brain 全认不出，旧守卫因此不触发，
             // 共享层「HasConfirm 一律按 A」就在这页乱按 → 卡死。这里补一组锦标赛页专有词
@@ -264,14 +263,26 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
             // 读不出这些词也不要紧——下面的「3 帧确认不了就 B」兜底同样能脱困。
             bool tournamentPage = obs.Ocr.ContainsJoined("自定义锦标赛") || obs.Ocr.ContainsJoined("参加锦标赛")
                                   || obs.Ocr.ContainsJoined("淘汰赛") || obs.Ocr.ContainsJoined("小组赛");
+            // 比赛页磁贴行（3~4 张卡时至少读出两枚标题；单枚「锦标赛」是子页而不是磁贴行）
+            bool isRealHub = screen == MatchScreen.MatchHub &&
+                             (HubTileLocator.VisibleTitleCount(obs.Ocr) >= 2 ||
+                              obs.Ocr.Lines.Any(l => l.Text.Replace(" ", "").Contains("我的联赛")));
+            // 联赛主页的第二条确认路径：共享分类里「前往比赛/下个赛季」只出现在我的联赛主页
+            // （见 MatchBrain.Classify 的注释与判定），比「比赛记录/最近5场」大字更常被读全。
+            // 只认专有词时，主页 OCR 偶发漏读大字 → 3 帧后 B 把**正确进入**的联赛主页也退掉了，
+            // 这是 v8.0.10 通用兜底带来的回归风险。补上这条后，只要主页按钮读得到就确认无误。
+            // 加 !otherBrain/!eventFeature/!tournamentPage 是防止别的模块页也带「前往比赛」时被误放行。
+            bool leagueHomeByPush = screen == MatchScreen.LeaguePage &&
+                                    (obs.Ocr.ContainsJoined("前往比赛") || obs.Ocr.ContainsJoined("下个赛季")) &&
+                                    !otherBrain && !eventFeature && !tournamentPage;
             // 正确进了我的联赛主页 / 本模块流程 / 回到比赛页 → 结束监视，清退回计数
-            if (isMyLeagueHome || isLeagueFlow || isRealHub)
+            if (isMyLeagueHome || isLeagueFlow || isRealHub || leagueHomeByPush)
             {
                 _enteredFromHub = false;
                 _wrongCardBacks = 0;
                 _entryVerifyRounds = 0;
-                _entryDialogAdvanced = false;
-                if (isMyLeagueHome) _hubWrongEntries = 0; // 真进对了：错卡计数归零
+                _entryDialogAdvances = 0;
+                if (isMyLeagueHome || leagueHomeByPush) _hubWrongEntries = 0; // 真进对了：错卡计数归零
             }
             else if (tournamentPage || otherBrain || eventFeature)
             {
@@ -298,20 +309,23 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                 // 不右移就会在同一张卡上再按一次 A，永远进同一个错页。
                 _enteredFromHub = false;
                 _entryVerifyRounds = 0;
+                _entryDialogAdvances = 0;
                 _hubForceRight = true;
                 _hubWrongEntries++;
                 return 2200;
             }
             else if ((screen is MatchScreen.HasConfirm or MatchScreen.PurchaseDialog
-                      or MatchScreen.KeyMatchDialog) && !_entryDialogAdvanced)
+                      or MatchScreen.KeyMatchDialog) && _entryDialogAdvances < 3 &&
+                     HasDialogButtonWord(obs.Ocr))
             {
-                // 认不出是哪个页（加载/过渡/叫不出名字的板块页）：先等两帧再判错。
-                _entryVerifyRounds++;
-                // 普通弹窗（HasConfirm/PurchaseDialog/关键比赛预告）先让共享决策推进一次——
-                // 进联赛后常先弹赛季奖励/关键比赛预告，那是正常流程，不能一上来就 B 掉。
-                // 这里不 return：直接往下走，交共享决策按 A 推进这一轮。
-                _entryDialogAdvanced = true;
-                _log($"[我的联赛] 进卡后先弹窗（{screen}），交共享决策推进一次后继续核验", LogLevel.Info);
+                // 真弹窗（OCR 里确实读到按钮词）才交共享决策推进：进联赛后常连着弹
+                // 两三个奖励/关键比赛预告窗，只放行一次会把第二个 B 掉。
+                // 锦标赛等错页即使被 YOLO 误判成 HasConfirm，通常没有按钮词 → 不放行，
+                // 直接落到下面的 3 帧兜底 B，不会在错页上连按 A（这正是"卡死"的表现）。
+                // 上限 3 次：弹窗链再长也到此为止，之后按错卡处理，避免无限推进。
+                // 这里不 return、也不累加 _entryVerifyRounds：正常弹窗链不该被超时打断。
+                _entryDialogAdvances++;
+                _log($"[我的联赛] 进卡后弹窗（{screen}），交共享决策推进（第 {_entryDialogAdvances}/3 次）后继续核验", LogLevel.Info);
             }
             else
             {
@@ -328,7 +342,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                 await _engine.Pad.Back();
                 _enteredFromHub = false;
                 _entryVerifyRounds = 0;
-                _entryDialogAdvanced = false;
+                _entryDialogAdvances = 0;
                 _hubForceRight = true;
                 _hubWrongEntries++;
                 return 2200;
@@ -524,7 +538,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                 _hubScanMoves = 0;
                 _enteredFromHub = true; // 下一帧核验是否真进了我的联赛，进错则 B 退回
                 _entryVerifyRounds = 0;
-                _entryDialogAdvanced = false;
+                _entryDialogAdvances = 0;
                 return 2800;
             }
             // 读不到标题：首次先归位最左，再逐格右移切换焦点（目标卡被焦点选中时才会滚入并读全）
@@ -1289,6 +1303,16 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         MyLeagueBrain.MlItemKind.ConditionBoost => $"状态加成 {t.Level}",
         _ => t.Kind.ToString(),
     };
+
+    /// <summary>
+    /// 这一屏是否真有「弹窗按钮词」。进卡核验时用：真弹窗（奖励/预告/确认）一定带一枚
+    /// 确定/取消/OK 之类的按钮；锦标赛等板块页即使被 YOLO 误判成 HasConfirm，通常没有
+    /// 这种按钮词 —— 不放行就不会在错页上连按 A。
+    /// </summary>
+    private static bool HasDialogButtonWord(OcrResult ocr) =>
+        ocr.ContainsJoined("取消") || ocr.ContainsJoined("确定") || ocr.ContainsJoined("确认")
+        || ocr.ContainsJoined("OK") || ocr.ContainsJoined("下一步") || ocr.ContainsJoined("继续")
+        || ocr.ContainsJoined("领取") || ocr.ContainsJoined("覆盖");
 
     /// <summary>焦点行文字是否就是目标道具（且非「使用中」）。逐行扫描命中判定。</summary>
     private static bool ItemLineMatches(string lineText, MyLeagueBrain.MlItemTarget target)

@@ -119,6 +119,33 @@ public class ReplaceItemDialogTests
     }
 
     [Fact]
+    public void 带内说明文字含覆盖且有取消_仍不误判()
+    {
+        // 共享层收紧回归：别的模块页面上「覆盖范围：全部球员」+ 一枚「取消」按钮，
+        // 不能因为出现「覆盖」二字就被当成替换弹窗白按一次上+A
+        var frame = Frame();
+        var ocr = Ocr(
+            ("覆盖范围：全部球员", 0.50, 0.46, 0.30, 0.04),
+            ("取消", 0.50, 0.66, 0.05, 0.036));
+        Assert.True(ocr.ContainsJoined("取消"));
+        Assert.False(PopupBrain.IsReplaceDialog(ocr));
+        Assert.Equal(PopupAction.PressConfirm, PopupBrain.Decide(frame, ocr, out _)); // 单按钮 → 直接 A
+    }
+
+    [Fact]
+    public void 标题整行被合并读长_分类仍按购买弹窗兜底()
+    {
+        // 标题+按钮被 OCR 并成一行（超过 PopupBrain 的 TitleMaxChars）时，
+        // Classify 的全文拼接判据仍然命中，购买弹窗不会退化成物品列表
+        var ocr = Ocr(
+            ("要覆盖目前的物品吗覆盖取消", 0.50, 0.46, 0.40, 0.045),
+            ("取消", 0.50, 0.66, 0.05, 0.036));
+        Assert.False(PopupBrain.IsReplaceDialog(ocr)); // 超长整行不认
+        Assert.Equal(MatchScreen.PurchaseDialog,
+            MatchBrain.Classify(new List<YoloDetection>(), ocr));
+    }
+
+    [Fact]
     public void 购买弹窗久按无效_按B脱困不死循环()
     {
         // 上移+A 连续 30 轮仍停在同一弹窗 → B 关掉重来（否则永远重按）
