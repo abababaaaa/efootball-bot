@@ -146,8 +146,8 @@ public static partial class MatchBrain
         if (ocr.ContainsJoined("法律及隐私政策") ||
             (ocr.ContainsJoined("确认按钮") &&
              (ocr.ContainsJoined("footbal") || ocr.ContainsJoined("konami") || ocr.ContainsJoined("版本"))) ||
-            (loginRecovery && Count("main_menu") == 0 && ocr.Words.Count <= 8 &&
-             ocr.ContainsJoined("footbal")))
+            (loginRecovery && Count("main_menu") == 0 && !HasMainMenuNavBar(ocr) &&
+             ocr.Words.Count <= 8 && ocr.ContainsJoined("footbal")))
             return MatchScreen.BootSplash;
         // 游戏启动设定窗（画面模式/分辨率，实机 2026-10-11：启动/更新后弹「设定」需确认一次）
         // 与启动标题画面（eFootball 标志 + 「按 X」提示）：都必须先于 InMatch 角区兜底——
@@ -257,6 +257,13 @@ public static partial class MatchBrain
         bool hasMyLeague = ocr.Lines.Any(l => l.Text.Replace(" ", "").Contains("我的联赛"));
         bool hasExit = ocr.Lines.Any(l => l.Text.Replace(" ", "").Contains("退出游戏"));
         if (hasMyLeague && !hasExit) return MatchScreen.MatchHub;
+        // v8.0.13 重训后的 YOLO 更保守：弹窗盖在真主菜单上时，导航条 main_menu 会从
+        // 0.8x 掉到 0.0x（实机 login_bonus_popup / inbox_popup 实测）。这类帧只要还有
+        // 推进按钮就会先走 HasConfirm 按 A 关弹窗；但按钮词也读不到时，旧逻辑会落到
+        // Unknown → 等待/B 逃生。这里用导航条固定 OCR 词兜底：走到这一步说明前面所有
+        // 弹窗/按钮判定都没命中，认作主菜单比盲等安全。
+        // ★不放在 main_menu 主判定处：否则弹窗页会被抢判成 MainMenu，反而推不动弹窗。
+        if (HasMainMenuNavBar(ocr)) return MatchScreen.MainMenu;
         // 比赛辅助判据②：右上角（AI 徽标区）有画面内容——重播/庆祝/镜头切换等
         // 无比分框可读的比赛帧兜底为比赛中（只等待不按键）；菜单右上角为纯黑不会命中。
         // 无比赛上下文（allowCornerInMatch=false）时不兜底——菜单页右上角也可能有内容，
@@ -264,6 +271,17 @@ public static partial class MatchBrain
         if (topRightHasContent && allowCornerInMatch) return MatchScreen.InMatch;
         return MatchScreen.Unknown;
     }
+
+    /// <summary>
+    /// 主菜单顶部导航条的 OCR 证据（v8.0.15 兜底）：四项固定 UI 词
+    /// 「游戏主菜单 / 商店 / 学院 / 额外选项」同在 y≈0.08 一行，OCR 稳定读全
+    /// （实机 login_bonus_popup / inbox_popup / stud_01 三帧验证）。
+    /// 周活动卡片页只有「对阵AI/对阵玩家」、合约页没有导航条，都不会命中。
+    /// 与 YOLO 的 main_menu 检测互为补充：重训后的模型更保守，只靠 YOLO 会漏。
+    /// </summary>
+    public static bool HasMainMenuNavBar(OcrResult ocr)
+        => ocr.Lines.Any(l => l.CenterY < 0.20 && l.Text.Contains("游戏主菜单")) &&
+           ocr.ContainsJoined("商店") && ocr.ContainsJoined("学院");
 
     /// <summary>
     /// 比赛选择页判定（新旧 UI 双形态）：

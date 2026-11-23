@@ -133,8 +133,11 @@ public sealed record MatchAction(MatchActionKind Kind, int WaitMs, string Target
 /// </summary>
 public static partial class MatchBrain
 {
-    /// <summary>状态判定/点击目标的最低检测置信度。</summary>
-    public const float MinScore = 0.45f;
+    /// <summary>状态判定/点击目标的最低检测置信度。
+    /// v8.0.15 起可由 AppConfig.Yolo.ClassifyScore 配置（默认仍是 0.45，行为逐字节不变）。
+    /// 换模型后置信度分布会漂移：FP32 重训模型整体比旧 FP16 模型低 0.05~0.1，
+    /// 实机若出现边界帧不认，可以在配置里微调而不必改代码重编译。</summary>
+    public static float MinScore { get; set; } = 0.45f;
     /// <summary>同一界面连续该轮数后操作退避放慢（导航类界面停手等待）。
     /// 弹窗/推进类界面例外：A/X 是唯一推进键，退避只放慢节奏绝不停止——
     /// 终场后的奖励弹窗常连成一长串且每页同判 HasConfirm（实机 2026-10-16：

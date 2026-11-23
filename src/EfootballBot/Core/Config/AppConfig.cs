@@ -132,6 +132,10 @@ public sealed class YoloConfig
 
     /// <summary>NMS IoU 阈值（仅非端到端导出格式使用）。</summary>
     public double NmsIou { get; set; } = 0.45;
+
+    /// <summary>共享层界面判定的最低置信度（MatchBrain.MinScore）。换模型后可微调；
+    /// 默认 0.45 与历史行为一致。调低=更容易认出目标但误报增多，调高=更保守。</summary>
+    public double ClassifyScore { get; set; } = 0.45;
 }
 
 /// <summary>
