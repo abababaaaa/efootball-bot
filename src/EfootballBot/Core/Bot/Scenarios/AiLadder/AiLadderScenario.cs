@@ -122,12 +122,15 @@ public sealed class AiLadderScenario : IScenario
             : MatchScreen.Unknown;
         _memory.Record(ml, now);
         // 启动引导：停在其他模块页（周活动/巅峰赛/我的联赛）时先 B 收敛回主页。
-        bool otherModule = wk != WkScreen.None
-                           || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None
-                           || (al == AlScreen.None &&
-                               ml is MatchScreen.LeaguePage or MatchScreen.PointsPage or MatchScreen.ItemList);
-        bool ownPage = al != AlScreen.None || ml is MatchScreen.MatchStartPage or MatchScreen.InMatch
-                       or MatchScreen.DifficultyPage or MatchScreen.HasConfirm;
+        bool inMatchFlow = matchContext || _matchSession.Active || ReturnToHomeGuide.IsSharedMatchFlow(ml);
+        bool myLeagueResidual = al == AlScreen.None &&
+                                (ml is MatchScreen.PointsPage or MatchScreen.ItemList ||
+                                 (ml == MatchScreen.LeaguePage && MyLeagueBrain.LooksLikeLeagueHome(obs.Ocr)));
+        bool otherModule = !inMatchFlow &&
+                           (wk != WkScreen.None
+                            || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None
+                            || myLeagueResidual);
+        bool ownPage = al != AlScreen.None || inMatchFlow;
         int? guideWait = await _homeGuide.StepAsync(obs.Frame,
             ml == MatchScreen.MainMenu, ownPage, otherModule, () => _engine.Pad.Back());
         if (guideWait is not null) return guideWait.Value;

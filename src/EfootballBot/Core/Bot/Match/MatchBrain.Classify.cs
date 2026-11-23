@@ -82,16 +82,25 @@ public static partial class MatchBrain
             (ocr.ContainsJoined("替补球员") || ocr.ContainsJoined("自动配置球员")) &&
             ocr.ContainsJoined("整体实力"))
             return MatchScreen.LeagueSquadPage;
-        // 比赛起始页（实机 match_start_page）：底部行「设置|球场|下一步」+ 队名/球场名
-        // （eFootball™ Stadium）。先于通用 btn_confirm：判定为起始页可带上"即将开赛"上下文。
-        // 2026-11-18 识别走查：旧判定「y>0.85 且含下一步」两个条件都写死——底栏键名换成
-        // 开始比赛/开赛、或整行被并读下移到 y≈0.83，任一处不合就整页漏判，帧随即落
-        // HasConfirm（上移再按）或 Unknown（等待→B 逃生），用户看到的就是「不自动开始比赛」。
-        // 现在：底栏任一推进键（词表见 PushWords）+ 球场/Stadium/体育场 即判起始页。
-        if ((ocr.ContainsJoined("球场") || ocr.ContainsJoined("Stadium") ||
+        // 比赛起始页（实机 match_start_page）：
+        // 形态①：第一屏底部行「设置|球场|下一步」+ 队名/球场名（eFootball™ Stadium）；
+        // 形态②：第二屏赛前热身/替补名单页（2026-11-24 实机：左列「替补球员/首发球员」名单，
+        //        底栏「< B 返回 | Y 比赛计划 | 前往比赛 A >」，无「球场」词且右下蓝框被 YOLO 判 btn_confirm）。
+        // 先于通用 btn_confirm：判定为起始页可带上"即将开赛"上下文并直接按 A 开赛。
+        bool stadiumStartPage =
+            (ocr.ContainsJoined("球场") || ocr.ContainsJoined("Stadium") ||
              ocr.ContainsJoined("体育场")) &&
             (FindBottomPushWord(ocr) is not null ||
-             ocr.Lines.Any(l => l.CenterY > 0.80 && l.Text.Contains("下一步"))))
+             ocr.Lines.Any(l => l.CenterY > 0.80 && l.Text.Contains("下一步")));
+        bool warmupStartPage =
+            !ocr.ContainsJoined("整体实力") &&
+            !ocr.ContainsJoined("赛程表") && !ocr.ContainsJoined("活动设置") &&
+            ((ocr.ContainsJoined("替补球员") || ocr.ContainsJoined("首发球员") || ocr.ContainsJoined("首发阵容")) &&
+             ocr.ContainsJoined("前往比赛") ||
+             ocr.ContainsJoined("比赛计划") &&
+             (ocr.Words.Any(w => w.CenterY > 0.80 && w.NormText.Contains("前往比赛")) ||
+              ocr.Lines.Any(l => l.CenterY > 0.80 && l.Text.Replace(" ", "").Contains("前往比赛"))));
+        if (stadiumStartPage || warmupStartPage)
             return MatchScreen.MatchStartPage;
         // ---- 防掉线重登链（eFootball 2027 v6.1.0 实机 8 帧，2026-10-19）：----
         // 付款确认弹窗（抽取页误按后弹出）：标题「付款确认」+「取消」。★必须最先判——

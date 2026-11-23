@@ -67,4 +67,14 @@ public sealed class ReturnToHomeGuide
     }
 
     public void Reset() { _guiding = false; _escapeAttempts = 0; }
+
+    /// <summary>
+    /// 共用比赛流程界面（开赛准备/选难度/关键比赛/比赛中/弹窗推进/终场/站位）：
+    /// 一旦处于这些界面说明已在正常比赛流程中，启动引导必须立即放行并清零，
+    /// 绝不能把赛前/赛中画面当成"其他模块残留页"按 B 踢回主页。
+    /// </summary>
+    public static bool IsSharedMatchFlow(MatchScreen screen) => screen is
+        MatchScreen.MatchStartPage or MatchScreen.InMatch or MatchScreen.FullTime
+        or MatchScreen.DifficultyPage or MatchScreen.HasConfirm
+        or MatchScreen.KeyMatchDialog or MatchScreen.LeagueSquadPage;
 }

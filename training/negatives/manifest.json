@@ -1,0 +1,74 @@
+{
+  "purpose": "main_menu 误检困难负样本：周活动卡片列表页/比赛选择页被 YOLO 判成 main_menu（实机 0.72~0.88），v8.0.9 目前靠 OCR 特征纠正，这里从模型层面根治。",
+  "class_order": [
+    "player_card",
+    "btn_back",
+    "btn_confirm",
+    "coin_bar",
+    "main_menu",
+    "item_row"
+  ],
+  "label_rule": "每帧只标确定存在的目标。这批页面共有的只有左下蓝色返回按钮（class 1）；顶部「对阵AI/对阵玩家」白色胶囊、活动横版卡、灰色「进入/继续」按钮都不是 6 类目标，不标。按 labeling_guide.md 第 4 条，看不清/不确定的宁可不标。",
+  "btn_back_box": "1 0.127 0.936 0.186 0.058（labeling_guide.md 实测参考坐标，返回按钮在所有页面位置固定）",
+  "note_on_player_card": "比赛选择页的锦标赛卡内有一张竖版 99 球员卡，本批未标（避免目测框不准）。原训练集已有 player_card 正样本，不影响召回；若要更严格可用 X-AnyLabeling 补框后重跑 merge_labels.ps1。 公开负样本现存 6 帧。",
+  "baseline_before_retrain": {
+    "model": "src/EfootballBot/models/yolo/yolo26n.onnx",
+    "tool": "python training/verify_model.py --model <model> --frames training/negatives/images",
+    "output_format": "[1,10,8400] 常规预测头（4+6 类, N=8400）",
+    "main_menu_scores": {
+      "neg_live_weekly_20261122.jpg": 0.775,
+      "neg_weekly_events_1029.png": 0.92,
+      "neg_weekly_events_list.png": 0.867,
+      "neg_weekly_vsplayers.png": 0.892,
+      "neg_matchhub_hub.png": 0.0,
+      "neg_matchhub_user1.png": 0.0,
+      "neg_matchhub_user2.png": 0.0
+    },
+    "conclusion": "周活动卡片列表页被判 main_menu 0.775~0.920（远超共享分类 0.45），比赛选择页为 0；与 v8.0.9 实机报告的 0.72~0.88 一致。训练后目标：这 4 帧降到 0.45 以下，同时真主菜单帧仍要能检出。"
+  },
+  "frames": [
+    {
+      "file": "neg_weekly_events_list.png",
+      "from": "tests/EfootballBot.Tests/TestData/weekly/weekly_events_list.png",
+      "page": "周活动卡片列表（对阵AI）",
+      "why": "顶部胶囊条最像 main_menu 导航条，误检主因"
+    },
+    {
+      "file": "neg_weekly_events_1029.png",
+      "from": "tests/EfootballBot.Tests/TestData/weekly/weekly_events_list_1029.png",
+      "page": "周活动卡片列表（另一批活动）",
+      "why": "不同活动文案/配色的同型页，防止过拟合到某一期活动"
+    },
+    {
+      "file": "neg_weekly_vsplayers.png",
+      "from": "tests/EfootballBot.Tests/TestData/weekly/weekly_events_list_vsplayers.png",
+      "page": "周活动列表（对阵玩家页签）",
+      "why": "页签切换后的同型页"
+    },
+    {
+      "file": "neg_matchhub_hub.png",
+      "from": "tests/EfootballBot.Tests/TestData/weekly/weekly_hub.png",
+      "page": "比赛选择页（锦标赛/活动/eFootball联赛）",
+      "why": "比赛页也不是主菜单，避免「比赛」大字+卡片行被误判"
+    },
+    {
+      "file": "neg_matchhub_user1.png",
+      "from": "tests/EfootballBot.Tests/TestData/matchhub_user_1.png",
+      "page": "比赛选择页（用户实机 1）",
+      "why": "同上，不同活动横幅"
+    },
+    {
+      "file": "neg_matchhub_user2.png",
+      "from": "tests/EfootballBot.Tests/TestData/matchhub_user_2.png",
+      "page": "比赛选择页（滚动到我的联赛/自定义锦标赛）",
+      "why": "卡排滚动后的版式，正是 myleague 磁贴定位的场景"
+    }
+  ],
+  "private_frame_notice": {
+    "reason": "该帧来自用户剪贴板实机截图，按用户要求从公开仓库移除，不再随 dataset.zip 分发",
+    "file": "neg_live_weekly_20261122.jpg",
+    "local_copy": "training/out/private/（已被 .gitignore 排除，不入库）",
+    "model_note": "v8.0.13 模型确实用过这一帧训练；模型权重不含图片像素，移除数据源不影响已发布模型。若要完全复现 v8.0.13 的训练，把本地副本放回 training/negatives/ 与 training/dataset/ 即可。",
+    "removed_from_frames": 1
+  }
+}

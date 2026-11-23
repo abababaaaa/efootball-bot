@@ -72,4 +72,32 @@ public class ReturnToHomeGuideTests
         Assert.Null(await g.StepAsync(Frame(), false, false, false, () => { backs++; return Task.CompletedTask; }));
         Assert.Equal(0, backs);
     }
+
+    [Fact]
+    public async Task SharedMatchFlow_ClearsGuidingAndNeverBacks()
+    {
+        // 回归（2026-11-24 实机日志）：一旦进入 MatchStartPage/InMatch/HasConfirm/FullTime 等
+        // 共用比赛流程，即便上一帧曾被误判成残留页触发过引导，也必须立即放行并清零，不可在开赛页死锁按 B。
+        var g = NewGuide();
+        int backs = 0;
+        Assert.NotNull(await g.StepAsync(Frame(), false, false, true, () => { backs++; return Task.CompletedTask; }));
+        Assert.Equal(1, backs);
+
+        foreach (var screen in new[]
+                 {
+                     MatchScreen.MatchStartPage, MatchScreen.InMatch, MatchScreen.FullTime,
+                     MatchScreen.DifficultyPage, MatchScreen.HasConfirm,
+                     MatchScreen.KeyMatchDialog, MatchScreen.LeagueSquadPage,
+                 })
+        {
+            Assert.True(ReturnToHomeGuide.IsSharedMatchFlow(screen));
+        }
+
+        // 进入共用比赛流程后，引导立即放行且清零 _guiding
+        Assert.Null(await g.StepAsync(Frame(), false, ReturnToHomeGuide.IsSharedMatchFlow(MatchScreen.MatchStartPage),
+            false, () => { backs++; return Task.CompletedTask; }));
+        // 之后遇到过场过渡 Unknown 帧，也不得再继续按 B
+        Assert.Null(await g.StepAsync(Frame(), false, false, false, () => { backs++; return Task.CompletedTask; }));
+        Assert.Equal(1, backs);
+    }
 }

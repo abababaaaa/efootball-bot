@@ -176,12 +176,21 @@ public sealed partial class WeeklyEventScenario : IScenario
         _memory.Record(ml, now);
         // 启动引导：停在其他模块页（我的联赛/天梯/巅峰赛）时先 B 收敛回主页，
         // 否则共享分类会把该页当"前往比赛"直接开赛，导致从别的模块页启动周活动到不了。
-        bool otherModule = AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
-                           || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None
-                           || (wk == WkScreen.None &&
-                               ml is MatchScreen.LeaguePage or MatchScreen.PointsPage or MatchScreen.ItemList);
+        // ★双守卫：
+        // 1) 已处于比赛上下文或共用比赛流程（开赛页/比赛中/过场弹窗/终场）时不触发引导，立即放行清零；
+        // 2) LeaguePage 只有真的含我的联赛专有词（LooksLikeLeagueHome）才算我的联赛残留页，
+        //    避免把周活动点「前往比赛」后的纯 btn_back 过渡页（MatchBrain 兜底成 LeaguePage）误踢回主页。
+        bool inMatchFlow = matchContext || _matchSession.Active || ReturnToHomeGuide.IsSharedMatchFlow(ml);
+        bool myLeagueResidual = wk == WkScreen.None &&
+                                (ml is MatchScreen.PointsPage or MatchScreen.ItemList ||
+                                 (ml == MatchScreen.LeaguePage && MyLeagueBrain.LooksLikeLeagueHome(obs.Ocr)));
+        bool otherModule = !inMatchFlow &&
+                           (AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
+                            || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None
+                            || myLeagueResidual);
+        bool ownPage = wk != WkScreen.None || inMatchFlow;
         int? guideWait = await _homeGuide.StepAsync(obs.Frame,
-            ml == MatchScreen.MainMenu, wk != WkScreen.None, otherModule,
+            ml == MatchScreen.MainMenu, ownPage, otherModule,
             () => _engine.Pad.Back());
         if (guideWait is not null) return guideWait.Value;
         if (!_takeoverLogged)
@@ -598,6 +607,14 @@ public sealed partial class WeeklyEventScenario : IScenario
                     return 600;
                 }
                 if (wk == WkScreen.EventsList) { SetPhase(WkPhase.Flow); return 800; }
+                // 单场活动/特殊活动从列表进入后不经过活动主页直接进开赛页或比赛中：立即切回 Flow 交还共享比赛流程
+                if (ml is MatchScreen.MatchStartPage or MatchScreen.InMatch)
+                {
+                    _introEnterTries = 0;
+                    _introStuckDumped = false;
+                    SetPhase(WkPhase.Flow);
+                    return null;
+                }
                 if (wk == WkScreen.EventIntro) return await PressIntroEnterAsync(obs);
                 if (wk == WkScreen.ChallengeList)
                     return await EnterChallengeListPhaseAsync(); // 挑战活动：介绍页按进入后弹的是挑战清单
@@ -942,10 +959,11 @@ public sealed partial class WeeklyEventScenario : IScenario
                 await _engine.Pad.Confirm();
                 return 2400;
             default:
-                // 按钮词没读到：有推进词就按 A（同比赛中弹窗规则），否则等一拍由上层重判
+                // 按钮词没读到：有推进词（含底栏「前往比赛/开始比赛/下一步」等）就按 A，否则等一拍由上层重判
                 if (obs.Ocr.ContainsJoined("下一步") || obs.Ocr.ContainsJoined("OK") ||
                     obs.Ocr.ContainsJoined("确认") || obs.Ocr.ContainsJoined("进入") ||
-                    obs.Ocr.ContainsJoined("继续"))
+                    obs.Ocr.ContainsJoined("继续") || obs.Ocr.ContainsJoined("前往比赛") ||
+                    MatchBrain.FindBottomPushWord(obs.Ocr) is not null)
                 {
                     _log($"[周活动] {context}：{note}，OCR 有推进词 → A", LogLevel.Info);
                     await _engine.Pad.Confirm();
