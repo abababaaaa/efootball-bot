@@ -50,25 +50,24 @@ public static partial class MatchBrain
             }
             case MatchScreen.MatchHub:
             {
-                // 右移选中「我的联赛」磁贴：进入比赛页后默认焦点在最左卡（新 UI 2026-10-21 实拍：
-                // 卡排 锦标赛/活动/eFootball™联赛/我的联赛）。
-                // 焦点确认认「我的联赛」词、y 不限——新 UI 没有旧版预览区（旧判据 y<0.6 恒假会
-                // 无限右移卡死）：未聚焦时该卡被屏幕右缘裁掉只读出碎片（我/自），聚焦后卡排
-                // 滚入、标签完整可读。误读提前按 A 的最坏情况是进错卡详情页，其分类不再是
-                // MatchHub，B 逃生自愈。焦点词整排漏读时 ≥NavEscapeStreak 按 B 回主菜单重导航。
+                // 右移选中「我的联赛」磁贴：进入比赛页后默认焦点在最左卡。
+                // ★ v8.2.0 修复（用户 2026-11-23 实机）：旧逻辑拿「标题词可读」当焦点确认——
+                // 但卡排滚动后标题可见、焦点仍停在锦标赛卡上时按 A 会误进锦标赛。改为以
+                // 焦点白框为准（frame 可用时）；白框明确在目标卡才按 A，明确在别卡则右移，
+                // 白框读不出（闪烁暗相位）才退回标题词判据。frame 不可用（纯函数单测）时
+                // 保持旧标题词判据，不改变无像素场景的行为。
                 if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
                     return PeriodicBackAction(screenStreak, NavEscapeStreak, "比赛页导航失效，B 回主菜单重导航");
-                bool focused = ocr.Lines.Any(l => l.Text.Contains("我的联赛"));
+
+                bool? frameFocused = frame is not null
+                    ? HubTileLocator.IsFocusedOnTarget(ocr, frame, "我的联赛")
+                    : null;
+                bool focused = frameFocused ?? ocr.Lines.Any(l => l.Text.Contains("我的联赛"));
                 if (focused)
                     return new MatchAction(MatchActionKind.PadConfirm,
                         screenStreak >= StuckStreak ? 5000 : 2500, "比赛页→我的联赛");
-                // 焦点词读不到就一直右移 → 到最右也不换动作，只有 20 轮后的 B 逃生兜着，
-                // 用户看到的是「比赛页来回晃、永远不开赛」（识别走查 2026-11-18 的主要僵局之一）：
-                // 新 UI 未聚焦时磁贴标签被右缘裁成碎片（我/自），OCR 读不出整词。
-                // 连续 6 轮（≈10s）仍读不到 → 按 A 试进当前焦点卡；进错板块的分类不会是
-                // MatchHub，B 逃生自愈，最坏是绕一次，好过无限右移。
-                if (screenStreak >= MatchHubFocusBlindStreak)
-                    return new MatchAction(MatchActionKind.PadConfirm, 2500, "比赛页焦点词读不到，按 A 试进当前卡");
+                // 焦点不在目标卡 → 继续右移。删掉旧的「读不到词就按 A 试进当前卡」兜底：
+                // 那正是误入第一张锦标赛卡的根源；改为到 NavEscapeStreak 走上面的周期 B 重导航。
                 return new MatchAction(MatchActionKind.PadMoveRight,
                     screenStreak >= StuckStreak ? 5000 : 1500, "比赛页右移→我的联赛");
             }

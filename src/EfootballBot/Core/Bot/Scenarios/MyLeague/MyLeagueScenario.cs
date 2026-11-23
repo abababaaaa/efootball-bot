@@ -500,13 +500,14 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         if (customWait is not null) return customWait.Value;
         if (screen != MatchScreen.MatchHub && _hubScanMoves != 0)
             _hubScanMoves = 0; // 离开比赛页，重置卡排滚动扫描
-        // 比赛页：定位「我的联赛」卡（国际服）。实机 2026-11-23：默认视图只显示3张卡
-        // （锦标赛/活动/eFootball联赛），「我的联赛」在最右被裁切、标题读不到；
-        // 且卡排**只在焦点移到该卡时才滚动**，标题完整可读的那一刻焦点就已在其上。
-        // 策略：读到标题 = 焦点已就位 → 直接按 A（不再归位重移，否则滚动后 offset 失准会移错）。
-        // 读不到 → 逐格右移切换焦点（到目标卡时卡排自会滚入），下一轮重读；扫满 MaxHubScanSteps
-        // 仍无则 B 回主菜单重新导航（不再回退共享逻辑的「盲按 A 试进当前卡」——那正是误入
-        // 第一张锦标赛卡的原因）。进错卡后由下方 _enteredFromHub 守卫核验并换焦点重试。
+        // 比赛页：定位「我的联赛」卡（国际服）。★ v8.2.0 修复（用户 2026-11-23 实机）：
+        // 旧逻辑用 FindTileOffset（标题在可见卡里的位置）当「焦点已在目标卡」就直接按 A，
+        // 但**标题可见 ≠ 光标选中**——卡排滚动后标题可见、焦点仍停在第一张锦标赛卡上时，
+        // 按 A 就误进锦标赛 → 残留页 B 退回 → 标题又可见 → 再按 A …… 死循环（实机日志印证）。
+        // 新策略：以 HubTileLocator.IsFocusedOnTarget 的**焦点白框检测**为准（聚焦卡边框
+        // 白像素是未聚焦卡的数倍，实机标定）。true 才按 A；false=焦点在别卡→右移换焦点；
+        // null=白框闪烁暗相位读不出→退回逐格右移；扫满 MaxHubScanSteps 仍无则 B 回主菜单。
+        // 进错卡仍由 _enteredFromHub 守卫核验并换焦点重试。
         if (SupportsOcrTileNav && screen == MatchScreen.MatchHub &&
             _streak < MatchBrain.NavEscapeStreak)
         {
@@ -532,10 +533,11 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                 await _engine.Pad.Back();
                 return 2600;
             }
-            int? tileOffset = HubTileLocator.FindTileOffset(obs.Ocr, "我的联赛");
-            if (tileOffset is int to)
+            // 焦点白框检测：只有确认焦点白框在「我的联赛」卡上才按 A（不再拿标题位置猜焦点）
+            bool? focused = HubTileLocator.IsFocusedOnTarget(obs.Ocr, obs.Frame, "我的联赛");
+            if (focused == true)
             {
-                _log($"[我的联赛] 比赛页：读到「我的联赛」标题（第 {to + 1} 可见卡，焦点已在目标卡），直接按 A", LogLevel.Info);
+                _log($"[我的联赛] 比赛页：焦点白框确认在「我的联赛」卡，按 A（右移 {_hubScanMoves} 格）", LogLevel.Info);
                 await _engine.Pad.Confirm();
                 _hubScanMoves = 0;
                 _enteredFromHub = true; // 下一帧核验是否真进了我的联赛，进错则 B 退回
@@ -543,21 +545,22 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                 _entryDialogAdvances = 0;
                 return 2800;
             }
-            // 读不到标题：首次先归位最左，再逐格右移切换焦点（目标卡被焦点选中时才会滚入并读全）
+            // focused == false（焦点明确在别的卡）或 null（白框闪烁暗相位读不出）：右移换焦点。
+            // 首次先归位最左，再逐格右移（目标卡被焦点选中时卡排自会滚入、白框亮起）。
             if (_hubScanMoves == 0)
                 await _engine.Pad.DpadRepeat(PadDir.Left, 6);
             if (_hubScanMoves < MaxHubScanSteps)
             {
                 _hubScanMoves++;
-                _log($"[我的联赛] 比赛页：未读到「我的联赛」标题，右移切焦点第 {_hubScanMoves}/{MaxHubScanSteps} 格后重读", LogLevel.Info);
+                string why = focused == false ? "焦点在别的卡" : "白框读不出（闪烁暗相位）";
+                _log($"[我的联赛] 比赛页：{why}，右移切焦点第 {_hubScanMoves}/{MaxHubScanSteps} 格后重读", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Right);
                 return 1800; // 给卡排滚动动画 + 下一帧 OCR 留足时间
             }
-            // 扫完仍读不到：B 回主菜单重新导航（旧版这里回退共享逻辑，其「焦点词读不到就按 A」
-            // 会直接按在当前焦点卡上——实机正是这样误入第一张锦标赛卡）。
+            // 扫完仍确认不了焦点：B 回主菜单重新导航，绝不盲按 A（那就是误入锦标赛的根因）。
             _hubScanMoves = 0;
-            _log($"[我的联赛] 比赛页：右移 {MaxHubScanSteps} 格仍未读到「我的联赛」标题，B 回主菜单重新导航", LogLevel.Warn);
-            _engine.DumpSuspiciousFrame(obs.Frame, "hub_tile_not_found", $"比赛页右移 {MaxHubScanSteps} 格仍未读到我的联赛标题（卡排裁切/布局异常）");
+            _log($"[我的联赛] 比赛页：右移 {MaxHubScanSteps} 格仍未确认焦点在我的联赛，B 回主菜单重新导航", LogLevel.Warn);
+            _engine.DumpSuspiciousFrame(obs.Frame, "hub_focus_not_found", $"比赛页右移 {MaxHubScanSteps} 格仍未白框确认焦点（卡排裁切/布局异常）");
             await _engine.Pad.Back();
             return 2600;
         }
