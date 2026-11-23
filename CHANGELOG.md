@@ -3,6 +3,13 @@
 正式版每次发版的内容写在这里，CI 发 Release 时自动把对应版本段落贴进 GitHub Release 正文。
 格式约定：`## v<版本号>` 开头的段落，段内可用 `-` 列点；CI 按 tag 名精确匹配段落。
 
+## v7.4.1
+
+- **修：国际服「阵容挑战 / Team Effort」的比赛计划失效修复整夜卡死——不会自动向左进入侧边栏，一整天零场次**——用户 2026-11-22 实机（截图：屏幕停在比赛计划编辑页，运行日志每秒刷一行 `[周活动·阵容挑战] 接管比赛计划页（SquadLineupEdit）：按侧边栏「自动配置球员」修复阵容`）。根因：`WeeklyEventScenario.HandleWeeklyAsync` 里那段「半途启动直接接管」的拦截写在 phase 分派**之前**且无条件生效——只要屏幕是编辑页就先 `SetPhase(MatchPlanSetup)`、把 `_planStep` 重置成 `Lineup`、再 `return 900`，于是 `case WkPhase.MatchPlanSetup → HandleMatchPlanSetupAsync` 一次都轮不到，`HandlePlanLineupAsync` 里的左移/下移全成了死代码：手柄一个方向键都发不出去，同一个红点修复流程无限自我重置
+  - **拦截加前置条件**：新增纯函数 `WeeklyBrain.ShouldTakeOverPlanEditor(planEditorOnScreen, alreadyFixingPlan)`——只有还没进 `MatchPlanSetup` 时才接管一次；已经在子流程里必须把这一帧放回 phase 分派，交给 `PlanStep` 屏幕驱动状态机
+  - **导航补确定性兜底**：实机 `weekly_teameffort_plan_editor.png` 帧的侧边栏白底探针读不出聚焦行（四行中位亮度都是 41，只有真聚焦行才是 255），旧逻辑「探针读不出 → 左×4，第 3 拍起改下×1 试探」在「战术」之后就把预算耗尽，永远走不到最后一项。改为**探针优先 + 盲走兜底**：左×6 饱和进左列侧边栏 → 上×5 饱和到最顶「战术」→ 下×4 落到最后一项「自动配置球员」→ A 下一步；四步分帧执行，任一步探针恢复可读就立刻改回按屏幕走，`SetPhase(MatchPlanSetup)` 同步清零盲走进度
+  - 回归用例 `TeamEffortRealFrameTests.PlanEditor_Takeover_OnlyBeforePlanSetup`；`dotnet build` 0 错误，arch-guard 11 条规则通过（180 个源文件），周活动与阵容挑战相关 162 条测试全绿
+
 ## v7.4.0
 
 - **新：界面外观变成「可选世界」，默认仍是 v7.3 的 Windows 11 观感** —— 社区 PR #4（Apple Glass 主题）的视觉改造不再单向覆盖主支，而是被拆成第二个「外观世界」：左栏底部「主题与外观」里除三张亮度卡（暗色 / 亮色 / 深蓝）外，新增「外观风格」一行，在 **Windows 11（云母）** 与 **Apple Glass（黑玻璃）** 之间切换，落盘 `config.json` 的 `Appearance.World`。老配置没有这个字段 → Fluent，不偷偷换皮肤；切换即时生效，不用重启
