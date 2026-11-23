@@ -1933,8 +1933,27 @@ public sealed class BotEngine : IDisposable
             if (_suspiciousDumpTicks.TryGetValue(tag, out long last) && now - last < throttleMs) return;
             _suspiciousDumpTicks[tag] = now;
         }
+        WriteTaggedFrame(f, tag, reason, "suspicious");
+    }
+
+    /// <summary>
+    /// 训练帧采集专用落盘（v8.1.1）：与 DumpSuspiciousFrame 的区别——不受 CollectSuspicious 开关与
+    /// 节流限制（开发者选项按钮是显式触发，要保证「按一次按钮、每个目标页抓到一张」），
+    /// 写到独立的 data\trainingframes\日期\ 目录，文件名带 tag 便于直接挑进训练集。
+    /// 落盘逻辑与 DumpSuspiciousFrame 共用 WriteTaggedFrame。
+    /// </summary>
+    public void DumpTrainingFrame(FrameData f, string tag, string reason)
+        => WriteTaggedFrame(f, tag, reason, "trainingframes");
+
+    /// <summary>
+    /// 带 tag 的帧落盘公共实现（DumpSuspiciousFrame / DumpTrainingFrame 共用）：
+    /// 写 data\&lt;subDir&gt;\日期\&lt;时间&gt;_&lt;tag&gt;.jpg + 同名 .txt（tag/reason/time）。
+    /// 帧池会复用 Bgra 数组，先在调用线程克隆像素，后台任务只做编码写盘；失败静默。
+    /// </summary>
+    private static void WriteTaggedFrame(FrameData f, string tag, string reason, string subDir)
+    {
         var pixels = (byte[])f.Bgra.Clone();
-        string dir = Path.Combine(AppPaths.DataDir, "suspicious", DateTime.Now.ToString("yyyyMMdd"));
+        string dir = Path.Combine(AppPaths.DataDir, subDir, DateTime.Now.ToString("yyyyMMdd"));
         string safeTag = string.IsNullOrWhiteSpace(tag) ? "frame" : tag.Replace(' ', '_');
         string stamp = DateTime.Now.ToString("HHmmss_fff");
         _ = Task.Run(() =>
@@ -1956,49 +1975,10 @@ public sealed class BotEngine : IDisposable
                         data.SaveTo(fs);
                     }
                 }
-                // 同名 .txt 记原因，抽查时一眼看出是哪类问题
                 File.WriteAllText(basePath + ".txt",
                     $"tag={safeTag}\nreason={reason}\ntime={DateTime.Now:yyyy-MM-dd HH:mm:ss}");
             }
             catch { /* 收集失败静默，绝不影响挂机 */ }
-        });
-    }
-
-    /// <summary>
-    /// 训练帧采集专用落盘（v8.1.1）：与 DumpSuspiciousFrame 的区别——不受 CollectSuspicious 开关与
-    /// 节流限制（开发者选项按钮是显式触发，要保证「按一次按钮、每个目标页抓到一张」），
-    /// 写到独立的 data\trainingframes\日期\ 目录，文件名带 tag 便于直接挑进训练集。
-    /// 只写图 + 同名 reason 文本，不读回、不改任何判定/动作，失败静默。
-    /// </summary>
-    public void DumpTrainingFrame(FrameData f, string tag, string reason)
-    {
-        var pixels = (byte[])f.Bgra.Clone();
-        string dir = Path.Combine(AppPaths.DataDir, "trainingframes", DateTime.Now.ToString("yyyyMMdd"));
-        string safeTag = string.IsNullOrWhiteSpace(tag) ? "frame" : tag.Replace(' ', '_');
-        string stamp = DateTime.Now.ToString("HHmmss_fff");
-        _ = Task.Run(() =>
-        {
-            try
-            {
-                Directory.CreateDirectory(dir);
-                string basePath = Path.Combine(dir, $"{stamp}_{safeTag}");
-                var info = new SKImageInfo(f.Width, f.Height, SKColorType.Bgra8888, SKAlphaType.Premul);
-                unsafe
-                {
-                    fixed (byte* p = pixels)
-                    {
-                        using var bmp = new SKBitmap();
-                        if (!bmp.InstallPixels(info, (nint)p, info.RowBytes)) return;
-                        using var img = SKImage.FromBitmap(bmp);
-                        using var data = img.Encode(SKEncodedImageFormat.Jpeg, 90);
-                        using var fs = File.Create(basePath + ".jpg");
-                        data.SaveTo(fs);
-                    }
-                }
-                File.WriteAllText(basePath + ".txt",
-                    $"tag={safeTag}\nreason={reason}\ntime={DateTime.Now:yyyy-MM-dd HH:mm:ss}");
-            }
-            catch { /* 采集失败静默，绝不影响挂机 */ }
         });
     }
 

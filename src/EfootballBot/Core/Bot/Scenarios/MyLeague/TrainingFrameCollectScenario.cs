@@ -1,5 +1,4 @@
 using EfootballBot.Core.Bot.Match;
-using EfootballBot.Core.Config;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 
@@ -30,7 +29,10 @@ public sealed class TrainingFrameCollectScenario : IScenario
 {
     private readonly BotEngine _engine;
     private readonly Action<string, LogLevel> _log;
+    /// <summary>已处理（抓到 或 未找到/超时跳过）的目标 tag——用于推进流程与去重。</summary>
     private readonly HashSet<string> _captured = new(StringComparer.Ordinal);
+    /// <summary>真正抓到图的 tag——与 _captured 分开，避免结束日志把「跳过」谎报成「已采集」。</summary>
+    private readonly HashSet<string> _collected = new(StringComparer.Ordinal);
     private readonly long _startTick = Environment.TickCount64;
 
     /// <summary>目标页清单：Tag = 判定/抓图 tag；Tile = 比赛页要点的磁贴名（null = 当前页直接抓）。</summary>
@@ -61,6 +63,8 @@ public sealed class TrainingFrameCollectScenario : IScenario
 
     public async Task<int> RunOnceAsync(CancellationToken ct)
     {
+        // 正常不可达：进 Done 必走 Finish()，其中 engine.Stop() 取消 CTS 结束主循环。
+        // 保留仅防重入（如 Stop 与下一轮竞态），不参与流程。
         if (_phase == Phase.Done) return 1000;
 
         // 总时限兜底：8 分钟还没抓完就停，避免无人值守时一直占用游戏
@@ -97,10 +101,14 @@ public sealed class TrainingFrameCollectScenario : IScenario
                 }
                 if (++_backAttempts > 8)
                 {
-                    _log("[训练帧] 连续 B 退 8 次仍未回主菜单，放弃回主页、按当前画面继续", LogLevel.Warn);
-                    _phase = Phase.AtHome;
-                    _rounds = 0;
-                    return 400;
+                    // 不能再放进 AtHome 抓图——此时画面不是主菜单，会把任意页当「主菜单正样本」
+                    // 写进训练集，与采集初衷相反。改为重置预算继续 B 退（与 ToHub 超时同策略），
+                    // 并在日志提示；实在回不去由 8 分钟总时限兜底结束。
+                    _log("[训练帧] 连续 B 退 8 次仍未回主菜单，重置预算继续尝试（不会抓非主菜单帧）", LogLevel.Warn);
+                    _engine.DumpSuspiciousFrame(obs.Frame, "train_home_stuck",
+                        $"B 退 8 次仍未回主菜单（当前 {screen}），继续尝试");
+                    _backAttempts = 0;
+                    return 1200;
                 }
                 _log($"[训练帧] 不在主菜单（{screen}），B 退收敛（{_backAttempts}/8）", LogLevel.Info);
                 await _engine.Pad.Back();
@@ -108,6 +116,14 @@ public sealed class TrainingFrameCollectScenario : IScenario
 
             // ---------- ② 主菜单：抓主菜单帧 → 导航进比赛页 ----------
             case Phase.AtHome:
+                // 双重保险：只有判定确为主菜单才抓（ToHome 已保证，这里防御未来改动）。
+                // 绝不把非主菜单帧写成「主菜单正样本」污染训练集。
+                if (!isMainMenu)
+                {
+                    _phase = Phase.ToHome;
+                    _backAttempts = 0;
+                    return 400;
+                }
                 CaptureIf("train_main_menu", "主菜单", obs);
 
                 // 主菜单 → 底部卡片行 → "比赛"磁贴 → A（复用饱和下×5 + OCR 磁贴定位）
@@ -202,6 +218,9 @@ public sealed class TrainingFrameCollectScenario : IScenario
 
             // ---------- ⑤ 子页：判定命中就抓图，然后 B 回比赛页 ----------
             case Phase.InSubPage:
+                // 这里独立复算判据、不复用 ObserveAsync 被动收集的结果：被动那次受 CollectSuspicious
+                // 开关控制（默认关），结果也没进 Observation；主动采集必须无条件自己判一次。
+                // CollectTrainingFrame 是纯函数，同帧双算成本可忽略。
                 var hit = MatchBrain.CollectTrainingFrame(ocr, dets);
                 if (hit is { } h && h.Tag == _pendingTag)
                     CaptureIf(_pendingTag!, _pendingLabel!, obs);
@@ -237,14 +256,20 @@ public sealed class TrainingFrameCollectScenario : IScenario
         if (_captured.Contains(tag)) return;
         _engine.DumpTrainingFrame(obs.Frame, tag, $"主动采集：{label}（{tag}）");
         _captured.Add(tag);
-        _log($"[训练帧] 已采集：{label} [{tag}]  进度 {_captured.Count}/{Targets.Length}", LogLevel.Success);
+        _collected.Add(tag);
+        _log($"[训练帧] 已采集：{label} [{tag}]  进度 {_collected.Count}/{Targets.Length}", LogLevel.Success);
     }
 
     private void Finish(string reason)
     {
-        var got = string.Join("、", Targets.Where(t => _captured.Contains(t.Tag)).Select(t => t.Label));
-        _log($"[训练帧] 采集结束（{reason}）：{(_captured.Count == 0 ? "未抓到任何页" : got)}，" +
-             $"共 {_captured.Count}/{Targets.Length}。已保存到 data\\trainingframes\\日期\\", LogLevel.Success);
+        // 只报真正抓到的页；跳过/超时的目标另行提示，不混进「已采集」
+        var got = string.Join("、", Targets.Where(t => _collected.Contains(t.Tag)).Select(t => t.Label));
+        var skipped = string.Join("、", Targets.Where(t => _captured.Contains(t.Tag) && !_collected.Contains(t.Tag))
+                                            .Select(t => t.Label));
+        _log($"[训练帧] 采集结束（{reason}）：抓到 [{(_collected.Count == 0 ? "无" : got)}]" +
+             $" {_collected.Count}/{Targets.Length}" +
+             $"{(_captured.Count > _collected.Count ? $"；未抓到（跳过/超时）：{skipped}" : "")}。" +
+             $"已保存到 data\\trainingframes\\日期\\", LogLevel.Success);
         _phase = Phase.Done;
         _engine.Stop(); // 场景自然结束，GUI 的 ScenarioRunning 轮询会自动复位按钮
     }

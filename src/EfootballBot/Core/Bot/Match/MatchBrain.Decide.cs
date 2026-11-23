@@ -399,11 +399,20 @@ public static partial class MatchBrain
     /// 合约页（Classify v8.0.16 排除词）、锦标赛（MyLeagueScenario tournamentPage）。
     /// 注意「对阵AI类别/对阵玩家类别」是联赛类别页，调用方必须先判联赛词再看本方法。
     /// </summary>
-    private static bool HasOtherModuleEvidence(OcrResult ocr)
+    /// <summary>
+    /// 周活动板块页的 OCR 证据（胶囊词 + 活动特征词，排除联赛类别页）。
+    /// 被 HasOtherModuleEvidence（联赛门控）与 CollectTrainingFrame（训练帧识别）共用，
+    /// 词表只此一份——这些词是历次实机调优的结果，复制多处会漏改（v8.1.1 审查发现）。
+    /// 注意「对阵AI类别/对阵玩家类别」是联赛类别页，必须先排除。
+    /// </summary>
+    internal static bool HasWeeklyEvidence(OcrResult ocr)
         => (ocr.ContainsJoined("对阵AI") && !ocr.ContainsJoined("对阵AI类别"))
            || (ocr.ContainsJoined("对阵玩家") && !ocr.ContainsJoined("对阵玩家类别"))
            || ocr.ContainsJoined("赛事等级") || ocr.ContainsJoined("Team Effort")
-           || ocr.ContainsJoined("巡回活动") || ocr.ContainsJoined("结束倒数")
+           || ocr.ContainsJoined("巡回活动") || ocr.ContainsJoined("结束倒数");
+
+    private static bool HasOtherModuleEvidence(OcrResult ocr)
+        => HasWeeklyEvidence(ocr)
            || ocr.ContainsJoined("特殊球员名单") || ocr.ContainsJoined("组合包")
            // 锦标赛板块页（实机 2026-11-23 用户截图）：标题「锦标赛」+ 卡片
            // 「Championship Club Event / 已结束 / Round 3 Ranking Event」+ 卡上「查看」，

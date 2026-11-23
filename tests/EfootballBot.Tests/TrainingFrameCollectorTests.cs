@@ -53,8 +53,9 @@ public class TrainingFrameCollectorTests
     [Fact]
     public void 锦标赛卡片页_抓负样本()
     {
+        // 纯 OCR 判定，不依赖任何 YOLO 框（btn_back 不参与本判据）
         var ocr = Ocr("锦标赛", "Championship Club Event", "已结束", "Round 3 Ranking Event", "查看");
-        Assert.Equal("train_tournament_cards", MatchBrain.CollectTrainingFrame(ocr, Dets("btn_back"))?.Tag);
+        Assert.Equal("train_tournament_cards", MatchBrain.CollectTrainingFrame(ocr, null)?.Tag);
     }
 
     [Fact]

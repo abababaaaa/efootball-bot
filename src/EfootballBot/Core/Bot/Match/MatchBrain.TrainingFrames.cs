@@ -30,7 +30,6 @@ public static partial class MatchBrain
 
         bool navBar = HasMainMenuNavBar(ocr);
         bool hasConfirm = count("btn_confirm") >= 1;
-        bool hasBack = count("btn_back") >= 1;
 
         // ① 弹窗盖住真主菜单：导航条可见 + 确认按钮 / 弹窗标题词同屏。
         //    这是 v8.0.15 修的困难场景——重训模型更保守时 main_menu 掉到 0.0x，
@@ -44,12 +43,9 @@ public static partial class MatchBrain
         if (navBar)
             return ("train_main_menu", "真主菜单导航条：游戏主菜单/商店/学院 三词同屏（补 main_menu 正样本）");
 
-        // ③ 周活动卡片页：胶囊词「对阵AI / 对阵玩家」(排除类别页) 或 Team Effort / 赛事等级 / 巡回活动。
+        // ③ 周活动卡片页：复用 HasWeeklyEvidence（与联赛门控同一份词表，排除联赛类别页）。
         //    这是 v8.0.13 重训的困难负样本来源——旧模型把它误检成 main_menu（0.72~0.92）。
-        bool weeklyCapsule = (ocr.ContainsJoined("对阵AI") && !ocr.ContainsJoined("对阵AI类别")) ||
-                             (ocr.ContainsJoined("对阵玩家") && !ocr.ContainsJoined("对阵玩家类别"));
-        if (weeklyCapsule || ocr.ContainsJoined("Team Effort") || ocr.ContainsJoined("赛事等级") ||
-            ocr.ContainsJoined("巡回活动") || ocr.ContainsJoined("结束倒数"))
+        if (HasWeeklyEvidence(ocr))
             return ("train_weekly_cards", "周活动卡片页：胶囊/Team Effort/赛事等级词（补 main_menu 困难负样本）");
 
         // ④ 锦标赛卡片页：标题「锦标赛」+ 卡上「查看」/ Round N Ranking，无赛段词——

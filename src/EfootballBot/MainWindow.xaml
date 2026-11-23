@@ -2545,7 +2545,7 @@
                                 </Grid.ColumnDefinitions>
                                 <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
                                 <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}" TextWrapping="Wrap"
-                                           Text="挂机遇到低置信度 / 判定卡住 / 残留页 B 退回时自动保存当前画面 JPG + 原因说明，供反馈定位问题。只写图片，不改变任何挂机动作。"/>
+                                           Text="挂机遇到低置信度 / 判定卡住 / 残留页 B 退回，以及路过主菜单、比赛页、周活动/锦标赛卡片、联赛主页等主要页面时，自动保存当前画面 JPG + 原因说明。只写图片，不改变任何挂机动作。"/>
                             </Grid>
                             <CheckBox x:Name="ChkCollectSuspicious" Content="启用：自动收集可疑帧" Margin="0,12,0,0"/>
                             <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
