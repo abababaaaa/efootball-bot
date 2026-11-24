@@ -72,6 +72,8 @@ public sealed class PhysicalPadControlTests
     [InlineData(@"HID\VID_045E&PID_028E&IG_01\3&5D59EC1&0&0000", true)]      // 本机真实 360 手柄集合
     [InlineData(@"HID\VID_045E&PID_028E&IG_00\3&34F4D81E&0&0000", true)]     // IG_00 形态
     [InlineData(@"HID\VID_0F0D&PID_00C1&IG_00\6&2DF92C3&0&0000", true)]      // 第三方 XInput 手柄
+    [InlineData(@"HID\VID_2DC8&PID_3106&MI_00&IG_00\7&1ABC23&0&0000", true)] // 复合 USB / 2.4G 接收器手柄（带 MI 段）
+    [InlineData(@"HID\{00001124-0000-1000-8000-00805F9B34FB}_VID&0002045E_PID&02FD&IG_00\8&ABC&0&0000", true)] // 蓝牙经典 HID XInput 集合
     [InlineData(@"HID\VID_1EA7&PID_0067&MI_02&COL02\A&1173CC4E&0&0001", false)] // 键盘 HID 集合
     [InlineData(@"USB\VID_045E&PID_028E&IG_01\2&DEE0F28&1&01", false)]       // USB 前缀非 HID 集合
     [InlineData(@"HID\VID_045E&PID_028E\5&2DEE0F28&0&0000", false)]          // 无 IG 段（DInput 形态）

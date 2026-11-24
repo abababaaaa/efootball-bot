@@ -56,7 +56,7 @@ public static class PopupBrain
     // 「覆盖」：购买道具替换已有物品确认弹窗（"要覆盖目前的物品吗？"覆盖/取消），
     // 2026-11-23 实机——焦点默认在下方蓝色「取消」，需上移到上方白底「覆盖」才是确认。
     private static readonly string[] ConfirmWords =
-        { "确认", "確定", "确定", "下一步", "进行", "进入", "继续", "领取", "获取", "覆盖", "ok", "yes", "next", "confirm" };
+        { "确认", "確定", "确定", "下一步", "进行", "进入", "继续", "领取", "获取", "覆盖", "购买", "使用", "ok", "yes", "next", "confirm" };
     /// <summary>非推进键词素：命中这些一律视为「不该按的键」。</summary>
     private static readonly string[] CancelWords =
         { "取消", "返回", "关闭", "稍后", "否", "离开", "退出", "cancel", "back", "close", "no" };
@@ -119,8 +119,13 @@ public static class PopupBrain
         }
         if (buttons.Count == 1)
         {
-            note = $"单按钮「{buttons[0].Label}」→ 直接 A";
-            return PopupAction.PressConfirm;
+            if (buttons[0].IsConfirm)
+            {
+                note = $"单按钮「{buttons[0].Label}」→ 直接 A";
+                return PopupAction.PressConfirm;
+            }
+            note = $"仅识别到非推进键「{buttons[0].Label}」（疑似双按钮漏读推进词），交由兜底策略处理";
+            return PopupAction.None;
         }
         var confirm = buttons.FirstOrDefault(b => b.IsConfirm);
         var focused = Focused(buttons);
@@ -137,8 +142,8 @@ public static class PopupBrain
         }
         if (confirm is null)
         {
-            note = $"高光在「{focused.Label}」但没有推进键（{Describe(buttons)}）→ 直接 A";
-            return PopupAction.PressConfirm;
+            note = $"高光在「{focused.Label}」且未识别到推进键（{Describe(buttons)}），交由兜底策略处理";
+            return PopupAction.None;
         }
         bool confirmBelow = confirm.CenterY > focused.CenterY;
         note = $"高光在「{focused.Label}」上，推进键「{confirm.Label}」在{(confirmBelow ? "下" : "上")}方" +

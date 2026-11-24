@@ -158,6 +158,96 @@ public static partial class WeeklyBrain
         return bestBlue >= 20 ? best : null;
     }
 
+    private const double DropdownRowStepY = 0.0425;
+
+    /// <summary>
+    /// 在右侧活动设置下拉区域（x 0.45~0.80, y 0.31~0.67）内按从上到下顺序识别难度选项。
+    /// </summary>
+    public static IReadOnlyList<string> DetectDropdownOptions(OcrResult ocr)
+    {
+        var hits = new List<(string Diff, double Y)>();
+        foreach (var diff in MatchBrain.Difficulties)
+        {
+            var word = ocr.Words.FirstOrDefault(x =>
+                x.CenterX is > 0.45 and < 0.80 && x.CenterY is > 0.31 and < 0.67 &&
+                x.Text.Replace(" ", "").Contains(diff, StringComparison.Ordinal));
+            if (word is not null) hits.Add((diff, word.CenterY));
+        }
+        return hits.OrderBy(h => h.Y).Select(h => h.Diff).ToList();
+    }
+
+    /// <summary>
+    /// 活动设置「赛事等级」下拉列表是否已展开（右半屏下拉纵带出现 ≥3 个难度项）。
+    /// 实机展开下时顶部仍保留「活动设置」标题，因此不能依赖 MatchBrain 分类；必须用本探针直接判。
+    /// </summary>
+    public static bool IsEventSettingsDropdown(OcrResult ocr)
+        => DetectDropdownOptions(ocr).Count >= 3;
+
+    /// <summary>
+    /// 检测活动设置「赛事等级」下拉列表当前白底高亮的聚焦行（实机聚焦行背景白底 luma≈250，
+    /// 未聚焦行深灰 luma≈75；扫文本右侧空白行带 x 0.64~0.88 避开文字与最右缘蓝勾）。返回 null = 未检出。
+    /// </summary>
+    public static string? DetectDropdownFocusedLevel(FrameData frame, OcrResult ocr)
+    {
+        var (w, h, bgra) = (frame.Width, frame.Height, frame.Bgra);
+        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return null;
+
+        string? best = null;
+        int bestLuma = -1, secondLuma = -1;
+        foreach (var diff in MatchBrain.Difficulties)
+        {
+            var word = ocr.Words.FirstOrDefault(x =>
+                x.CenterX is > 0.45 and < 0.70 && x.CenterY is > 0.32 and < 0.66 &&
+                x.Text.Replace(" ", "").Contains(diff, StringComparison.Ordinal));
+            if (word is null) continue;
+
+            double y0 = Math.Clamp(word.CenterY - 0.014, 0, 1);
+            double y1 = Math.Clamp(word.CenterY + 0.014, 0, 1);
+            int luma = RegionProbe.MedianLuma(frame, 0.64, 0.88, y0, y1);
+            if (luma > bestLuma)
+            {
+                secondLuma = bestLuma;
+                bestLuma = luma;
+                best = diff;
+            }
+            else if (luma > secondLuma)
+            {
+                secondLuma = luma;
+            }
+        }
+        if (best is null || bestLuma < 170) return null;
+        if (secondLuma >= 0 && bestLuma - secondLuma < 50) return null;
+        return best;
+    }
+
+    /// <summary>
+    /// 计算下拉列表从 <paramref name="current"/> 移动到 <paramref name="wanted"/> 的步数与方向
+    /// （正数 = 向下，负数 = 向上，0 = 已对齐）。优先结合基准难度序与实机行距 0.0425 计算。
+    /// </summary>
+    public static int ComputeDropdownStepDelta(OcrResult ocr, string current, string wanted)
+    {
+        if (current == wanted) return 0;
+        int curIdx = Array.IndexOf(MatchBrain.Difficulties, current);
+        int wantIdx = Array.IndexOf(MatchBrain.Difficulties, wanted);
+        int? canonDelta = curIdx >= 0 && wantIdx >= 0 ? wantIdx - curIdx : null;
+
+        var curWord = ocr.Words.FirstOrDefault(x =>
+            x.CenterX is > 0.45 and < 0.80 && x.CenterY is > 0.31 and < 0.67 &&
+            x.Text.Replace(" ", "").Contains(current, StringComparison.Ordinal));
+        var wantWord = ocr.Words.FirstOrDefault(x =>
+            x.CenterX is > 0.45 and < 0.80 && x.CenterY is > 0.31 and < 0.67 &&
+            x.Text.Replace(" ", "").Contains(wanted, StringComparison.Ordinal));
+
+        if (curWord is not null && wantWord is not null)
+        {
+            int yDelta = (int)Math.Round((wantWord.CenterY - curWord.CenterY) / DropdownRowStepY);
+            if (canonDelta is int cd && Math.Abs(cd - yDelta) <= 1)
+                return Math.Clamp(cd, -6, 6);
+            return Math.Clamp(yDelta, -6, 6);
+        }
+        return canonDelta is int d ? Math.Clamp(d, -6, 6) : 0;
+    }
+
     /// <summary>
     /// 难度页的最终确认弹窗：「是否要选择&lt;难度名&gt;？」+ 纵排按钮 进入(上)/取消(下)，
     /// ★默认焦点在「取消」——直接按 A 会取消回列表（用户 2026-10-30 实机）。必须 ↑ 后再 A。

@@ -68,21 +68,26 @@ public sealed class SmartHotkey : IDisposable
     /// <summary>兼容旧 API：低级钩子不需要窗口句柄，空实现。</summary>
     public void Attach(object window) { }
 
-    /// <summary>注册热键（安装低级钩子）。失败返回 false。</summary>
+    /// <summary>注册热键（按需安装低级钩子，任一失败自动回滚不泄漏）。失败返回 false。</summary>
     public bool Register(Config.HotkeyConfig cfg)
     {
         if (!cfg.Enabled) return false;
         Unregister();
         _cfg = cfg;
-        if (_kbHook == IntPtr.Zero)
+        bool needKb = !cfg.IsMouse || (!cfg.ResumeIsMouse && cfg.ResumeVirtualKey != 0);
+        bool needMs = cfg.IsMouse || (cfg.ResumeIsMouse && cfg.ResumeVirtualKey != 0);
+        if (!needKb && !needMs) return false;
+
+        var modHandle = GetModuleHandle(null);
+        if (needKb && _kbHook == IntPtr.Zero)
         {
-            _kbHook = SetWindowsHookEx(WH_KEYBOARD_LL, _kbProc, GetModuleHandle(null), 0);
-            if (_kbHook == IntPtr.Zero) return false;
+            _kbHook = SetWindowsHookEx(WH_KEYBOARD_LL, _kbProc, modHandle, 0);
+            if (_kbHook == IntPtr.Zero) { Unregister(); return false; }
         }
-        if (_msHook == IntPtr.Zero)
+        if (needMs && _msHook == IntPtr.Zero)
         {
-            _msHook = SetWindowsHookEx(WH_MOUSE_LL, _msProc, GetModuleHandle(null), 0);
-            if (_msHook == IntPtr.Zero) return false;
+            _msHook = SetWindowsHookEx(WH_MOUSE_LL, _msProc, modHandle, 0);
+            if (_msHook == IntPtr.Zero) { Unregister(); return false; }
         }
         IsRegistered = true;
         return true;
@@ -132,6 +137,17 @@ public sealed class SmartHotkey : IDisposable
         }
     }
 
+    internal static bool ShouldAcceptKeyDown(int vk, ref int heldMainVk, Func<int, bool> isKeyPhysicallyDown)
+    {
+        if (IsModifierVk(vk)) return false;
+        // 丢过 WM_KEYUP（UAC/提权窗口切换等）时，GetAsyncKeyState 会报告实际已松开，立刻清零自愈
+        if (heldMainVk != 0 && !isKeyPhysicallyDown(heldMainVk))
+            heldMainVk = 0;
+        if (vk == heldMainVk) return false;
+        heldMainVk = vk;
+        return true;
+    }
+
     private IntPtr KeyboardProc(int nCode, IntPtr wParam, IntPtr lParam)
     {
         if (nCode >= 0)
@@ -140,11 +156,8 @@ public sealed class SmartHotkey : IDisposable
             int vk = Marshal.ReadInt32(lParam, 0); // KBDLLHOOKSTRUCT.vkCode
             if (msg is WM_KEYDOWN or WM_SYSKEYDOWN)
             {
-                if (!IsModifierVk(vk) && vk != _heldMainVk)
-                {
-                    _heldMainVk = vk;
+                if (ShouldAcceptKeyDown(vk, ref _heldMainVk, static k => (GetAsyncKeyState(k) & 0x8000) != 0))
                     Fire(vk, CurrentMods(), isMouse: false);
-                }
             }
             else if (msg is WM_KEYUP or WM_SYSKEYUP)
             {

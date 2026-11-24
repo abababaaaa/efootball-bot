@@ -112,4 +112,31 @@ public sealed class PadSlotWitnessTests
         Assert.False(PadTakeoverBlockedException.IsBlocked("未找到正在运行的 eFootball 游戏窗口"));
         Assert.False(PadTakeoverBlockedException.IsBlocked(null));
     }
+
+    [Fact]
+    public void ShouldRetryEmptySlot0_仅在槽位0实际空闲且未重试时返回true()
+    {
+        var emptySlot0 = new PadSlotWitness.WitnessResult(Slot0Occupied: false, VirtualInSlot0: false, Slot0State: null);
+        Assert.True(PadSlotWitness.ShouldRetryEmptySlot0(emptySlot0, attempt: 0));
+        Assert.False(PadSlotWitness.ShouldRetryEmptySlot0(emptySlot0, attempt: 1));
+
+        var otherDeviceInSlot0 = new PadSlotWitness.WitnessResult(
+            Slot0Occupied: true, VirtualInSlot0: false, Slot0State: State(0, 0));
+        Assert.False(PadSlotWitness.ShouldRetryEmptySlot0(otherDeviceInSlot0, attempt: 0));
+
+        var readyInSlot0 = new PadSlotWitness.WitnessResult(
+            Slot0Occupied: true, VirtualInSlot0: true, Slot0State: State(Code, Code));
+        Assert.False(PadSlotWitness.ShouldRetryEmptySlot0(readyInSlot0, attempt: 0));
+    }
+
+    [Theory]
+    [InlineData(false, 2, 0, true)]      // slot0 已空闲：立即退出
+    [InlineData(true, 0, 0, false)]      // 节点刚变 disabled 但 slot0 仍占：不得 0ms 提前退出
+    [InlineData(true, 0, 5999, false)]   // 宽限未满 6s：继续等父设备升级/注销完成
+    [InlineData(true, 0, 6000, true)]    // 节点全禁用且宽限满 6s：允许进入后段判定
+    [InlineData(true, 1, 8000, false)]   // 仍有已启用物理节点：继续等
+    public void ShouldExitHideWait_防止物理节点刚禁用但slot0未释放时提前退出(
+        bool slot0Occupied, int enabledNodes, long elapsedZeroMs, bool expectedExit)
+        => Assert.Equal(expectedExit,
+            PadSlotWitness.ShouldExitHideWait(slot0Occupied, enabledNodes, elapsedZeroMs));
 }

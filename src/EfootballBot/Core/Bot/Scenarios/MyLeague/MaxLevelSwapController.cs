@@ -312,7 +312,8 @@ public sealed class MaxLevelSwapController
         var px = (byte[])f.Bgra.Clone();
         for (int i = 0; i < px.Length; i += 4)
         {
-            int lum = (px[i] * 299 + px[i + 1] * 587 + px[i + 2] * 114) / 1000;
+            // BGRA 布局为 [B, G, R, A]，R 在 +2、B 在 +0
+            int lum = (px[i + 2] * 299 + px[i + 1] * 587 + px[i] * 114) / 1000;
             byte v = lum >= 150 ? byte.MaxValue : byte.MinValue;
             px[i] = px[i + 1] = px[i + 2] = v;
         }
@@ -595,7 +596,8 @@ public sealed class MaxLevelSwapController
                     // 整晚把最高评价的后备换进首发。至多 2 次也防探针误判来回翻死循环。
                     if (MaxLevelSwapBrain.IsOverallRatingChecked(ocr, frame))
                     {
-                        if (MaxLevelSwapBrain.IsSortArrowUp(frame) is false && _sortFlips < 2)
+                        bool? arrowUp = MaxLevelSwapBrain.IsSortArrowUp(frame);
+                        if (arrowUp is false && _sortFlips < 2)
                         {
                             _sortFlips++;
                             var (top, bot, tot) = MaxLevelSwapBrain.DiagSortArrow(frame);
@@ -603,7 +605,7 @@ public sealed class MaxLevelSwapController
                             log($"[我的联赛] 整体评价已勾选、箭头读数为下（{top}/{bot}/{tot}）：按 Y 翻方向（第 {_sortFlips} 次）", LogLevel.Info);
                             return 1100;
                         }
-                        if (MaxLevelSwapBrain.IsSortArrowUp(frame) is false)
+                        if (arrowUp is false)
                             log("[我的联赛] 翻方向两次后箭头仍读为下：按升序继续（探针读数见上条日志）", LogLevel.Warn);
                         log("[我的联赛] 排序键已是「整体评价」：B 返回，继续筛选", LogLevel.Info);
                         await pad.Back();
@@ -616,6 +618,7 @@ public sealed class MaxLevelSwapController
                     if (up is false)
                     {
                         await pad.Y(); // 降序 → 改升序（列表首位=整体评价最低）
+                        await Task.Delay(250, ct); // 给弹窗刷新排序方向再确认，防紧接 A 吞掉 Y
                         log("[我的联赛] 排序箭头为下，按 Y 切为升序", LogLevel.Info);
                     }
                     else if (up is null)
@@ -774,7 +777,10 @@ public sealed class MaxLevelSwapController
                     {
                         // 确认窗盖在站位页上（兜底）：取消/关闭在下方时先上移再 A
                         if (ocr.ContainsJoined("取消") || ocr.ContainsJoined("关闭"))
+                        {
                             await pad.Dpad(PadDir.Up);
+                            await Task.Delay(250, ct);
+                        }
                         log("[我的联赛] 退出确认弹窗：按 A 确认", LogLevel.Info);
                         await pad.Confirm();
                         _exitUsedA = true;
@@ -896,7 +902,10 @@ public sealed class MaxLevelSwapController
                     {
                         // 巡检结束时阵容已变更，B 完成会弹确认窗：取消/关闭在下方时先上移再 A
                         if (ocr.ContainsJoined("取消") || ocr.ContainsJoined("关闭"))
+                        {
                             await pad.Dpad(PadDir.Up);
+                            await Task.Delay(250, ct);
+                        }
                         log("[我的联赛] 退出确认弹窗：按 A 确认", LogLevel.Info);
                         await pad.Confirm();
                         return 1300;
@@ -916,7 +925,10 @@ public sealed class MaxLevelSwapController
                 {
                     // 确认窗（无页面词可判）：取消/关闭在下方时先上移再 A
                     if (ocr.ContainsJoined("取消") || ocr.ContainsJoined("关闭"))
+                    {
                         await pad.Dpad(PadDir.Up);
+                        await Task.Delay(250, ct);
+                    }
                     await pad.Confirm();
                     return 1200;
                 }
@@ -943,12 +955,12 @@ public sealed class MaxLevelSwapController
         return await AbortAsync($"连续卡住（{what}）", pad, log);
     }
 
-    private Task<int?> AbortAsync(string reason, ISwapPad pad, Action<string, LogLevel> log)
+    private async Task<int?> AbortAsync(string reason, ISwapPad pad, Action<string, LogLevel> log)
     {
         log($"[我的联赛] 满级巡检放弃：{reason}。按 B 尝试退出，下次比赛结束后重试", LogLevel.Error);
         _phase = Phase.Done;
-        _ = pad.Back();
-        return Task.FromResult<int?>(2000);
+        await pad.Back();
+        return 2000;
     }
 }
 

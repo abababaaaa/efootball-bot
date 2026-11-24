@@ -132,6 +132,15 @@ public class SharedMatchLayerTests
     }
 
     [Fact]
+    public void 场次时长_超过60分钟不回绕()
+    {
+        var t = new MatchSessionTracker();
+        Assert.False(t.Observe(MatchScreen.InMatch, T0));
+        Assert.True(t.Observe(MatchScreen.FullTime, T0.AddMinutes(65).AddSeconds(12)));
+        Assert.Equal("65:12", t.LastDurationText);
+    }
+
+    [Fact]
     public void 场次判定_超时收尾不可信()
     {
         var t = new MatchSessionTracker();

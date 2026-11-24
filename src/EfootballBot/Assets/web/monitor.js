@@ -6,7 +6,6 @@
   "use strict";
 
   var T = new URL(location.href).searchParams.get("t") || "";
-  var QS = T ? "?t=" + encodeURIComponent(T) : "&t=";
   var $ = function (id) { return document.getElementById(id); };
 
   var el = {
@@ -117,7 +116,8 @@
   }
 
   function act(cmd) {
-    fetch(api(cmd), { method: "GET", cache: "no-store" }).then(function (r) {
+    var headers = T ? { "X-Token": T } : undefined;
+    fetch(api(cmd), { method: "POST", cache: "no-store", headers: headers }).then(function (r) {
       if (!r.ok) throw new Error(String(r.status));
       toast(cmd === "stop" ? "已发送停止" : "已发送 " + cmd, false);
     }).catch(function () {

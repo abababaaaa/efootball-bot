@@ -437,6 +437,10 @@ public partial class MainWindow
     {
         try
         {
+            if (EfootballBot.Core.Input.PhysicalPadControl.IsBotSessionActive()
+                || _workerHost is { ScenarioRunning: true } || _starting)
+                return;
+
             EfootballBot.Core.Input.PhysicalPadControl.WriteShimScripts();
 
             await Task.Run(() =>
@@ -446,15 +450,30 @@ public partial class MainWindow
                     EfootballBot.Core.Input.PhysicalPadControl.LegacyHidHideCleanupOnce();
                     EfootballBot.Core.Input.PhysicalPadControl.EnsureTasksRegistered();
 
+                    if (EfootballBot.Core.Input.PhysicalPadControl.IsBotSessionActive())
+                        return;
+
                     if (EfootballBot.Core.Input.PhysicalPadControl.HasPendingRestore()
                         || EfootballBot.Core.Input.PhysicalPadControl.HasDisabledGamepad())
                     {
                         Dispatcher.BeginInvoke(() =>
-                            AppendLog("检测到仍被禁用的真实手柄，触发自动恢复…", LogLevel.Info));
-                        EfootballBot.Core.Input.PhysicalPadControl.RunTaskSilently(
-                            EfootballBot.Core.Input.PhysicalPadControl.PadRestoreTaskName);
-                        Dispatcher.BeginInvoke(() =>
-                            AppendLog("手柄恢复任务已触发（详见 data\\pad-control.log）", LogLevel.Info));
+                            AppendLog("检测到仍被禁用的真实手柄，正在恢复…", LogLevel.Info));
+                        if (EfootballBot.Core.System.Elevation.IsCurrentProcessElevated())
+                        {
+                            if (!EfootballBot.Core.Input.PhysicalPadControl.IsBotSessionActive())
+                            {
+                                var (_, msg) = EfootballBot.Core.Input.PhysicalPadControl.RestoreAll();
+                                Dispatcher.BeginInvoke(() =>
+                                    AppendLog($"真实手柄恢复：{msg}", LogLevel.Info));
+                            }
+                        }
+                        else
+                        {
+                            EfootballBot.Core.Input.PhysicalPadControl.RunTaskSilently(
+                                EfootballBot.Core.Input.PhysicalPadControl.PadRestoreTaskName);
+                            Dispatcher.BeginInvoke(() =>
+                                AppendLog("手柄恢复任务已触发（详见 data\\pad-control.log）", LogLevel.Info));
+                        }
                     }
                 }
                 catch { /* 未提权等：下次启动重试 */ }

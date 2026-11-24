@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using System.IO;
 using System.IO.Pipes;
 using System.Text;
@@ -67,7 +68,7 @@ public sealed class WorkerHost : IDisposable
     /// 所有开始按钮永久禁用（只有结束按钮没有、点开始也没反应）"，即用户报的
     /// 「非正常退出后开始卡住/永久点不动」。自动重启期间保持 true（重启即恢复同一场景）。
     /// </summary>
-    public bool ScenarioRunning => !_disposed && _scenarioRunning;
+    public bool ScenarioRunning => !_disposed && (_scenarioRunning || _autoRestarting);
     public BotStats LastStats => _lastStats;
 
     /// <summary>启动 Worker 子进程并建立管道连接（与 StopAsync 互斥，重入时排队等待）。</summary>
@@ -145,7 +146,7 @@ public sealed class WorkerHost : IDisposable
 
         while (sw.ElapsedMilliseconds < 30000)
         {
-            if (process?.HasExited == true)
+            if (process.HasExited)
                 throw new InvalidOperationException(
                     $"Worker 进程已退出（代码 {process.ExitCode}）。{ReadWorkerError()}");
 
@@ -195,7 +196,7 @@ public sealed class WorkerHost : IDisposable
         if (connectedPipe is null || reader is null)
             throw new InvalidOperationException(
                 $"无法连接到 Worker 命名管道（30s 超时，管道名 {pipeName}，最后错误：{lastConnectError?.Message}）。{ReadWorkerError()}");
-        if (process?.HasExited == true)
+        if (process.HasExited)
             throw new InvalidOperationException(
                 $"握手后 Worker 进程已退出（代码 {process.ExitCode}）。{ReadWorkerError()}");
 
@@ -219,8 +220,7 @@ public sealed class WorkerHost : IDisposable
                         _lastStats.KeyMatches = msg.KeyMatches;
                         _lastStats.PlayersMaxed = msg.PlayersMaxed;
                         _lastStats.SkippedMatches = msg.Skipped;
-                        _lastStats.StartedAt = string.IsNullOrEmpty(msg.StartedAt)
-                            ? null : DateTime.Parse(msg.StartedAt);
+                        _lastStats.StartedAt = TryParseTimestamp(msg.StartedAt);
                         _lastStats.LastError = msg.LastError ?? "";
                         _lastStats.PerfNote = msg.Perf ?? "";
                         StatsChanged?.Invoke(_lastStats);
@@ -438,6 +438,14 @@ public sealed class WorkerHost : IDisposable
         try { process?.Dispose(); } catch { }
         _process = null;
         _readCts = null;
+    }
+
+    private static DateTime? TryParseTimestamp(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw)) return null;
+        if (DateTime.TryParse(raw, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var dt))
+            return dt;
+        return DateTime.TryParse(raw, CultureInfo.CurrentCulture, DateTimeStyles.None, out dt) ? dt : null;
     }
 
     private void EmitLog(string level, string text)

@@ -773,4 +773,83 @@ public class WeeklyBrainTests
         var frame = DropdownFrameWithCheck(""); // 不画任何勾
         Assert.Null(WeeklyBrain.DetectDropdownCheckedLevel(frame, DropdownOcr()));
     }
+
+    private static FrameData DropdownFrameWithHighlightAndCheck(string focusedLevel, string checkedLevel)
+    {
+        const int W = 1280, H = 759;
+        var px = new byte[W * H * 4];
+        var rows = new (string Name, double Cy)[]
+        {
+            ("新手", 0.356), ("业余", 0.399), ("标准", 0.440), ("职业", 0.482),
+            ("顶尖球员", 0.524), ("超级球星", 0.566), ("传奇", 0.609),
+        };
+        foreach (var (name, cy) in rows)
+        {
+            int y0 = (int)((cy - 0.015) * H), y1 = (int)((cy + 0.015) * H);
+            byte lum = name == focusedLevel ? (byte)250 : (byte)75;
+            for (int y = y0; y < y1; y++)
+                for (int x = (int)(0.55 * W); x < (int)(0.94 * W); x++)
+                {
+                    int i = (y * W + x) * 4;
+                    px[i] = lum; px[i + 1] = lum; px[i + 2] = lum; px[i + 3] = 255;
+                }
+            if (name == checkedLevel)
+            {
+                for (int y = y0; y < y1; y++)
+                    for (int x = (int)(0.91 * W); x < (int)(0.94 * W); x++)
+                    {
+                        int i = (y * W + x) * 4;
+                        px[i] = 200; px[i + 1] = 60; px[i + 2] = 40; px[i + 3] = 255;
+                    }
+            }
+        }
+        return new FrameData(px, W, H, 0);
+    }
+
+    [Fact]
+    public void IsEventSettingsDropdown_区分展开下拉与收起设置浮层()
+    {
+        Assert.True(WeeklyBrain.IsEventSettingsDropdown(DropdownOcr()));
+
+        var closed = Ocr(
+            W("活动设置", 0.61, 0.11), W("赛事等级", 0.57, 0.20),
+            W("新手", 0.56, 0.29), W("自动控制", 0.57, 0.47), W("开", 0.56, 0.52));
+        Assert.False(WeeklyBrain.IsEventSettingsDropdown(closed));
+    }
+
+    [Theory]
+    [InlineData("新手")]
+    [InlineData("职业")]
+    [InlineData("传奇")]
+    public void DetectDropdownFocusedLevel_白底高光聚焦行_正确识别(string focused)
+    {
+        var frame = DropdownFrameWithHighlightAndCheck(focused, "新手");
+        Assert.Equal(focused, WeeklyBrain.DetectDropdownFocusedLevel(frame, DropdownOcr()));
+    }
+
+    [Fact]
+    public void DetectDropdownFocusedLevel_无高光_返回Null()
+    {
+        var frame = DropdownFrameWithHighlightAndCheck("", "新手");
+        Assert.Null(WeeklyBrain.DetectDropdownFocusedLevel(frame, DropdownOcr()));
+    }
+
+    [Fact]
+    public void ComputeDropdownStepDelta_上下移动与缺行OCR兼容()
+    {
+        var ocr = DropdownOcr();
+        Assert.Equal(6, WeeklyBrain.ComputeDropdownStepDelta(ocr, "新手", "传奇"));
+        Assert.Equal(-4, WeeklyBrain.ComputeDropdownStepDelta(ocr, "传奇", "标准"));
+        Assert.Equal(0, WeeklyBrain.ComputeDropdownStepDelta(ocr, "职业", "职业"));
+
+        // 即使 OCR 漏读了中间几行，也能给出正确的上下跨度
+        var partial = new OcrResult(new[]
+        {
+            W("新手", 0.561, 0.356),
+            W("职业", 0.561, 0.482),
+            W("传奇", 0.562, 0.609),
+        }, 1280, 759);
+        Assert.Equal(6, WeeklyBrain.ComputeDropdownStepDelta(partial, "新手", "传奇"));
+        Assert.Equal(3, WeeklyBrain.ComputeDropdownStepDelta(partial, "新手", "职业"));
+    }
 }

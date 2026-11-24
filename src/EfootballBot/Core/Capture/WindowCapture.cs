@@ -33,7 +33,7 @@ public sealed class WindowCapture : ICaptureProvider
     private long _lastProduceTick;
     private GpuVideoScalerVortice? _gpuScalerVortice;
     private bool _gpuFailed;          // 本捕获会话 GPU 缩放不可用后静默回退 CPU
-    private bool _running;
+    private volatile bool _running;
     private DateTime _lastFrameAt = DateTime.MinValue;
     private int _frameErrorCount;
 
@@ -198,6 +198,7 @@ public sealed class WindowCapture : ICaptureProvider
             {
                 // 启动中途失败：释放已创建的半套资源，保证下次 Start 干净重来
                 // （Stop 有 !_running 短路，不会清理这些）
+                if (_pool is not null) { try { _pool.FrameArrived -= OnFrameArrived; } catch { } }
                 try { _session?.Dispose(); } catch { }
                 try { _pool?.Dispose(); } catch { }
                 _session = null;
@@ -308,11 +309,12 @@ public sealed class WindowCapture : ICaptureProvider
 
     private void OnFrameArrived(Direct3D11CaptureFramePool sender, object args)
     {
+        if (!_running) return;
         Direct3D11CaptureFrame? frame = null;
         try
         {
             frame = sender.TryGetNextFrame();
-            if (frame is null) return;
+            if (frame is null || !_running) return;
 
             // 帧池必须与内容原始尺寸严格一致（小了裁切、大了拉伸/黑边）。
             // ① 边框幻影差（Win10 item.Size 含不可见边框 1296×759，内容 1282×752）：
@@ -380,21 +382,27 @@ public sealed class WindowCapture : ICaptureProvider
             var cap = CapSize(_size.Width, _size.Height);
             if (!_gpuFailed && (cap.Width != _size.Width || cap.Height != _size.Height))
             {
-                try
+                lock (_gate)
                 {
-                    // GPU 缩放器与设备创建同家族（_d3dDevicePtr 属于 Vortice 包装）
-                    _gpuScalerVortice ??= new GpuVideoScalerVortice(_d3dDevicePtr, Step);
-                    data = _gpuScalerVortice.ScaleToBgra(frame.Surface, _size.Width, _size.Height, out ow, out oh);
-                    gpuDone = true;
-                }
-                catch (Exception gex)
-                {
-                    _gpuFailed = true;
-                    Step($"GPU 硬件缩放不可用，本捕获会话回退 CPU 缩放：{gex.Message}");
+                    if (!_running || _d3dDevicePtr == 0) return;
+                    try
+                    {
+                        // GPU 缩放器与设备创建同家族（_d3dDevicePtr 属于 Vortice 包装）
+                        _gpuScalerVortice ??= new GpuVideoScalerVortice(_d3dDevicePtr, Step);
+                        data = _gpuScalerVortice.ScaleToBgra(frame.Surface, _size.Width, _size.Height, out ow, out oh);
+                        gpuDone = true;
+                    }
+                    catch (Exception gex)
+                    {
+                        if (!_running) return;
+                        _gpuFailed = true;
+                        Step($"GPU 硬件缩放不可用，本捕获会话回退 CPU 缩放：{gex.Message}");
+                    }
                 }
             }
             if (!gpuDone)
             {
+                if (!_running) return;
                 // 跨适配器/异常表面可能让 WinRT 异步拷贝永不完成（挂住回调线程、画面永远无产出）：
                 // 3s 超时按帧处理失败上报，交给引擎重建/升级捕获设备。
                 var copyTask = SoftwareBitmap.CreateCopyFromSurfaceAsync(frame.Surface, BitmapAlphaMode.Premultiplied).AsTask();
@@ -403,17 +411,20 @@ public sealed class WindowCapture : ICaptureProvider
                 // CPU 侧降采样（高≤720）：下游 OCR/ROI 只接触小图，全尺寸数组随本次 GC 释放
                 data = DownscaleIfNeeded(full, w, h, out ow, out oh);
             }
+            if (!_running) return;
             _latest = new FrameData(data, ow, oh, tick);
             _lastFrameAt = DateTime.Now;
             FrameUpdated?.Invoke(this, EventArgs.Empty);
         }
         catch (Exception ex) when (ex is COMException or InvalidCastException or ObjectDisposedException)
         {
+            if (!_running) return;
             // 捕获过程中窗口关闭 / 设备丢失
             CaptureClosed?.Invoke(this, ex.Message);
         }
         catch (Exception ex)
         {
+            if (!_running) return;
             // 记录前几次瞬时错误，便于诊断
             if (++_frameErrorCount <= 3)
                 Step($"帧处理失败: {ex.Message}");
@@ -504,6 +515,7 @@ public sealed class WindowCapture : ICaptureProvider
             try { _gpuScalerVortice?.Dispose(); } catch { }
             _gpuScalerVortice = null;
             _gpuFailed = false;
+            if (_pool is not null) { try { _pool.FrameArrived -= OnFrameArrived; } catch { } }
             try { _session?.Dispose(); } catch { }
             try { _pool?.Dispose(); } catch { }
             _session = null;

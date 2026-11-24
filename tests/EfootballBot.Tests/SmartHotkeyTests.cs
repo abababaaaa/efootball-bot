@@ -40,4 +40,19 @@ public class SmartHotkeyTests
         Assert.Equal(SmartHotkey.HotkeyAction.None, SmartHotkey.MatchHotkey(cfg, 0x51, 6, isMouse: false));
         Assert.Equal(SmartHotkey.HotkeyAction.None, SmartHotkey.MatchHotkey(null, 0x51, 6, isMouse: false));
     }
+
+    [Fact]
+    public void ShouldAcceptKeyDown_SuppressesAutoRepeat_RecoversAfterMissedKeyUp()
+    {
+        int held = 0;
+        bool qPhysicallyDown = true;
+
+        // 首次按下 Q 放行，持续按住产生系统连发时抑制
+        Assert.True(SmartHotkey.ShouldAcceptKeyDown(0x51, ref held, _ => qPhysicallyDown));
+        Assert.False(SmartHotkey.ShouldAcceptKeyDown(0x51, ref held, _ => qPhysicallyDown));
+
+        // 模拟在提权窗口丢失 WM_KEYUP，但物理按键实际已松开 → 下次再按 Q 自动恢复
+        qPhysicallyDown = false;
+        Assert.True(SmartHotkey.ShouldAcceptKeyDown(0x51, ref held, _ => qPhysicallyDown));
+    }
 }

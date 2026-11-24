@@ -23,6 +23,11 @@ public sealed partial class WeeklyEventScenario : IScenario
     /// 全部就绪或读不到（保守不按）时 B 返回。改选等级超预算则带 Warn 放弃，绝不卡死。</summary>
     private async Task<int> HandleSettingsAsync(WkScreen wk, MatchScreen ml, Observation obs)
     {
+        if (wk == WkScreen.EventSettings && WeeklyBrain.IsEventSettingsDropdown(obs.Ocr))
+        {
+            SetPhase(WkPhase.LevelDropdown);
+            return await HandleSettingsDropdownAsync(obs.Frame, obs.Ocr);
+        }
         if (wk == WkScreen.EventSettings)
         {
             var cfg = _engine.Config.Weekly;
@@ -44,6 +49,7 @@ public sealed partial class WeeklyEventScenario : IScenario
                 await _engine.Pad.Back();
                 return 2000;
             }
+            bool levelUnmet = false;
             // 1) 赛事等级（光标默认在等级行：饱和上移归位后直接 A）
             if (s.Level is not null && s.Level != cfg.EventLevel)
             {
@@ -56,6 +62,7 @@ public sealed partial class WeeklyEventScenario : IScenario
                     await _engine.Pad.Confirm();
                     return 2200;
                 }
+                levelUnmet = true;
                 // 措辞写清楚是「设置未成功」——旧版曾误写成「设置成功」，让人以为按配置生效了；
                 // 把目标值/当前值/后果都写明，避免误解为「已按传奇开赛」。
                 _log($"[周活动] 赛事等级设置未成功：想要「{cfg.EventLevel}」但游戏仍为「{s.Level}」，本次按当前等级开赛（非配置等级）", LogLevel.Warn);
@@ -82,7 +89,10 @@ public sealed partial class WeeklyEventScenario : IScenario
                 await _engine.Pad.Confirm();
                 return 2000;
             }
-            _log("[周活动] 设置核验完成，B 返回活动主页", LogLevel.Success);
+            if (levelUnmet)
+                _log($"[周活动] 设置核验结束（赛事等级未达成「{cfg.EventLevel}」，按当前「{s.Level}」开赛），B 返回活动主页", LogLevel.Warn);
+            else
+                _log("[周活动] 设置核验完成，B 返回活动主页", LogLevel.Success);
             SetPhase(WkPhase.LaunchReady);
             await _engine.Pad.Back();
             return 1800;
@@ -108,6 +118,56 @@ public sealed partial class WeeklyEventScenario : IScenario
         }
         if (++_attempts > 4) { SetPhase(WkPhase.Flow); return 600; }
         return 1200;
+    }
+
+    /// <summary>
+    /// 活动设置「赛事等级」实机下拉列表闭环导航（2026-11-24 实机截图校准）：
+    /// 展开后右半屏保留「活动设置」标题与 7 行下拉项，白底高光为当前焦点行、右侧蓝勾为当前选中项，
+    /// 底部无独立确认键，方向键移动焦点至目标项后直接按 A 即选中并收起下拉。
+    /// 先校验白底焦点（回退蓝勾），未对齐先按方向键闭环移位并留下一帧视觉复核，确认焦点落在目标项才按 A。
+    /// </summary>
+    private async Task<int> HandleSettingsDropdownAsync(Capture.FrameData frame, OcrResult ocr)
+    {
+        string wanted = _engine.Config.Weekly.EventLevel;
+        string? focused = WeeklyBrain.DetectDropdownFocusedLevel(frame, ocr);
+        string? checkedLevel = WeeklyBrain.DetectDropdownCheckedLevel(frame, ocr);
+        string? current = focused ?? checkedLevel;
+        if (current is null || !MatchBrain.Difficulties.Contains(wanted))
+        {
+            _log($"[周活动] 赛事等级下拉当前项未读出（焦点「{focused ?? "null"}」/勾选「{checkedLevel ?? "null"}」），B 收起", LogLevel.Warn);
+            SetPhase(WkPhase.Settings);
+            await _engine.Pad.Back();
+            return 1800;
+        }
+        if (current == wanted)
+        {
+            _log($"[周活动] 赛事等级下拉：焦点已在「{wanted}」，A 确认选中", LogLevel.Success);
+            SetPhase(WkPhase.Settings);
+            await _engine.Pad.Confirm();
+            return 1800;
+        }
+        if (++_dropdownMoves > 6)
+        {
+            _log($"[周活动] 赛事等级下拉多次移位未对齐「{wanted}」（当前「{current}」），B 收起", LogLevel.Warn);
+            SetPhase(WkPhase.Settings);
+            await _engine.Pad.Back();
+            return 1800;
+        }
+        int delta = WeeklyBrain.ComputeDropdownStepDelta(ocr, current, wanted);
+        if (delta == 0)
+        {
+            _log($"[周活动] 赛事等级下拉：步距为 0（当前「{current}」），A 确认", LogLevel.Info);
+            SetPhase(WkPhase.Settings);
+            await _engine.Pad.Confirm();
+            return 1800;
+        }
+        _attempts = 0; // 移位期间允许下一帧复核焦点，不触发未识别超时
+        var dir = delta > 0 ? PadDir.Down : PadDir.Up;
+        int steps = Math.Abs(delta);
+        string dirName = delta > 0 ? "下" : "上";
+        _log($"[周活动] 赛事等级下拉：{current} → {wanted}（{dirName}×{steps}，下帧复核焦点）", LogLevel.Info);
+        await _engine.Pad.DpadRepeat(dir, steps);
+        return 900;
     }
 
     /// <summary>赛事等级下拉选项（复用我的联赛难度页检测：蓝勾=当前所选，N+1-k 公式改选）。
@@ -214,4 +274,7 @@ public sealed partial class WeeklyEventScenario : IScenario
 
     /// <summary>赛事等级改选尝试次数（超 2 次放弃改选，继续用游戏当前值）。</summary>
     private int _levelAttempts;
+
+    /// <summary>活动设置下拉列表单次改选的闭环移位次数（防探针异常时来回抖动）。</summary>
+    private int _dropdownMoves;
 }

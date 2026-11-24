@@ -129,7 +129,8 @@ public class ReplaceItemDialogTests
             ("取消", 0.50, 0.66, 0.05, 0.036));
         Assert.True(ocr.ContainsJoined("取消"));
         Assert.False(PopupBrain.IsReplaceDialog(ocr));
-        Assert.Equal(PopupAction.PressConfirm, PopupBrain.Decide(frame, ocr, out _)); // 单按钮 → 直接 A
+        // 既不能误判为替换弹窗（UpThenConfirm），也不再对单枚非推进键「取消」盲按 A（改为 None 交由兜底策略处理）
+        Assert.Equal(PopupAction.None, PopupBrain.Decide(frame, ocr, out _));
     }
 
     [Fact]

@@ -42,4 +42,15 @@ public class BackgroundParkerTests
     {
         Assert.Equal(expected, BackgroundParker.WindowShrunk(originalWidth, currentWidth));
     }
+
+    [Theory]
+    [InlineData(2624, 100, 2624, 100, true, true)]
+    [InlineData(2617, 100, 2624, 100, false, true)] // Win11 DWM -7px 不可见边框
+    [InlineData(2632, 108, 2624, 100, true, true)]  // DPI 舍入微差
+    [InlineData(500, 100, 2624, 100, false, false)] // 被游戏拖回屏幕内
+    public void IsAtParkPosition_容忍DWM边框偏差且拦截真实回归(
+        int actualLeft, int actualTop, int expectedLeft, int expectedTop, bool checkTop, bool expected)
+    {
+        Assert.Equal(expected, BackgroundParker.IsAtParkPosition(actualLeft, actualTop, expectedLeft, expectedTop, checkTop));
+    }
 }

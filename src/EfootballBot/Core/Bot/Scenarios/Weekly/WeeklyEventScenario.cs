@@ -616,6 +616,8 @@ public sealed partial class WeeklyEventScenario : IScenario
                 return await HandleSettingsAsync(wk, ml, obs);
             case WkPhase.LevelDropdown:
             {
+                if (WeeklyBrain.IsEventSettingsDropdown(obs.Ocr))
+                    return await HandleSettingsDropdownAsync(obs.Frame, obs.Ocr);
                 if (ml == MatchScreen.DifficultyPage)
                     return await HandleLevelOptionsAsync(obs.Frame, obs.Ocr);
                 // 下拉展开样式未识别（待实机校准）：B 收起回浮层；改选预算在 Settings 侧
@@ -833,6 +835,14 @@ public sealed partial class WeeklyEventScenario : IScenario
     {
         _phase = phase;
         _attempts = 0;
+        if (phase == WkPhase.AtHome)
+        {
+            _levelAttempts = 0; // 每次回到主页/重新核验设置，允许重新尝试改选难度
+        }
+        if (phase == WkPhase.LevelDropdown)
+        {
+            _dropdownMoves = 0;
+        }
         if (phase == WkPhase.MatchPlanSetup)
         {
             _planStep = PlanStep.Open;      // 新的一次修复：先按 Y，再按屏幕往下走
@@ -889,6 +899,15 @@ public sealed partial class WeeklyEventScenario : IScenario
                 await _engine.Pad.Confirm();
                 return 2400;
             default:
+                // 仅读到取消/关闭或高光非推进键且未读出推进键：按默认焦点避让取消，先上移一格留足焦点刷新后再 A
+                if (obs.Ocr.ContainsJoined("取消") || obs.Ocr.ContainsJoined("关闭"))
+                {
+                    _log($"[周活动] {context}：{note}，兜底上移避开取消/关闭后再 A", LogLevel.Info);
+                    await _engine.Pad.Dpad(PadDir.Up);
+                    await Task.Delay(250);
+                    await _engine.Pad.Confirm();
+                    return 2400;
+                }
                 // 按钮词没读到：有推进词（含底栏「前往比赛/开始比赛/下一步」等）就按 A，否则等一拍由上层重判
                 if (obs.Ocr.ContainsJoined("下一步") || obs.Ocr.ContainsJoined("OK") ||
                     obs.Ocr.ContainsJoined("确认") || obs.Ocr.ContainsJoined("进入") ||

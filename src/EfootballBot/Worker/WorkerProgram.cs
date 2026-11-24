@@ -315,9 +315,16 @@ public static class WorkerProgram
                         engine.Stop();
                         await SendAsync(PipeProtocol.EvLog("Info", "已停止"));
                     }
+                    var finishingEngine = engine;
+                    engine = null;
+                    if (finishingEngine is not null)
+                    {
+                        try { finishingEngine.Dispose(); } catch { }
+                        try { await finishingEngine.WaitPendingRestoreAsync(1200); } catch { }
+                    }
                     StopPreviewLoop();
-                    // 确认事件：GUI 收到后立即回收进程。Worker 收 stop 本就不退出
-                    // （保活等重连），GUI 侧固定等 5s 进程退出只会白等后 Kill。
+                    // 确认事件：GUI 收到后立即回收进程。先释放 ViGEmClient 并等进程内手柄恢复落盘再回 Stopped，
+                    // 避免遗留内核槽位延迟或计划任务与下一轮「开始」竞争。
                     await SendAsync(PipeProtocol.EvStopped());
                 }
                 else if (msg.Cmd == "pause")

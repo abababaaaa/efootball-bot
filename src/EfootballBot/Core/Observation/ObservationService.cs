@@ -22,6 +22,7 @@ public sealed class ObservationService : IDisposable
     private FrameData? _lastOcrFrame;
     private OcrResult _lastOcr = OcrResult.Empty;
     private ulong? _lastOcrHash;
+    private IReadOnlyList<OcrMaskRect>? _osdMaskRects;
     private long _lastOcrTick;
     private readonly List<DateTime> _rebuildTimes = new();
 
@@ -92,6 +93,7 @@ public sealed class ObservationService : IDisposable
         _frame = null;
         _lastOcrFrame = null;
         _lastOcrHash = null;
+        _osdMaskRects = null;
     }
 
     /// <summary>
@@ -179,20 +181,38 @@ public sealed class ObservationService : IDisposable
     /// <summary>把"当前后端出帧正常"写入本机记忆。GDI/WARP 写入是启动提速的关键
     /// （下次不再撞探测链）；WGC 写入用于机器修复后自愈覆盖旧判定。
     /// DXGI 为用户显式选择的模式，不参与记忆（记忆只在 Wgc 模式下消费）。</summary>
+    internal static bool TryGetWgcWarpControl(ICaptureProvider provider, out bool forceWarp, out Action<bool> setForceWarp)
+    {
+        switch (provider)
+        {
+            case WindowCapture wc:
+                forceWarp = wc.ForceWarpDevice;
+                setForceWarp = v => wc.ForceWarpDevice = v;
+                return true;
+            case CaptureHost ch when !ch.SidecarActive:
+                forceWarp = ch.ForceWarpDevice;
+                setForceWarp = v => ch.ForceWarpDevice = v;
+                return true;
+            default:
+                forceWarp = false;
+                setForceWarp = static _ => { };
+                return false;
+        }
+    }
+
     private void RememberWorkingBackend()
     {
         try
         {
-            switch (_provider)
+            if (_provider is GdiWindowCapture)
             {
-                case GdiWindowCapture:
-                    CaptureBackendMemory.Save(CaptureBackendKind.Gdi, "GDI 捕获出帧正常");
-                    break;
-                case WindowCapture wc:
-                    CaptureBackendMemory.Save(
-                        wc.ForceWarpDevice ? CaptureBackendKind.Warp : CaptureBackendKind.Wgc,
-                        wc.ForceWarpDevice ? "WARP 兼容模式出帧正常" : "硬件 WGC 出帧正常");
-                    break;
+                CaptureBackendMemory.Save(CaptureBackendKind.Gdi, "GDI 捕获出帧正常");
+            }
+            else if (TryGetWgcWarpControl(_provider, out bool forceWarp, out _))
+            {
+                CaptureBackendMemory.Save(
+                    forceWarp ? CaptureBackendKind.Warp : CaptureBackendKind.Wgc,
+                    forceWarp ? "WARP 兼容模式出帧正常" : "硬件 WGC 出帧正常");
             }
         }
         catch { /* 记忆失败不影响挂机 */ }
@@ -274,11 +294,11 @@ public sealed class ObservationService : IDisposable
                 throw new CaptureUnrecoverableException(
                     "画面捕获会话多次建立但始终无帧，已停止重建。" + DescribeZeroFrameCause());
             }
-            if (_provider is WindowCapture wc && !wc.ForceWarpDevice)
+            if (TryGetWgcWarpControl(_provider, out bool forceWarp, out var setWarp) && !forceWarp)
             {
                 // 熔断前唯一的机会：强制切 WARP 软渲染设备重建——表面为系统内存，
                 // CPU 拷贝必达（v1.x 在这类机器上的实际工作形态）。
-                wc.ForceWarpDevice = true;
+                setWarp(true);
                 _backendSavedThisRun = false; // 兼容模式验证通过后回写 WARP 记忆
                 LogInternal("捕获会话建立后始终无帧：直接改用 WARP 软渲染设备重建捕获" +
                     "（虚拟显示器/远程环境兼容模式；再无帧将降级 GDI 捕获）", LogLevel.Warn);
@@ -303,9 +323,9 @@ public sealed class ObservationService : IDisposable
                     // 熔断前最后一次机会：硬件设备 WGC 在虚拟显示器/远程会话机器上跨适配器表面
                     // 失效（GPU 缩放 E_INVALIDARG、CPU 拷贝无产出），重建多少次都无帧；
                     // 强制切 WARP 软渲染设备重建（v1.x 在这些机器上的实际工作形态），仍无帧才熔断降级 GDI。
-                    if (_provider is WindowCapture wc && !wc.ForceWarpDevice)
+                    if (TryGetWgcWarpControl(_provider, out bool forceWarp, out var setWarp) && !forceWarp)
                     {
-                        wc.ForceWarpDevice = true;
+                        setWarp(true);
                         _backendSavedThisRun = false;
                         _rebuildTimes.Clear();
                         _fastStallCount = 0;
@@ -369,7 +389,8 @@ public sealed class ObservationService : IDisposable
         // 命中时返回【新帧】+ 缓存识别，YOLO 仍按新帧节奏跑，不被 OCR 绑死。
         // 指纹只算【一次】：旧实现判断时一次、存缓存时又一次，同一帧 3.7MB 白扫两遍。
         long tHash0 = Environment.TickCount64;
-        ulong hash = HashBgra(f);
+        var masks = _osdMaskRects;
+        ulong hash = HashBgra(f, masks);
         long hashMs = Environment.TickCount64 - tHash0;
 
         if (_lastOcrHash is { } lastHash && hash == lastHash)
@@ -382,6 +403,12 @@ public sealed class ObservationService : IDisposable
         long tOcr0 = Environment.TickCount64;
         var ocr = await _ocr.RecognizeAsync(f, ct);
         long ocrMs = Environment.TickCount64 - tOcr0;
+        var nextMasks = ocr.OsdMaskRects.Count > 0 ? ocr.OsdMaskRects : null;
+        if (!MaskRectsEqual(masks, nextMasks))
+        {
+            _osdMaskRects = nextMasks;
+            hash = HashBgra(f, nextMasks);
+        }
         _lastOcrFrame = f;
         _lastOcr = ocr;
         _lastOcrHash = hash;
@@ -389,14 +416,24 @@ public sealed class ObservationService : IDisposable
         return new ObserveResult(f, ocr, frameWaitMs, hashMs, ocrMs);
     }
 
+    private static bool MaskRectsEqual(IReadOnlyList<OcrMaskRect>? a, IReadOnlyList<OcrMaskRect>? b)
+    {
+        int ca = a?.Count ?? 0, cb = b?.Count ?? 0;
+        if (ca == 0 && cb == 0) return true;
+        if (ca != cb || a is null || b is null) return false;
+        for (int i = 0; i < ca; i++)
+            if (a[i] != b[i]) return false;
+        return true;
+    }
+
+    internal static ulong HashBgra(FrameData f) => HashBgra(f, null);
+
     /// <summary>
-    /// 帧内容指纹（FNV-1a 64，按像素 32 位读取）。
-    /// 仅用于同帧去重：极小概率的碰撞只是多跑/少跑一次 OCR，不同帧误判同帧的概率 ~2^-64，无正确性风险。
-    /// 采样策略：整行读取、隔行取样（1280×720 约 92 万字节 → 约 46 万次异或，实测 &lt;1ms）。
-    /// 只隔行不隔列——横向保留全部像素，1px 宽的闪烁光标也不会漏判；纵向只跳过单行变化
-    /// （文字/按钮/弹窗的像素变化必然跨多行），代价可忽略。
+    /// 帧内容指纹（FNV-1a 64，按像素 32 位读取）；传入 <paramref name="ignoreRects"/> 时
+    /// 动态跳过已识别出的顶部外置性能监控 OSD 区域，防止跳变的 FPS/温度像素打穿静帧去重。
+    /// 未检测到外置浮窗时 <paramref name="ignoreRects"/> 为空，走零分支全帧扫描。
     /// </summary>
-    internal static ulong HashBgra(FrameData f)
+    internal static ulong HashBgra(FrameData f, IReadOnlyList<OcrMaskRect>? ignoreRects)
     {
         const ulong offset = 14695981039346656037;
         const ulong prime = 1099511628211;
@@ -410,11 +447,50 @@ public sealed class ObservationService : IDisposable
         int rows = Math.Min(Math.Max(1, f.Height), px.Length / w);
         ulong hash = offset ^ (ulong)bgra.Length;
         const int RowStep = 2;
+
+        if (ignoreRects is null || ignoreRects.Count == 0)
+        {
+            for (int y = 0; y < rows; y += RowStep)
+            {
+                int rowBase = y * w;
+                for (int x = 0; x < w; x++)
+                {
+                    hash ^= px[rowBase + x];
+                    hash *= prime;
+                }
+            }
+            return hash;
+        }
+
+        int maskCount = Math.Min(ignoreRects.Count, 16);
+        Span<int> mx0 = stackalloc int[maskCount];
+        Span<int> my0 = stackalloc int[maskCount];
+        Span<int> mx1 = stackalloc int[maskCount];
+        Span<int> my1 = stackalloc int[maskCount];
+        for (int m = 0; m < maskCount; m++)
+        {
+            var r = ignoreRects[m];
+            mx0[m] = (int)Math.Clamp(Math.Floor(r.X0 * w), 0, w);
+            mx1[m] = (int)Math.Clamp(Math.Ceiling(r.X1 * w), 0, w);
+            my0[m] = (int)Math.Clamp(Math.Floor(r.Y0 * rows), 0, rows);
+            my1[m] = (int)Math.Clamp(Math.Ceiling(r.Y1 * rows), 0, rows);
+        }
+
         for (int y = 0; y < rows; y += RowStep)
         {
             int rowBase = y * w;
             for (int x = 0; x < w; x++)
             {
+                bool skip = false;
+                for (int m = 0; m < maskCount; m++)
+                {
+                    if (y >= my0[m] && y < my1[m] && x >= mx0[m] && x < mx1[m])
+                    {
+                        skip = true;
+                        break;
+                    }
+                }
+                if (skip) continue;
                 hash ^= px[rowBase + x];
                 hash *= prime;
             }

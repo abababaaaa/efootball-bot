@@ -86,6 +86,11 @@ public static class PadConfigJob
 
     private static int RunPadRestore()
     {
+        if (PhysicalPadControl.IsBotSessionActive())
+        {
+            AppendLog($"[pad-restore {Now}] 挂机会话进行中，跳过恢复");
+            return 0;
+        }
         var (ok, msg) = PhysicalPadControl.RestoreAll();
         AppendLog($"[pad-restore {Now}] {(ok ? "成功" : "失败")}：{msg}");
         return ok ? 0 : 1;

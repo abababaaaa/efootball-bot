@@ -26,6 +26,7 @@ public sealed class BackgroundParker
 {
     private readonly Action<string, LogLevel> _log;
     private readonly int _watchdogIntervalMs;
+    private readonly object _gate = new();
 
     private nint _hwnd;
     private RECT _original;
@@ -33,10 +34,14 @@ public sealed class BackgroundParker
     private int _parkApiError;
     private ParkRect? _target;
     private CancellationTokenSource? _cts;
+    private volatile bool _isParked;
+
+    /// <summary>Win11 隐形边框与 DPI 取整带来的坐标系容差（像素）。</summary>
+    internal const int ParkCoordTolerancePx = 16;
 
     /// <summary>看门狗把窗口重新移出屏幕的次数（游戏自行搬回的次数）。</summary>
     public int Corrections { get; private set; }
-    public bool IsParked { get; private set; }
+    public bool IsParked => _isParked;
 
     public BackgroundParker(Action<string, LogLevel> log, int watchdogIntervalMs = 2500)
     {
@@ -53,10 +58,14 @@ public sealed class BackgroundParker
     internal static bool WindowShrunk(int originalWidth, int currentWidth) =>
         originalWidth >= 800 && currentWidth * 2 < originalWidth;
 
+    internal static bool IsAtParkPosition(int actualLeft, int actualTop, int expectedLeft, int expectedTop, bool checkTop)
+        => Math.Abs(actualLeft - expectedLeft) <= ParkCoordTolerancePx &&
+           (!checkTop || Math.Abs(actualTop - expectedTop) <= ParkCoordTolerancePx);
+
     /// <summary>在停靠点原地把窗口恢复为原始尺寸（不改变 Z 序、不抢激活）。</summary>
-    private void RestoreSizeAt(int parkX)
+    private void RestoreSizeAt(int parkX, int parkTop)
     {
-        SetWindowPos(_hwnd, nint.Zero, parkX, _original.Top,
+        SetWindowPos(_hwnd, nint.Zero, parkX, parkTop,
             _original.Right - _original.Left, _original.Bottom - _original.Top,
             SWP_NOZORDER | SWP_NOACTIVATE);
     }
@@ -65,78 +74,83 @@ public sealed class BackgroundParker
     /// <paramref name="target"/> 非 null 时停靠到该矩形（虚拟显示器后台），否则移出屏幕。</summary>
     public void Start(nint hwnd, ParkRect? target = null)
     {
-        Stop();
-        if (hwnd == nint.Zero) return;
-        _hwnd = hwnd;
-        _target = target;
-        _hadOriginal = GetWindowRect(hwnd, out _original);
-        Corrections = 0;
-        _parkApiError = 0;
-
-        if (IsIconic(hwnd))
+        CancellationToken token;
+        lock (_gate)
         {
-            _log("后台停靠跳过：游戏窗口当前处于最小化状态", LogLevel.Warn);
-            return;
-        }
-        // 全屏（最大化）窗口被系统钉在显示器上，且游戏内不允许更改显示模式/切换无边框：
-        // 不做移出，跳过停靠（避免移出失败或窗口行为异常）
-        if (IsZoomed(hwnd))
-        {
+            Stop();
+            if (hwnd == nint.Zero) return;
+            _hwnd = hwnd;
+            _target = target;
             _hadOriginal = GetWindowRect(hwnd, out _original);
-            _log("后台停靠跳过：全屏（最大化）状态下无法移出窗口，请退出全屏后再启用后台停靠", LogLevel.Warn);
-            return;
-        }
-        if (!Park())
-        {
-            _log(DescribeFailure(_parkApiError), LogLevel.Warn);
-            return;
+            Corrections = 0;
+            _parkApiError = 0;
+
+            if (IsIconic(hwnd))
+            {
+                _log("后台停靠跳过：游戏窗口当前处于最小化状态", LogLevel.Warn);
+                return;
+            }
+            // 全屏（最大化）窗口被系统钉在显示器上，且游戏内不允许更改显示模式/切换无边框：
+            // 不做移出，跳过停靠（避免移出失败或窗口行为异常）
+            if (IsZoomed(hwnd))
+            {
+                _hadOriginal = GetWindowRect(hwnd, out _original);
+                _log("后台停靠跳过：全屏（最大化）状态下无法移出窗口，请退出全屏后再启用后台停靠", LogLevel.Warn);
+                return;
+            }
+            if (!Park())
+            {
+                _log(DescribeFailure(_parkApiError), LogLevel.Warn);
+                return;
+            }
+
+            _isParked = true;
+            // 落盘：强制关闭/更新/崩溃等非正常退出后，下次启动自动还原。
+            // 必须存移出前的原矩形（_original）——此刻窗口已在屏幕外，读当前坐标会把
+            // 屏幕外坐标当原位置存下来，之后所有还原路径都等于没还原（游戏永远回不来）。
+            SaveParkRecord(_hwnd, _original);
+            _cts = new CancellationTokenSource();
+            token = _cts.Token;
         }
 
-        IsParked = true;
-        // 落盘：强制关闭/更新/崩溃等非正常退出后，下次启动自动还原。
-        // 必须存移出前的原矩形（_original）——此刻窗口已在屏幕外，读当前坐标会把
-        // 屏幕外坐标当原位置存下来，之后所有还原路径都等于没还原（游戏永远回不来）。
-        SaveParkRecord(_hwnd, _original);
-        // 停靠移动可能触发游戏自行缩窗（渲染/输入全死）：稍候片刻做一次尺寸校验，
-        // 被缩就在屏外原地把尺寸恢复（实测恢复一次后游戏不再缩）
-        Thread.Sleep(600);
-        int parkLeft = _target?.X ?? ComputeParkX(GetSystemMetrics(SM_XVIRTUALSCREEN), GetSystemMetrics(SM_CXVIRTUALSCREEN));
-        if (GetWindowRect(_hwnd, out var afterPark) &&
-            WindowShrunk(_original.Right - _original.Left, afterPark.Right - afterPark.Left))
-        {
-            RestoreSizeAt(parkLeft);
-            _log("后台停靠：游戏窗口被自行缩小（缩窗会杀死渲染与输入），已恢复尺寸", LogLevel.Warn);
-        }
-        _log(_target is { } t
+        _log(target is { } t
             ? $"后台停靠已开启：游戏窗口已停靠到虚拟显示器（{t.Width}×{t.Height}，物理屏幕不可见；停止挂机后自动还原位置）"
             : "后台停靠已开启：游戏窗口已移出屏幕（主屏幕不可见，点击其他软件不会跳出；停止挂机后自动还原位置）",
             LogLevel.Success);
-        _cts = new CancellationTokenSource();
-        _ = Task.Run(() => WatchAsync(_hwnd, _cts.Token));
+        // 停靠移动可能触发游戏自行缩窗：异步交由看门狗首拍（600ms 后）做尺寸校验与恢复，不再阻塞启动线程
+        _ = Task.Run(() => WatchAsync(hwnd, token));
     }
 
     /// <summary>停止看门狗并还原窗口原位置（幂等；未停靠过则什么都不做）。</summary>
     public void Stop()
     {
-        if (_cts is not null)
+        int restoredCorrections = 0;
+        bool didRestore = false;
+        lock (_gate)
         {
-            try { _cts.Cancel(); } catch { }
-            _cts.Dispose();
-            _cts = null;
+            if (_cts is not null)
+            {
+                try { _cts.Cancel(); } catch { }
+                _cts.Dispose();
+                _cts = null;
+            }
+            if (!_isParked) return;
+            _isParked = false;
+            restoredCorrections = Corrections;
+            try
+            {
+                // 还原挂机前原位置与尺寸；窗口已关闭时 SetWindowRect 自然失败，无需处理
+                if (_hadOriginal && _hwnd != nint.Zero)
+                    SetWindowPos(_hwnd, nint.Zero, _original.Left, _original.Top,
+                        _original.Right - _original.Left, _original.Bottom - _original.Top,
+                        SWP_NOZORDER | SWP_NOACTIVATE);
+                DeleteParkRecord(); // 正常还原完成，清除落盘记录
+                didRestore = true;
+            }
+            catch { /* 还原失败不影响停止流程 */ }
         }
-        if (!IsParked) return;
-        IsParked = false;
-        try
-        {
-            // 还原挂机前原位置与尺寸；窗口已关闭时 SetWindowRect 自然失败，无需处理
-            if (_hadOriginal && _hwnd != nint.Zero)
-                SetWindowPos(_hwnd, nint.Zero, _original.Left, _original.Top,
-                    _original.Right - _original.Left, _original.Bottom - _original.Top,
-                    SWP_NOZORDER | SWP_NOACTIVATE);
-            DeleteParkRecord(); // 正常还原完成，清除落盘记录
-            _log($"后台停靠已还原游戏窗口原位置（看门狗校正 {Corrections} 次）", LogLevel.Info);
-        }
-        catch { /* 还原失败不影响停止流程 */ }
+        if (didRestore)
+            _log($"后台停靠已还原游戏窗口原位置（看门狗校正 {restoredCorrections} 次）", LogLevel.Info);
     }
 
     /// <summary>
@@ -146,17 +160,20 @@ public sealed class BackgroundParker
     /// </summary>
     public void StopWatchdogOnly()
     {
-        if (_cts is not null)
+        lock (_gate)
         {
-            try { _cts.Cancel(); } catch { }
-            _cts.Dispose();
-            _cts = null;
+            if (_cts is not null)
+            {
+                try { _cts.Cancel(); } catch { }
+                _cts.Dispose();
+                _cts = null;
+            }
+            _isParked = false;
+            _hwnd = nint.Zero;
+            _hadOriginal = false;
+            _target = null;
+            DeleteParkRecord();
         }
-        IsParked = false;
-        _hwnd = nint.Zero;
-        _hadOriginal = false;
-        _target = null;
-        DeleteParkRecord();
     }
 
     /// <summary>停靠（不改变 Z 序、不抢激活）：目标矩形非 null 时移到该矩形（含尺寸），
@@ -169,9 +186,6 @@ public sealed class BackgroundParker
         int x, y, w, h;
         if (_target is { } t)
         {
-            // 虚拟屏停靠同样保持窗口原尺寸（SWP_NOSIZE）：强改窗口尺寸会让游戏画面
-            // 与内部渲染分辨率不一致（1280×720 客户区被拉成 1920×1080），
-            // 感知/ROI 是归一化坐标，挪位置不缩放才是安全操作
             x = t.X; y = t.Y; w = 0; h = 0;
         }
         else
@@ -186,7 +200,8 @@ public sealed class BackgroundParker
             _parkApiError = Marshal.GetLastWin32Error();
             return false;
         }
-        if (GetWindowRect(_hwnd, out var rc) && rc.Left == x && (w == 0 || rc.Top == y)) return true;
+        if (GetWindowRect(_hwnd, out var rc) && IsAtParkPosition(rc.Left, rc.Top, x, y, checkTop: _target is not null))
+            return true;
         _parkApiError = 0; // API 成功但位置被游戏强制还原 → 按独占全屏归类
         return false;
     }
@@ -203,41 +218,71 @@ public sealed class BackgroundParker
     {
         try
         {
+            // 首拍延迟 600ms 检测游戏是否自行缩窗，避免在 Start() 里同步阻塞调用线程
+            await Task.Delay(600, ct);
+            CheckAndCorrectWindowLocked(hwnd, ct, checkDrift: false);
+
             while (!ct.IsCancellationRequested)
             {
                 await Task.Delay(_watchdogIntervalMs, ct);
-                if (!IsWindow(hwnd) || IsParked == false) return;
-                if (IsIconic(hwnd)) continue; // 用户手动最小化：不与之对抗
-
-                if (!GetWindowRect(hwnd, out var rc)) continue;
-                int parkX = _target?.X ?? ComputeParkX(
-                    GetSystemMetrics(SM_XVIRTUALSCREEN),
-                    GetSystemMetrics(SM_CXVIRTUALSCREEN));
-                int parkTop = _target?.Y ?? _original.Top;
-                if (rc.Left != parkX || rc.Top != parkTop)
-                {
-                    // 游戏把窗口搬回了屏幕（或用户拖动）：重新停靠
-                    if (SetWindowPos(hwnd, nint.Zero, parkX, parkTop,
-                            0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE))
-                    {
-                        Corrections++;
-                        _log($"看门狗：游戏窗口被挪回屏幕（{rc.Left},{rc.Top}），已重新停靠（第 {Corrections} 次）", LogLevel.Info);
-                    }
-                    // 移回动作可能再次触发自行缩窗，交给下面的尺寸校验（本或下轮处理）
-                    if (!GetWindowRect(hwnd, out rc)) continue;
-                }
-                // 尺寸校验：停靠状态下游戏自行缩窗（渲染/输入全死）即原地恢复尺寸
-                if (WindowShrunk(_original.Right - _original.Left, rc.Right - rc.Left))
-                {
-                    RestoreSizeAt(parkX);
-                    Corrections++;
-                    _log($"看门狗：游戏窗口被自行缩小至 {rc.Right - rc.Left}x{rc.Bottom - rc.Top}，" +
-                         $"已恢复尺寸（第 {Corrections} 次）", LogLevel.Info);
-                }
+                if (!CheckAndCorrectWindowLocked(hwnd, ct, checkDrift: true))
+                    return;
             }
         }
         catch (OperationCanceledException) { }
         catch { /* 看门狗异常静默：停靠失败不影响挂机主流程 */ }
+    }
+
+    private bool CheckAndCorrectWindowLocked(nint hwnd, CancellationToken ct, bool checkDrift)
+    {
+        string? warnMsg = null;
+        string? infoMsg = null;
+        lock (_gate)
+        {
+            if (ct.IsCancellationRequested || !_isParked || _hwnd != hwnd || !IsWindow(hwnd))
+                return false;
+            if (IsIconic(hwnd)) return true; // 用户手动最小化：不与之对抗
+            if (!GetWindowRect(hwnd, out var rc)) return true;
+
+            int parkX = _target?.X ?? ComputeParkX(
+                GetSystemMetrics(SM_XVIRTUALSCREEN),
+                GetSystemMetrics(SM_CXVIRTUALSCREEN));
+            int parkTop = _target?.Y ?? _original.Top;
+
+            if (checkDrift && !IsAtParkPosition(rc.Left, rc.Top, parkX, parkTop, checkTop: true))
+            {
+                if (SetWindowPos(hwnd, nint.Zero, parkX, parkTop,
+                        0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE))
+                {
+                    Corrections++;
+                    infoMsg = $"看门狗：游戏窗口被挪回屏幕（{rc.Left},{rc.Top}），已重新停靠（第 {Corrections} 次）";
+                }
+                if (!GetWindowRect(hwnd, out rc))
+                {
+                    if (infoMsg is not null) _log(infoMsg, LogLevel.Info);
+                    return true;
+                }
+            }
+
+            if (WindowShrunk(_original.Right - _original.Left, rc.Right - rc.Left))
+            {
+                RestoreSizeAt(parkX, parkTop);
+                if (checkDrift)
+                {
+                    Corrections++;
+                    warnMsg = $"看门狗：游戏窗口被自行缩小至 {rc.Right - rc.Left}x{rc.Bottom - rc.Top}，" +
+                              $"已恢复尺寸（第 {Corrections} 次）";
+                }
+                else
+                {
+                    warnMsg = "后台停靠：游戏窗口被自行缩小（缩窗会杀死渲染与输入），已恢复尺寸";
+                }
+            }
+        }
+
+        if (infoMsg is not null) _log(infoMsg, LogLevel.Info);
+        if (warnMsg is not null) _log(warnMsg, LogLevel.Warn);
+        return true;
     }
 
     private const int SM_CXFULLSCREEN = 16; // 主屏幕宽（不含任务栏）
