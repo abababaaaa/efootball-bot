@@ -149,7 +149,7 @@ public sealed partial class WeeklyEventScenario : IScenario
     /// cref="WeeklyBrain.DetectFocusedSidebarItem"/>）：读到别的项就下移一行；探针读不出
     /// （实机 plan_editor 帧里四行中位亮度都是 41，只有真聚焦行才是 255）就走确定性配方：
     /// 左×6 饱和进侧边栏 → 上×5 饱和到最顶「战术」→ 下×4 落到最后一项「自动配置球员」→ A。
-    /// 两种路径都不会无限左移/无限下移把自己卡在原地（吸收上游 v7.4.1 修复）。
+    /// 两种路径都不会无限左移/无限下移把自己卡在原地。
     /// </summary>
     private async Task<int> HandlePlanLineupAsync(WkScreen wk, Observation obs)
     {
@@ -272,7 +272,7 @@ public sealed partial class WeeklyEventScenario : IScenario
     private bool _planOptionPicked;
 
     /// <summary>本轮盲走进度：0=刚左移归位；1=已上饱和到「战术」；2=已下×4 到「自动配置球员」；
-    /// 3=下一步按 A。探针一旦读出高亮行立即清零（上游 v7.4.1）。</summary>
+    /// 3=下一步按 A。探针一旦读出高亮行立即清零。</summary>
     private int _planBlindStep;
 
     /// <summary>「无法进行比赛」弹窗连续按 A 未消失的次数（弹窗消失即清零）。</summary>

@@ -295,10 +295,11 @@ public sealed partial class WeeklyEventScenario : IScenario
         _planInvalidPresses = 0; // 弹窗已不在屏上：连按计数归零
         // 比赛计划编辑页 / 其「自动配置球员」选项弹窗（2026-11-22 用户实机）：正常只在
         // MatchPlanSetup 里出现；半途启动（人工点进比赛计划后才开挂机）也从这里接上。
-        // ★吸收上游 v7.4.1 修复：只在「还没进修复子流程」时接管一次；已经在 MatchPlanSetup
-        // 里必须把这一帧放回下面的 phase 分派（HandleMatchPlanSetupAsync → PlanStep 屏幕驱动）。
-        // 旧写法无条件接管并 return，每帧都把 _planStep 重置成 Lineup —— 手柄方向键发不出去，
-        // 屏幕永远停在编辑页，日志每秒刷「接管比赛计划页」（用户实测卡一整天、零场次）。
+        // ★只在「还没进修复子流程」时接管：已经在 MatchPlanSetup 里必须把这一帧放回
+        // 下面的 phase 分派（HandleMatchPlanSetupAsync → PlanStep 屏幕驱动）。旧写法无条件
+        // 接管并 return，等于每帧都把 _planStep 重置成 Lineup 再等 900ms —— 手柄一个方向键
+        // 都发不出去，屏幕永远停在编辑页，日志每秒刷一行「接管比赛计划页」（用户 2026-11-22
+        // 实测：卡一整天、不会向左进侧边栏）。
         bool planEditorOnScreen = wk is WkScreen.SquadLineupEdit or WkScreen.AutoConfigOptions;
         if (WeeklyBrain.ShouldTakeOverPlanEditor(planEditorOnScreen, _phase == WkPhase.MatchPlanSetup))
         {
@@ -836,7 +837,7 @@ public sealed partial class WeeklyEventScenario : IScenario
         {
             _planStep = PlanStep.Open;      // 新的一次修复：先按 Y，再按屏幕往下走
             _planOptionPicked = false;
-            _planBlindStep = 0;             // 盲走配方重新计（上游 v7.4.1）
+            _planBlindStep = 0;             // 盲走配方重新计
         }
         if (phase == WkPhase.IntroPopups)
         {

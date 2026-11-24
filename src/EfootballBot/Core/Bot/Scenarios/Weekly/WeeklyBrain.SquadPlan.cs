@@ -58,9 +58,10 @@ public static partial class WeeklyBrain
 
     /// <summary>
     /// 比赛计划编辑页 / 自动配置选项弹窗是否要「接管」进修复子流程（2026-11-22 用户实测回归）：
-    /// 只有还没进 MatchPlanSetup 时才接管；已经在子流程里必须把这一帧交回 PlanStep 状态机。
-    /// 旧写法无条件接管并立刻 return，等于每一帧都把子步骤重置成 Lineup，手柄一个方向键
-    /// 都发不出去、屏幕永远停在编辑页（用户实测卡一整天）。吸收自上游 v7.4.1 修复。
+    /// 只有还没进 <c>MatchPlanSetup</c> 时才接管；已经在子流程里必须把这一帧交回 PlanStep
+    /// 状态机。旧写法无条件接管并立刻 return，等于每一帧都把子步骤重置成 Lineup，手柄一个
+    /// 方向键都发不出去、屏幕永远停在编辑页（用户实测：卡一整天，不会向左进侧边栏，
+    /// 日志每秒刷一行「接管比赛计划页」）。
     /// </summary>
     public static bool ShouldTakeOverPlanEditor(bool planEditorOnScreen, bool alreadyFixingPlan)
         => planEditorOnScreen && !alreadyFixingPlan;

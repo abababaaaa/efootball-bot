@@ -223,9 +223,9 @@ public class TeamEffortRealFrameTests
     [Fact]
     public void PlanEditor_Takeover_OnlyBeforePlanSetup()
     {
-        // 吸收自上游 v7.4.1（用户 2026-11-22 实测：卡一整天、不会向左进侧边栏，日志每秒刷
-        // 「接管比赛计划页」）：编辑页拦截只允许在「还没进修复子流程」时接管一次。已经在
-        // MatchPlanSetup 里还必须接管 = 每帧把子步骤重置成 Lineup 并 return，手柄发不出方向键。
+        // 回归（用户 2026-11-22 实测：卡一整天、不会向左进侧边栏，日志每秒刷「接管比赛计划页」）：
+        // 编辑页拦截只允许在「还没进修复子流程」时接管一次。已经在 MatchPlanSetup 里还必须接管
+        // 就等于每帧把子步骤重置成 Lineup 并 return，手柄一个方向键都发不出去。
         Assert.True(WeeklyBrain.ShouldTakeOverPlanEditor(planEditorOnScreen: true, alreadyFixingPlan: false));
         Assert.False(WeeklyBrain.ShouldTakeOverPlanEditor(true, alreadyFixingPlan: true));
         Assert.False(WeeklyBrain.ShouldTakeOverPlanEditor(false, alreadyFixingPlan: false));
