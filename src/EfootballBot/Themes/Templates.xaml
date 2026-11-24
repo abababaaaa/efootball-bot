@@ -8,7 +8,7 @@
     <!-- 横幅白色按钮 -->
     <Style x:Key="BannerBtn" TargetType="Button">
         <Setter Property="Background" Value="White"/>
-        <Setter Property="Foreground" Value="#FF0B7A4E"/>
+        <Setter Property="Foreground" Value="{DynamicResource Accent}"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Padding" Value="17,7"/>
         <Setter Property="FontSize" Value="12.5"/>
@@ -26,7 +26,7 @@
                     </Border>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="bd" Property="Background" Value="#FFE7FAF1"/>
+                            <Setter TargetName="bd" Property="Background" Value="#FFF0F6FF"/>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
                             <Setter TargetName="bd" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.97" ScaleY="0.97"/></Setter.Value></Setter>
@@ -117,14 +117,14 @@
         <Setter Property="FontSize" Value="13"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="MinWidth" Value="84"/>
+        <Setter Property="MinWidth" Value="76"/>
         <Setter Property="HorizontalContentAlignment" Value="Center"/>
         <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Border x:Name="bd" CornerRadius="8" Background="Transparent"
-                            BorderBrush="Transparent" BorderThickness="1" Margin="3,9">
+                            BorderBrush="Transparent" BorderThickness="1" Margin="3,8" Padding="12,0">
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
@@ -206,9 +206,9 @@
         <Setter Property="Background" Value="Transparent"/>
         <Setter Property="BorderBrush" Value="Transparent"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="8"/>
-        <Setter Property="Padding" Value="12,9"/>
-        <Setter Property="Margin" Value="0,0,0,4"/>
+        <Setter Property="CornerRadius" Value="9"/>
+        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="Margin" Value="0,0,0,6"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="RenderTransformOrigin" Value="0.5,0.5"/>
         <Setter Property="RenderTransform">

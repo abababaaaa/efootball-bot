@@ -21,7 +21,7 @@
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="12"/>
         <Setter Property="Padding" Value="16,15"/>
-        <Setter Property="Margin" Value="0,0,0,14"/>
+        <Setter Property="Margin" Value="0,0,0,12"/>
         <Setter Property="Effect" Value="{DynamicResource CardShadowEffect}"/>
     </Style>
 
@@ -133,7 +133,7 @@
         <Setter Property="BorderBrush" Value="{DynamicResource ChipStroke}"/>
         <Setter Property="BorderThickness" Value="1"/>
         <Setter Property="CornerRadius" Value="6"/>
-        <Setter Property="Padding" Value="11,5"/>
+        <Setter Property="Padding" Value="9,4"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
     </Style>
 
@@ -152,14 +152,14 @@
 
     <Style x:Key="MetricValue" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource NumberFont}"/>
-        <Setter Property="FontSize" Value="19"/>
+        <Setter Property="FontSize" Value="18"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
-        <Setter Property="LineHeight" Value="23"/>
+        <Setter Property="LineHeight" Value="22"/>
         <Setter Property="Typography.NumeralAlignment" Value="Tabular"/>
     </Style>
     <Style x:Key="MetricLabel" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="11.5"/>
+        <Setter Property="FontSize" Value="11"/>
         <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
         <Setter Property="Margin" Value="0,2,0,0"/>
     </Style>

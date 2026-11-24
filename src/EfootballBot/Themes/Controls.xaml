@@ -15,18 +15,22 @@
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
                     <Grid Margin="4,0">
-                        <Border x:Name="bd" CornerRadius="8" Padding="16,14" Background="Transparent"
+                        <Border x:Name="bd" CornerRadius="8" Padding="14,11" Background="Transparent"
                                 BorderBrush="Transparent" BorderThickness="1">
                             <Grid>
                                 <!-- 左侧选中指示条：WorkBuddy 侧栏的方形强调，不用整块药丸 -->
-                                <Border x:Name="bar" Width="3.5" CornerRadius="1.5" HorizontalAlignment="Left"
-                                        VerticalAlignment="Stretch" Margin="-16,6,0,6"
+                                <Border x:Name="bar" Width="3" CornerRadius="1.5" HorizontalAlignment="Left"
+                                        VerticalAlignment="Stretch" Margin="-10,4,0,4"
                                         Background="{DynamicResource SelectBar}" Opacity="0"/>
-                                <ContentPresenter Margin="8,0,8,0" VerticalAlignment="Center"/>
+                                <ContentPresenter Margin="8,0,6,0" VerticalAlignment="Center"/>
                             </Grid>
                         </Border>
                     </Grid>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource HoverOverlay}"/>
+                            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                        </Trigger>
                         <!-- 选中高亮必须「已选中 + 当前正在看游戏模块（Tag=Active）」双条件：
                              切到设置/更新/日志/关于时模块 RadioButton 仍保持 IsChecked（服务器选择
                              语义要留着），只看 IsChecked 会让左栏同时亮起两项，而且再点该项因为
@@ -40,13 +44,6 @@
                             <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SelectBorder}"/>
                             <Setter TargetName="bar" Property="Opacity" Value="1"/>
                             <Setter Property="Foreground" Value="{DynamicResource SelectFg}"/>
-                        </MultiTrigger>
-                        <MultiTrigger>
-                            <MultiTrigger.Conditions>
-                                <Condition Property="IsMouseOver" Value="True"/>
-                                <Condition Property="IsChecked" Value="False"/>
-                            </MultiTrigger.Conditions>
-                            <Setter TargetName="bd" Property="Background" Value="{DynamicResource HoverOverlay}"/>
                         </MultiTrigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.45"/>
@@ -76,9 +73,9 @@
                                 BorderBrush="Transparent" BorderThickness="1">
                             <Grid>
                                 <Border x:Name="bar" Width="3" CornerRadius="1.5" HorizontalAlignment="Left"
-                                        VerticalAlignment="Stretch" Margin="-5,6,0,6"
+                                        VerticalAlignment="Stretch" Margin="3,7,0,7"
                                         Background="{DynamicResource SelectBar}" Opacity="0"/>
-                                <ContentPresenter Margin="18,0,8,0" VerticalAlignment="Center"
+                                <ContentPresenter Margin="14,0,8,0" VerticalAlignment="Center"
                                           HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
                             </Grid>
                         </Border>
@@ -109,6 +106,7 @@
     <Style x:Key="PrimaryBtn" TargetType="Button">
         <Setter Property="Background" Value="{DynamicResource PrimaryBtnFill}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextOnPrimary}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource PrimaryBtnStroke}"/>
         <Setter Property="BorderThickness" Value="0"/>
         <Setter Property="Padding" Value="16,8"/>
         <Setter Property="MinHeight" Value="34"/>
@@ -119,12 +117,12 @@
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="Button">
-                    <Grid RenderTransformOrigin="0.5,0.5">
+                    <Grid x:Name="root" RenderTransformOrigin="0.5,0.5">
                         <Grid.RenderTransform>
                             <ScaleTransform ScaleX="1" ScaleY="1"/>
                         </Grid.RenderTransform>
                         <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="9"
-                                BorderBrush="{DynamicResource PrimaryBtnStroke}" BorderThickness="1"
+                                BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
                                 Padding="{TemplateBinding Padding}" Effect="{DynamicResource CardShadowEffect}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
@@ -137,7 +135,7 @@
                             <Setter TargetName="flash" Property="Opacity" Value="0.10"/>
                         </Trigger>
                         <Trigger Property="IsPressed" Value="True">
-                            <Setter Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.975" ScaleY="0.975"/></Setter.Value></Setter>
+                            <Setter TargetName="root" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.98" ScaleY="0.98"/></Setter.Value></Setter>
                             <Setter TargetName="flash" Property="Opacity" Value="0.18"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
@@ -153,6 +151,8 @@
     <!-- 运行中「一键结束」：实心危险色（由代码 MainWindow.ModuleRun 切换样式，勿删） -->
     <Style x:Key="DangerBtn" TargetType="Button" BasedOn="{StaticResource PrimaryBtn}">
         <Setter Property="Background" Value="{DynamicResource Danger}"/>
+        <Setter Property="Foreground" Value="{DynamicResource TextOnDanger}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource DangerBorder}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
     </Style>
 
@@ -326,23 +326,24 @@
                             <ColumnDefinition Width="*"/>
                         </Grid.ColumnDefinitions>
                         <!-- 胶囊拨片：Trigger 直接驱动（勿用 VSM ColorAnimation 动画模板内联冻结画笔，会静默失效） -->
-                        <Grid Grid.Column="0" Width="40" Height="22" VerticalAlignment="Center" Margin="0,0,10,0">
-                            <Border x:Name="track" CornerRadius="11" Background="{DynamicResource ToggleOff}"/>
-                            <Border x:Name="thumb" Width="18" Height="18" CornerRadius="9" Background="White"
+                        <Grid Grid.Column="0" Width="38" Height="21" VerticalAlignment="Center" Margin="0,0,10,0">
+                            <Border x:Name="track" CornerRadius="10.5" Background="{DynamicResource ToggleOff}"
+                                    BorderBrush="{DynamicResource Divider}" BorderThickness="1"/>
+                            <Border x:Name="thumb" Width="17" Height="17" CornerRadius="8.5" Background="White"
                                     HorizontalAlignment="Left" VerticalAlignment="Center" Margin="2,0,0,0"/>
                         </Grid>
                         <ContentPresenter Grid.Column="1" VerticalAlignment="Center"/>
                     </Grid>
                     <ControlTemplate.Triggers>
                         <Trigger Property="IsChecked" Value="True">
-                            <!-- 开启态：纯白轨道 + 深色滑块（不再与主按钮抢绿色） -->
                             <Setter TargetName="track" Property="Background" Value="{DynamicResource ToggleOn}"/>
-                            <Setter TargetName="thumb" Property="Background" Value="{DynamicResource WindowBg}"/>
+                            <Setter TargetName="track" Property="BorderBrush" Value="Transparent"/>
+                            <Setter TargetName="thumb" Property="Background" Value="{DynamicResource ToggleThumbOn}"/>
                             <Setter TargetName="thumb" Property="HorizontalAlignment" Value="Right"/>
                             <Setter TargetName="thumb" Property="Margin" Value="0,0,2,0"/>
                         </Trigger>
                         <Trigger Property="IsMouseOver" Value="True">
-                            <Setter TargetName="track" Property="Opacity" Value="0.85"/>
+                            <Setter TargetName="track" Property="Opacity" Value="0.88"/>
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
                             <Setter Property="Opacity" Value="0.45"/>
@@ -353,7 +354,7 @@
         </Setter>
     </Style>
 
-    <!-- ============ 文本框（圆角 + 聚焦亮边） ============ -->
+    <!-- ============ 文本框（圆角 + 悬停与聚焦亮边） ============ -->
     <Style TargetType="TextBox">
         <Setter Property="Background" Value="{DynamicResource InputBg}"/>
         <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
@@ -370,12 +371,17 @@
                                       VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource HairlineStrong}"/>
+                        </Trigger>
                         <Trigger Property="IsKeyboardFocused" Value="True">
                             <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource AccentGlow}"/>
-                            <Setter TargetName="bd" Property="BorderThickness" Value="1.5"/>
                         </Trigger>
                         <Trigger Property="IsReadOnly" Value="True">
                             <Setter TargetName="bd" Property="Background" Value="{DynamicResource Surface2}"/>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.45"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -415,29 +421,56 @@
                                           IsHitTestVisible="False"
                                           TextElement.Foreground="{TemplateBinding Foreground}"/>
                         <Grid Width="16" Height="16" HorizontalAlignment="Right" VerticalAlignment="Center"
-                              Margin="0,0,11,0">
-                            <Path Data="M0,0 L5,5 L10,0" Stroke="{DynamicResource TextMuted}"
-                                  StrokeThickness="1.8" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
-                                  HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                              Margin="0,0,10,0" IsHitTestVisible="False">
+                            <Path x:Name="arrow" Data="M0,0 L5,5 L10,0" Stroke="{DynamicResource TextMuted}"
+                                  StrokeThickness="1.7" StrokeStartLineCap="Round" StrokeEndLineCap="Round"
+                                  HorizontalAlignment="Center" VerticalAlignment="Center"
+                                  RenderTransformOrigin="0.5,0.5">
+                                <Path.RenderTransform>
+                                    <RotateTransform Angle="0"/>
+                                </Path.RenderTransform>
+                            </Path>
                         </Grid>
                         <Popup x:Name="PART_Popup" Placement="Bottom" AllowsTransparency="True"
                                Focusable="False" PopupAnimation="Fade"
                                IsOpen="{TemplateBinding IsDropDownOpen}">
                             <Border Background="{DynamicResource ComboPopupBg}"
-                                    BorderBrush="{DynamicResource CardBorder}" BorderThickness="1"
+                                    BorderBrush="{DynamicResource HairlineStrong}" BorderThickness="1"
                                     CornerRadius="10" Margin="0,5,0,9" Padding="4"
                                     Effect="{StaticResource FloatShadow}"
                                     MinWidth="{Binding ActualWidth,RelativeSource={RelativeSource TemplatedParent}}">
-                                <StackPanel IsItemsHost="True"/>
+                                <ScrollViewer MaxHeight="280" VerticalScrollBarVisibility="Auto"
+                                              HorizontalScrollBarVisibility="Disabled" Focusable="False">
+                                    <StackPanel IsItemsHost="True" KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                </ScrollViewer>
                             </Border>
                         </Popup>
                     </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="arrow" Property="Stroke" Value="{DynamicResource TextSecondary}"/>
+                        </Trigger>
+                        <Trigger Property="IsDropDownOpen" Value="True">
+                            <Setter TargetName="arrow" Property="RenderTransform">
+                                <Setter.Value>
+                                    <RotateTransform Angle="180"/>
+                                </Setter.Value>
+                            </Setter>
+                            <Setter TargetName="arrow" Property="Stroke" Value="{DynamicResource TextPrimary}"/>
+                        </Trigger>
+                    </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
         </Setter>
         <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="BorderBrush" Value="{DynamicResource HairlineStrong}"/>
+            </Trigger>
             <Trigger Property="IsDropDownOpen" Value="True">
                 <Setter Property="BorderBrush" Value="{DynamicResource AccentGlow}"/>
+            </Trigger>
+            <Trigger Property="IsEnabled" Value="False">
+                <Setter Property="Opacity" Value="0.45"/>
             </Trigger>
         </Style.Triggers>
     </Style>
@@ -456,6 +489,7 @@
                         <Trigger Property="IsSelected" Value="True">
                             <Setter TargetName="bd" Property="Background" Value="{DynamicResource AccentLight}"/>
                             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
                         </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
@@ -517,22 +551,28 @@
     </Style>
 
 
-    <!-- 顶部功能分类页签：选中=明显的灰色磨砂方框（宽高充足、一直高亮） -->
+    <!-- 顶部功能分类页签：次于顶栏导航一级的紧凑页签 -->
     <Style x:Key="SubTab" TargetType="RadioButton">
         <Setter Property="Foreground" Value="{DynamicResource SegTabFg}"/>
-        <Setter Property="FontSize" Value="15"/>
-        <Setter Property="FontWeight" Value="SemiBold"/>
+        <Setter Property="FontSize" Value="13"/>
+        <Setter Property="FontWeight" Value="Medium"/>
         <Setter Property="Cursor" Value="Hand"/>
-        <Setter Property="Margin" Value="0,2,10,2"/>
+        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="Margin" Value="0,2,6,2"/>
+        <Setter Property="VerticalContentAlignment" Value="Center"/>
         <Setter Property="Template">
             <Setter.Value>
                 <ControlTemplate TargetType="RadioButton">
-                    <Border x:Name="bd" CornerRadius="8" Background="Transparent"
-                            BorderBrush="Transparent" BorderThickness="1" Padding="16,13">
+                    <Border x:Name="bd" CornerRadius="7" Background="Transparent"
+                            BorderBrush="Transparent" BorderThickness="1" Padding="13,7"
+                            RenderTransformOrigin="0.5,0.5">
+                        <Border.RenderTransform>
+                            <ScaleTransform ScaleX="1" ScaleY="1"/>
+                        </Border.RenderTransform>
                         <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                     </Border>
                     <ControlTemplate.Triggers>
-                        <!-- 选中态：灰色磨砂方框 + 描边 + 白字，常驻高亮、宽高大气 -->
+                        <!-- 选中态：磨砂方框 + 描边 + 主文字 -->
                         <Trigger Property="IsChecked" Value="True">
                             <Setter TargetName="bd" Property="Background" Value="{DynamicResource SubTabSelFill}"/>
                             <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource SubTabSelStroke}"/>
@@ -547,6 +587,12 @@
                             <Setter TargetName="bd" Property="Background" Value="{DynamicResource SegTabHover}"/>
                             <Setter Property="Foreground" Value="{DynamicResource SegTabHoverFg}"/>
                         </MultiTrigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="bd" Property="RenderTransform"><Setter.Value><ScaleTransform ScaleX="0.97" ScaleY="0.97"/></Setter.Value></Setter>
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter Property="Opacity" Value="0.4"/>
+                        </Trigger>
                     </ControlTemplate.Triggers>
                 </ControlTemplate>
             </Setter.Value>
@@ -570,8 +616,8 @@
         <Setter Property="Background" Value="{DynamicResource CardBg}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="8"/>
-        <Setter Property="Padding" Value="12,10"/>
+        <Setter Property="CornerRadius" Value="9"/>
+        <Setter Property="Padding" Value="11,9"/>
     </Style>
 
     <!-- ============ 操作栏容器（本次运行 / 主要操作） ============ -->
@@ -579,8 +625,8 @@
         <Setter Property="Background" Value="{DynamicResource CardBg}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="8"/>
-        <Setter Property="Padding" Value="14,12"/>
+        <Setter Property="CornerRadius" Value="10"/>
+        <Setter Property="Padding" Value="12,12"/>
     </Style>
 
     <!-- ============ 进度条（胶囊轨道 + 绿色填充） ============ -->
@@ -654,7 +700,12 @@
                                     <Thumb.Template>
                                         <ControlTemplate TargetType="Thumb">
                                             <Border x:Name="th" Background="{DynamicResource ScrollThumb}"
-                                                    CornerRadius="999" Margin="2,1" Opacity="0.75"/>
+                                                    CornerRadius="999" Margin="2,1" Opacity="0.55"/>
+                                            <ControlTemplate.Triggers>
+                                                <Trigger Property="IsMouseOver" Value="True">
+                                                    <Setter TargetName="th" Property="Opacity" Value="0.95"/>
+                                                </Trigger>
+                                            </ControlTemplate.Triggers>
                                         </ControlTemplate>
                                     </Thumb.Template>
                                 </Thumb>

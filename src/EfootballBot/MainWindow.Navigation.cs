@@ -65,9 +65,38 @@ public partial class MainWindow
                 NavigateTo(NavMode.Game);
                 RbCnLeague.IsChecked = true;
                 break;
+            case "CnWeekly":
+                RbCn.IsChecked = true;
+                NavigateTo(NavMode.Game);
+                RbCnWeekly.IsChecked = true;
+                break;
+            case "CnMyLeague":
+                RbCn.IsChecked = true;
+                NavigateTo(NavMode.Game);
+                RbCnMyLeague.IsChecked = true;
+                break;
             case "Network":
                 NavigateTo(NavMode.Network);
-                break;
+                return;
+            case "Settings":
+                _devMode = false;
+                NavigateTo(NavMode.Settings);
+                return;
+        }
+        SyncSubTabs();
+    }
+
+    private void BtnTopStatus_Click(object sender, RoutedEventArgs e)
+    {
+        if (_workerHost is { ScenarioRunning: true })
+        {
+            _rightUserCollapsed = false;
+            NavigateTo(NavMode.Game);
+            SetRightPanelCollapsed(false);
+        }
+        else
+        {
+            NavigateTo(NavMode.Game);
         }
     }
     private void BtnHomeFeedback_Click(object sender, RoutedEventArgs e) => NavigateTo(NavMode.Feedback);
@@ -132,6 +161,12 @@ public partial class MainWindow
         // 设置页镜像页签：Imp1/2/3 走 Important 块内的子分段；
         // RbSetDisplay/Input/Daily 走各自独立的内容块。之前后三个误用 SubTab_Checked，
         // 其 ShowByTag 不认识 RbSet*，导致内容不切换、选中态也不常驻 —— 这里统一处理。
+        ApplySettingsSection(target);
+    }
+
+    /// <summary>按设置二级页签 Tag 同步显示设置内容区。</summary>
+    private void ApplySettingsSection(string target)
+    {
         bool isImp = target.StartsWith("Imp");
         SetTabImportant.Visibility = isImp ? Visibility.Visible : Visibility.Collapsed;
         SetTabDisplay.Visibility = target == "RbSetDisplay" ? Visibility.Visible : Visibility.Collapsed;
@@ -144,6 +179,8 @@ public partial class MainWindow
                 if (child is FrameworkElement fe2 && fe2.Tag is string tg && tg.StartsWith("Imp"))
                     fe2.Visibility = tg == target ? Visibility.Visible : Visibility.Collapsed;
         }
+        if (target == "RbSetInput")
+            RefreshPadBackendState();
     }
 
     /// <summary>只显示某个工具页滚动内容里的第 idx 段。</summary>
@@ -289,9 +326,11 @@ public partial class MainWindow
     /// <summary>显示主题选择覆盖层，current 为当前生效主题（高亮选中），world 为当前外观世界。</summary>
     private void ShowThemeOverlay(string current, string? world = null)
     {
-        _pendingTheme = current;
-        _pendingWorld = ThemeManager.NormalizeWorld(world ?? _cfg.Appearance.World);
-        HighlightThemeCard(current);
+        _origTheme = current;
+        _origWorld = ThemeManager.NormalizeWorld(world ?? _cfg.Appearance.World);
+        _pendingTheme = _origTheme;
+        _pendingWorld = _origWorld;
+        HighlightThemeCard(_pendingTheme);
         HighlightWorldCard(_pendingWorld);
         ThemeOverlay.Visibility = Visibility.Visible;
         BtnThemeConfirm.Visibility = Visibility.Visible;
@@ -300,6 +339,22 @@ public partial class MainWindow
     private void HideThemeOverlay()
     {
         ThemeOverlay.Visibility = Visibility.Collapsed;
+    }
+
+    private void ApplyThemePreview()
+    {
+        ThemeManager.ApplyTheme(_pendingTheme, _pendingWorld);
+        ApplyWindowAppearance();
+        HighlightThemeCard(_pendingTheme);
+        HighlightWorldCard(_pendingWorld);
+    }
+
+    private void CancelThemeOverlay()
+    {
+        if (ThemeOverlay.Visibility != Visibility.Visible) return;
+        ThemeManager.ApplyTheme(_origTheme, _origWorld);
+        ApplyWindowAppearance();
+        HideThemeOverlay();
     }
 
     private void HighlightThemeCard(string theme)
@@ -346,7 +401,7 @@ public partial class MainWindow
         if (sender is Border { Tag: string tag })
         {
             _pendingTheme = tag;
-            HighlightThemeCard(tag);
+            ApplyThemePreview();
         }
     }
 
@@ -355,8 +410,32 @@ public partial class MainWindow
         if (sender is Border { Tag: string tag })
         {
             _pendingWorld = ThemeManager.NormalizeWorld(tag);
-            HighlightWorldCard(_pendingWorld);
+            ApplyThemePreview();
         }
+    }
+
+    private void BtnThemeCancel_Click(object sender, RoutedEventArgs e) => CancelThemeOverlay();
+
+    private void ThemeOverlay_BackdropClick(object sender, MouseButtonEventArgs e)
+    {
+        for (DependencyObject? d = e.OriginalSource as DependencyObject; d is not null;
+             d = VisualTreeHelper.GetParent(d))
+        {
+            if (ReferenceEquals(d, ThemeDialogCard)) return;
+        }
+        CancelThemeOverlay();
+        e.Handled = true;
+    }
+
+    protected override void OnPreviewKeyDown(KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape && ThemeOverlay.Visibility == Visibility.Visible)
+        {
+            CancelThemeOverlay();
+            e.Handled = true;
+            return;
+        }
+        base.OnPreviewKeyDown(e);
     }
 
     private void BtnThemeConfirm_Click(object sender, RoutedEventArgs e)
@@ -475,13 +554,13 @@ public partial class MainWindow
 
     // ---------------- 左栏导航切换 ----------------
 
-    /// <summary>收起/展开右栏：收起时右栏列宽归零、中栏自动铺满，右侧留一条 26px 折叠条。</summary>
+    /// <summary>收起/展开右栏：收起时右栏列宽归零、中栏自动铺满，右侧留一条展开窄条。</summary>
     private void SetRightPanelCollapsed(bool collapsed)
     {
         RightPanel.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         RightRail.Visibility = collapsed ? Visibility.Visible : Visibility.Collapsed;
-        RightCol.MinWidth = collapsed ? 0 : 380;
-        RightCol.MaxWidth = collapsed ? 0 : 520;
+        RightCol.MinWidth = collapsed ? 0 : 330;
+        RightCol.MaxWidth = collapsed ? 0 : 440;
         RightCol.Width = collapsed ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
     }
 

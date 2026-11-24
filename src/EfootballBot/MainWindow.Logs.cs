@@ -31,9 +31,12 @@ public partial class MainWindow
     private static Brush BrushIdle => (Brush)Application.Current.Resources["EnvDotIdle"];
     private static Brush BrushWarn => (Brush)Application.Current.Resources["Warning"];
     private static Brush BrushLogInfo => (Brush)Application.Current.Resources["LogInfo"];
-    // 日志分段配色（固定色，不随主题）：时间=橙，模块前缀=蓝
-    private static readonly Brush BrushLogTime = new SolidColorBrush(Color.FromRgb(0xFF, 0xB8, 0x6C)); // 橙
-    private static readonly Brush BrushLogTag = new SolidColorBrush(Color.FromRgb(0x6C, 0xB6, 0xFF));  // 蓝
+    // 日志分段配色（跟随主题，保证浅色与深色主题下都清晰可读）
+    private static Brush BrushLogTime => (Brush)Application.Current.Resources["LogTime"];
+    private static Brush BrushLogTag => (Brush)Application.Current.Resources["LogTag"];
+
+    private ScrollViewer? _logScrollViewer;
+    private int _copyLogBadgeSeq;
 
     private static readonly System.Text.RegularExpressions.Regex LogPrefixRegex = new(
         @"^\[(?<t>\d{2}:\d{2}:\d{2})\]\s*(?<tag>\[[^\]]+\])?\s*(?<rest>.*)$",
@@ -48,16 +51,42 @@ public partial class MainWindow
     };
 
     /// <summary>
-    /// 运行日志与日志历史共用的三段分色行：[时间] 橙 / [模块前缀] 蓝 / 正文按级别，自动换行。
+    /// 运行日志与日志历史共用的三段分色行：[时间] / [模块前缀] / 正文按级别，自动换行。
     /// </summary>
     private static TextBlock BuildLogLine(string time, string? tag, string rest, LogLevel lv)
     {
-        var tb = new TextBlock { TextWrapping = TextWrapping.Wrap };
+        var tb = new TextBlock { TextWrapping = TextWrapping.Wrap, LineHeight = 18 };
         tb.Inlines.Add(new Run($"[{time}] ") { Foreground = BrushLogTime });
         if (!string.IsNullOrEmpty(tag))
             tb.Inlines.Add(new Run($"{tag} ") { Foreground = BrushLogTag });
         tb.Inlines.Add(new Run(rest) { Foreground = LevelBrush(lv) });
         return tb;
+    }
+
+    private static string ExtractLogBlockText(TextBlock tb)
+        => tb.Inlines.Count > 0
+            ? string.Concat(tb.Inlines.OfType<Run>().Select(r => r.Text))
+            : tb.Text;
+
+    private static T? FindVisualChild<T>(DependencyObject root) where T : DependencyObject
+    {
+        int count = VisualTreeHelper.GetChildrenCount(root);
+        for (int i = 0; i < count; i++)
+        {
+            var child = VisualTreeHelper.GetChild(root, i);
+            if (child is T typed) return typed;
+            var sub = FindVisualChild<T>(child);
+            if (sub is not null) return sub;
+        }
+        return null;
+    }
+
+    private bool ShouldAutoScrollLogs()
+    {
+        _logScrollViewer ??= FindVisualChild<ScrollViewer>(LogList);
+        if (_logScrollViewer is null) return true;
+        return _logScrollViewer.ScrollableHeight <= 1
+            || _logScrollViewer.VerticalOffset >= _logScrollViewer.ScrollableHeight - 24;
     }
 
     private void AppendLog(string msg, LogLevel lv)
@@ -154,7 +183,7 @@ public partial class MainWindow
 
     private void AppendLogItem(string msg, LogLevel lv)
     {
-        // 三段分色：[时间] 灰 / [模块前缀] 主题色 / 正文按级别
+        bool autoScroll = ShouldAutoScrollLogs();
         TextBlock tb;
         var m = LogPrefixRegex.Match(msg);
         if (m.Success)
@@ -163,13 +192,13 @@ public partial class MainWindow
         }
         else
         {
-            tb = new TextBlock { TextWrapping = TextWrapping.Wrap };
+            tb = new TextBlock { TextWrapping = TextWrapping.Wrap, LineHeight = 18 };
             tb.Inlines.Add(new Run(msg) { Foreground = LevelBrush(lv) });
         }
 
         LogList.Items.Add(tb);
         while (LogList.Items.Count > 300) LogList.Items.RemoveAt(0);
-        LogList.ScrollIntoView(tb);
+        if (autoScroll) LogList.ScrollIntoView(tb);
     }
 
     private void CmbRuntimeLogFilter_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -207,6 +236,31 @@ public partial class MainWindow
     {
         _logBuffer.Clear();
         LogList.Items.Clear();
+    }
+
+    private async void BtnCopyLog_Click(object sender, RoutedEventArgs e)
+    {
+        var lines = LogList.Items.OfType<TextBlock>().Select(ExtractLogBlockText).ToArray();
+        if (lines.Length == 0) return;
+        await CopyTextWithFeedbackAsync(string.Join(Environment.NewLine, lines));
+    }
+
+    private async void LogList_MouseDoubleClick(object sender, MouseButtonEventArgs e)
+    {
+        if (LogList.SelectedItem is not TextBlock tb) return;
+        string text = ExtractLogBlockText(tb);
+        if (string.IsNullOrEmpty(text)) return;
+        await CopyTextWithFeedbackAsync(text);
+    }
+
+    private async Task CopyTextWithFeedbackAsync(string text)
+    {
+        try { Clipboard.SetText(text); } catch { return; }
+        int seq = ++_copyLogBadgeSeq;
+        BtnCopyLog.Content = "已复制";
+        await Task.Delay(1500);
+        if (_copyLogBadgeSeq == seq)
+            BtnCopyLog.Content = "复制";
     }
 
     private void BtnOpenLogFolder_Click(object sender, RoutedEventArgs e)
@@ -382,7 +436,7 @@ public partial class MainWindow
                 }
                 else
                 {
-                    tb = new TextBlock { TextWrapping = TextWrapping.Wrap };
+                    tb = new TextBlock { TextWrapping = TextWrapping.Wrap, LineHeight = 18 };
                     tb.Inlines.Add(new Run(msg) { Foreground = LevelBrush(lv) });
                 }
 

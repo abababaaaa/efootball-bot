@@ -35,6 +35,8 @@ public partial class MainWindow
     private bool _starting;
     private string _pendingTheme = ThemeManager.Dark;
     private string _pendingWorld = ThemeManager.WorldFluent;
+    private string _origTheme = ThemeManager.Dark;
+    private string _origWorld = ThemeManager.WorldFluent;
 
     // 代码颜色统一在 MainWindow.Logs.cs 定义（运行时从 Application 资源读取，跟随主题）
 
@@ -359,6 +361,7 @@ public partial class MainWindow
             AppendLog(hdrWarn, LogLevel.Warn);
 
         _starting = true;
+        UpdateTopStatusPill();
         try
         {
             SaveUiToConfig();
@@ -589,7 +592,10 @@ public partial class MainWindow
         StMaxed.Text = s.PlayersMaxed.ToString();
         StElapsed.Text = s.StartedAt is null ? "—" : (DateTime.Now - s.StartedAt.Value).ToString(@"hh\:mm\:ss");
         StError.Text = string.IsNullOrEmpty(s.LastError) ? "" : $"最近错误：{s.LastError}";
+        StError.Visibility = string.IsNullOrEmpty(s.LastError) ? Visibility.Collapsed : Visibility.Visible;
         StPerf.Text = string.IsNullOrEmpty(s.PerfNote) ? "" : $"性能：{s.PerfNote}";
+        StPerf.Visibility = string.IsNullOrEmpty(s.PerfNote) ? Visibility.Collapsed : Visibility.Visible;
+        UpdateTopStatusPill();
 
         // 场景自动结束（正常跑完 / 异常退出）：ScenarioRunning 变 false 后按钮需从"停止"恢复为"开始"
         if (_workerHost is { ScenarioRunning: false } && _statsTimer.IsEnabled)

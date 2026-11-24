@@ -22,6 +22,7 @@
     <SolidColorBrush x:Key="TrackBg" Color="#4D000000"/>
     <SolidColorBrush x:Key="GlassBg" Color="#D9101012"/>
     <SolidColorBrush x:Key="GlassStroke" Color="#24FFFFFF"/>
+    <SolidColorBrush x:Key="DialogBg" Color="#F516161A"/>
     <SolidColorBrush x:Key="ControlFill" Color="#18FFFFFF"/>
     <SolidColorBrush x:Key="ControlStroke" Color="#2EFFFFFF"/>
     <!-- 顶栏/左栏的淡黑玻璃蒙版：护住导航文字可读性，同时保留毛玻璃透射 -->
@@ -37,6 +38,8 @@
     <SolidColorBrush x:Key="SegTabHover" Color="#1AFFFFFF"/>
     <SolidColorBrush x:Key="SegTabHoverFg" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="LogInfo" Color="#FFE5E5EA"/>
+    <SolidColorBrush x:Key="LogTime" Color="#FFFFB86C"/>
+    <SolidColorBrush x:Key="LogTag" Color="#FF6CB6FF"/>
 
     <!-- ===== 强调色（Apple 深色 = 蓝 #0A84FF，上面压白字） ===== -->
     <SolidColorBrush x:Key="Accent" Color="#FF0A84FF"/>
@@ -54,6 +57,7 @@
     <SolidColorBrush x:Key="DangerText" Color="#FFFF6966"/>
     <SolidColorBrush x:Key="DangerBorder" Color="#66FF453A"/>
     <SolidColorBrush x:Key="DangerSoft" Color="#26FF453A"/>
+    <SolidColorBrush x:Key="TextOnDanger" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="Warning" Color="#FFFFD60A"/>
     <SolidColorBrush x:Key="Success" Color="#FF30D158"/>
     <SolidColorBrush x:Key="Info" Color="#FF0A84FF"/>
@@ -66,8 +70,9 @@
     <SolidColorBrush x:Key="InputBorder" Color="#33FFFFFF"/>
     <SolidColorBrush x:Key="HoverOverlay" Color="#1AFFFFFF"/>
     <SolidColorBrush x:Key="ScrollThumb" Color="#66FFFFFF"/>
-    <SolidColorBrush x:Key="ToggleOff" Color="#66EBEBF0"/>
-    <SolidColorBrush x:Key="ToggleOn" Color="#FFE5E5EA"/>
+    <SolidColorBrush x:Key="ToggleOff" Color="#38FFFFFF"/>
+    <SolidColorBrush x:Key="ToggleOn" Color="#FF30D158"/>
+    <SolidColorBrush x:Key="ToggleThumbOn" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="ModuleDot" Color="#FF8E8E93"/>
     <SolidColorBrush x:Key="EnvDotIdle" Color="#FF8E8E93"/>
 

@@ -75,6 +75,42 @@ public partial class MainWindow
         // 换人测试按钮：未激活时显示专用文案（ModuleRun 循环会把它改成「开始」）
         bool swapActive = running && _activeStartBtn == BtnTestSwap;
         BtnTestSwap.Content = swapActive ? $"一键结束{hk}" : "一键测试换人";
+        UpdateTopStatusPill();
+    }
+
+    /// <summary>同步顶栏实时状态胶囊（就绪 / 启动中 / 运行中 / 已暂停 + 当前模块与耗时）。</summary>
+    internal void UpdateTopStatusPill()
+    {
+        if (DotTopStatus is null || TxtTopStatus is null) return;
+        bool running = _workerHost is { ScenarioRunning: true };
+        if (_starting)
+        {
+            DotTopStatus.Fill = BrushWarn;
+            TxtTopStatus.Text = "正在启动…";
+            return;
+        }
+        if (!running)
+        {
+            DotTopStatus.Fill = BrushIdle;
+            TxtTopStatus.Text = "就绪";
+            return;
+        }
+
+        string modeName = BotModuleCatalog.Find(_activeMode) is { } desc
+            ? (desc.Server == ServerRegion.Cn ? $"国服 · {desc.DisplayName}" : desc.DisplayName)
+            : "挂机";
+        var s = _workerHost?.LastStats;
+        string elapsed = s?.StartedAt is { } st ? $" · {(DateTime.Now - st):hh\\:mm\\:ss}" : "";
+        if (_paused)
+        {
+            DotTopStatus.Fill = BrushWarn;
+            TxtTopStatus.Text = $"已暂停 · {modeName}";
+        }
+        else
+        {
+            DotTopStatus.Fill = BrushOk;
+            TxtTopStatus.Text = $"运行中 · {modeName}{elapsed}";
+        }
     }
 
     private async void BtnManualStop_Click(object sender, RoutedEventArgs e)

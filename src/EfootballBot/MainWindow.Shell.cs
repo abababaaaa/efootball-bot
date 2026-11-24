@@ -235,14 +235,28 @@ public partial class MainWindow
         }
     }
 
-    /// <summary>设置页二级页签：正常模式停在「★重要设定」，开发者模式只显示开发者内容。</summary>
+    /// <summary>设置页二级页签：恢复上一次选中的设置页签内容，开发者模式只显示开发者内容。</summary>
     private void ApplySettingsTabs()
     {
-        SetTabImportant.Visibility = _devMode ? Visibility.Collapsed : Visibility.Visible;
-        SetTabDisplay.Visibility = Visibility.Collapsed;
-        SetTabInput.Visibility = Visibility.Collapsed;
-        SetTabDaily.Visibility = Visibility.Collapsed;
-        SetTabDev.Visibility = _devMode ? Visibility.Visible : Visibility.Collapsed;
+        if (_devMode)
+        {
+            SetTabImportant.Visibility = Visibility.Collapsed;
+            SetTabDisplay.Visibility = Visibility.Collapsed;
+            SetTabInput.Visibility = Visibility.Collapsed;
+            SetTabDaily.Visibility = Visibility.Collapsed;
+            SetTabDev.Visibility = Visibility.Visible;
+            return;
+        }
+
+        string activeTag =
+            SubRbImp1.IsChecked == true ? (SubRbImp1.Tag as string ?? "Imp1") :
+            SubRbImp2.IsChecked == true ? (SubRbImp2.Tag as string ?? "Imp2") :
+            SubRbImp3.IsChecked == true ? (SubRbImp3.Tag as string ?? "Imp3") :
+            SubRbSetDisplay.IsChecked == true ? (SubRbSetDisplay.Tag as string ?? "RbSetDisplay") :
+            SubRbSetInput.IsChecked == true ? (SubRbSetInput.Tag as string ?? "RbSetInput") :
+            SubRbSetDaily.IsChecked == true ? (SubRbSetDaily.Tag as string ?? "RbSetDaily") :
+            "Imp1";
+        ApplySettingsSection(activeTag);
     }
 
     /// <summary>
