@@ -108,7 +108,7 @@
         <Setter Property="Foreground" Value="{DynamicResource TextOnPrimary}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource PrimaryBtnStroke}"/>
         <Setter Property="BorderThickness" Value="0"/>
-        <Setter Property="Padding" Value="16,8"/>
+        <Setter Property="Padding" Value="14,0"/>
         <Setter Property="MinHeight" Value="34"/>
         <Setter Property="FontSize" Value="12.5"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
@@ -121,13 +121,13 @@
                         <Grid.RenderTransform>
                             <ScaleTransform ScaleX="1" ScaleY="1"/>
                         </Grid.RenderTransform>
-                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="9"
+                        <Border x:Name="bd" Background="{TemplateBinding Background}" CornerRadius="8"
                                 BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1"
                                 Padding="{TemplateBinding Padding}" Effect="{DynamicResource CardShadowEffect}">
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
                         </Border>
-                        <!-- 悬停压暗层：白按钮上用浅灰反馈 -->
-                        <Border x:Name="flash" CornerRadius="9" Background="{DynamicResource BtnFlash}" Opacity="0"
+                        <!-- 悬停压暗/提亮层 -->
+                        <Border x:Name="flash" CornerRadius="8" Background="{DynamicResource BtnFlash}" Opacity="0"
                                 IsHitTestVisible="False"/>
                     </Grid>
                     <ControlTemplate.Triggers>
@@ -162,8 +162,8 @@
         <Setter Property="Foreground" Value="{DynamicResource DangerText}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource DangerBorder}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Padding" Value="14,6"/>
-        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="Padding" Value="14,0"/>
+        <Setter Property="MinHeight" Value="34"/>
         <Setter Property="FontSize" Value="12.5"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="Template">
@@ -232,8 +232,8 @@
         <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource ControlStroke}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="Padding" Value="14,6"/>
-        <Setter Property="MinHeight" Value="32"/>
+        <Setter Property="Padding" Value="14,0"/>
+        <Setter Property="MinHeight" Value="34"/>
         <Setter Property="FontSize" Value="12.5"/>
         <Setter Property="Cursor" Value="Hand"/>
         <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
@@ -616,8 +616,8 @@
         <Setter Property="Background" Value="{DynamicResource CardBg}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource CardBorder}"/>
         <Setter Property="BorderThickness" Value="1"/>
-        <Setter Property="CornerRadius" Value="9"/>
-        <Setter Property="Padding" Value="11,9"/>
+        <Setter Property="CornerRadius" Value="8"/>
+        <Setter Property="Padding" Value="10,7"/>
     </Style>
 
     <!-- ============ 操作栏容器（本次运行 / 主要操作） ============ -->

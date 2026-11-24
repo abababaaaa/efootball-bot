@@ -26,7 +26,7 @@ public partial class MainWindow
     // ---------------- 日志 / 统计 ----------------
 
     // 代码颜色改为运行时从 Application 资源读取（跟随主题）
-    private static Brush BrushOk => (Brush)Application.Current.Resources["AccentGlow"];
+    private static Brush BrushOk => (Brush)Application.Current.Resources["Success"];
     private static Brush BrushBad => (Brush)Application.Current.Resources["Danger"];
     private static Brush BrushIdle => (Brush)Application.Current.Resources["EnvDotIdle"];
     private static Brush BrushWarn => (Brush)Application.Current.Resources["Warning"];

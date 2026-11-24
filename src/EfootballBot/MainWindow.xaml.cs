@@ -335,25 +335,49 @@ public partial class MainWindow
         if (_starting) return;
         var host = GetOrCreateWorkerHost();
 
+        bool switching = false;
         if (host.ScenarioRunning)
         {
-            await StopScenarioAsync();
-            return;
+            if (_activeStartBtn == btn || _activeStartBtn is null)
+            {
+                await StopScenarioAsync();
+                return;
+            }
+            switching = true;
+            _starting = true;
+            try
+            {
+                SetStartButtonsEnabled(false);
+                btn.Content = "切换中…";
+                string targetName = BotModuleCatalog.Find(mode ?? "")?.DisplayName ?? mode ?? "目标模式";
+                AppendLog($"正在切换至「{targetName}」…", LogLevel.Info);
+                await StopScenarioAsync(allowAutoClose: false);
+            }
+            catch
+            {
+                _starting = false;
+                RefreshRunButtons();
+                throw;
+            }
+            _starting = false;
         }
 
-        // 开始前必须手动确认的两点：
+        // 开始前必须手动确认的两点（运行中直接切换模式时免二次弹窗）：
         // ① 真实手柄随时可拿：挂机检测到占用会自动让路（虚拟手柄暂时断开，你的手柄立刻可用）；
         // ② 全屏（尤其超宽）下定位与捕获均不稳定，720p 窗口模式是实测可靠配置。
-        var confirm = System.Windows.MessageBox.Show(
-            this,
-            "开始前请确认两件事：\n\n" +
-            "① 真实手柄随时可拿去玩\n挂机中检测到你在用真实手柄会自动让路（虚拟手柄暂时断开，你的手柄立刻可用）；" +
-            "停手后自动恢复继续挂机。注意：虚拟手柄占用玩家 1，挂机运行中请勿同时用两只手柄玩同一个游戏。\n\n" +
-            "② 游戏最好以 720p 窗口模式运行\n无边框窗口 1280×720 最稳定；独占全屏下挂机无法窗口化且定位易失效。",
-            "开始挂机前确认",
-            MessageBoxButton.OKCancel,
-            MessageBoxImage.Warning);
-        if (confirm != MessageBoxResult.OK) return;
+        if (!switching)
+        {
+            var confirm = System.Windows.MessageBox.Show(
+                this,
+                "开始前请确认两件事：\n\n" +
+                "① 真实手柄随时可拿去玩\n挂机中检测到你在用真实手柄会自动让路（虚拟手柄暂时断开，你的手柄立刻可用）；" +
+                "停手后自动恢复继续挂机。注意：虚拟手柄占用玩家 1，挂机运行中请勿同时用两只手柄玩同一个游戏。\n\n" +
+                "② 游戏最好以 720p 窗口模式运行\n无边框窗口 1280×720 最稳定；独占全屏下挂机无法窗口化且定位易失效。",
+                "开始挂机前确认",
+                MessageBoxButton.OKCancel,
+                MessageBoxImage.Warning);
+            if (confirm != MessageBoxResult.OK) return;
+        }
 
         // HDR 检测警告：HDR 开启时捕获帧整体过曝，绝对色探针/OCR 全线漂移——只警告不拦截
         var hdrWarn = HdrStatus.BuildStartWarning();
@@ -361,14 +385,13 @@ public partial class MainWindow
             AppendLog(hdrWarn, LogLevel.Warn);
 
         _starting = true;
-        UpdateTopStatusPill();
         try
         {
             SaveUiToConfig();
             SetStartButtonsEnabled(false);
 
             // 立即反馈：Worker 冷启动握手最长 30s，期间按钮必须显示"启动中…"而非无响应
-            btn.Content = "启动中…";
+            btn.Content = switching ? "切换中…" : "启动中…";
             AppendLog("正在启动 Worker（首次冷启动需解压，可能 10 秒以上）…", LogLevel.Info);
             // 总超时兜底：任何一步卡住都不允许「启动中…」永久驻留（按钮永久不可点）
             await host.StartAsync(mode!).WaitAsync(TimeSpan.FromSeconds(60));
@@ -595,7 +618,6 @@ public partial class MainWindow
         StError.Visibility = string.IsNullOrEmpty(s.LastError) ? Visibility.Collapsed : Visibility.Visible;
         StPerf.Text = string.IsNullOrEmpty(s.PerfNote) ? "" : $"性能：{s.PerfNote}";
         StPerf.Visibility = string.IsNullOrEmpty(s.PerfNote) ? Visibility.Collapsed : Visibility.Visible;
-        UpdateTopStatusPill();
 
         // 场景自动结束（正常跑完 / 异常退出）：ScenarioRunning 变 false 后按钮需从"停止"恢复为"开始"
         if (_workerHost is { ScenarioRunning: false } && _statsTimer.IsEnabled)

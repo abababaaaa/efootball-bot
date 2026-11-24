@@ -86,19 +86,6 @@ public partial class MainWindow
         SyncSubTabs();
     }
 
-    private void BtnTopStatus_Click(object sender, RoutedEventArgs e)
-    {
-        if (_workerHost is { ScenarioRunning: true })
-        {
-            _rightUserCollapsed = false;
-            NavigateTo(NavMode.Game);
-            SetRightPanelCollapsed(false);
-        }
-        else
-        {
-            NavigateTo(NavMode.Game);
-        }
-    }
     private void BtnHomeFeedback_Click(object sender, RoutedEventArgs e) => NavigateTo(NavMode.Feedback);
 
     private void TopNav_Checked(object sender, RoutedEventArgs e)
@@ -559,9 +546,9 @@ public partial class MainWindow
     {
         RightPanel.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
         RightRail.Visibility = collapsed ? Visibility.Visible : Visibility.Collapsed;
-        RightCol.MinWidth = collapsed ? 0 : 330;
-        RightCol.MaxWidth = collapsed ? 0 : 440;
-        RightCol.Width = collapsed ? new GridLength(0) : new GridLength(1, GridUnitType.Star);
+        RightCol.MinWidth = collapsed ? 0 : 320;
+        RightCol.MaxWidth = collapsed ? 0 : 400;
+        RightCol.Width = collapsed ? new GridLength(0) : new GridLength(0.55, GridUnitType.Star);
     }
 
 

@@ -20,9 +20,10 @@ public static class ThemePalette
     public static IReadOnlyDictionary<string, string> For(string? themeName, string? world = null)
     {
         bool glass = ThemeManager.IsGlassWorld(world);
+        bool isLight = themeName == ThemeManager.Light;
         var colors = new Dictionary<string, string>(
             glass ? GlassDict(themeName) : FluentDict(themeName), StringComparer.Ordinal);
-        ApplyWorldTokens(colors, glass);
+        ApplyWorldTokens(colors, glass, isLight);
         return colors;
     }
 
@@ -44,9 +45,9 @@ public static class ThemePalette
     /// 世界维度 Token 一次派生：
     ///  - Fluent 侧全部由既有 Token 推出 —— 切回默认外观时观感与 v7.3 一致
     ///    （蓝强调色指示条、实心强调色主按钮、无卡片投影、顶栏透明）；
-    ///  - Glass 侧给出玻璃质感数值（浅灰选中、白玻璃主按钮、渐变卡片、顶栏淡黑玻璃）。
+    ///  - Glass 侧给出玻璃质感数值（浅灰选中、强调色主按钮、通透渐变卡片、顶栏淡黑玻璃）。
     /// </summary>
-    private static void ApplyWorldTokens(Dictionary<string, string> c, bool glass)
+    private static void ApplyWorldTokens(Dictionary<string, string> c, bool glass, bool isLight)
     {
         if (glass)
         {
@@ -54,17 +55,17 @@ public static class ThemePalette
             c["SelectBar"] = c["SelectFg"];
             c["SubTabSelFill"] = Get(c, "SubTabSelFill", "#664A4A50");
             c["SubTabSelStroke"] = Get(c, "SubTabSelStroke", "#4DFFFFFF");
-            // 主按钮：白玻璃渐变 + 深色字 + 顶高光描边
-            c["PrimaryBtnFrom"] = "#FFFFFFFF";
-            c["PrimaryBtnMid"] = "#FFF2F2F5";
-            c["PrimaryBtnTo"] = "#FFE2E2E8";
-            c["TextOnPrimary"] = "#FF1C1C1E";
-            c["PrimaryBtnStroke"] = "#FFFFFFFF";
-            c["BtnFlash"] = "#FF9A9AA0";                     // 白玻璃按钮上的压暗反馈
-            // 卡片玻璃渐变：顶部亮、底部透（高级感来自光影，不是半透明色块）
-            c["GlassFillTop"] = "#3DFFFFFF";
-            c["GlassFillMid"] = "#14FFFFFF";
-            c["GlassFillBottom"] = "#0DFFFFFF";
+            // 主按钮：强调色精致渐变 + 柔和高光描边（消除刺眼纯白方块）
+            c["PrimaryBtnFrom"] = c["Accent"];
+            c["PrimaryBtnMid"] = c["Accent"];
+            c["PrimaryBtnTo"] = c["BrandTo"];
+            c["TextOnPrimary"] = c["TextOnAccent"];
+            c["PrimaryBtnStroke"] = isLight ? "#22000000" : "#2EFFFFFF";
+            c["BtnFlash"] = "#FFFFFFFF";
+            // 卡片玻璃渐变：克制细腻的光影过渡，告别厚重雾白顶边
+            c["GlassFillTop"] = isLight ? "#E0FFFFFF" : "#14FFFFFF";
+            c["GlassFillMid"] = isLight ? "#CCFFFFFF" : "#0DFFFFFF";
+            c["GlassFillBottom"] = isLight ? "#B8FFFFFF" : "#09FFFFFF";
             // 顶栏玻璃蒙版：与左右栏同一张淡黑玻璃
             c["TopBarBg"] = c["ChromeGlass"];
         }
@@ -148,16 +149,16 @@ public static class ThemePalette
         ["SegTabHover"] = "#14FFFFFF",
         ["SegTabHoverFg"] = "#FFFFFFFF",
         ["LogInfo"] = "#FFD6D6D6",
-        ["LogTime"] = "#FFFFB86C",
-        ["LogTag"] = "#FF6CB6FF",
-        ["Accent"] = "#FF60CDFF",
-        ["AccentHover"] = "#FF7EDBFF",
-        ["AccentGlow"] = "#FF9BEBFF",
+        ["LogTime"] = "#FF7E8694",
+        ["LogTag"] = "#FF7AB8FF",
+        ["Accent"] = "#FF2563EB",
+        ["AccentHover"] = "#FF3B82F6",
+        ["AccentGlow"] = "#FF60A5FA",
         ["AccentLight"] = "#3360CDFF",
         ["AccentBorder"] = "#5560CDFF",
         ["AccentSoft"] = "#1F60CDFF",
         ["AccentBorderStrong"] = "#8060CDFF",
-        ["TextOnAccent"] = "#FF003544",
+        ["TextOnAccent"] = "#FFFFFFFF",
         ["Danger"] = "#FFFF99A4",
         ["DangerHover"] = "#FFFFB3BC",
         ["DangerText"] = "#FFFF99A4",
@@ -176,7 +177,7 @@ public static class ThemePalette
         ["ScrollThumb"] = "#66FFFFFF",
         ["ToggleOff"] = "#33FFFFFF",
         ["ToggleOn"] = "#FF60CDFF",
-        ["ToggleThumbOn"] = "#FF003544",
+        ["ToggleThumbOn"] = "#FFFFFFFF",
         ["ModuleDot"] = "#FF7A7A7A",
         ["EnvDotIdle"] = "#FF8A8A8A",
         ["Divider"] = "#17FFFFFF",
@@ -189,8 +190,8 @@ public static class ThemePalette
         ["TabTrackBg"] = "#4D000000",
         ["IntlTabBg"] = "#4D000000",
         ["IntlTabBorder"] = "#1FFFFFFF",
-        ["BrandFrom"] = "#FF60CDFF",
-        ["BrandTo"] = "#FF0F6CBD",
+        ["BrandFrom"] = "#FF3B82F6",
+        ["BrandTo"] = "#FF1D4ED8",
         ["BannerFrom"] = "#FF0F6CBD",
         ["BannerTo"] = "#FF0B4F8A",
         ["TextOnBanner"] = "#FFFFFFFF",
@@ -230,7 +231,7 @@ public static class ThemePalette
         ["SegTabHover"] = "#0A000000",
         ["SegTabHoverFg"] = "#FF1A1A1A",
         ["LogInfo"] = "#FF1A1A1A",
-        ["LogTime"] = "#FFB45309",
+        ["LogTime"] = "#FF78716C",
         ["LogTag"] = "#FF1D4ED8",
         ["Accent"] = "#FF0067C0",
         ["AccentHover"] = "#FF1975C5",
@@ -312,16 +313,16 @@ public static class ThemePalette
         ["SegTabHover"] = "#14FFFFFF",
         ["SegTabHoverFg"] = "#FFFFFFFF",
         ["LogInfo"] = "#FFD8E4F5",
-        ["LogTime"] = "#FFFFB86C",
-        ["LogTag"] = "#FF6CB6FF",
-        ["Accent"] = "#FF7CC4FF",
-        ["AccentHover"] = "#FF9AD4FF",
-        ["AccentGlow"] = "#FFB7E2FF",
+        ["LogTime"] = "#FF7E8A9E",
+        ["LogTag"] = "#FF7AB8FF",
+        ["Accent"] = "#FF2563EB",
+        ["AccentHover"] = "#FF3B82F6",
+        ["AccentGlow"] = "#FF60A5FA",
         ["AccentLight"] = "#337CC4FF",
         ["AccentBorder"] = "#557CC4FF",
         ["AccentSoft"] = "#1F7CC4FF",
         ["AccentBorderStrong"] = "#807CC4FF",
-        ["TextOnAccent"] = "#FF04243D",
+        ["TextOnAccent"] = "#FFFFFFFF",
         ["Danger"] = "#FFFF9AA5",
         ["DangerHover"] = "#FFFFB4BD",
         ["DangerText"] = "#FFFF9AA5",
@@ -340,7 +341,7 @@ public static class ThemePalette
         ["ScrollThumb"] = "#66FFFFFF",
         ["ToggleOff"] = "#33FFFFFF",
         ["ToggleOn"] = "#FF7CC4FF",
-        ["ToggleThumbOn"] = "#FF04243D",
+        ["ToggleThumbOn"] = "#FFFFFFFF",
         ["ModuleDot"] = "#FF8098B8",
         ["EnvDotIdle"] = "#FF92A6C0",
         ["Divider"] = "#1FFFFFFF",
@@ -353,8 +354,8 @@ public static class ThemePalette
         ["TabTrackBg"] = "#4D060A12",
         ["IntlTabBg"] = "#4D060A12",
         ["IntlTabBorder"] = "#1FFFFFFF",
-        ["BrandFrom"] = "#FF7CC4FF",
-        ["BrandTo"] = "#FF1F6FB5",
+        ["BrandFrom"] = "#FF3B82F6",
+        ["BrandTo"] = "#FF1D4ED8",
         ["BannerFrom"] = "#FF1F6FB5",
         ["BannerTo"] = "#FF144F84",
         ["TextOnBanner"] = "#FFFFFFFF",
@@ -402,11 +403,11 @@ public static class ThemePalette
         ["SegTabHover"] = "#1AFFFFFF",
         ["SegTabHoverFg"] = "#FFFFFFFF",
         ["LogInfo"] = "#FFE5E5EA",
-        ["LogTime"] = "#FFFFB86C",
-        ["LogTag"] = "#FF6CB6FF",
-        ["Accent"] = "#FF0A84FF",
-        ["AccentHover"] = "#FF3D9CFF",
-        ["AccentGlow"] = "#FF7DBBFF",
+        ["LogTime"] = "#FF7E8694",
+        ["LogTag"] = "#FF7AB8FF",
+        ["Accent"] = "#FF2563EB",
+        ["AccentHover"] = "#FF3B82F6",
+        ["AccentGlow"] = "#FF60A5FA",
         ["AccentLight"] = "#330A84FF",
         ["AccentBorder"] = "#660A84FF",
         ["AccentSoft"] = "#260A84FF",
@@ -451,8 +452,8 @@ public static class ThemePalette
         ["TabTrackBg"] = "#4D000000",
         ["IntlTabBg"] = "#4D000000",
         ["IntlTabBorder"] = "#1FFFFFFF",
-        ["BrandFrom"] = "#FF0A84FF",
-        ["BrandTo"] = "#FF0057D6",
+        ["BrandFrom"] = "#FF3B82F6",
+        ["BrandTo"] = "#FF1D4ED8",
         ["BannerFrom"] = "#FF0A84FF",
         ["BannerTo"] = "#FF0057D6",
         ["TextOnBanner"] = "#FFFFFFFF",
@@ -499,11 +500,11 @@ public static class ThemePalette
         ["SegTabHover"] = "#0A000000",
         ["SegTabHoverFg"] = "#FF1C1C1E",
         ["LogInfo"] = "#FF1C1C1E",
-        ["LogTime"] = "#FFB45309",
+        ["LogTime"] = "#FF78716C",
         ["LogTag"] = "#FF1D4ED8",
-        ["Accent"] = "#FF007AFF",
-        ["AccentHover"] = "#FF3399FF",
-        ["AccentGlow"] = "#FF66B2FF",
+        ["Accent"] = "#FF0067C0",
+        ["AccentHover"] = "#FF1975C5",
+        ["AccentGlow"] = "#FF0F6CBD",
         ["AccentLight"] = "#1A007AFF",
         ["AccentBorder"] = "#55007AFF",
         ["AccentSoft"] = "#14007AFF",
@@ -548,8 +549,8 @@ public static class ThemePalette
         ["TabTrackBg"] = "#0A000000",
         ["IntlTabBg"] = "#0A000000",
         ["IntlTabBorder"] = "#1A000000",
-        ["BrandFrom"] = "#FF007AFF",
-        ["BrandTo"] = "#FF0057D6",
+        ["BrandFrom"] = "#FF0067C0",
+        ["BrandTo"] = "#FF0055A3",
         ["BannerFrom"] = "#FF007AFF",
         ["BannerTo"] = "#FF0057D6",
         ["TextOnBanner"] = "#FFFFFFFF",
@@ -596,16 +597,16 @@ public static class ThemePalette
         ["SegTabHover"] = "#1AFFFFFF",
         ["SegTabHoverFg"] = "#FFFFFFFF",
         ["LogInfo"] = "#FFE0E8F2",
-        ["LogTime"] = "#FFFFB86C",
-        ["LogTag"] = "#FF6CB6FF",
-        ["Accent"] = "#FF5AC8FA",
-        ["AccentHover"] = "#FF7ED4FF",
-        ["AccentGlow"] = "#FFA6E4FF",
+        ["LogTime"] = "#FF7E8A9E",
+        ["LogTag"] = "#FF7AB8FF",
+        ["Accent"] = "#FF2563EB",
+        ["AccentHover"] = "#FF3B82F6",
+        ["AccentGlow"] = "#FF60A5FA",
         ["AccentLight"] = "#335AC8FA",
         ["AccentBorder"] = "#665AC8FA",
         ["AccentSoft"] = "#265AC8FA",
         ["AccentBorderStrong"] = "#995AC8FA",
-        ["TextOnAccent"] = "#FF06131F",
+        ["TextOnAccent"] = "#FFFFFFFF",
         // 深蓝主题的浅灰玻璃选中态
         ["SelectFill"] = "#2EFFFFFF",
         ["SelectFillStrong"] = "#3DFFFFFF",
@@ -645,8 +646,8 @@ public static class ThemePalette
         ["TabTrackBg"] = "#4D151A22",
         ["IntlTabBg"] = "#4D151A22",
         ["IntlTabBorder"] = "#1FFFFFFF",
-        ["BrandFrom"] = "#FF5AC8FA",
-        ["BrandTo"] = "#FF0A84FF",
+        ["BrandFrom"] = "#FF3B82F6",
+        ["BrandTo"] = "#FF1D4ED8",
         ["BannerFrom"] = "#FF5AC8FA",
         ["BannerTo"] = "#FF0A84FF",
         ["TextOnBanner"] = "#FFFFFFFF",

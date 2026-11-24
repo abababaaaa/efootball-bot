@@ -38,13 +38,13 @@
     <SolidColorBrush x:Key="SegTabHover" Color="#1AFFFFFF"/>
     <SolidColorBrush x:Key="SegTabHoverFg" Color="#FFFFFFFF"/>
     <SolidColorBrush x:Key="LogInfo" Color="#FFE5E5EA"/>
-    <SolidColorBrush x:Key="LogTime" Color="#FFFFB86C"/>
-    <SolidColorBrush x:Key="LogTag" Color="#FF6CB6FF"/>
+    <SolidColorBrush x:Key="LogTime" Color="#FF7E8694"/>
+    <SolidColorBrush x:Key="LogTag" Color="#FF7AB8FF"/>
 
-    <!-- ===== 强调色（Apple 深色 = 蓝 #0A84FF，上面压白字） ===== -->
-    <SolidColorBrush x:Key="Accent" Color="#FF0A84FF"/>
-    <SolidColorBrush x:Key="AccentHover" Color="#FF3D9CFF"/>
-    <SolidColorBrush x:Key="AccentGlow" Color="#FF7DBBFF"/>
+    <!-- ===== 强调色（沉稳宝石蓝 #2563EB，上面压白字） ===== -->
+    <SolidColorBrush x:Key="Accent" Color="#FF2563EB"/>
+    <SolidColorBrush x:Key="AccentHover" Color="#FF3B82F6"/>
+    <SolidColorBrush x:Key="AccentGlow" Color="#FF60A5FA"/>
     <SolidColorBrush x:Key="AccentLight" Color="#330A84FF"/>
     <SolidColorBrush x:Key="AccentBorder" Color="#660A84FF"/>
     <SolidColorBrush x:Key="AccentSoft" Color="#260A84FF"/>
@@ -89,8 +89,8 @@
     <SolidColorBrush x:Key="IntlTabBorder" Color="#1FFFFFFF"/>
 
     <!-- ===== 品牌 / 横幅（Apple 蓝，不做渐变堆叠） ===== -->
-    <SolidColorBrush x:Key="BrandFrom" Color="#FF0A84FF"/>
-    <SolidColorBrush x:Key="BrandTo" Color="#FF0057D6"/>
+    <SolidColorBrush x:Key="BrandFrom" Color="#FF3B82F6"/>
+    <SolidColorBrush x:Key="BrandTo" Color="#FF1D4ED8"/>
     <SolidColorBrush x:Key="BannerFrom" Color="#FF0A84FF"/>
     <SolidColorBrush x:Key="BannerTo" Color="#FF0057D6"/>
     <SolidColorBrush x:Key="TextOnBanner" Color="#FFFFFFFF"/>
@@ -120,19 +120,19 @@
          具体色值由 ThemeManager.ApplyTheme 在运行时构造对应主题的渐变后覆盖。
          这里给的是暗色（默认）兜底值，保证设计器里也能预览。 -->
     <LinearGradientBrush x:Key="GlassFill" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#3DFFFFFF" Offset="0"/>
-        <GradientStop Color="#14FFFFFF" Offset="0.16"/>
-        <GradientStop Color="#0DFFFFFF" Offset="1"/>
+        <GradientStop Color="#14FFFFFF" Offset="0"/>
+        <GradientStop Color="#0DFFFFFF" Offset="0.16"/>
+        <GradientStop Color="#09FFFFFF" Offset="1"/>
     </LinearGradientBrush>
     <LinearGradientBrush x:Key="AccentPillFill" StartPoint="0,0" EndPoint="0,1">
         <GradientStop Color="{DynamicResource AccentHoverColor}" Offset="0"/>
         <GradientStop Color="{DynamicResource AccentColor}" Offset="1"/>
     </LinearGradientBrush>
-    <!-- 主按钮：浅色玻璃质感（白→浅灰），靠描边与投影浮起，不靠蓝色色相 -->
+    <!-- 主按钮：强调色精致渐变 + 柔和高光描边 -->
     <LinearGradientBrush x:Key="PrimaryBtnFill" StartPoint="0,0" EndPoint="0,1">
-        <GradientStop Color="#FFFFFFFF" Offset="0"/>
-        <GradientStop Color="#FFF2F2F5" Offset="0.55"/>
-        <GradientStop Color="#FFE2E2E8" Offset="1"/>
+        <GradientStop Color="#FF2563EB" Offset="0"/>
+        <GradientStop Color="#FF2563EB" Offset="0.55"/>
+        <GradientStop Color="#FF1D4ED8" Offset="1"/>
     </LinearGradientBrush>
     <LinearGradientBrush x:Key="CardTopHighlight" StartPoint="0,0" EndPoint="1,0">
         <GradientStop Color="#00FFFFFF" Offset="0"/>
@@ -141,11 +141,11 @@
     </LinearGradientBrush>
 
     <!-- ===== 渐变停点专用 Color 版（GradientStop.Color 只吃 Color） ===== -->
-    <Color x:Key="BrandFromColor">#FF0A84FF</Color>
-    <Color x:Key="BrandToColor">#FF0057D6</Color>
+    <Color x:Key="BrandFromColor">#FF3B82F6</Color>
+    <Color x:Key="BrandToColor">#FF1D4ED8</Color>
     <!-- 渐变引用的兜底 Color：ApplyTheme 会在运行时按主题覆盖这些同名 key -->
-    <Color x:Key="AccentColor">#FF0A84FF</Color>
-    <Color x:Key="AccentHoverColor">#FF3D9CFF</Color>
+    <Color x:Key="AccentColor">#FF2563EB</Color>
+    <Color x:Key="AccentHoverColor">#FF3B82F6</Color>
     <Color x:Key="HairlineStrongColor">#3DFFFFFF</Color>
     <!-- 浅灰毛玻璃选中态兜底：ApplyTheme 运行时按主题覆盖 -->
     <SolidColorBrush x:Key="SelectFill" Color="#2EFFFFFF"/>
@@ -163,9 +163,9 @@
     <SolidColorBrush x:Key="ChipFill" Color="#3D000000"/>
     <SolidColorBrush x:Key="ChipStroke" Color="#3DFFFFFF"/>
     <!-- 主按钮：文字色 / 顶高光描边 / 悬停压暗层（Fluent = 强调色按钮 + 白字 + 白色提亮） -->
-    <SolidColorBrush x:Key="TextOnPrimary" Color="#FF1C1C1E"/>
-    <SolidColorBrush x:Key="PrimaryBtnStroke" Color="#FFFFFFFF"/>
-    <SolidColorBrush x:Key="BtnFlash" Color="#FF9A9AA0"/>
+    <SolidColorBrush x:Key="TextOnPrimary" Color="#FFFFFFFF"/>
+    <SolidColorBrush x:Key="PrimaryBtnStroke" Color="#2EFFFFFF"/>
+    <SolidColorBrush x:Key="BtnFlash" Color="#FFFFFFFF"/>
     <!-- 下拉选择卡：本体与弹出层用更实的底色，盖住下层文字 -->
     <SolidColorBrush x:Key="ComboBg" Color="#2A242428"/>
     <SolidColorBrush x:Key="ComboPopupBg" Color="#F0161618"/>

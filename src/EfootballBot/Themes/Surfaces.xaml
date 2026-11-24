@@ -44,7 +44,7 @@
 
     <Style x:Key="PageTitle" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/>
-        <Setter Property="FontSize" Value="22"/>
+        <Setter Property="FontSize" Value="20"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
     </Style>
@@ -54,7 +54,6 @@
         <Setter Property="Margin" Value="0,7,0,0"/>
         <Setter Property="TextWrapping" Value="Wrap"/>
         <Setter Property="LineHeight" Value="21"/>
-        <Setter Property="MaxWidth" Value="600"/>
     </Style>
     <Style x:Key="H2" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource DisplayFont}"/>
@@ -152,15 +151,15 @@
 
     <Style x:Key="MetricValue" TargetType="TextBlock">
         <Setter Property="FontFamily" Value="{StaticResource NumberFont}"/>
-        <Setter Property="FontSize" Value="18"/>
+        <Setter Property="FontSize" Value="15"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
         <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
-        <Setter Property="LineHeight" Value="22"/>
+        <Setter Property="LineHeight" Value="18"/>
         <Setter Property="Typography.NumeralAlignment" Value="Tabular"/>
     </Style>
     <Style x:Key="MetricLabel" TargetType="TextBlock">
-        <Setter Property="FontSize" Value="11"/>
+        <Setter Property="FontSize" Value="11.5"/>
         <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
-        <Setter Property="Margin" Value="0,2,0,0"/>
+        <Setter Property="Margin" Value="0"/>
     </Style>
 </ResourceDictionary>

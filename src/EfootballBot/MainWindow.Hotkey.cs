@@ -81,8 +81,8 @@ public partial class MainWindow
         {
             foreach (var t in new[]
                      {
-                         TxtHkIntlPreMatch, TxtHkIntlLeague, TxtHkIntlWeekly, TxtHkIntlLadder, TxtHkStud,
-                         TxtHkCnPreMatch, TxtHkCnLeague, TxtHkCnWeekly, TxtHkCnMyLeague,
+                         TxtHkIntlLeague, TxtHkIntlWeekly, TxtHkIntlLadder, TxtHkStud,
+                         TxtHkCnLeague, TxtHkCnWeekly, TxtHkCnMyLeague,
                      })
                 if (t is not null) _hotkeyChips.Add(t);
         }
@@ -97,7 +97,7 @@ public partial class MainWindow
     {
         if (LblHotkeyMain is null) return; // XAML 初始化顺序保护
         string disp = _cfg.Hotkey.Enabled ? _cfg.Hotkey.DisplayString() : "已禁用";
-        var fg = (System.Windows.Media.Brush)FindResource(_cfg.Hotkey.Enabled ? "AccentGlow" : "TextMuted");
+        var fg = (System.Windows.Media.Brush)FindResource(_cfg.Hotkey.Enabled ? "TextPrimary" : "TextMuted");
         LblHotkeyMain.Text = disp;
         foreach (var t in HotkeyChips())
         {

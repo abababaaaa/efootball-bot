@@ -36,4 +36,13 @@ public class ThemePaletteTests
         Assert.NotEqual(glassLight["ChipFill"], glassLight["TextPrimary"]);
         Assert.NotEqual("#D91C1C1E", glassLight["ChipFill"]);
     }
+
+    [Fact]
+    public void GlassDarkPrimaryUsesAccentAndSubtleCardTopFill()
+    {
+        var glassDark = ThemePalette.For(ThemeManager.Dark, ThemeManager.WorldGlass);
+        Assert.Equal(glassDark["Accent"], glassDark["PrimaryBtnFrom"]);
+        Assert.NotEqual("#FFFFFFFF", glassDark["PrimaryBtnFrom"]);
+        Assert.NotEqual("#3DFFFFFF", glassDark["GlassFillTop"]);
+    }
 }

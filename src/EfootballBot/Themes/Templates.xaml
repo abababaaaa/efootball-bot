@@ -51,15 +51,15 @@
             </Trigger>
         </Style.Triggers>
     </Style>
-    <!-- 卡片标题前的小圆点（macOS 风格）：取代旧的 3px 竖条，柔和地点一下标题 -->
+    <!-- 卡片标题前的强调竖条：精致对齐标题文字 -->
     <Style x:Key="CardTitleBar" TargetType="Rectangle">
-        <Setter Property="Width" Value="6"/>
-        <Setter Property="Height" Value="6"/>
-        <Setter Property="RadiusX" Value="3"/>
-        <Setter Property="RadiusY" Value="3"/>
+        <Setter Property="Width" Value="3"/>
+        <Setter Property="Height" Value="12"/>
+        <Setter Property="RadiusX" Value="1.5"/>
+        <Setter Property="RadiusY" Value="1.5"/>
         <Setter Property="Fill" Value="{DynamicResource Accent}"/>
         <Setter Property="VerticalAlignment" Value="Center"/>
-        <Setter Property="Margin" Value="1,0,10,0"/>
+        <Setter Property="Margin" Value="0,0,8,0"/>
     </Style>
 
 
