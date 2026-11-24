@@ -126,17 +126,8 @@ public sealed class TrainingFrameCollectScenario : IScenario
                 }
                 CaptureIf("train_main_menu", "主菜单", obs);
 
-                // 主菜单 → 底部卡片行 → "比赛"磁贴 → A（复用饱和下×5 + OCR 磁贴定位）
-                await _engine.Pad.DpadRepeat(PadDir.Down, 5);
-                int matchOff = HubTileLocator.FindMainMenuMatchOffset(ocr) ?? 0;
-                await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-                if (matchOff > 0)
-                    await _engine.Pad.DpadRepeat(PadDir.Right, matchOff);
-                _log(matchOff > 0
-                    ? $"[训练帧] 主菜单导航：下×5 → 左×6 → 右×{matchOff} → A（「比赛」在第 {matchOff + 1} 格）"
-                    : "[训练帧] 主菜单导航：下×5 → 左×6 → A（OCR 未读全底部磁贴，回退饱和归位）",
-                    LogLevel.Info);
-                await _engine.Pad.Confirm();
+                // 主菜单 → 底部卡片行 → "比赛"磁贴 → A（复用共享 MatchActionExecutor）
+                await MatchActionExecutor.EnterMatchFromMainMenuAsync(_engine, obs, _log, "训练帧");
                 _phase = Phase.ToHub;
                 _rounds = 0;
                 return 2800;

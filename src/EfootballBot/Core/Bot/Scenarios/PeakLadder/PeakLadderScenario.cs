@@ -181,71 +181,29 @@ public sealed class PeakLadderScenario : IScenario
         {
             return 2000;
         }
-        switch (action.Kind)
-        {
-            case MatchActionKind.PadEnterMatch:
+        return await MatchActionExecutor.ExecuteAsync(
+            _engine, _matchPlay, action, obs, _log, "天梯巅峰赛", ct,
+            onEnterMatch: async () =>
+            {
                 // 国服主页：上×2 进页签行 → 左×4 饱和归位「推荐」→ 右×1 进「比赛」页签
-                // （卡行进入天梯巅峰赛由 Flow 的主页分支处理）
                 _log("[天梯巅峰赛] 主页导航：上×2 → 左×4 归位推荐页签 → 右进比赛页签", LogLevel.Info);
                 await _engine.Pad.DpadRepeat(PadDir.Up, 2);
                 await _engine.Pad.DpadRepeat(PadDir.Left, 4);
                 await _engine.Pad.Dpad(PadDir.Right);
-                break;
-            case MatchActionKind.PadConfirm:
-                // 国服键序（用户 2026-11-21）：① RT（页面所印提示键）→ ② A → ③ 后台鼠标点击。
-                // 比赛中的回放/中场小弹窗不掺进来——比赛里 RT 有游戏内含义，只按 A。
+                return null;
+            },
+            onConfirm: async () =>
+            {
+                // 国服键序：比赛中的弹窗只按 A；赛外走 RT → A → 鼠标
                 if (_matchSession.Active)
                 {
                     _log($"[天梯巅峰赛] 比赛中弹窗 A：{action.Target}", LogLevel.Info);
                     await _engine.Pad.Confirm();
-                    break;
+                    return null;
                 }
                 return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, action.Target,
                     "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, ct);
-            case MatchActionKind.PadUpConfirm:
-                _log($"[天梯巅峰赛] 弹窗上移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Up);
-                await Task.Delay(250); // 上移后留时给游戏刷新焦点，否则A落在旧焦点(取消)
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadDownConfirm:
-                _log($"[天梯巅峰赛] 弹窗下移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadStartPress:
-                _log($"[天梯巅峰赛] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Start();
-                break;
-            case MatchActionKind.PadXPress:
-                _log($"[天梯巅峰赛] {action.Target}", LogLevel.Info);
-                await _engine.Pad.X();
-                break;
-            case MatchActionKind.PadLoginNav:
-                // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
-                _log($"[天梯巅峰赛] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Dpad(PadDir.Right);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.GamepadBack:
-                _log($"[天梯巅峰赛] {action.Target}", LogLevel.Warn);
-                await _engine.Pad.Back();
-                break;
-            case MatchActionKind.GamepadBackAfterConfirm:
-                _log($"[天梯巅峰赛] {action.Target}", LogLevel.Warn);
-                await _engine.Pad.Dpad(PadDir.Up); // B 多次无效：先上移把焦点从「取消」移到确认键
-                await _engine.Pad.Confirm(); // 再 A 确认（直接 A 可能落在取消键上继续死循环）
-                await _engine.Pad.Back(); // 最后 B 返回
-                break;
-            case MatchActionKind.MatchIdleTap:
-                // 比赛中挂机点击：按 A + 用户「挂机节奏」区间随机间隔（共享层 MatchPlay，拟人化）
-                return await _matchPlay.IdleTapAsync(ct);
-            case MatchActionKind.PadMoveRight:
-                await _engine.Pad.Dpad(PadDir.Right);
-                break;
-        }
-        return action.WaitMs;
+            });
     }
 
     // ---------------- 菜单侧状态机 ----------------

@@ -79,14 +79,21 @@ public sealed class WindowCapture : ICaptureProvider
     }
 
     /// <summary>
-    /// 输出帧分辨率上限：高≤720，等比缩放。全屏 3440×1440 → 1720×720（帧数据量降 4 倍）。
+    /// 免缩放容忍高度上限：覆盖 720p 窗口化 + Windows 10/11 标题栏/边框（实机 1282×759 / 1296×759），
+    /// 避免 759→720 无意义最近邻重采样造成文字毛糙和双倍 LOH 分配。
+    /// 超过此上限（1080p/2K/4K）仍按 720 等比缩小。
+    /// </summary>
+    internal const int MaxUnscaledHeight = 780;
+
+    /// <summary>
+    /// 输出帧分辨率上限：高≤780 保持原图；超过时等比缩放到高 720。全屏 3440×1440 → 1720×720（帧数据量降 4 倍）。
     /// 所有 ROI 检测均为归一化坐标+占比判定，降采样不影响识别。
     /// 注意：此缩放只能在 CPU 侧做——WGC 帧池尺寸小于内容尺寸时是「裁切左上角」而非缩放。
     /// </summary>
     internal static SizeInt32 CapSize(int width, int height)
     {
         width = Math.Max(2, width); height = Math.Max(2, height);
-        if (height <= 720) return new SizeInt32 { Width = width, Height = height };
+        if (height <= MaxUnscaledHeight) return new SizeInt32 { Width = width, Height = height };
         double scale = 720.0 / height;
         int w = Math.Max(2, (int)Math.Round(width * scale));
         return new SizeInt32 { Width = w, Height = 720 };
@@ -139,7 +146,7 @@ public sealed class WindowCapture : ICaptureProvider
                 _size = ClampSize(width, height);
                 var capped = CapSize(width, height);
                 if (capped.Width != _size.Width || capped.Height != _size.Height)
-                    Step($"[捕获] 原始 {_size.Width}×{_size.Height}：全尺寸采集，输出降采样到 {capped.Width}×{capped.Height}");
+                    Step($"原始 {_size.Width}×{_size.Height}：全尺寸采集，输出降采样到 {capped.Width}×{capped.Height}");
 
                 Step("① 创建 D3D11 设备");
                 CreateDevice();
@@ -213,7 +220,7 @@ public sealed class WindowCapture : ICaptureProvider
         if (ms > 0 && ms < 33) ms = 33;
         if (_minFrameIntervalMs == ms) return;
         _minFrameIntervalMs = ms;
-        Step($"[捕获] 节流档位切换 → {(ms <= 33 ? "全速" : $"{ms}ms")}");
+        Step($"节流档位切换 → {(ms <= 33 ? "全速" : $"{ms}ms")}");
 
         if (ms <= 33)
         {
@@ -253,7 +260,7 @@ public sealed class WindowCapture : ICaptureProvider
             _vorticeDevice = Vortice.Direct3D11.D3D11.D3D11CreateDevice(
                 Vortice.Direct3D.DriverType.Warp,
                 Vortice.Direct3D11.DeviceCreationFlags.BgraSupport);
-            Step("[捕获] 帧池使用 WARP 软渲染设备（虚拟显示器/远程环境兼容模式，CPU 拷贝帧）");
+            Step("帧池使用 WARP 软渲染设备（虚拟显示器/远程环境兼容模式，CPU 拷贝帧）");
             _d3dDevicePtr = _vorticeDevice.NativePointer;
             _winrtDevice = CaptureInterop.CreateDirect3DDevice(_d3dDevicePtr);
             return;
@@ -275,12 +282,12 @@ public sealed class WindowCapture : ICaptureProvider
                 _vorticeDevice = candidate;
                 boundExplicit = true;
                 Step(pickedForOutputs
-                    ? $"[捕获] D3D11 设备绑定硬件 GPU：{adapterName}（显存最大的独显无显示输出，为保帧流改绑有输出的显卡）"
-                    : $"[捕获] D3D11 设备绑定硬件 GPU：{adapterName}");
+                    ? $"D3D11 设备绑定硬件 GPU：{adapterName}（显存最大的独显无显示输出，为保帧流改绑有输出的显卡）"
+                    : $"D3D11 设备绑定硬件 GPU：{adapterName}");
             }
             else
             {
-                Step($"[捕获] 绑定硬件 GPU {adapterName} 失败（0x{result.Code:X8}），改试默认适配器");
+                Step($"绑定硬件 GPU {adapterName} 失败（0x{result.Code:X8}），改试默认适配器");
             }
             adapter.Dispose();
         }
@@ -291,7 +298,7 @@ public sealed class WindowCapture : ICaptureProvider
             _vorticeDevice = Vortice.Direct3D11.D3D11.D3D11CreateDevice(
                 Vortice.Direct3D.DriverType.Hardware,
                 Vortice.Direct3D11.DeviceCreationFlags.BgraSupport);
-            Step("[捕获] D3D11 设备使用默认硬件适配器");
+            Step("D3D11 设备使用默认硬件适配器");
         }
 
         var device = _vorticeDevice ?? throw new InvalidOperationException("D3D11 设备创建失败");
@@ -322,7 +329,7 @@ public sealed class WindowCapture : ICaptureProvider
                     if (_running && _pool is not null && _winrtDevice is not null &&
                         (content.Width != _size.Width || content.Height != _size.Height))
                     {
-                        Step($"[捕获] 帧尺寸变化：重建帧池 {_size.Width}×{_size.Height} → " +
+                        Step($"帧尺寸变化：重建帧池 {_size.Width}×{_size.Height} → " +
                              $"{content.Width}×{content.Height}");
                         _size = content;
                         ReleaseHeldFrames();
@@ -383,7 +390,7 @@ public sealed class WindowCapture : ICaptureProvider
                 catch (Exception gex)
                 {
                     _gpuFailed = true;
-                    Step($"[捕获] GPU 硬件缩放不可用，本捕获会话回退 CPU 缩放：{gex.Message}");
+                    Step($"GPU 硬件缩放不可用，本捕获会话回退 CPU 缩放：{gex.Message}");
                 }
             }
             if (!gpuDone)
@@ -409,7 +416,7 @@ public sealed class WindowCapture : ICaptureProvider
         {
             // 记录前几次瞬时错误，便于诊断
             if (++_frameErrorCount <= 3)
-                Step($"[捕获] 帧处理失败: {ex.Message}");
+                Step($"帧处理失败: {ex.Message}");
         }
         finally
         {

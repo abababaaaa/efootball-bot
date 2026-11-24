@@ -438,6 +438,7 @@ public sealed partial class WeeklyEventScenario : IScenario
             return 5000;
         }
         _squadPopupPresses++;
+        _attempts = 0; // 已处理入场弹窗：清零当前阶段超时计数，防止关弹窗后加载过渡瞬撞上限 B 退回列表
         _log($"[周活动·阵容挑战] 入场弹窗「球员卡限制」（第 {_squadPopupPresses} 次）：A 确认关闭", LogLevel.Info);
         await _engine.Pad.Confirm();
         return 2200;

@@ -36,6 +36,105 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
     public static readonly OcrResult Empty = new(Array.Empty<OcrWord>(), 0, 0);
 
     private IReadOnlyList<OcrLine>? _lines;
+    private List<List<OcrWord>>? _groupedLines;
+
+    /// <summary>
+    /// 按排版行聚类缓存（每行按 X 升序排好），供 Lines / MergedWords / JoinedText 共用，
+    /// 避免同一帧内重复跑 3 遍 O(N²) 行聚类。
+    /// </summary>
+    private List<List<OcrWord>> GetGroupedLines()
+    {
+        if (_groupedLines is { } cached) return cached;
+        var groups = new List<(List<OcrWord> Words, double SumY, double SumH)>();
+        foreach (var w in Words.OrderBy(w => w.Y).ThenBy(w => w.X))
+        {
+            int hit = -1;
+            for (int i = 0; i < groups.Count; i++)
+            {
+                var g = groups[i];
+                int n = g.Words.Count;
+                double avgY = g.SumY / n;
+                double avgH = g.SumH / n;
+                if (Math.Abs(avgY - w.CenterY) < Math.Max(w.H, avgH) * 0.7)
+                {
+                    hit = i;
+                    break;
+                }
+            }
+            if (hit < 0)
+            {
+                groups.Add((new List<OcrWord> { w }, w.CenterY, w.H));
+            }
+            else
+            {
+                var g = groups[hit];
+                g.Words.Add(w);
+                groups[hit] = (g.Words, g.SumY + w.CenterY, g.SumH + w.H);
+            }
+        }
+        var lines = new List<List<OcrWord>>(groups.Count);
+        foreach (var g in groups)
+        {
+            g.Words.Sort((a, b) => a.X.CompareTo(b.X));
+            lines.Add(g.Words);
+        }
+        _groupedLines = lines;
+        return lines;
+    }
+
+    /// <summary>
+    /// 判定词块是否属于 Windows 窗口顶部标题栏噪声（左上角图标、eFootball™ 标题、右上角控制按钮）。
+    /// 窗口化 WGC 捕获整窗时（如 1282×759）顶部 ~31px 会被 OCR 读出，导致比赛中 OCR 降频失效、
+    /// 加载帧误判 TitleScreen。只过滤 OCR 词块而不裁切图像，确保 YOLO 与像素探针坐标 100% 不变。
+    /// </summary>
+    internal static bool IsWindowTitlebarWord(OcrWord w)
+    {
+        if (!(w.Y < 0.035 && w.CenterY < 0.042 && w.H < 0.055)) return false;
+        string norm = w.NormText;
+        if (w.X < 0.30 &&
+            (norm.Contains("footbal", StringComparison.OrdinalIgnoreCase) ||
+             norm.Contains("ootbal", StringComparison.OrdinalIgnoreCase) ||
+             norm.Contains("otball", StringComparison.OrdinalIgnoreCase) ||
+             norm.Contains("efoot", StringComparison.OrdinalIgnoreCase) ||
+             norm.Contains("实况足球", StringComparison.OrdinalIgnoreCase) ||
+             (w.Text.Contains('™') && w.X < 0.25)))
+            return true;
+
+        if (w.X < 0.055 && w.W < 0.055 && norm.Length <= 2 && norm.All(ch => ch < 128))
+            return true;
+
+        if (w.X > 0.86 && w.W < 0.08)
+        {
+            if (norm.Length == 0) return true;
+            if (norm is "x" or "X" or "一" or "口") return true;
+            string trimmed = w.Text.Trim();
+            if (trimmed is "-" or "—" or "_" or "□" or "×") return true;
+        }
+        return false;
+    }
+
+    /// <summary>剔除顶部 Windows 标题栏噪声词；无命中时零分配直接返回原实例。</summary>
+    internal static OcrResult FilterWindowTitlebar(OcrResult result)
+    {
+        if (result.Words.Count == 0) return result;
+        bool any = false;
+        for (int i = 0; i < result.Words.Count; i++)
+        {
+            if (IsWindowTitlebarWord(result.Words[i]))
+            {
+                any = true;
+                break;
+            }
+        }
+        if (!any) return result;
+        var filtered = new List<OcrWord>(result.Words.Count);
+        for (int i = 0; i < result.Words.Count; i++)
+        {
+            var w = result.Words[i];
+            if (!IsWindowTitlebarWord(w)) filtered.Add(w);
+        }
+        return new OcrResult(filtered, result.Width, result.Height);
+    }
 
     /// <summary>
     /// 按排版行聚合（每个词属于唯一一行），行文本为行内词 Norm 拼接。
@@ -46,17 +145,9 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
 
     private IReadOnlyList<OcrLine> BuildLines()
     {
-        var lines = new List<List<OcrWord>>();
-        foreach (var w in Words.OrderBy(w => w.Y).ThenBy(w => w.X))
+        var lines = GetGroupedLines();
+        return lines.Select(ordered =>
         {
-            var line = lines.FirstOrDefault(l =>
-                Math.Abs(l.Average(x => x.CenterY) - w.CenterY) < Math.Max(w.H, l.Average(x => x.H)) * 0.7);
-            if (line is null) lines.Add(new List<OcrWord> { w });
-            else line.Add(w);
-        }
-        return lines.Select(line =>
-        {
-            var ordered = line.OrderBy(w => w.X).ToList();
             double x0 = ordered.Min(w => w.X), y0 = ordered.Min(w => w.Y);
             double x1 = ordered.Max(w => w.X + w.W), y1 = ordered.Max(w => w.Y + w.H);
             return new OcrLine(string.Concat(ordered.Select(w => w.NormText)),
@@ -80,19 +171,9 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
     private IReadOnlyList<OcrWord> MergeLines()
     {
         var result = new List<OcrWord>(Words);
-        // 按行分组：中心 Y 接近且高度相近的词归为一行
-        var lines = new List<List<OcrWord>>();
-        foreach (var w in Words.OrderBy(w => w.Y).ThenBy(w => w.X))
+        foreach (var ordered in GetGroupedLines())
         {
-            var line = lines.FirstOrDefault(l =>
-                Math.Abs(l.Average(x => x.CenterY) - w.CenterY) < Math.Max(w.H, l.Average(x => x.H)) * 0.7);
-            if (line is null) lines.Add(new List<OcrWord> { w });
-            else line.Add(w);
-        }
-        foreach (var line in lines)
-        {
-            if (line.Count < 2) continue;
-            var ordered = line.OrderBy(w => w.X).ToList();
+            if (ordered.Count < 2) continue;
             string text = string.Concat(ordered.Select(w => w.NormText));
             if (text.Length < 2) continue;
             double x0 = ordered.Min(w => w.X), y0 = ordered.Min(w => w.Y);
@@ -122,17 +203,9 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
 
     private string BuildJoinedText()
     {
-        var lines = new List<List<OcrWord>>();
-        foreach (var w in Words.OrderBy(w => w.Y).ThenBy(w => w.X))
-        {
-            var line = lines.FirstOrDefault(l =>
-                Math.Abs(l.Average(x => x.CenterY) - w.CenterY) < Math.Max(w.H, l.Average(x => x.H)) * 0.7);
-            if (line is null) lines.Add(new List<OcrWord> { w });
-            else line.Add(w);
-        }
-        return string.Concat(lines
+        return string.Concat(GetGroupedLines()
             .OrderBy(l => l.Average(w => w.CenterY))
-            .SelectMany(l => l.OrderBy(w => w.X).Select(w => w.NormText)));
+            .SelectMany(l => l.Select(w => w.NormText)));
     }
 
     /// <summary>在全文拼接里找子串（不要求关键词落在同一个 OCR 词内）。</summary>
@@ -358,6 +431,7 @@ public sealed class OcrRecognizer : IDisposable
         {
             var scaled = ImageScaling.DownscaleBilinear(frame, _downscaleLongSide);
             var result = await _backend.RecognizeAsync(scaled, ct).ConfigureAwait(false);
+            result = OcrResult.FilterWindowTitlebar(result);
             if (!_tuning.LineReread || result.Words.Count == 0)
             {
                 LastRereadStats = default;

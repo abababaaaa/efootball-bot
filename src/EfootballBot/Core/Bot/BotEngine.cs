@@ -124,6 +124,9 @@ public sealed class BotEngine : IDisposable
     private readonly ReconnectWatch _reconnectWatch = new();
     /// <summary>当前场景插件（null = 纯感知观察模式）。</summary>
     public IScenario? Scenario { get; set; }
+    /// <summary>主循环本轮已采集的感知结果：供 Scenario.RunOnceAsync 首行一次性复用，
+    /// 避免每轮重复调 ObserveAsync 导致同帧双跑 OCR/YOLO 与 [性能] 统计归零。</summary>
+    private Observation? _roundObs;
     // 暂停标志：置位后主循环不再观察/操作，且立即清空手柄输出防残留半按状态
     private volatile bool _paused;
     /// <summary>单步请求：暂停状态下执行一轮「观察 + 决策」后自动回到暂停（见 RequestStep）。</summary>
@@ -420,10 +423,13 @@ public sealed class BotEngine : IDisposable
                                 Observation.ApplyCaptureThrottle(300);
                                 try
                                 {
-                                    await ObserveAsync(token);
+                                    var stepObs = await ObserveAsync(token);
                                     if (Scenario is not null)
                                     {
-                                        int delay = await Scenario.RunOnceAsync(token);
+                                        int delay;
+                                        _roundObs = stepObs;
+                                        try { delay = await Scenario.RunOnceAsync(token); }
+                                        finally { _roundObs = null; }
                                         LogInternal($"单步完成（场景建议下一轮 {delay}ms），继续暂停", LogLevel.Info);
                                     }
                                     else
@@ -533,7 +539,11 @@ public sealed class BotEngine : IDisposable
                         }
                         int delayMs = 300;
                         if (Scenario is not null)
-                            delayMs = await Scenario.RunOnceAsync(token);
+                        {
+                            _roundObs = obs;
+                            try { delayMs = await Scenario.RunOnceAsync(token); }
+                            finally { _roundObs = null; }
+                        }
                         RecordPerf(roundStartTick, actionStartMs);
                         // 输入活性（P0-1）与玩家 1 归属（P0-2）：都是"游戏到底还收不收得到 bot 输入"
                         // 这一件事的两面——前者看按键有没有效果，后者看槽位还是不是我们的。
@@ -1470,7 +1480,9 @@ public sealed class BotEngine : IDisposable
         }
     }
 
-    public void Stop()
+    public void Stop() => StopInternal("正常停止", isError: false);
+
+    private void StopInternal(string summaryReason, bool isError)
     {
         try { _cts?.Cancel(); } catch { }
         try { Pad360.ResetAll(); } catch { }        // 停止即拔掉虚拟手柄：其他应用立即看不到任何手柄（旧实现保持在线到引擎销毁，
@@ -1492,21 +1504,21 @@ public sealed class BotEngine : IDisposable
         try { _dxgi?.Stop(); } catch { }
         try { _gdi?.Stop(); } catch { }
         _lastObs = null;
+        _roundObs = null;
         // 注意：上面 Disconnect 只在停止时发生。挂机运行期间绝不反复断开/重连虚拟手柄——
         // 手柄一旦被游戏看到「断开→重连」，eFootball 会把光标停靠到顶部头部的「手柄归属」图标上，
         // 重连设备的 Left/A 全部失效（焦点不在磁贴行）。运行期自愈走 ReconnectPadAsync，
         // 仅在提交连续失败（手柄实质已失效）时才重建。
-        WriteSessionSummary("正常停止", isError: false);
+        WriteSessionSummary(summaryReason, isError);
         WeChatFeed.SessionStop();
     }
 
-    /// <summary>异常停止（场景报错终止）：自动留档当前画面后正常停止。
+    /// <summary>异常停止（场景报错终止）：自动留档当前画面并写入异常会话摘要后停止。
     /// 用户反馈排障从「读日志猜画面」变成直接看帧。</summary>
     public void StopWithError(string reason)
     {
         SaveFailureDump(reason);
-        Stop();
-        WriteSessionSummary($"异常停止：{reason}", isError: true);
+        StopInternal($"异常停止：{reason}", isError: true);
     }
 
     /// <summary>本次运行是否已写过会话摘要（Stop 可能被多处调用，摘要只写一次）。</summary>
@@ -1811,6 +1823,11 @@ public sealed class BotEngine : IDisposable
     /// 的帧本来就不需要重跑 OCR。</param>
     public async Task<Observation> ObserveAsync(CancellationToken ct, bool forceOcr = false)
     {
+        if (!forceOcr && _roundObs is { } cached)
+        {
+            _roundObs = null;
+            return cached;
+        }
         // 比赛画面（OCR 零词 + YOLO 零框）文字密度天然为零——全帧 OCR 是观察循环里最大
         // 单项 CPU，比赛中基本全浪费（比赛判定靠角区探针 + YOLO，见下方注释）。上一轮感知
         // 为全空时把 OCR 间隔放宽 3 倍（≤5s 封顶）：文字/按钮一出现（弹窗、终场、回菜单）

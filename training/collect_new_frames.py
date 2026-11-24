@@ -26,6 +26,116 @@ CLASS_ORDER = ["player_card", "btn_back", "btn_confirm", "coin_bar", "main_menu"
 CLASS_ID = {name: i for i, name in enumerate(CLASS_ORDER)}
 
 
+def _parse_box(box: str):
+    """解析 'class,score,x,y,w,h'（x/y 为左上角归一化）；无效则返 None。"""
+    parts = box.split(",")
+    if len(parts) != 6:
+        return None
+    name, score_s, x_s, y_s, w_s, h_s = parts
+    if name not in CLASS_ID:
+        return None
+    try:
+        score = float(score_s)
+        x, y, bw, bh = float(x_s), float(y_s), float(w_s), float(h_s)
+    except ValueError:
+        return None
+    return {
+        "raw": box,
+        "name": name,
+        "score": score,
+        "x1": x,
+        "y1": y,
+        "x2": x + bw,
+        "y2": y + bh,
+        "cx": x + bw / 2,
+        "cy": y + bh / 2,
+        "w": bw,
+        "h": bh,
+    }
+
+
+def _iou(a: dict, b: dict) -> float:
+    ix1, iy1 = max(a["x1"], b["x1"]), max(a["y1"], b["y1"])
+    ix2, iy2 = min(a["x2"], b["x2"]), min(a["y2"], b["y2"])
+    iw, ih = max(0.0, ix2 - ix1), max(0.0, iy2 - iy1)
+    inter = iw * ih
+    if inter <= 0:
+        return 0.0
+    area_a = max(0.0, a["w"]) * max(0.0, a["h"])
+    area_b = max(0.0, b["w"]) * max(0.0, b["h"])
+    union = area_a + area_b - inter
+    return inter / union if union > 0 else 0.0
+
+
+def validate_boxes(boxes: list[str]) -> tuple[list[str], list[str]]:
+    """
+    自动标注几何/语义护栏（防止错误预测回灌训练集「自我投毒」）：
+      1. 剔除右半屏 btn_back（cx > 0.50）
+      2. 剔除左下角返回位 btn_confirm（cx < 0.25 and cy > 0.85）
+      3. btn_back 与 btn_confirm 重叠 IoU > 0.45 时仅保留高分框
+      4. 存在居中弹窗 btn_confirm（0.30 <= cx <= 0.70 and 0.45 <= cy <= 0.85）时，
+         剔除低分（score < 0.75）左下角暗化背景 btn_back
+    返回 (保留原始串列表, 过滤原因明细列表)。
+    """
+    parsed = []
+    dropped_reasons: list[str] = []
+    for raw in boxes:
+        p = _parse_box(raw)
+        if p is None:
+            dropped_reasons.append(f"无效格式: {raw}")
+            continue
+        parsed.append(p)
+
+    # 先按单框位置规则过滤
+    stage1 = []
+    for p in parsed:
+        if p["name"] == "btn_back" and p["cx"] > 0.50:
+            dropped_reasons.append(f"右半屏误标 btn_back ({p['score']:.2f} @cx={p['cx']:.2f})")
+            continue
+        if p["name"] == "btn_confirm" and p["cx"] < 0.25 and p["cy"] > 0.85:
+            dropped_reasons.append(f"左下角返回位误标 btn_confirm ({p['score']:.2f} @cx={p['cx']:.2f},cy={p['cy']:.2f})")
+            continue
+        stage1.append(p)
+
+    has_center_confirm = any(
+        p["name"] == "btn_confirm" and 0.30 <= p["cx"] <= 0.70 and 0.45 <= p["cy"] <= 0.85
+        for p in stage1
+    )
+
+    # 居中弹窗遮罩下过滤低分背景 btn_back
+    stage2 = []
+    for p in stage1:
+        if (has_center_confirm and p["name"] == "btn_back"
+                and p["cx"] < 0.30 and p["cy"] > 0.75 and p["score"] < 0.75):
+            dropped_reasons.append(
+                f"居中弹窗下低分背景 btn_back ({p['score']:.2f} @cx={p['cx']:.2f},cy={p['cy']:.2f})")
+            continue
+        stage2.append(p)
+
+    # btn_back vs btn_confirm 同位重叠互斥：只留高分框
+    drop_idx: set[int] = set()
+    for i in range(len(stage2)):
+        if i in drop_idx:
+            continue
+        for j in range(i + 1, len(stage2)):
+            if j in drop_idx:
+                continue
+            a, b = stage2[i], stage2[j]
+            if {a["name"], b["name"]} == {"btn_back", "btn_confirm"} and _iou(a, b) > 0.45:
+                loser_i = j if a["score"] >= b["score"] else i
+                winner = a if a["score"] >= b["score"] else b
+                loser = stage2[loser_i]
+                drop_idx.add(loser_i)
+                dropped_reasons.append(
+                    f"{loser['name']} 与 {winner['name']} 重叠(IoU={_iou(a, b):.2f})，"
+                    f"舍低分 {loser['score']:.2f} 留 {winner['score']:.2f}")
+                if loser_i == i:
+                    break
+
+    kept_boxes = [p["raw"] for idx, p in enumerate(stage2) if idx not in drop_idx]
+    return kept_boxes, dropped_reasons
+
+
 def to_yolo_label(box: str) -> str:
     """批量检测的 'class,score,x,y,w,h'（x/y 为左上角归一化）→ YOLO 'id cx cy w h'。"""
     parts = box.split(",")
@@ -111,25 +221,30 @@ def main():
         reps.append(sorted(g, key=lambda p: (priority(p.relative_to(src).as_posix()), str(p)))[0])
     dup_removed = len(files) - len(reps)
 
-    # 2) 内容筛选
+    # 2) 内容筛选 + 护栏校验
     kept, dropped = [], []
+    guard_total = 0
     for p in reps:
         rel = p.relative_to(src).as_posix()
-        boxes = boxes_by_rel.get(rel, [])
+        raw_boxes = boxes_by_rel.get(rel, [])
+        boxes, guard_reasons = validate_boxes(raw_boxes)
+        guard_total += len(guard_reasons)
         m = re.search(r"_\d{6}_\d{3}_([\w]+)", p.name)
         tag = m.group(1) if m else ""
         if any(k in p.name for k in DROP_NAMES):
             dropped.append((rel, tag, "黑屏/失败帧")); continue
         if not boxes and not any(k in tag for k in KEEP_TAGS):
-            dropped.append((rel, tag, "无目标且非困难页")); continue
-        kept.append((rel, p, boxes, tag))
+            dropped.append((rel, tag, "护栏过滤后无目标且非困难页" if raw_boxes else "无目标且非困难页")); continue
+        kept.append((rel, p, boxes, tag, guard_reasons))
 
     print(f"源 {len(files)} 张 → 真重复剔除 {dup_removed} 张 → {len(reps)} 张")
-    print(f"内容筛选后：保留 {len(kept)} 张 / 剔除 {len(dropped)} 张")
+    print(f"内容筛选后：保留 {len(kept)} 张 / 剔除 {len(dropped)} 张（[护栏过滤] 拦截伪框 {guard_total} 个）")
     print("\n=== 剔除 ===")
     for rel, tag, why in dropped: print(f"  - {rel} [{tag or '无tag'}] {why}")
     print("\n=== 保留 ===")
-    for rel, _, boxes, tag in kept: print(f"  + {rel} [{tag or '无tag'}] {len(boxes)}框")
+    for rel, _, boxes, tag, guard_reasons in kept:
+        guard_note = f" | [护栏过滤] {'; '.join(guard_reasons)}" if guard_reasons else ""
+        print(f"  + {rel} [{tag or '无tag'}] {len(boxes)}框{guard_note}")
 
     if args.dry_run:
         print("\n[dry-run] 未写入"); return
@@ -137,7 +252,7 @@ def main():
     img_dir, lbl_dir = NEG / "images", NEG / "labels"
     img_dir.mkdir(parents=True, exist_ok=True); lbl_dir.mkdir(parents=True, exist_ok=True)
     written = 0
-    for rel, p, boxes, tag in kept:
+    for rel, p, boxes, tag, _ in kept:
         # rel 形如 "captures/20261123/xxx.jpg"（as_posix 开头无斜杠），用路径段判断
         parts = rel.split("/")
         prefix = ("trf" if "trainingframes" in parts else "sus" if "suspicious" in parts

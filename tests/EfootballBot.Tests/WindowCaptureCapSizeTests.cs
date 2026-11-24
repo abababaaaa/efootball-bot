@@ -14,6 +14,17 @@ public class WindowCaptureCapSizeTests
         Assert.Equal(720, s.Height);
     }
 
+    [Theory]
+    [InlineData(1282, 759)]
+    [InlineData(1296, 759)]
+    [InlineData(1280, 752)]
+    public void CapSize_Windowed720pWithTitlebar_KeepsOriginal(int w, int h)
+    {
+        SizeInt32 s = WindowCapture.CapSize(w, h);
+        Assert.Equal(w, s.Width);
+        Assert.Equal(h, s.Height);
+    }
+
     [Fact]
     public void CapSize_FullHd_ScalesTo1280x720()
     {

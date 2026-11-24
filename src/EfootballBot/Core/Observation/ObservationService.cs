@@ -148,15 +148,23 @@ public sealed class ObservationService : IDisposable
         }
     }
 
+    /// <summary>纯函数（可单测）：本轮重启后连续健康出帧时长是否达到 2 分钟熔断清空阈值。</summary>
+    internal static bool ShouldResetBreakerOnFreshFrame(DateTime firstFreshAfterRestartAt, DateTime now) =>
+        firstFreshAfterRestartAt != DateTime.MinValue && (now - firstFreshAfterRestartAt).TotalSeconds >= 120;
+
     /// <summary>记录"刚拿到新鲜画面"。连续健康 ≥2 分钟自动清空熔断预算。
     /// 首次出帧时把当前后端记入本机记忆（capture-backend.json），下次启动直连。</summary>
     private void MarkFreshFrame()
     {
         var now = DateTime.Now;
-        if (_lastFreshFrameAt != DateTime.MinValue && (now - _lastFreshFrameAt).TotalSeconds >= 120)
+        if (ShouldResetBreakerOnFreshFrame(_firstFreshAfterRestartAt, now))
         {
-            lock (_rebuildTimes) _rebuildTimes.Clear();
-            _fastStallCount = 0;
+            if (_fastStallCount != 0 || _zeroFrameRestarts != 0 || _rebuildTimes.Count > 0)
+            {
+                lock (_rebuildTimes) _rebuildTimes.Clear();
+                _fastStallCount = 0;
+                _zeroFrameRestarts = 0;
+            }
         }
         if (_firstFreshAfterRestartAt == DateTime.MinValue)
             _firstFreshAfterRestartAt = now;
@@ -366,7 +374,7 @@ public sealed class ObservationService : IDisposable
 
         if (_lastOcrHash is { } lastHash && hash == lastHash)
         {
-            _lastOcrTick = now; // 视同一次 OCR 周期，维持节流节奏
+            _lastOcrTick = Environment.TickCount64; // 视同一次 OCR 周期，维持节流节奏
             return new ObserveResult(f, _lastOcr, frameWaitMs, hashMs, 0);
         }
 
@@ -377,7 +385,7 @@ public sealed class ObservationService : IDisposable
         _lastOcrFrame = f;
         _lastOcr = ocr;
         _lastOcrHash = hash;
-        _lastOcrTick = now;
+        _lastOcrTick = Environment.TickCount64;
         return new ObserveResult(f, ocr, frameWaitMs, hashMs, ocrMs);
     }
 

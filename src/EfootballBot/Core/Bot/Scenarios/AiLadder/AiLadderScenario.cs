@@ -188,74 +188,7 @@ public sealed class AiLadderScenario : IScenario
         {
             return 2000;
         }
-        switch (action.Kind)
-        {
-            case MatchActionKind.PadEnterMatch:
-                // 主菜单进比赛卡：下×2 进底部卡行 → OCR 定位"比赛"格位后精确右移；读不全回退左×6
-                await _engine.Pad.DpadRepeat(PadDir.Down, 5); // 饱和下按到底部卡行（到底停住，防下少了按错）
-                int matchOff = HubTileLocator.FindMainMenuMatchOffset(obs.Ocr) ?? 0;
-                if (matchOff > 0)
-                {
-                    _log($"[AI天梯联赛] 主菜单导航：下×5→归位最左→右×{matchOff}→A（OCR 定位比赛在第 {matchOff + 1} 格）", LogLevel.Info);
-                    await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-                    await _engine.Pad.DpadRepeat(PadDir.Right, matchOff);
-                }
-                else
-                {
-                    _log("[AI天梯联赛] 主菜单导航：下×5→左×6→A（OCR 未读全底部磁贴，回退饱和归位）", LogLevel.Info);
-                    _engine.DumpSuspiciousFrame(obs.Frame, "menu_tile_ocr_incomplete", "主菜单底部磁贴 OCR 读不全，回退固定左×6 导航");
-                    await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-                }
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadConfirm:
-                _log($"[AI天梯联赛] 手柄 A：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadUpConfirm:
-                _log($"[AI天梯联赛] 弹窗上移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Up);
-                await Task.Delay(250); // 上移后留时给游戏刷新焦点，否则A落在旧焦点(取消)
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadDownConfirm:
-                _log($"[AI天梯联赛] 弹窗下移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadStartPress:
-                _log($"[AI天梯联赛] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Start();
-                break;
-            case MatchActionKind.PadXPress:
-                _log($"[AI天梯联赛] {action.Target}", LogLevel.Info);
-                await _engine.Pad.X();
-                break;
-            case MatchActionKind.PadLoginNav:
-                // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
-                _log($"[AI天梯联赛] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Dpad(PadDir.Right);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.GamepadBack:
-                _log($"[AI天梯联赛] {action.Target}", LogLevel.Warn);
-                await _engine.Pad.Back();
-                break;
-            case MatchActionKind.GamepadBackAfterConfirm:
-                _log($"[AI天梯联赛] {action.Target}", LogLevel.Warn);
-                await _engine.Pad.Dpad(PadDir.Up); // B 多次无效：先上移把焦点从「取消」移到确认键
-                await _engine.Pad.Confirm(); // 再 A 确认（直接 A 可能落在取消键上继续死循环）
-                await _engine.Pad.Back(); // 最后 B 返回
-                break;
-            case MatchActionKind.MatchIdleTap:
-                // 比赛中挂机点击：按 A + 用户「挂机节奏」区间随机间隔（共享层 MatchPlay，拟人化）
-                return await _matchPlay.IdleTapAsync(ct);
-            case MatchActionKind.PadMoveRight:
-                await _engine.Pad.Dpad(PadDir.Right);
-                break;
-        }
-        return action.WaitMs;
+        return await MatchActionExecutor.ExecuteAsync(_engine, _matchPlay, action, obs, _log, "AI天梯联赛", ct);
     }
 
     // ---------------- 菜单侧状态机 ----------------
@@ -309,21 +242,7 @@ public sealed class AiLadderScenario : IScenario
                         await _engine.Pad.Back();
                         return 2400;
                     }
-                    await _engine.Pad.DpadRepeat(PadDir.Down, 5); // 饱和下按到底部卡行（到底停住，防下少了按错）
-                    int flowMatchOff = HubTileLocator.FindMainMenuMatchOffset(obs.Ocr) ?? 0;
-                    if (flowMatchOff > 0)
-                    {
-                        _log($"[AI天梯联赛] 主菜单导航：下×5→归位最左→右×{flowMatchOff}→A（OCR 定位比赛在第 {flowMatchOff + 1} 格）", LogLevel.Info);
-                        await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-                        await _engine.Pad.DpadRepeat(PadDir.Right, flowMatchOff);
-                    }
-                    else
-                    {
-                        _log("[AI天梯联赛] 主菜单导航：下×5→左×6→A（OCR 未读全底部磁贴，回退饱和归位）", LogLevel.Info);
-                        _engine.DumpSuspiciousFrame(obs.Frame, "menu_tile_ocr_incomplete", "主菜单底部磁贴 OCR 读不全，回退固定左×6 导航");
-                        await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-                    }
-                    await _engine.Pad.Confirm();
+                    await MatchActionExecutor.EnterMatchFromMainMenuAsync(_engine, obs, _log, "AI天梯联赛");
                     return 3000;
                 }
                 if (ml == MatchScreen.MatchHub)

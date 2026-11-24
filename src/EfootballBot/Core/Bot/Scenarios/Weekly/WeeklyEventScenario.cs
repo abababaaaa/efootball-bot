@@ -247,74 +247,7 @@ public sealed partial class WeeklyEventScenario : IScenario
         {
             return 2000;
         }
-        switch (action.Kind)
-        {
-            case MatchActionKind.PadEnterMatch:
-                // 主菜单进比赛卡：下×2 进底部卡行 → OCR 定位"比赛"格位后精确右移；读不全回退左×6
-                await _engine.Pad.DpadRepeat(PadDir.Down, 5); // 饱和下按到底部卡行（到底停住，防下少了按错）
-                int matchOff = HubTileLocator.FindMainMenuMatchOffset(obs.Ocr) ?? 0;
-                if (matchOff > 0)
-                {
-                    _log($"[周活动] 主菜单导航：下×5→归位最左→右×{matchOff}→A（OCR 定位比赛在第 {matchOff + 1} 格）", LogLevel.Info);
-                    await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-                    await _engine.Pad.DpadRepeat(PadDir.Right, matchOff);
-                }
-                else
-                {
-                    _log("[周活动] 主菜单导航：下×5→左×6→A（OCR 未读全底部磁贴，回退饱和归位）", LogLevel.Info);
-                    _engine.DumpSuspiciousFrame(obs.Frame, "menu_tile_ocr_incomplete", "主菜单底部磁贴 OCR 读不全，回退固定左×6 导航");
-                    await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-                }
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadConfirm:
-                _log($"[周活动] 手柄 A：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadUpConfirm:
-                _log($"[周活动] 弹窗上移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Up);
-                await Task.Delay(250); // 上移后留时给游戏刷新焦点，否则A落在旧焦点(取消)
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadDownConfirm:
-                _log($"[周活动] 弹窗下移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadStartPress:
-                _log($"[周活动] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Start();
-                break;
-            case MatchActionKind.PadXPress:
-                _log($"[周活动] {action.Target}", LogLevel.Info);
-                await _engine.Pad.X();
-                break;
-            case MatchActionKind.PadLoginNav:
-                // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
-                _log($"[周活动] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Dpad(PadDir.Right);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.GamepadBack:
-                _log($"[周活动] {action.Target}", LogLevel.Warn);
-                await _engine.Pad.Back();
-                break;
-            case MatchActionKind.GamepadBackAfterConfirm:
-                _log($"[周活动] {action.Target}", LogLevel.Warn);
-                await _engine.Pad.Dpad(PadDir.Up); // B 多次无效：先上移把焦点从「取消」移到确认键
-                await _engine.Pad.Confirm(); // 再 A 确认（直接 A 可能落在取消键上继续死循环）
-                await _engine.Pad.Back(); // 最后 B 返回
-                break;
-            case MatchActionKind.MatchIdleTap:
-                // 比赛中挂机点击：按 A + 用户「挂机节奏」区间随机间隔（共享层 MatchPlay，拟人化）
-                return await _matchPlay.IdleTapAsync(ct);
-            case MatchActionKind.PadMoveRight:
-                await _engine.Pad.Dpad(PadDir.Right);
-                break;
-        }
-        return action.WaitMs;
+        return await MatchActionExecutor.ExecuteAsync(_engine, _matchPlay, action, obs, _log, "周活动", ct);
     }
 
     // ---------------- 菜单侧状态机 ----------------
@@ -506,21 +439,7 @@ public sealed partial class WeeklyEventScenario : IScenario
                         await _engine.Pad.Back();
                         return 2400;
                     }
-                    await _engine.Pad.DpadRepeat(PadDir.Down, 5); // 饱和下按到底部卡行（到底停住，防下少了按错）
-                    int flowMatchOff = HubTileLocator.FindMainMenuMatchOffset(obs.Ocr) ?? 0;
-                    if (flowMatchOff > 0)
-                    {
-                        _log($"[周活动] 主菜单导航：下×5→归位最左→右×{flowMatchOff}→A（OCR 定位比赛在第 {flowMatchOff + 1} 格）", LogLevel.Info);
-                        await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-                        await _engine.Pad.DpadRepeat(PadDir.Right, flowMatchOff);
-                    }
-                    else
-                    {
-                        _log("[周活动] 主菜单导航：下×5→左×6→A（OCR 未读全底部磁贴，回退饱和归位）", LogLevel.Info);
-                        _engine.DumpSuspiciousFrame(obs.Frame, "menu_tile_ocr_incomplete", "主菜单底部磁贴 OCR 读不全，回退固定左×6 导航");
-                        await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-                    }
-                    await _engine.Pad.Confirm();
+                    await MatchActionExecutor.EnterMatchFromMainMenuAsync(_engine, obs, _log, "周活动");
                     return 3000;
                 }
                 if (ml == MatchScreen.MatchHub)
@@ -825,21 +744,11 @@ public sealed partial class WeeklyEventScenario : IScenario
         _planFixAttempts = 0; // 换了活动/重进：比赛计划修复次数重新计
         await _engine.Pad.Dpad(PadDir.Down);          // 页签行→卡行（已在卡行则到头无害）
         await _engine.Pad.DpadRepeat(PadDir.Left, 6); // 饱和到最左第 1 卡（到头多按无害）
-        // 绿勾探针（已完成活动）或本运行内已拉黑：右移跳过。第 4 卡屏幕外探不到勾，
-        // 直接进入后由主页完成态判定兜底（完成→B 返回拉黑），不会重复刷
-        while (_slotIndex < 4)
-        {
-            bool blacklisted = _doneSlots.Contains(_slotIndex);
-            bool greenCheck = !blacklisted && WeeklyBrain.DetectGreenCheck(obs.Frame, _slotIndex);
-            if (!blacklisted && !greenCheck) break;
-            if (greenCheck)
-            {
-                _doneSlots.Add(_slotIndex);
-                _log($"[周活动] 卡位 {_slotIndex + 1} 右上角绿勾（主要奖励已完成），跳过不进入", LogLevel.Info);
-            }
-            await _engine.Pad.Dpad(PadDir.Right);
-            _slotIndex++;
-        }
+        // 绿勾探针（已完成活动）或本运行内已拉黑：算出目标槽位后统一一次右移到位
+        // （旧实现循环里右移一次、跳出循环后又按 _slotIndex 再右移，导致双倍右移跳过未完成活动）。
+        _slotIndex = ResolveNextEventSlot(_slotIndex, _doneSlots,
+            slot => WeeklyBrain.DetectGreenCheck(obs.Frame, slot),
+            slot => _log($"[周活动] 卡位 {slot + 1} 右上角绿勾（主要奖励已完成），跳过不进入", LogLevel.Info));
         if (_slotIndex >= 4)
             return await FinishAllEventsAsync();
         if (_slotIndex > 0) await _engine.Pad.DpadRepeat(PadDir.Right, _slotIndex);
@@ -847,6 +756,26 @@ public sealed partial class WeeklyEventScenario : IScenario
         SetPhase(WkPhase.IntroPopups);
         await _engine.Pad.Confirm();
         return 2800;
+    }
+
+    /// <summary>纯函数（可单测）：从起始槽位向后跳过已拉黑与右上角绿勾槽位，返回目标槽位序号（≥4=全部完成）。</summary>
+    internal static int ResolveNextEventSlot(int startSlot, ISet<int> doneSlots,
+        Func<int, bool> isGreenCheck, Action<int>? onGreenCheck = null)
+    {
+        int slot = startSlot;
+        while (slot < 4)
+        {
+            bool blacklisted = doneSlots.Contains(slot);
+            bool greenCheck = !blacklisted && isGreenCheck(slot);
+            if (!blacklisted && !greenCheck) break;
+            if (greenCheck)
+            {
+                doneSlots.Add(slot);
+                onGreenCheck?.Invoke(slot);
+            }
+            slot++;
+        }
+        return slot;
     }
 
     /// <summary>周活动全部刷完（可见槽位全部完成或被跳过）：配置了「全部完成后接力」就先 B 退回

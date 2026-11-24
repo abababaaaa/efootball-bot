@@ -310,73 +310,25 @@ public sealed partial class CnWeeklyScenario : IScenario
                 return 2000;
             }
         }
-        switch (action.Kind)
-        {
-            case MatchActionKind.PadEnterMatch:
-                // 国服主页不走国际服的下→左×6：国服主页是页签行（推荐/比赛/签约/商店），
-                // 上×2 进页签行 → 左×4 饱和归位「推荐」→ 右×1 到「比赛」。
-                // ★2026-11-05 实机：这里只按三拍就等下一帧，一旦下一帧不是 HomeMatch 也不是
-                // 活动列表（新版 UI 页签/卡行读不全），共享流程会把同一三拍无限重放，永远到不了
-                // 活动列表。改为一次按完整序列（进页签→进卡行→A），并做页面安全检查。
+        return await MatchActionExecutor.ExecuteAsync(
+            _engine, _matchPlay, action, obs, _log, "国服周活动", ct,
+            onEnterMatch: async () =>
+            {
                 if (CnWeeklyBrain.LooksLikeCnHome(obs.Ocr))
                     return await NavigateToEventListAsync("主菜单");
                 return await EscapeUnknownPageAsync(obs, "不是主页特征");
-            case MatchActionKind.PadConfirm:
-                // 国服键序（用户 2026-11-21）：① RT（页面所印提示键）→ ② A → ③ 后台鼠标点击。
-                // 段位积分页 / 赛后小结这类国服网页层页面只吃鼠标，旧逻辑每轮空按 A 就卡死在这里。
-                // 比赛中的回放/中场小弹窗不掺进来——比赛里 RT 有游戏内含义，只按 A。
+            },
+            onConfirm: async () =>
+            {
                 if (_matchSession.Active)
                 {
                     _log($"[国服周活动] 比赛中弹窗 A：{action.Target}", LogLevel.Info);
                     await _engine.Pad.Confirm();
-                    break;
+                    return null;
                 }
                 return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, action.Target,
                     "国服周活动", _log, obs.Ocr, obs.Detections, null, ct);
-            case MatchActionKind.PadUpConfirm:
-                _log($"[国服周活动] 弹窗上移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Up);
-                await Task.Delay(250); // 上移后留时给游戏刷新焦点，否则A落在旧焦点(取消)
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadDownConfirm:
-                _log($"[国服周活动] 弹窗下移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadStartPress:
-                _log($"[国服周活动] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Start();
-                break;
-            case MatchActionKind.PadXPress:
-                _log($"[国服周活动] {action.Target}", LogLevel.Info);
-                await _engine.Pad.X();
-                break;
-            case MatchActionKind.PadLoginNav:
-                // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
-                _log($"[国服周活动] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Dpad(PadDir.Right);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.GamepadBack:
-                _log($"[国服周活动] {action.Target}", LogLevel.Warn);
-                await _engine.Pad.Back();
-                break;
-            case MatchActionKind.GamepadBackAfterConfirm:
-                _log($"[国服周活动] {action.Target}", LogLevel.Warn);
-                await _engine.Pad.Dpad(PadDir.Up); // B 多次无效：先上移把焦点从「取消」移到确认键
-                await _engine.Pad.Confirm(); // 再 A 确认（直接 A 可能落在取消键上继续死循环）
-                await _engine.Pad.Back(); // 最后 B 返回
-                break;
-            case MatchActionKind.MatchIdleTap:
-                // 比赛中挂机点击：按 A + 用户「挂机节奏」区间随机间隔（共享层 MatchPlay，拟人化）
-                return await _matchPlay.IdleTapAsync(ct);
-            case MatchActionKind.PadMoveRight:
-                await _engine.Pad.Dpad(PadDir.Right);
-                break;
-        }
-        return action.WaitMs;
+            });
     }
 
     // ---------------- 国服菜单侧状态机 ----------------

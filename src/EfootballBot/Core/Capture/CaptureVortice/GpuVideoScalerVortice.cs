@@ -42,7 +42,7 @@ internal sealed class GpuVideoScalerVortice : IDisposable
     private ID3D11VideoProcessorEnumerator? _enumerator;
     private ID3D11VideoProcessor? _processor;
 
-    private int _srcW, _srcH, _dstW, _dstH;
+    private int _srcW, _srcH, _dstW, _dstH, _vpW, _vpH;
 
     public GpuVideoScalerVortice(IntPtr d3dDevicePtr, Action<string> log)
     {
@@ -83,7 +83,11 @@ internal sealed class GpuVideoScalerVortice : IDisposable
         using var frameTex = AcquireFrameTexture(surface);
 
         // 2. 全尺寸 GPU→GPU 拷贝到 VP 输入纹理（显存内操作，不经 PCIe/CPU）
-        _context!.CopyResource(_mid!, frameTex);
+        if (_vpW == srcW && _vpH == srcH)
+            _context!.CopyResource(_mid!, frameTex);
+        else
+            _context!.CopySubresourceRegion(_mid!, 0, 0, 0, 0, frameTex, 0,
+                new Vortice.Mathematics.Box(0, 0, 0, _vpW, _vpH, 1));
 
         // 3. 硬件缩放（整幅输入 → 整幅输出；默认双线性质量）。
         //    视图对象存于实例字段，Blt 调用期间必然存活。
@@ -139,10 +143,12 @@ internal sealed class GpuVideoScalerVortice : IDisposable
 
     private void EnsureResourcesCore(int srcW, int srcH, int dstW, int dstH)
     {
+        int vpW = Math.Max(2, srcW & ~1);
+        int vpH = Math.Max(2, srcH & ~1);
         var contentDesc = new VideoProcessorContentDescription
         {
-            InputWidth = (uint)srcW,
-            InputHeight = (uint)srcH,
+            InputWidth = (uint)vpW,
+            InputHeight = (uint)vpH,
             OutputWidth = (uint)dstW,
             OutputHeight = (uint)dstH,
             InputFrameFormat = VideoFrameFormat.Progressive,
@@ -153,30 +159,12 @@ internal sealed class GpuVideoScalerVortice : IDisposable
         _videoDevice!.CreateVideoProcessorEnumerator(ref contentDesc, out _enumerator).CheckError();
         _videoDevice.CreateVideoProcessor(_enumerator!, 0, out _processor).CheckError();
 
-        // VP 输入：全尺寸，BIND_DECODER（CreateVideoProcessorInputView 的硬性要求）
-        _mid = _device!.CreateTexture2D(new Texture2DDescription
-        {
-            Width = (uint)srcW,
-            Height = (uint)srcH,
-            MipLevels = 1,
-            ArraySize = 1,
-            Format = Format.B8G8R8A8_UNorm,
-            SampleDescription = new SampleDescription(1, 0),
-            Usage = ResourceUsage.Default,
-            BindFlags = BindFlags.Decoder,
-            CPUAccessFlags = CpuAccessFlags.None,
-            MiscFlags = ResourceOptionFlags.None,
-        });
-        _videoDevice.CreateVideoProcessorInputView(_mid, _enumerator!,
-            new VideoProcessorInputViewDescription
-            {
-                FourCC = 0,
-                ViewDimension = VideoProcessorInputViewDimension.Texture2D,
-                Texture2D = new Texture2DVideoProcessorInputView { MipSlice = 0, ArraySlice = 0 },
-            }, out _inView).CheckError();
+        // VP 输入：偶数对齐尺寸；优先 BindFlags.None（NVIDIA 驱动常拒绝 BGRA8+BindFlags.Decoder），
+        // 若驱动要求 BindFlags.Decoder 则释放后回退再试一次。
+        CreateInputTextureAndView(vpW, vpH);
 
         // VP 输出：小尺寸，BIND_RENDER_TARGET
-        _out = _device.CreateTexture2D(new Texture2DDescription
+        _out = _device!.CreateTexture2D(new Texture2DDescription
         {
             Width = (uint)dstW,
             Height = (uint)dstH,
@@ -211,8 +199,47 @@ internal sealed class GpuVideoScalerVortice : IDisposable
             MiscFlags = ResourceOptionFlags.None,
         });
 
-        _srcW = srcW; _srcH = srcH; _dstW = dstW; _dstH = dstH;
-        _log($"[捕获] GPU 硬件缩放就绪：{srcW}×{srcH} → {dstW}×{dstH}（VideoProcessor，Vortice）");
+        _srcW = srcW; _srcH = srcH; _dstW = dstW; _dstH = dstH; _vpW = vpW; _vpH = vpH;
+        _log($"GPU 硬件缩放就绪：{srcW}×{srcH} → {dstW}×{dstH}（VideoProcessor，Vortice）");
+    }
+
+    private void CreateInputTextureAndView(int vpW, int vpH)
+    {
+        Exception? lastErr = null;
+        foreach (var bind in new[] { BindFlags.None, BindFlags.Decoder })
+        {
+            try
+            {
+                _mid = _device!.CreateTexture2D(new Texture2DDescription
+                {
+                    Width = (uint)vpW,
+                    Height = (uint)vpH,
+                    MipLevels = 1,
+                    ArraySize = 1,
+                    Format = Format.B8G8R8A8_UNorm,
+                    SampleDescription = new SampleDescription(1, 0),
+                    Usage = ResourceUsage.Default,
+                    BindFlags = bind,
+                    CPUAccessFlags = CpuAccessFlags.None,
+                    MiscFlags = ResourceOptionFlags.None,
+                });
+                _videoDevice!.CreateVideoProcessorInputView(_mid, _enumerator!,
+                    new VideoProcessorInputViewDescription
+                    {
+                        FourCC = 0,
+                        ViewDimension = VideoProcessorInputViewDimension.Texture2D,
+                        Texture2D = new Texture2DVideoProcessorInputView { MipSlice = 0, ArraySlice = 0 },
+                    }, out _inView).CheckError();
+                return;
+            }
+            catch (Exception ex)
+            {
+                lastErr = ex;
+                _inView?.Dispose(); _inView = null;
+                _mid?.Dispose(); _mid = null;
+            }
+        }
+        throw lastErr!;
     }
 
     /// <summary>从 WGC 帧的 WinRT IDirect3DSurface 提取原生 D3D11 纹理（用完释放引用）。</summary>
