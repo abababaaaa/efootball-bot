@@ -1,3 +1,4 @@
+using EfootballBot.Core.Bot.Match;
 using EfootballBot.Core.Config;
 using EfootballBot.Core.Inference;
 using EfootballBot.Core.Vision;
@@ -74,6 +75,9 @@ public static class EngineServices
     public static PerceptionPipeline AcquirePerception(AppConfig cfg, OnnxSessionFactory factory,
         Action<string, LogLevel> log, out bool reused)
     {
+        // 分类层阈值也随配置走（换模型后可在配置文件里微调，不必重编译）。
+        // 放在 lock 外无条件赋值：幂等，复用分支同样生效。
+        MatchBrain.MinScore = (float)cfg.Yolo.ClassifyScore;
         lock (Gate)
         {
             string key = PerceptionKey(cfg);
@@ -125,7 +129,8 @@ public static class EngineServices
            $"{cfg.UnlimitedOcr.Endpoint}|{cfg.UnlimitedOcr.Model}|{cfg.UnlimitedOcr.TimeoutSeconds}";
 
     private static string PerceptionKey(AppConfig cfg)
-        => $"{cfg.Yolo.Enabled}|{cfg.Yolo.ScoreThreshold:F3}|{cfg.Yolo.NmsIou:F3}";
+        => $"{cfg.Yolo.Enabled}|{cfg.Yolo.ScoreThreshold:F3}|{cfg.Yolo.NmsIou:F3}|" +
+           $"{cfg.Yolo.ClassifyScore:F3}";
 
     /// <summary>把配置里的性能档翻译成 OcrTuning（全关时返回 Off，与历史行为逐字节一致）。</summary>
     private static OcrTuning BuildTuning(AppConfig cfg)

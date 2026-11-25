@@ -228,7 +228,10 @@ public static class UpdateApplier
         var buffer = new byte[81920];
         Exception? last = null;
         // 文件流只写不读（FileAccess.Write），哈希随下载流增量计算，不回读文件
-        using var hasher = expectedSha256 is null ? null : IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        string? expected = string.IsNullOrWhiteSpace(expectedSha256)
+            ? null
+            : expectedSha256.Trim().ToLowerInvariant();
+        using var hasher = expected is null ? null : IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
 
         await using var file = new FileStream(targetPath, FileMode.Create, FileAccess.Write, FileShare.None);
         foreach (var url in candidates)
@@ -253,12 +256,16 @@ public static class UpdateApplier
                 if (resp.Content.Headers.ContentLength is long d && d != written)
                     throw new IOException($"内容长度不符：收到 {written} 字节，标称 {d}");
 
-                if (hasher is not null)
+                if (hasher is not null && expected is not null)
                 {
                     string actual = Convert.ToHexString(hasher.GetHashAndReset()).ToLowerInvariant();
-                    if (actual != expectedSha256)
+                    if (actual != expected)
+                    {
+                        string actualShort = actual.Length > 12 ? actual[..12] : actual;
+                        string expectedShort = expected.Length > 12 ? expected[..12] : expected;
                         throw new InvalidDataException(
-                            $"SHA256 校验失败：实际 {actual[..12]}…，期望 {expectedSha256[..12]}…");
+                            $"SHA256 校验失败：实际 {actualShort}…，期望 {expectedShort}…");
+                    }
                 }
 
                 Log($"下载成功：{HostOf(url)}（{written} 字节）");

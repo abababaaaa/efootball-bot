@@ -5,8 +5,10 @@ using SkiaSharp;
 
 namespace EfootballBot.Core.Vision;
 
-/// <summary>OCR 词块，坐标已归一化到 0~1。</summary>
-public sealed record OcrWord(string Text, double X, double Y, double W, double H)
+/// <summary>OCR 词块，坐标已归一化到 0~1。
+/// <paramref name="Confidence"/> 为引擎给出的识别置信度(0~1)；默认 1.0 = 未知/最高可信，
+/// 保证无 score 的后端(VLM)与既有测试构造无需改动。仅用于多候选择优，不做全局硬阈值过滤。</summary>
+public sealed record OcrWord(string Text, double X, double Y, double W, double H, double Confidence = 1.0)
 {
     public double CenterX => X + W / 2;
     public double CenterY => Y + H / 2;
@@ -29,11 +31,329 @@ public sealed record OcrLine(string Text, double X, double Y, double W, double H
     public double CenterY => Y + H / 2;
 }
 
+/// <summary>归一化遮罩矩形（供静态帧哈希剔除外置性能监控 OSD 等局部高频跳变区）。</summary>
+public readonly record struct OcrMaskRect(double X0, double Y0, double X1, double Y1);
+
 public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Height)
 {
     public static readonly OcrResult Empty = new(Array.Empty<OcrWord>(), 0, 0);
 
+    /// <summary>识别并剔除的顶部外置性能监控（FPS/CPU/GPU 等）包围盒列表；无监控浮窗时恒为空。</summary>
+    public IReadOnlyList<OcrMaskRect> OsdMaskRects { get; init; } = Array.Empty<OcrMaskRect>();
+
     private IReadOnlyList<OcrLine>? _lines;
+    private List<List<OcrWord>>? _groupedLines;
+
+    /// <summary>
+    /// 按排版行聚类缓存（每行按 X 升序排好），供 Lines / MergedWords / JoinedText 共用，
+    /// 避免同一帧内重复跑 3 遍 O(N²) 行聚类。
+    /// </summary>
+    private List<List<OcrWord>> GetGroupedLines()
+    {
+        if (_groupedLines is { } cached) return cached;
+        var groups = new List<(List<OcrWord> Words, double SumY, double SumH)>();
+        foreach (var w in Words.OrderBy(w => w.Y).ThenBy(w => w.X))
+        {
+            int hit = -1;
+            for (int i = 0; i < groups.Count; i++)
+            {
+                var g = groups[i];
+                int n = g.Words.Count;
+                double avgY = g.SumY / n;
+                double avgH = g.SumH / n;
+                if (Math.Abs(avgY - w.CenterY) < Math.Max(w.H, avgH) * 0.7)
+                {
+                    hit = i;
+                    break;
+                }
+            }
+            if (hit < 0)
+            {
+                groups.Add((new List<OcrWord> { w }, w.CenterY, w.H));
+            }
+            else
+            {
+                var g = groups[hit];
+                g.Words.Add(w);
+                groups[hit] = (g.Words, g.SumY + w.CenterY, g.SumH + w.H);
+            }
+        }
+        var lines = new List<List<OcrWord>>(groups.Count);
+        foreach (var g in groups)
+        {
+            g.Words.Sort((a, b) => a.X.CompareTo(b.X));
+            lines.Add(g.Words);
+        }
+        _groupedLines = lines;
+        return lines;
+    }
+
+    /// <summary>
+    /// 判定词块是否属于 Windows 窗口顶部标题栏噪声（左上角图标、eFootball™ 标题、右上角控制按钮）。
+    /// 窗口化 WGC 捕获整窗时（如 1282×759）顶部 ~31px 会被 OCR 读出，导致比赛中 OCR 降频失效、
+    /// 加载帧误判 TitleScreen。只过滤 OCR 词块而不裁切图像，确保 YOLO 与像素探针坐标 100% 不变。
+    /// </summary>
+    internal static bool IsWindowTitlebarWord(OcrWord w)
+    {
+        if (!(w.Y < 0.035 && w.CenterY < 0.042 && w.H < 0.055)) return false;
+        string norm = w.NormText;
+        if (w.X < 0.30 &&
+            (norm.Contains("footbal", StringComparison.OrdinalIgnoreCase) ||
+             norm.Contains("ootbal", StringComparison.OrdinalIgnoreCase) ||
+             norm.Contains("otball", StringComparison.OrdinalIgnoreCase) ||
+             norm.Contains("efoot", StringComparison.OrdinalIgnoreCase) ||
+             norm.Contains("实况足球", StringComparison.OrdinalIgnoreCase) ||
+             (w.Text.Contains('™') && w.X < 0.25)))
+            return true;
+
+        if (w.X < 0.055 && w.W < 0.055 && norm.Length <= 2 && norm.All(ch => ch < 128))
+            return true;
+
+        if (w.X > 0.86 && w.W < 0.08)
+        {
+            if (norm.Length == 0) return true;
+            if (norm is "x" or "X" or "一" or "口") return true;
+            string trimmed = w.Text.Trim();
+            if (trimmed is "-" or "—" or "_" or "□" or "×") return true;
+        }
+        return false;
+    }
+
+    /// <summary>剔除顶部 Windows 标题栏噪声词及可选的外置性能监控 OSD 词；无命中时零分配直接返回原实例。</summary>
+    internal static OcrResult FilterWindowTitlebar(OcrResult result)
+    {
+        if (result.Words.Count == 0) return result;
+        var (osdIndices, osdMasks) = DetectTopBandPerfOsd(result.Words);
+        bool anyTitlebar = false;
+        for (int i = 0; i < result.Words.Count; i++)
+        {
+            if (IsWindowTitlebarWord(result.Words[i]))
+            {
+                anyTitlebar = true;
+                break;
+            }
+        }
+        if (!anyTitlebar && osdIndices is null) return result;
+        var filtered = new List<OcrWord>(result.Words.Count);
+        for (int i = 0; i < result.Words.Count; i++)
+        {
+            var w = result.Words[i];
+            if (IsWindowTitlebarWord(w)) continue;
+            if (osdIndices is not null && osdIndices.Contains(i)) continue;
+            filtered.Add(w);
+        }
+        return new OcrResult(filtered, result.Width, result.Height)
+        {
+            OsdMaskRects = osdMasks,
+        };
+    }
+
+    /// <summary>
+    /// 识别顶部外置性能监控（NVIDIA App / MSI Afterburner / Steam 等：FPS / CPU / GPU / 温度）区域：
+    /// 仅当顶部带（Y &lt; 0.12）同一行真检测到性能监控组合特征时才剔除监控词并产出遮罩矩形；
+    /// 对未开启任何外置监控的用户零影响、零假阳性（不误伤「比赛 / 对阵AI / 积分数字」）。
+    /// </summary>
+    private static (HashSet<int>? Indices, IReadOnlyList<OcrMaskRect> Masks) DetectTopBandPerfOsd(IReadOnlyList<OcrWord> words)
+    {
+        var topCandidates = new List<int>();
+        bool anyPerfToken = false;
+        for (int i = 0; i < words.Count; i++)
+        {
+            var w = words[i];
+            if (!(w.Y < 0.12 && w.CenterY < 0.14 && w.H < 0.06)) continue;
+            if (IsWindowTitlebarWord(w)) continue;
+            topCandidates.Add(i);
+            if (!anyPerfToken && HasPerfOsdKeyword(w.Text))
+                anyPerfToken = true;
+        }
+        if (!anyPerfToken || topCandidates.Count == 0)
+            return (null, Array.Empty<OcrMaskRect>());
+
+        topCandidates.Sort((a, b) => words[a].CenterY.CompareTo(words[b].CenterY));
+        var lines = new List<(List<int> Idxs, double SumY, double SumH)>();
+        foreach (int idx in topCandidates)
+        {
+            var w = words[idx];
+            int hit = -1;
+            for (int i = 0; i < lines.Count; i++)
+            {
+                var g = lines[i];
+                double avgY = g.SumY / g.Idxs.Count;
+                double avgH = g.SumH / g.Idxs.Count;
+                if (Math.Abs(avgY - w.CenterY) <= Math.Max(w.H, avgH) * 0.85)
+                {
+                    hit = i;
+                    break;
+                }
+            }
+            if (hit < 0)
+                lines.Add((new List<int> { idx }, w.CenterY, w.H));
+            else
+            {
+                var g = lines[hit];
+                g.Idxs.Add(idx);
+                lines[hit] = (g.Idxs, g.SumY + w.CenterY, g.SumH + w.H);
+            }
+        }
+
+        HashSet<int>? stripped = null;
+        var rawMasks = new List<OcrMaskRect>();
+        foreach (var line in lines)
+        {
+            line.Idxs.Sort((a, b) => words[a].X.CompareTo(words[b].X));
+            if (!IsPerfOsdLine(words, line.Idxs)) continue;
+
+            var lineHit = new bool[line.Idxs.Count];
+            for (int k = 0; k < line.Idxs.Count; k++)
+            {
+                string t = words[line.Idxs[k]].Text;
+                if (IsPerfOsdToken(t)) lineHit[k] = true;
+            }
+            // 向右吸收紧邻性能标签后面的数值碎片（如 "CPU"|"75 C"、"GPU"|"71°("、"FPS"|"304"）
+            for (int k = 1; k < line.Idxs.Count; k++)
+            {
+                if (!lineHit[k - 1] || lineHit[k]) continue;
+                var prev = words[line.Idxs[k - 1]];
+                var cur = words[line.Idxs[k]];
+                double gap = cur.X - (prev.X + prev.W);
+                if (gap <= 0.08 && IsTelemetryValueFragment(cur.Text, gap, EndsWithTelemetryLabel(prev.Text)))
+                    lineHit[k] = true;
+            }
+            for (int k = 0; k < line.Idxs.Count; k++)
+            {
+                if (!lineHit[k]) continue;
+                int wordIdx = line.Idxs[k];
+                stripped ??= new HashSet<int>();
+                stripped.Add(wordIdx);
+                var w = words[wordIdx];
+                rawMasks.Add(new OcrMaskRect(
+                    Math.Clamp(w.X - 0.02, 0, 1),
+                    Math.Clamp(w.Y - 0.01, 0, 1),
+                    Math.Clamp(w.X + w.W + 0.02, 0, 1),
+                    Math.Clamp(w.Y + w.H + 0.01, 0, 1)));
+            }
+        }
+
+        if (stripped is null || rawMasks.Count == 0)
+            return (null, Array.Empty<OcrMaskRect>());
+        return (stripped, MergeOverlappingMasks(rawMasks));
+    }
+
+    private static bool HasPerfOsdKeyword(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return false;
+        string u = text.ToUpperInvariant();
+        if (u.Contains("FPS", StringComparison.Ordinal) ||
+            u.Contains("CPU", StringComparison.Ordinal) ||
+            u.Contains("GPU", StringComparison.Ordinal) ||
+            u.Contains('℃') ||
+            u.Contains("°C", StringComparison.Ordinal))
+            return true;
+        return ContainsEpsWithDigits(u);
+    }
+
+    private static bool ContainsEpsWithDigits(string upper)
+    {
+        int idx = upper.IndexOf("EPS", StringComparison.Ordinal);
+        while (idx >= 0)
+        {
+            for (int j = idx + 3; j < upper.Length && j < idx + 6; j++)
+            {
+                if (char.IsDigit(upper[j])) return true;
+                if (upper[j] != ' ' && upper[j] != ':') break;
+            }
+            idx = upper.IndexOf("EPS", idx + 3, StringComparison.Ordinal);
+        }
+        return false;
+    }
+
+    private static bool IsPerfOsdToken(string text)
+    {
+        if (HasPerfOsdKeyword(text)) return true;
+        string t = text.Trim().ToUpperInvariant();
+        return t.Length <= 8 &&
+               (t.Contains('°') && t.Any(char.IsDigit));
+    }
+
+    private static bool IsPerfOsdLine(IReadOnlyList<OcrWord> words, List<int> lineIdxs)
+    {
+        bool hasFps = false, hasCpu = false, hasGpu = false, hasTemp = false, hasDigits = false, hasLat = false;
+        foreach (int i in lineIdxs)
+        {
+            string raw = words[i].Text;
+            string u = raw.ToUpperInvariant();
+            if (u.Contains("FPS", StringComparison.Ordinal) || ContainsEpsWithDigits(u)) hasFps = true;
+            if (u.Contains("CPU", StringComparison.Ordinal)) hasCpu = true;
+            if (u.Contains("GPU", StringComparison.Ordinal)) hasGpu = true;
+            if (u.Contains('℃') || u.Contains("°C", StringComparison.Ordinal) ||
+                (u.Contains('°') && u.Any(char.IsDigit)))
+                hasTemp = true;
+            if (u.Contains("MS", StringComparison.Ordinal) && u.Any(char.IsDigit)) hasLat = true;
+            if (raw.Any(char.IsDigit)) hasDigits = true;
+        }
+        int categories = (hasFps ? 1 : 0) + (hasCpu ? 1 : 0) + (hasGpu ? 1 : 0) + (hasTemp ? 1 : 0) + (hasLat ? 1 : 0);
+        if (categories >= 2 && hasDigits) return true;
+        if (hasFps && hasDigits) return true;
+        return (hasCpu || hasGpu) && hasTemp;
+    }
+
+    private static bool EndsWithTelemetryLabel(string text)
+    {
+        string u = text.TrimEnd(' ', ':', '|').ToUpperInvariant();
+        return u.EndsWith("FPS", StringComparison.Ordinal) ||
+               u.EndsWith("EPS", StringComparison.Ordinal) ||
+               u.EndsWith("CPU", StringComparison.Ordinal) ||
+               u.EndsWith("GPU", StringComparison.Ordinal) ||
+               u.EndsWith("LAT", StringComparison.Ordinal);
+    }
+
+    private static bool IsTelemetryValueFragment(string text, double gap, bool prevEndedWithLabel)
+    {
+        string t = text.Trim();
+        if (t.Length == 0 || t.Length > 10) return false;
+        bool hasTempOrUnit = false, hasDigit = false;
+        foreach (char c in t)
+        {
+            if (char.IsDigit(c)) { hasDigit = true; continue; }
+            if (c is '°' or '℃' or '%' or 'C' or 'c' or 'F' or 'f' or 'M' or 'm' or 's' or 'S' or 'G' or 'g' or 'H' or 'h' or 'z' or 'Z')
+            {
+                if (c is '°' or '℃' or '%' or 'C' or 'c' or 'M' or 'm' or 's' or 'S') hasTempOrUnit = true;
+                continue;
+            }
+            if (c is ' ' or '.' or ',' or ':' or '/' or '|' or '(' or ')' or '-') continue;
+            return false;
+        }
+        if (!hasDigit && !hasTempOrUnit) return false;
+        return hasTempOrUnit || (prevEndedWithLabel && gap <= 0.05);
+    }
+
+    private static IReadOnlyList<OcrMaskRect> MergeOverlappingMasks(List<OcrMaskRect> rects)
+    {
+        if (rects.Count <= 1) return rects;
+        rects.Sort((a, b) => a.X0.CompareTo(b.X0));
+        var merged = new List<OcrMaskRect>(rects.Count) { rects[0] };
+        for (int i = 1; i < rects.Count; i++)
+        {
+            var r = rects[i];
+            bool combined = false;
+            for (int j = 0; j < merged.Count; j++)
+            {
+                var m = merged[j];
+                bool yOverlap = Math.Min(m.Y1, r.Y1) - Math.Max(m.Y0, r.Y0) >= -0.02;
+                bool xClose = r.X0 <= m.X1 + 0.02 && r.X1 >= m.X0 - 0.02;
+                if (yOverlap && xClose)
+                {
+                    merged[j] = new OcrMaskRect(
+                        Math.Min(m.X0, r.X0), Math.Min(m.Y0, r.Y0),
+                        Math.Max(m.X1, r.X1), Math.Max(m.Y1, r.Y1));
+                    combined = true;
+                    break;
+                }
+            }
+            if (!combined) merged.Add(r);
+        }
+        return merged;
+    }
 
     /// <summary>
     /// 按排版行聚合（每个词属于唯一一行），行文本为行内词 Norm 拼接。
@@ -44,17 +364,9 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
 
     private IReadOnlyList<OcrLine> BuildLines()
     {
-        var lines = new List<List<OcrWord>>();
-        foreach (var w in Words.OrderBy(w => w.Y).ThenBy(w => w.X))
+        var lines = GetGroupedLines();
+        return lines.Select(ordered =>
         {
-            var line = lines.FirstOrDefault(l =>
-                Math.Abs(l.Average(x => x.CenterY) - w.CenterY) < Math.Max(w.H, l.Average(x => x.H)) * 0.7);
-            if (line is null) lines.Add(new List<OcrWord> { w });
-            else line.Add(w);
-        }
-        return lines.Select(line =>
-        {
-            var ordered = line.OrderBy(w => w.X).ToList();
             double x0 = ordered.Min(w => w.X), y0 = ordered.Min(w => w.Y);
             double x1 = ordered.Max(w => w.X + w.W), y1 = ordered.Max(w => w.Y + w.H);
             return new OcrLine(string.Concat(ordered.Select(w => w.NormText)),
@@ -78,24 +390,16 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
     private IReadOnlyList<OcrWord> MergeLines()
     {
         var result = new List<OcrWord>(Words);
-        // 按行分组：中心 Y 接近且高度相近的词归为一行
-        var lines = new List<List<OcrWord>>();
-        foreach (var w in Words.OrderBy(w => w.Y).ThenBy(w => w.X))
+        foreach (var ordered in GetGroupedLines())
         {
-            var line = lines.FirstOrDefault(l =>
-                Math.Abs(l.Average(x => x.CenterY) - w.CenterY) < Math.Max(w.H, l.Average(x => x.H)) * 0.7);
-            if (line is null) lines.Add(new List<OcrWord> { w });
-            else line.Add(w);
-        }
-        foreach (var line in lines)
-        {
-            if (line.Count < 2) continue;
-            var ordered = line.OrderBy(w => w.X).ToList();
+            if (ordered.Count < 2) continue;
             string text = string.Concat(ordered.Select(w => w.NormText));
             if (text.Length < 2) continue;
             double x0 = ordered.Min(w => w.X), y0 = ordered.Min(w => w.Y);
             double x1 = ordered.Max(w => w.X + w.W), y1 = ordered.Max(w => w.Y + w.H);
-            result.Add(new OcrWord(text, x0, y0, x1 - x0, y1 - y0));
+            // 合并行置信度取最低：整行文本里只要有一个碎词可疑，合并结果就应降权（保守）
+            double conf = ordered.Min(w => w.Confidence);
+            result.Add(new OcrWord(text, x0, y0, x1 - x0, y1 - y0, conf));
         }
         return result;
     }
@@ -118,17 +422,9 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
 
     private string BuildJoinedText()
     {
-        var lines = new List<List<OcrWord>>();
-        foreach (var w in Words.OrderBy(w => w.Y).ThenBy(w => w.X))
-        {
-            var line = lines.FirstOrDefault(l =>
-                Math.Abs(l.Average(x => x.CenterY) - w.CenterY) < Math.Max(w.H, l.Average(x => x.H)) * 0.7);
-            if (line is null) lines.Add(new List<OcrWord> { w });
-            else line.Add(w);
-        }
-        return string.Concat(lines
+        return string.Concat(GetGroupedLines()
             .OrderBy(l => l.Average(w => w.CenterY))
-            .SelectMany(l => l.OrderBy(w => w.X).Select(w => w.NormText)));
+            .SelectMany(l => l.Select(w => w.NormText)));
     }
 
     /// <summary>在全文拼接里找子串（不要求关键词落在同一个 OCR 词内）。</summary>
@@ -158,9 +454,13 @@ public sealed record OcrResult(IReadOnlyList<OcrWord> Words, int Width, int Heig
         }
     }
 
-    /// <summary>按钮词匹配的第一个命中（规则见 <see cref="FindButtonWords"/>）。</summary>
+    /// <summary>
+    /// 按钮词命中（规则见 <see cref="FindButtonWords"/>）。多个命中时取置信度最高的那个：
+    /// 同一关键词在画面出现多处时（如弹窗按钮 + 背景文字），引擎 score 更高的更可能是真按钮。
+    /// MaxBy 在 score 相同时稳定返回首个命中，故单候选与无 score（默认 1.0）场景行为完全不变。
+    /// </summary>
     public OcrWord? FindButton(string normalizedKeyword)
-        => FindButtonWords(normalizedKeyword).FirstOrDefault();
+        => FindButtonWords(normalizedKeyword).MaxBy(w => w.Confidence);
 }
 
 /// <summary>文字规范化，对抗 OCR 的空格 / 全半角 / 常见误识。</summary>
@@ -350,6 +650,7 @@ public sealed class OcrRecognizer : IDisposable
         {
             var scaled = ImageScaling.DownscaleBilinear(frame, _downscaleLongSide);
             var result = await _backend.RecognizeAsync(scaled, ct).ConfigureAwait(false);
+            result = OcrResult.FilterWindowTitlebar(result);
             if (!_tuning.LineReread || result.Words.Count == 0)
             {
                 LastRereadStats = default;
@@ -359,7 +660,9 @@ public sealed class OcrRecognizer : IDisposable
             var (merged, stats) = await LineReread.ApplyAsync(result, scaled, _backend.RecognizeAsync, _tuning, ct)
                 .ConfigureAwait(false);
             LastRereadStats = stats;
-            return merged;
+            return merged.OsdMaskRects.Count == 0 && result.OsdMaskRects.Count > 0
+                ? merged with { OsdMaskRects = result.OsdMaskRects }
+                : merged;
         }
         finally
         {
@@ -482,7 +785,8 @@ internal sealed class RapidV6OcrBackend : IOcrBackend
                             Math.Clamp(minX / frame.Width, 0, 1),
                             Math.Clamp(minY / frame.Height, 0, 1),
                             Math.Clamp((maxX - minX) / frame.Width, 0, 1),
-                            Math.Clamp((maxY - minY) / frame.Height, 0, 1)));
+                            Math.Clamp((maxY - minY) / frame.Height, 0, 1),
+                            block.BoxScore));
                     }
                 }
             }
@@ -563,7 +867,8 @@ internal sealed class SimdPaddleOcrBackend : IOcrBackend
                     Math.Clamp(minX / frame.Width, 0, 1),
                     Math.Clamp(minY / frame.Height, 0, 1),
                     Math.Clamp((maxX - minX) / frame.Width, 0, 1),
-                    Math.Clamp((maxY - minY) / frame.Height, 0, 1)));
+                    Math.Clamp((maxY - minY) / frame.Height, 0, 1),
+                    line.RecognitionScore));
             }
             return new OcrResult(words, frame.Width, frame.Height);
         }, ct);

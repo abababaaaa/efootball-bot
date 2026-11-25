@@ -4,6 +4,9 @@ using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 using System.IO; // Core.System 命名空间遮蔽：裸 Path/File/Directory 必须靠本 using（global:: 前缀在此工程报 CS0103）
 using EfootballBot.Core.Bot.Match;
+using EfootballBot.Core.Bot.Scenarios.Weekly;
+using EfootballBot.Core.Bot.Scenarios.AiLadder;
+using EfootballBot.Core.Bot.Scenarios.PeakLadder;
 
 // ===========================================================================
 // 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
@@ -44,8 +47,14 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
     private MatchSessionTracker _matchSession => _matchPlay.Session;
     /// <summary>赛后活动任务页（全屏活动地图）状态机：仅国际服（国服子类关闭）。</summary>
     private readonly PostMatchActivityController _postMatch = new();
+    /// <summary>启动引导：停在其他模块页时先 B 收敛回主页（国服子类有自己的残留页兜底，不用这个）。</summary>
+    private readonly ReturnToHomeGuide _homeGuide;
     /// <summary>是否处理赛后活动任务页。国服子类覆盖为 false（该功能仅国际服独享）。</summary>
     protected virtual bool SupportsPostMatchActivity => true;
+
+    /// <summary>比赛页是否用 OCR 实时定位「我的联赛」磁贴卡位（国际服开；国服有自己的导航覆盖关闭）。
+    /// 磁贴随活动增减会左右漂移，写死右移次数会按错卡。</summary>
+    protected virtual bool SupportsOcrTileNav => true;
     /// <summary>
     /// 是否支持「只打关键比赛」（杀进程跳过普通比赛）。仅国际服：国服比赛中有
     /// 「跳过比赛」菜单项，不需要重启游戏；且国服进程重启会连带启动器行为差异较大。
@@ -59,10 +68,41 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
     private bool _itemsInitialized;
     /// <summary>本次运行已确认满足（主页面板核验通过或购买完成后重验通过）。</summary>
     private bool _purchaseSatisfied;
+    /// <summary>购买期间弹出了「积分不足」弹窗：本场关弹窗回主页后跳过核验直接开赛，不再反复进店空转。</summary>
+    private bool _insufficientPoints;
     /// <summary>本轮运行已购买的目标（物品页商店行无法判"已拥有"，用已购集合防重复买）。</summary>
     private readonly HashSet<MyLeagueBrain.MlItemTarget> _bought = new();
     /// <summary>物品页当前光标所在行（1 起；0=未知需锚定）。增量下移导航用。</summary>
     private int _itemRow;
+    /// <summary>逐行 OCR 扫描定位目标的已下移格数（0=起点/未开始；扫描完归零）。</summary>
+    private int _itemScanSteps;
+    /// <summary>逐行扫描中「列表已到底」的连续静止轮数（画面 OCR 行集合连续不变=光标到列表底）。</summary>
+    private int _itemStallRounds;
+    /// <summary>上一轮扫描看到的 OCR 行文字（判列表到底用：连续相同则光标走不动了）。</summary>
+    private string? _itemLastRows;
+    /// <summary>比赛页右移找「我的联赛」卡的格数（卡排可横向滚动，最右卡初始被裁切读不到标题）。</summary>
+    private int _hubScanMoves;
+    /// <summary>比赛页最多右移几格再放弃（磁贴行随活动增减，最多 5~6 张；超过说明标题读不出来）。</summary>
+    private const int MaxHubScanSteps = 6;
+    /// <summary>上一张卡按 A 进错了：回到比赛页先右移一格换焦点，否则定位器会在同一张卡上再按 A。</summary>
+    private bool _hubForceRight;
+    /// <summary>本次到达比赛页以来连续进错卡的次数（达上限 → B 回主菜单重新导航）。</summary>
+    private int _hubWrongEntries;
+    /// <summary>连续进错卡上限（4 张卡最多错 3 次，留余量；超了说明定位器读错了位置）。</summary>
+    private const int HubWrongEntryLimit = 6;
+    /// <summary>刚从比赛页按 A 想进「我的联赛」——下一帧若落到其它模块页需 B 退回，不能在错误页面继续推进。</summary>
+    private bool _enteredFromHub;
+    /// <summary>按 A 之后的核验轮数：认不出"确实进了我的联赛"时等几帧再判错（有文字的陌生页最多 3 帧）。</summary>
+    private int _entryVerifyRounds;
+    /// <summary>按 A 之后处于纯空白加载过渡帧（0 词 + 0 框）的累计等待轮数：允许较长加载不消耗错卡次数。</summary>
+    private int _entryLoadingRounds;
+    /// <summary>
+    /// 进卡后已交共享决策推进过的弹窗次数（上限 3；超过就按错卡 B 退回）。
+    /// 用计数而不是布尔：进联赛后常连着弹两三个奖励/预告窗，只放行一次会把第二个 B 掉。
+    /// </summary>
+    private int _entryDialogAdvances;
+    /// <summary>进错页后连续 B 退回仍停在该页的次数，达阈值换招「上→A→B」（同 B 逃生换招）。</summary>
+    private int _wrongCardBacks;
     /// <summary>智能接管提示是否已记录（每次运行一次）。</summary>
     private bool _takeoverLogged;
     /// <summary>TitleScreen 首次出现时间（比赛上下文中按 X 前 30s 宽限，区分加载画面与真标题）。</summary>
@@ -118,6 +158,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         _engine = engine;
         _log = log;
         _matchPlay = new MatchPlay(engine, "我的联赛", log);
+        _homeGuide = new ReturnToHomeGuide("我的联赛", log, engine.DumpSuspiciousFrame);
         _swapTestOnly = swapTestOnly;
         // 焦点检测亮度明细 → Debug 日志（导航错判时日志直接给出各磁贴实际亮度/阈值/判定）
         MyLeagueBrain.FocusDiag = s => _log($"[我的联赛] {s}", LogLevel.Debug);
@@ -154,7 +195,179 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         // 冷启动直接落在真实比赛中由比分框时钟主判据覆盖，不依赖角区兜底。
         bool matchContext = MatchShared.MatchContext(_memory, now);
         var screen = ClassifyScreen(obs, matchContext);
+        // 周活动页被 YOLO 误检成 main_menu 框时，共享分类会判 MainMenu（实机 2026-11-23：
+        // 对阵AI/Team Effort 卡片页检测 main_menu 0.72~0.88）→ 引导误认"已到主页"不接管，
+        // 于是执行主菜单导航跑偏。用周活动 Brain 分类 + OCR 专有特征双重判据纠正为 Unknown，
+        // 让引导走 B 退回。OCR 特征：顶部「对阵AI/对阵玩家」页签 + 活动卡（Team Effort/阵容挑战/
+        // 巡回活动/结束倒数）——真正主菜单没有这些词，不会误伤。
+        bool weeklyPageByBrain = WeeklyBrain.Classify(obs.Detections, obs.Ocr,
+            ScreenProbe.CornerHasContent(obs.Frame), matchContext,
+            ScreenProbe.IsMostlyLightPage(obs.Frame)) != WkScreen.None;
+        bool weeklyPageByOcr = (obs.Ocr.ContainsJoined("对阵AI") || obs.Ocr.ContainsJoined("对阵玩家"))
+            && (obs.Ocr.ContainsJoined("Team Effort") || obs.Ocr.ContainsJoined("阵容挑战")
+                || obs.Ocr.ContainsJoined("巡回活动") || obs.Ocr.ContainsJoined("结束倒数"));
+        if (screen == MatchScreen.MainMenu && SupportsOcrTileNav && (weeklyPageByBrain || weeklyPageByOcr))
+        {
+            _log("[我的联赛] 界面纠正：YOLO 误检 main_menu 的周活动页 → Unknown（交引导 B 退回）", LogLevel.Warn);
+            _engine.DumpSuspiciousFrame(obs.Frame, "main_menu_misdetect_weekly",
+                "周活动页被YOLO误检main_menu判成主菜单，纠正交引导退回");
+            screen = MatchScreen.Unknown;
+        }
         _memory.Record(screen, now);
+        // 启动引导（国际服）：若游戏停在其他模块页（周活动/天梯/巅峰赛），先 B 收敛回主页，
+        // 否则共享分类会把该页当"前往比赛"直接开赛，导致从别的模块页启动本模块时永远到不了。
+        // 借其他模块 Brain 认残留页（架构锁允许只读借用 Brain.Classify）；本模块页/主页/比赛中跳过。
+        if (SupportsOcrTileNav) // 国际服标志（国服子类有自己的残留页兜底，关闭此引导）
+        {
+            bool otherModule = weeklyPageByBrain || weeklyPageByOcr // OCR 特征提取在上文已算，覆盖 YOLO 误检
+                                || AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
+                                || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None;
+            // 联赛自有页：主页 LeaguePage / 积分 PointsPage / 物品 ItemList /
+            // 首发站位 LeagueSquadPage / 说明页 等，命中即跳过引导（半途续接）。
+            // ★LeaguePage 既可能是我的联赛主页，也可能是 AI天梯「对阵AI类别」页——
+            // 用联赛主页专有词区分：主页有「比赛记录/最近5场比赛/排名+赛程表」，类别页没有。
+            // 有专有词 → 本模块页（跳过引导，v7.5.1 误认死循环不复发）；
+            // 无专有词 + 其它 Brain 认出 → 其它模块残留页（B 退回，v8.0.x 类别页开错赛修复）。
+            bool leagueHomeWords = obs.Ocr.ContainsJoined("比赛记录") || obs.Ocr.ContainsJoined("最近5场比赛")
+                                   || (obs.Ocr.ContainsJoined("排名") && obs.Ocr.ContainsJoined("赛程表"));
+            bool ownPage = (screen is MatchScreen.LeaguePage ? leagueHomeWords :
+                           screen is MatchScreen.PointsPage
+                           or MatchScreen.ItemList or MatchScreen.LeagueSquadPage
+                           or MatchScreen.PurchaseDialog or MatchScreen.KeyMatchDialog
+                           or MatchScreen.MatchStartPage or MatchScreen.InMatch or MatchScreen.FullTime
+                           or MatchScreen.DifficultyPage or MatchScreen.HasConfirm or MatchScreen.LeagueInfoPage);
+            int? guideWait = await _homeGuide.StepAsync(obs.Frame,
+                screen == MatchScreen.MainMenu, ownPage, otherModule,
+                () => _engine.Pad.Back());
+            if (guideWait is not null) return guideWait.Value;
+        }
+        // 进错页兜底：刚从比赛页按 A 想进「我的联赛」，若落到别的板块页（活动/天梯/巅峰赛），
+        // 共享 HasConfirm「一律按确定推进」会在错误页面继续乱按（2026-11-23 实机日志：
+        // 进活动页 HasConfirm→按OK→回主页→又进错，反复跑偏）。这里识别后立即 B 退回比赛页
+        // 重新定位，不落共享决策。正常弹窗（确定/OK/下一步，无其它板块特征）不触发。
+        if (_enteredFromHub)
+        {
+            bool otherBrain = WeeklyBrain.Classify(obs.Detections, obs.Ocr,
+                                    ScreenProbe.CornerHasContent(obs.Frame), matchContext,
+                                    ScreenProbe.IsMostlyLightPage(obs.Frame)) != WkScreen.None
+                                || AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
+                                || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None;
+            bool eventFeature = obs.Ocr.ContainsJoined("赛事等级") || obs.Ocr.ContainsJoined("Team Effort")
+                                || (obs.Ocr.ContainsJoined("对阵AI") && !obs.Ocr.ContainsJoined("对阵AI类别"));
+            // 明确的本模块页 / 比赛流程 / 主菜单 → 正常。注意 LeaguePage 不在此列：
+            // 周活动主页也归此类，无法单靠它区分，用下面的联赛主页专有词判定。
+            bool isLeagueFlow = screen is MatchScreen.LeagueInfoPage
+                                or MatchScreen.LeagueSquadPage or MatchScreen.PointsPage or MatchScreen.ItemList
+                                or MatchScreen.MatchStartPage or MatchScreen.InMatch or MatchScreen.DifficultyPage
+                                or MatchScreen.FullTime or MatchScreen.MainMenu;
+            // 误入比赛页第一张「锦标赛」卡（用户 2026-11-23 实机："经常会误入第一个卡片锦标赛然后卡死"）：
+            // 那一页没有任何模块特征词，Weekly/AiLadder/Peak 三个 Brain 全认不出，旧守卫因此不触发，
+            // 共享层「HasConfirm 一律按 A」就在这页乱按 → 卡死。这里补一组锦标赛页专有词
+            // （淘汰赛/小组赛/自定义锦标赛 只在锦标赛板块出现，联赛主页与弹窗都不带）；
+            // 读不出这些词也不要紧——下面的「3 帧确认不了就 B」兜底同样能脱困。
+            bool tournamentPage = obs.Ocr.ContainsJoined("自定义锦标赛") || obs.Ocr.ContainsJoined("参加锦标赛")
+                                  || obs.Ocr.ContainsJoined("淘汰赛") || obs.Ocr.ContainsJoined("小组赛");
+            // 其它模块页已被 Brain/特征词认出时，主页固定词不作为确认依据
+            bool noOtherModule = !otherBrain && !eventFeature && !tournamentPage;
+            // 用户 2026-11-22 实机截图红框标出的主页固定词（前往比赛/排名/比赛记录/最近5场比赛/
+            // 兑换积分/赛季纪录/赛事信息/建议/赛程表）版面固定、基本不变，用户要求"差不多就可以确定"：
+            // 命中 ≥2 个即确认进了我的联赛主页，不必把大字全读全。旧版只认「比赛记录/最近5场/
+            // 排名+赛程表」，OCR 漏读那几个大字时通用兜底会把**正确进入**的主页也 B 退出。
+            // 另保留一条唯一词强证据：共享分类里「前往比赛/下个赛季」只出现在联赛主页，
+            // 单独读到它（且分类为 LeaguePage）也确认无误。
+            bool mainButton = obs.Ocr.ContainsJoined("前往比赛") || obs.Ocr.ContainsJoined("下个赛季");
+            // ★词表证据不附加 noOtherModule：v7.5.1 实机事故的教训就是主页专有词命中却被
+            // 其它模块 Brain 误认成残留页、无限 B 退回。命中 ≥2 个固定词是无条件确认；
+            // 只有"仅读到一枚主按钮词"这种弱证据才要求排除其它模块特征。
+            bool isMyLeagueHome = MyLeagueBrain.LooksLikeLeagueHome(obs.Ocr) ||
+                                  (noOtherModule && mainButton && screen == MatchScreen.LeaguePage);
+            // 比赛页磁贴行（3~4 张卡时至少读出两枚标题；单枚「锦标赛」是子页而不是磁贴行）
+            bool isRealHub = screen == MatchScreen.MatchHub &&
+                             (HubTileLocator.VisibleTitleCount(obs.Ocr) >= 2 ||
+                              obs.Ocr.Lines.Any(l => l.Text.Replace(" ", "").Contains("我的联赛")));
+            // 正确进了我的联赛主页 / 本模块流程 / 回到比赛页 → 结束监视，清退回计数
+            if (isMyLeagueHome || isLeagueFlow || isRealHub)
+            {
+                _enteredFromHub = false;
+                _wrongCardBacks = 0;
+                _entryVerifyRounds = 0;
+                _entryLoadingRounds = 0;
+                _entryDialogAdvances = 0;
+                if (isMyLeagueHome) _hubWrongEntries = 0; // 真进对了：错卡计数归零
+            }
+            else if (tournamentPage || otherBrain || eventFeature)
+            {
+                // 仍在错误页：B 退回；连续 3 次无效（画面不变）则换招「上→A→B」，
+                // 与 B 逃生换招同款——直接 A 可能落在取消键，先上移避开再 A 最后 B。
+                _wrongCardBacks++;
+                bool escalate = _wrongCardBacks >= 3;
+                _log($"[我的联赛] 比赛页进错板块（{screen}{(tournamentPage ? "·锦标赛页" : "")}），" +
+                     $"{(escalate ? "B 连续无效，换招上→A→B" : $"B 退回重定位（{_wrongCardBacks}/3）")}", LogLevel.Warn);
+                _engine.DumpSuspiciousFrame(obs.Frame, escalate ? "wrong_card_escape" : "wrong_card_entered",
+                    $"比赛页按A后落到错误板块（{screen}），{(escalate ? "B连续3次无效换招上AB" : "B退回")}");
+                if (escalate)
+                {
+                    await _engine.Pad.Dpad(PadDir.Up);
+                    await _engine.Pad.Confirm();
+                    await _engine.Pad.Back();
+                    _wrongCardBacks = 0;
+                }
+                else
+                {
+                    await _engine.Pad.Back();
+                }
+                // 退回比赛页后换焦点重定位：磁贴定位器刚在这张卡上读到了「我的联赛」，
+                // 不右移就会在同一张卡上再按一次 A，永远进同一个错页。
+                _enteredFromHub = false;
+                _entryVerifyRounds = 0;
+                _entryLoadingRounds = 0;
+                _entryDialogAdvances = 0;
+                _hubForceRight = true;
+                _hubWrongEntries++;
+                return 2200;
+            }
+            else if ((screen is MatchScreen.HasConfirm or MatchScreen.PurchaseDialog
+                      or MatchScreen.KeyMatchDialog) && _entryDialogAdvances < 3 &&
+                     HasDialogButtonWord(obs.Ocr))
+            {
+                // 真弹窗（OCR 里确实读到按钮词）才交共享决策推进：进联赛后常连着弹
+                // 两三个奖励/关键比赛预告窗，只放行一次会把第二个 B 掉。
+                // 锦标赛等错页即使被 YOLO 误判成 HasConfirm，通常没有按钮词 → 不放行，
+                // 直接落到下面的 3 帧兜底 B，不会在错页上连按 A（这正是"卡死"的表现）。
+                // 上限 3 次：弹窗链再长也到此为止，之后按错卡处理，避免无限推进。
+                // 这里不 return、也不累加 _entryVerifyRounds：正常弹窗链不该被超时打断。
+                _entryDialogAdvances++;
+                _log($"[我的联赛] 进卡后弹窗（{screen}），交共享决策推进（第 {_entryDialogAdvances}/3 次）后继续核验", LogLevel.Info);
+            }
+            else
+            {
+                bool isLoadingFrame = (screen is MatchScreen.Unknown or MatchScreen.TitleScreen)
+                    && obs.Ocr.Words.Count == 0 && obs.Detections.Count == 0;
+                if (isLoadingFrame && ++_entryLoadingRounds < 8)
+                {
+                    _log($"[我的联赛] 比赛页按 A 后加载过渡中（第 {_entryLoadingRounds}/8 帧），继续等待", LogLevel.Debug);
+                    return 1500;
+                }
+                _entryVerifyRounds++;
+                // 3 帧仍确认不了"这是我的联赛"就按进错卡处理——宁可多 B 一次，
+                // 也不留在错页上被共享决策乱按（实机就是这个表现：进了错页卡死）。
+                if (_entryVerifyRounds < 3)
+                {
+                    _log($"[我的联赛] 比赛页按 A 后画面认不出（{screen}，第 {_entryVerifyRounds}/3 帧），再等一帧核验", LogLevel.Debug);
+                    return 1500;
+                }
+                _log($"[我的联赛] 比赛页按 A 后连续 {_entryVerifyRounds} 帧确认不了「我的联赛」，按进错卡 B 退回", LogLevel.Warn);
+                _engine.DumpSuspiciousFrame(obs.Frame, "wrong_card_unknown", $"按A后 {_entryVerifyRounds} 帧认不出（{screen}），B 退回");
+                await _engine.Pad.Back();
+                _enteredFromHub = false;
+                _entryVerifyRounds = 0;
+                _entryLoadingRounds = 0;
+                _entryDialogAdvances = 0;
+                _hubForceRight = true;
+                _hubWrongEntries++;
+                return 2200;
+            }
+        }
         // 识别走查（2026-11-18）：连续多轮认不出的界面把实机帧 + OCR 摘要落 datadump。
         // 新版改版后「哪一屏认不出来」只能靠用户口述，反馈包里没有那一帧，远程只能猜；
         // 现在用户下次反馈直接带图。节流 120s、要求帧里确实有字（黑帧/加载帧不转存）。
@@ -225,6 +438,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
             _bought.Clear();
             _verifyRetries = 0;
             _purchaseSatisfied = false;
+            _insufficientPoints = false;
             _phase = PurchasePhase.Idle;
             _navAttempts = 0;
             _goMatchAttempts = 0;
@@ -303,6 +517,73 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         // 模块自有界面拦截（国服子类在此接管主页导航与 RT 确认键）：返回非 null = 本轮已处理
         int? customWait = await InterceptAsync(obs, screen, _streak, inMatchRecently);
         if (customWait is not null) return customWait.Value;
+        if (screen != MatchScreen.MatchHub && _hubScanMoves != 0)
+            _hubScanMoves = 0; // 离开比赛页，重置卡排滚动扫描
+        // 比赛页：定位「我的联赛」卡（国际服）。★ v8.2.0 修复（用户 2026-11-23 实机）：
+        // 旧逻辑用 FindTileOffset（标题在可见卡里的位置）当「焦点已在目标卡」就直接按 A，
+        // 但**标题可见 ≠ 光标选中**——卡排滚动后标题可见、焦点仍停在第一张锦标赛卡上时，
+        // 按 A 就误进锦标赛 → 残留页 B 退回 → 标题又可见 → 再按 A …… 死循环（实机日志印证）。
+        // 新策略：以 HubTileLocator.IsFocusedOnTarget 的**焦点白框检测**为准（聚焦卡边框
+        // 白像素是未聚焦卡的数倍，实机标定）。true 才按 A；false=焦点在别卡→右移换焦点；
+        // null=白框闪烁暗相位读不出→退回逐格右移；扫满 MaxHubScanSteps 仍无则 B 回主菜单。
+        // 进错卡仍由 _enteredFromHub 守卫核验并换焦点重试。
+        if (SupportsOcrTileNav && screen == MatchScreen.MatchHub &&
+            _streak < MatchBrain.NavEscapeStreak)
+        {
+            // 上一张卡按 A 进错了（已 B 退回）：先右移一格换焦点再重新定位。
+            // 不换焦点的话定位器会在同一张卡上再次读到「我的联赛」并再按一次 A —— 实机表现
+            // 就是「反复进锦标赛，永远开不了赛」（用户 2026-11-23）。
+            if (_hubForceRight)
+            {
+                _hubForceRight = false;
+                _hubScanMoves = Math.Max(_hubScanMoves, 1) + 1;
+                _log($"[我的联赛] 比赛页：上一张卡进错，右移一格换焦点（第 {_hubScanMoves} 格）后重新定位", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Right);
+                return 1800;
+            }
+            // 同一轮比赛页里连续进错太多次：定位器把目标读在了错卡上，B 回主菜单重新导航，
+            // 让主菜单→比赛页的归位序列重置卡排焦点（总比无限进错页好）。
+            if (_hubWrongEntries >= HubWrongEntryLimit)
+            {
+                _hubWrongEntries = 0;
+                _hubScanMoves = 0;
+                _log($"[我的联赛] 比赛页：连续 {HubWrongEntryLimit} 次进错卡，B 回主菜单重新导航", LogLevel.Warn);
+                _engine.DumpSuspiciousFrame(obs.Frame, "hub_wrong_card_loop", $"比赛页连续 {HubWrongEntryLimit} 次进错卡，B 回主菜单");
+                await _engine.Pad.Back();
+                return 2600;
+            }
+            // 焦点白框检测：只有确认焦点白框在「我的联赛」卡上才按 A（不再拿标题位置猜焦点）
+            bool? focused = HubTileLocator.IsFocusedOnTarget(obs.Ocr, obs.Frame, "我的联赛");
+            if (focused == true)
+            {
+                _log($"[我的联赛] 比赛页：焦点白框确认在「我的联赛」卡，按 A（右移 {_hubScanMoves} 格）", LogLevel.Info);
+                await _engine.Pad.Confirm();
+                _hubScanMoves = 0;
+                _enteredFromHub = true; // 下一帧核验是否真进了我的联赛，进错则 B 退回
+                _entryVerifyRounds = 0;
+                _entryLoadingRounds = 0;
+                _entryDialogAdvances = 0;
+                return 2800;
+            }
+            // focused == false（焦点明确在别的卡）或 null（白框闪烁暗相位读不出）：右移换焦点。
+            // 首次先归位最左，再逐格右移（目标卡被焦点选中时卡排自会滚入、白框亮起）。
+            if (_hubScanMoves == 0)
+                await _engine.Pad.DpadRepeat(PadDir.Left, 6);
+            if (_hubScanMoves < MaxHubScanSteps)
+            {
+                _hubScanMoves++;
+                string why = focused == false ? "焦点在别的卡" : "白框读不出（闪烁暗相位）";
+                _log($"[我的联赛] 比赛页：{why}，右移切焦点第 {_hubScanMoves}/{MaxHubScanSteps} 格后重读", LogLevel.Info);
+                await _engine.Pad.Dpad(PadDir.Right);
+                return 1800; // 给卡排滚动动画 + 下一帧 OCR 留足时间
+            }
+            // 扫完仍确认不了焦点：B 回主菜单重新导航，绝不盲按 A（那就是误入锦标赛的根因）。
+            _hubScanMoves = 0;
+            _log($"[我的联赛] 比赛页：右移 {MaxHubScanSteps} 格仍未确认焦点在我的联赛，B 回主菜单重新导航", LogLevel.Warn);
+            _engine.DumpSuspiciousFrame(obs.Frame, "hub_focus_not_found", $"比赛页右移 {MaxHubScanSteps} 格仍未白框确认焦点（卡排裁切/布局异常）");
+            await _engine.Pad.Back();
+            return 2600;
+        }
         var action = MatchBrain.Decide(screen, obs.Ocr, _streak, inMatchRecently, obs.Frame);
         MatchShared.DecisionSnapshot(_log, "我的联赛", screen, _streak, action, obs.Ocr);
         // 标题画面宽限（共享实现，含赛后弹窗链 90s 档，见 MatchShared.TitleGrace）：
@@ -333,98 +614,47 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         }
         _difficultyPageRounds = 0;
         _difficultyConfirmRound = 0;
-        switch (action.Kind)
-        {
-            case MatchActionKind.PadEnterMatch:
-                // 主菜单 → 底部卡片行 → 最左"比赛" → A（v1.2 修订，用户 2026-10-19 实测：
-                // 新 UI 需 下×2 才进底部卡行，第 1 下离开页签行/第 2 下进卡行；左到头多按无害）
-                _log("[我的联赛] 主菜单导航：下×2→左×6→A 进比赛页", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadConfirm when action.Target is "前往比赛" or "下个赛季":
+        return await MatchActionExecutor.ExecuteAsync(
+            _engine, _matchPlay, action, obs, _log, "我的联赛", ct,
+            onConfirm: async () =>
             {
-                // 【识别系统重做 2026-10-11 深夜】不再做磁贴亮度焦点校验（实机不可靠：
-                // 赛程表恒亮、面板抬亮、机器差异——当天多次卡死均源于此）。一律先盲归位
-                // 序列 Left×4 + Up×6 饱和到前往比赛（左列上下链均为用户确认边：前往比赛
-                // --下--> 赛程表 --下--> 赛事信息，反向同链；到头多按无害），再按 A。
-                // 位置无关、不依赖任何画面判读；从根上杜绝光标停在 i 上误入说明页。
-                // 【主页无响应自愈 2026-10-12】按 A 后画面仍停在主页（右侧面板展开时
-                // D-pad/A 无效，或输入未到达游戏）：第 3 次先左拨收回面板再归位；
-                // 第 6/9/… 次改按 B 退出联赛由比赛页重进（重进后主页光标回默认位）。
-                _goMatchAttempts++;
-                if (_goMatchAttempts >= 2)
+                if (action.Target is "前往比赛" or "下个赛季")
                 {
-                    // 连续多次从主页前往比赛仍未推进到开赛：大概率流程上有弹窗不被识别
-                    // （按 A 被取消又弹回）。画面摘要进日志供远程定位弹窗文案。
-                    _log($"[我的联赛] 注意：第 {_goMatchAttempts} 次前往比赛仍未开赛（疑似有弹窗识别受阻），当前画面 OCR：{OcrDigest(obs.Ocr)}", LogLevel.Warn);
+                    await HandleHomeGoMatchAsync(action.Target);
+                    return action.WaitMs;
                 }
-                if (_goMatchAttempts == 3)
-                {
-                    _log("[我的联赛] 主页连续按 A 未离开：先左拨收回右侧面板再试（面板展开时 D-pad/A 无效）", LogLevel.Warn);
-                    await _engine.Pad.RsFlick(PadDir.Left);
-                }
-                if (_goMatchAttempts >= 6 && (_goMatchAttempts - 6) % 3 == 0)
-                {
-                    _log("[我的联赛] 主页持续无响应：B 退出联赛重进自愈；若反复出现，请检查是否连接了真实手柄（挂机前须断开）", LogLevel.Warn);
-                    await _engine.Pad.Back();
-                    break;
-                }
-                _log($"[我的联赛] 盲归位到{action.Target}（左×4+上×6）后开赛", LogLevel.Info);
-                await HomeToGoMatchAsync();
-                _log($"[我的联赛] 手柄 A：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Confirm();
-                _lastGoMatchPress = DateTime.Now;
-                _goMatchOcrDumped = false;
-                break;
-            }
-            case MatchActionKind.PadConfirm:
-                // 「下一步/确认」的按键动作由场景决定：国际服 = 直接 A；国服子类覆盖成
-                // 国服键序 RT → A → 鼠标点击（见 CnMyLeagueScenario.AdvanceConfirmAsync）
                 return await AdvanceConfirmAsync(action, obs, _streak, ct);
-            case MatchActionKind.PadMoveRight:
-                _log($"[我的联赛] 比赛页右移：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Right);
-                break;
-            case MatchActionKind.GamepadBack:
-                _log("[我的联赛] 无特征界面连续多轮，按 B 逃生", LogLevel.Warn);
-                await _engine.Pad.Back();
-                break;
-            case MatchActionKind.PadUpConfirm:
-                _log($"[我的联赛] 弹窗上移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Up);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadDownConfirm:
-                _log($"[我的联赛] 弹窗下移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadStartPress:
-                _log($"[我的联赛] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Start();
-                break;
-            case MatchActionKind.PadXPress:
-                _log($"[我的联赛] {action.Target}", LogLevel.Info);
-                await _engine.Pad.X();
-                break;
-            case MatchActionKind.PadLoginNav:
-                // 登录序列：下→右→A（A 落在「登录」上，用户实机序列）——eFootball 2027
-                // 标题页与未登录页共用（两页默认焦点都在页签行，按钮列在右侧）
-                _log($"[我的联赛] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Dpad(PadDir.Right);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.MatchIdleTap:
-                // 比赛中挂机点击：按 A + 用户「挂机节奏」区间随机间隔（共享层 MatchPlay，拟人化）
-                return await _matchPlay.IdleTapAsync(ct);
-            case MatchActionKind.Wait:
-                break;
+            },
+            backLogOverride: "无特征界面连续多轮，按 B 逃生",
+            moveRightLog: $"比赛页右移：{action.Target}");
+    }
+
+    private async Task HandleHomeGoMatchAsync(string target)
+    {
+        // 【识别系统重做 2026-10-11 深夜】不再做磁贴亮度焦点校验，一律盲归位到前往比赛后按 A。
+        // 【主页无响应自愈 2026-10-12】第 3 次先左拨收回右侧面板再试；第 6/9/… 次 B 退出联赛重进自愈。
+        _goMatchAttempts++;
+        if (_goMatchAttempts >= 2)
+        {
+            _log($"[我的联赛] 注意：第 {_goMatchAttempts} 次前往比赛仍未开赛（疑似有弹窗识别受阻）", LogLevel.Warn);
         }
-        return action.WaitMs;
+        if (_goMatchAttempts == 3)
+        {
+            _log("[我的联赛] 主页连续按 A 未离开：先左拨收回右侧面板再试（面板展开时 D-pad/A 无效）", LogLevel.Warn);
+            await _engine.Pad.RsFlick(PadDir.Left);
+        }
+        if (_goMatchAttempts >= 6 && (_goMatchAttempts - 6) % 3 == 0)
+        {
+            _log("[我的联赛] 主页持续无响应：B 退出联赛重进自愈；若反复出现，请检查是否连接了真实手柄（挂机前须断开）", LogLevel.Warn);
+            await _engine.Pad.Back();
+            return;
+        }
+        _log($"[我的联赛] 盲归位到{target}（左×4+上×6）后开赛", LogLevel.Info);
+        await HomeToGoMatchAsync();
+        _log($"[我的联赛] 手柄 A：{target}", LogLevel.Info);
+        await _engine.Pad.Confirm();
+        _lastGoMatchPress = DateTime.Now;
+        _goMatchOcrDumped = false;
     }
 
     // ---------------- 只打关键比赛（普通比赛杀进程跳过） ----------------
@@ -524,6 +754,10 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         _skipCountdownLogged = false;
         _lastScreen = MatchScreen.Unknown;
         _streak = 0;
+        _enteredFromHub = false;
+        _entryVerifyRounds = 0;
+        _entryLoadingRounds = 0;
+        _entryDialogAdvances = 0;
         _titleSince = null;
         _goMatchAttempts = 0;
         _goMatchOcrDumped = false;
@@ -537,6 +771,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         _bought.Clear();
         _verifyRetries = 0;
         _purchaseSatisfied = false;
+        _insufficientPoints = false;
         _phase = PurchasePhase.Idle;
         _navAttempts = 0;
         if (!success)
@@ -662,6 +897,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                     _phase = PurchasePhase.Buying;
                     _navAttempts = 0;
                     _itemRow = 0; // 未知行，Buying 首轮自动锚定顶部
+                    _itemScanSteps = 0;
                     _log("[我的联赛] 智能接管：已在物品页，继续购买", LogLevel.Info);
                     return 800;
                 }
@@ -770,13 +1006,23 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
             case PurchasePhase.Buying:
             {
                 if (screen == MatchScreen.PurchaseDialog || screen == MatchScreen.HasConfirm)
+                {
+                    if (IsInsufficientPointsDialog(ocr) && !_insufficientPoints)
+                    {
+                        _insufficientPoints = true;
+                        _log("[我的联赛] 检测到「积分不足」提示，关弹窗后将跳过本场道具购买直接开赛", LogLevel.Warn);
+                    }
                     return null; // 确认弹窗交给 Brain 决策（PadUpConfirm / PadConfirm）
+                }
                 if (screen != MatchScreen.ItemList) return null;
                 // 找下一个未购买的目标（物品页用已购集合 + 使用中预检防重复买）
                 var target = _configuredItems.FirstOrDefault(t => !_bought.Contains(t));
                 if (target is null)
                 {
-                    _log("[我的联赛] 购买完毕，返回主页重新核验", LogLevel.Success);
+                    _log(_insufficientPoints
+                        ? "[我的联赛] 积分不足跳过购买，返回主页前往比赛"
+                        : "[我的联赛] 购买完毕，返回主页重新核验",
+                        _insufficientPoints ? LogLevel.Warn : LogLevel.Success);
                     _phase = PurchasePhase.Returning;
                     await _engine.Pad.Back();
                     return 2200;
@@ -789,27 +1035,98 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                     _bought.Add(target);
                     return 1500;
                 }
-                // 固定行序增量导航（用户确认：状态1~3 / 经验4~6 / 主教练13，按行序升序购买）：
-                // 从当前行直接下移 (row - _itemRow) 格——如 第3行买完到第6行只下移3格，不回顶
-                int row = MyLeagueBrain.ExpectedItemRow(target);
+                // 逐行 OCR 扫描定位（2026-11-23 用户实机：物品页是滚动列表，4x 在中间需下滑
+                // 才显示，写死行号+Up归位首次会买错）。每下移一格读一次焦点行（白底高亮）文字，
+                // 认出目标再按 A；读不准/扫描超限则回退原固定行号逻辑，绝不空按。
                 if (_itemRow < 1)
                 {
-                    await _engine.Pad.DpadRepeat(PadDir.Up, 16);
+                    await _engine.Pad.DpadRepeat(PadDir.Up, 16); // 锚定列表顶部作为扫描起点
                     _itemRow = 1;
+                    _itemScanSteps = 0;
+                    _itemStallRounds = 0;
+                    _itemLastRows = null;
+                    return 1200;
                 }
-                int down = row - _itemRow;
-                _log($"[我的联赛] 购买 {DescribeItem(target)}（第 {row} 行，自第 {_itemRow} 行下移 {Math.Max(down, 0)} 格）", LogLevel.Info);
-                _bought.Add(target);
-                _itemRow = row;
-                if (down > 0)
-                    await _engine.Pad.DpadRepeat(PadDir.Down, down);
-                await _engine.Pad.Confirm();
-                return 2500;
+                string? focusText = MyLeagueBrain.DetectFocusedItemText(frame, ocr);
+                // 经验值道具：用用户给的「出现目标档位即停 / 2x 见 3x 上移一格」规律（纯函数决策）；
+                // 其它类别（教练/状态）：保持焦点行文字匹配。两条路都只在命中时按 A。
+                MyLeagueBrain.ItemScanAction step;
+                if (target.Kind == MyLeagueBrain.MlItemKind.ExpBoost)
+                {
+                    step = MyLeagueBrain.ItemScanStepExpBoost(ocr, target, focusText)
+                           ?? MyLeagueBrain.ItemScanAction.Down;
+                }
+                else
+                {
+                    bool isTarget = focusText is not null && ItemLineMatches(focusText, target);
+                    step = isTarget ? MyLeagueBrain.ItemScanAction.Stop
+                                    : MyLeagueBrain.ItemScanAction.Down;
+                }
+                if (step == MyLeagueBrain.ItemScanAction.Stop)
+                {
+                    // 经验值档位以「画面首次出现即焦点在该档」为准（用户实机规律），focusText 仅参考
+                    _log($"[我的联赛] 逐行扫描命中目标「{DescribeItem(target)}」（画面出现目标档位，焦点行参考：{focusText ?? "未读"}），按 A 购买", LogLevel.Info);
+                    _engine.DumpSuspiciousFrame(frame, "item_scan_hit", $"逐行扫描命中 {DescribeItem(target)}（扫描 {_itemScanSteps} 格，画面档位命中，焦点行：{focusText ?? "未读"}）");
+                    _bought.Add(target);
+                    _itemScanSteps = 0;
+                    _itemStallRounds = 0;
+                    _itemLastRows = null;
+                    await _engine.Pad.Confirm();
+                    return 2500;
+                }
+                // 「一直往下滑直到焦点选中目标」——2026-11-23 用户要求：不再回退固定行号盲按 A
+                // （那会买错道具）。持续 Down/Up 逐行逼近，命中才 A。两种退出：
+                //   ① 列表到底（连续 3 轮行集合不变，光标走不动）；② 扫满 MaxItemScan 格保险。
+                // 退出都**不按 A**，只记日志 + 抓帧 + 回主页重新核验，绝不误买。
+                const int MaxItemScan = 40;   // 列表可能很长，放宽扫描预算
+                const int StallToBottom = 3;  // 连续 3 轮画面不变 = 已到列表底
+                string rowsNow = string.Join("|", ocr.Lines
+                    .Where(l => l.CenterY is > 0.20 and < 0.88)
+                    .Select(l => l.Text));
+                if (_itemLastRows is not null && rowsNow == _itemLastRows)
+                    _itemStallRounds++;
+                else
+                    _itemStallRounds = 0;
+                _itemLastRows = rowsNow;
+                bool atBottom = _itemStallRounds >= StallToBottom;
+                bool overBudget = _itemScanSteps >= MaxItemScan;
+                if (atBottom || overBudget)
+                {
+                    string why = atBottom ? $"列表已到底（连续 {StallToBottom} 轮画面不变）" : $"扫满 {MaxItemScan} 格";
+                    _log($"[我的联赛] 逐行扫描未命中目标「{DescribeItem(target)}」：{why}（焦点：{focusText ?? "读不准"}），不购买、回主页重新核验", LogLevel.Warn);
+                    _engine.DumpSuspiciousFrame(frame, "item_scan_miss", $"逐行扫描未命中 {DescribeItem(target)}：{why}（焦点：{focusText ?? "读不准"}），未购买");
+                    _itemScanSteps = 0;
+                    _itemStallRounds = 0;
+                    _itemLastRows = null;
+                    // 未买到：不碰道具行，B 退回主页让上层重新核验/再导航（绝不落 _bought）
+                    _phase = PurchasePhase.Returning;
+                    await _engine.Pad.Back();
+                    return 2200;
+                }
+                _itemScanSteps++;
+                // Up 兜底（2x 见 3x / 焦点档位过大）：上移一格；否则下移继续滑
+                if (step == MyLeagueBrain.ItemScanAction.Up)
+                {
+                    _log($"[我的联赛] 逐行扫描：焦点档位越过目标「{DescribeItem(target)}」（焦点行：{focusText ?? "画面档位"}），上移一格逼近", LogLevel.Info);
+                    await _engine.Pad.Dpad(PadDir.Up);
+                }
+                else
+                    await _engine.Pad.Dpad(PadDir.Down);
+                return 900;
             }
             case PurchasePhase.Returning:
             {
                 if (screen == MatchScreen.LeaguePage && ocr.ContainsJoined("前往比赛"))
                 {
+                    if (_insufficientPoints)
+                    {
+                        _purchaseSatisfied = true;
+                        _insufficientPoints = false;
+                        _phase = PurchasePhase.Idle;
+                        _navAttempts = 0;
+                        _log("[我的联赛] 积分不足，本场跳过道具核验并直接前往比赛", LogLevel.Info);
+                        return 600;
+                    }
                     // 回到主页：重新走面板核验（满足则导航回前往比赛）
                     _phase = PurchasePhase.Idle;
                     _navAttempts = 0;
@@ -949,7 +1266,11 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         _verifyRetries++;
         _log($"[我的联赛] 购买流程退出：{reason}", LogLevel.Warn);
         _phase = PurchasePhase.Idle;
+        _insufficientPoints = false;
         _navAttempts = 0;
+        _itemScanSteps = 0;
+        _itemStallRounds = 0;
+        _itemLastRows = null;
         if (_verifyRetries > 2)
         {
             _purchaseSatisfied = true;
@@ -1006,8 +1327,38 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         MyLeagueBrain.MlItemKind.ConditionBoost => $"状态加成 {t.Level}",
         _ => t.Kind.ToString(),
     };
-}
 
+    /// <summary>纯函数（可单测）：弹窗文本是否表示我的联赛积分不足无法购买道具。</summary>
+    internal static bool IsInsufficientPointsDialog(OcrResult ocr) =>
+        ocr.ContainsJoined("积分不足") || ocr.ContainsJoined("insufficient");
+
+    /// <summary>
+    /// 这一屏是否真有「弹窗按钮词」。进卡核验时用：真弹窗（奖励/预告/确认）一定带一枚
+    /// 确定/取消/OK 之类的按钮；锦标赛等板块页即使被 YOLO 误判成 HasConfirm，通常没有
+    /// 这种按钮词 —— 不放行就不会在错页上连按 A。
+    /// </summary>
+    private static bool HasDialogButtonWord(OcrResult ocr) =>
+        ocr.ContainsJoined("取消") || ocr.ContainsJoined("确定") || ocr.ContainsJoined("确认")
+        || ocr.ContainsJoined("OK") || ocr.ContainsJoined("下一步") || ocr.ContainsJoined("继续")
+        || ocr.ContainsJoined("领取") || ocr.ContainsJoined("覆盖");
+
+    /// <summary>焦点行文字是否就是目标道具（且非「使用中」）。逐行扫描命中判定。</summary>
+    private static bool ItemLineMatches(string lineText, MyLeagueBrain.MlItemTarget target)
+    {
+        if (lineText.Contains("使用中")) return false; // 已拥有，不需购买
+        string norm = lineText.Replace(" ", "").ToLowerInvariant(); // OCR 可能读出大写 4X/x4
+        string level = target.Level.ToLowerInvariant();
+        return target.Kind switch
+        {
+            MyLeagueBrain.MlItemKind.ExpBoost =>
+                norm.Contains("经验值") && (norm.Contains(level) ||
+                    (level.Length >= 2 && norm.Contains(level[1] + level[0].ToString()))), // 4x / x4
+            MyLeagueBrain.MlItemKind.CoachBoost => norm.Contains("教练"),
+            MyLeagueBrain.MlItemKind.ConditionBoost => norm.Contains("状态") && norm.Contains(target.Level),
+            _ => false,
+        };
+    }
+}
 
 
 

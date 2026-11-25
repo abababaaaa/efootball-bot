@@ -7,8 +7,8 @@ public sealed class Pad
 {
     private readonly IVirtualPad _vg;
     private readonly TimingConfig _t;
-    private readonly Random _rnd = new();
     private readonly HumanPacer? _pace;
+    private CancellationToken _sessionCt;
 
     // ---- 性能埋点（P1-14）：场景一秒钟到底花多少在"按键"上 ----
     // 只在 Pad 的公有动作入口计时：内部 Task.Delay（按住/间隔）也算动作时间——
@@ -29,6 +29,9 @@ public sealed class Pad
         _pace = timing.HumanPacingEnabled ? new HumanPacer() : null;
     }
 
+    /// <summary>绑定当前挂机会话的取消令牌：用户停止后中断连按与等待，并确保松手。</summary>
+    public void SetSessionToken(CancellationToken ct) => _sessionCt = ct;
+
     /// <summary>动作计时包装：次数 +1，耗时累加（异常也计，便于看出"卡在提交上"）。</summary>
     private async Task Timed(Func<Task> action)
     {
@@ -42,7 +45,7 @@ public sealed class Pad
     {
         if (_pace is not null) return _pace.Sample(baseMs);
         int j = Math.Max(0, Math.Min(200, _t.HumanJitterMs));
-        int d = j == 0 ? 0 : _rnd.Next(-j, j + 1);
+        int d = j == 0 ? 0 : Random.Shared.Next(-j, j + 1);
         return Math.Max(40, baseMs + d);
     }
 
@@ -50,58 +53,58 @@ public sealed class Pad
     private async Task MaybeHesitate()
     {
         if (_pace is null || !_pace.RollHesitation()) return;
-        await Task.Delay(_pace.HesitationMs());
+        await Task.Delay(_pace.HesitationMs(), _sessionCt);
     }
 
     /// <summary>下一步 / 确认（手柄 A）。</summary>
     public Task Confirm() => Timed(async () =>
     {
         await MaybeHesitate();
-        await _vg.TapAsync(PadButton.A, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
+        await _vg.TapAsync(PadButton.A, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs), _sessionCt);
     });
 
     /// <summary>返回（手柄 B）。</summary>
     public Task Back() => Timed(async () =>
     {
         await MaybeHesitate();
-        await _vg.TapAsync(PadButton.B, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
+        await _vg.TapAsync(PadButton.B, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs), _sessionCt);
     });
 
     /// <summary>按任意指定按钮（供声明式导航图使用）。</summary>
     public Task Press(PadButton b) => Timed(async () =>
     {
         await MaybeHesitate();
-        await _vg.TapAsync(b, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs));
+        await _vg.TapAsync(b, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs), _sessionCt);
     });
 
     public Task Dpad(PadDir dir) => Timed(async () =>
     {
         await MaybeHesitate();
-        await _vg.TapDpadAsync(dir, Jitter(_t.DpadHoldMs), Jitter(_t.TapGapMs));
+        await _vg.TapDpadAsync(dir, Jitter(_t.DpadHoldMs), Jitter(_t.TapGapMs), _sessionCt);
     });
 
-    public Task X() => Timed(() => _vg.TapAsync(PadButton.X, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
-    public Task Y() => Timed(() => _vg.TapAsync(PadButton.Y, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
-    public Task LB() => Timed(() => _vg.TapAsync(PadButton.LeftShoulder, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
-    public Task RB() => Timed(() => _vg.TapAsync(PadButton.RightShoulder, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
-    public Task R3() => Timed(() => _vg.TapAsync(PadButton.RightThumb, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
-    public Task L3() => Timed(() => _vg.TapAsync(PadButton.LeftThumb, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
-    public Task Start() => Timed(() => _vg.TapAsync(PadButton.Start, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs)));
+    public Task X() => Timed(() => _vg.TapAsync(PadButton.X, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs), _sessionCt));
+    public Task Y() => Timed(() => _vg.TapAsync(PadButton.Y, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs), _sessionCt));
+    public Task LB() => Timed(() => _vg.TapAsync(PadButton.LeftShoulder, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs), _sessionCt));
+    public Task RB() => Timed(() => _vg.TapAsync(PadButton.RightShoulder, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs), _sessionCt));
+    public Task R3() => Timed(() => _vg.TapAsync(PadButton.RightThumb, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs), _sessionCt));
+    public Task L3() => Timed(() => _vg.TapAsync(PadButton.LeftThumb, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs), _sessionCt));
+    public Task Start() => Timed(() => _vg.TapAsync(PadButton.Start, Jitter(_t.TapHoldMs), Jitter(_t.TapGapMs), _sessionCt));
 
     /// <summary>右扳机 RT（个别赛前确认页右下角提示「RT 确定」）。</summary>
     public Task RT() => Timed(async () =>
     {
         _vg.SetRightTrigger(255);
-        await Task.Delay(Jitter(_t.TapHoldMs));
-        _vg.SetRightTrigger(0);
-        await Task.Delay(Jitter(_t.TapGapMs));
+        try { await Task.Delay(Jitter(_t.TapHoldMs), _sessionCt); }
+        finally { _vg.SetRightTrigger(0); }
+        await Task.Delay(Jitter(_t.TapGapMs), _sessionCt);
     });
 
     /// <summary>右摇杆轻推（联赛主页右侧“使用的物品”翻页）。</summary>
-    public Task RsFlick(PadDir dir) => Timed(() => _vg.FlickRightStickAsync(dir, Jitter(160), Jitter(200)));
+    public Task RsFlick(PadDir dir) => Timed(() => _vg.FlickRightStickAsync(dir, Jitter(160), Jitter(200), _sessionCt));
 
     public Task DpadRepeat(PadDir dir, int count)
-        => RepeatAsync(count, () => Dpad(dir));
+        => RepeatAsync(count, () => Dpad(dir), _sessionCt);
 
     /// <summary>
     /// 快速连按方向键（换人巡检等状态机的批量移光标用）：保持/间隔减半、跳过拟人犹豫。
@@ -112,7 +115,10 @@ public sealed class Pad
         int hold = Jitter(Math.Max(60, _t.DpadHoldMs / 2));
         int gap = Jitter(Math.Max(80, _t.TapGapMs / 2));
         for (int i = 0; i < count; i++)
-            await _vg.TapDpadAsync(dir, hold, gap);
+        {
+            _sessionCt.ThrowIfCancellationRequested();
+            await _vg.TapDpadAsync(dir, hold, gap, _sessionCt);
+        }
     });
 
     /// <summary>结算 / 奖励页：缓慢连按 A。</summary>
@@ -126,9 +132,13 @@ public sealed class Pad
         }
     }
 
-    public static async Task RepeatAsync(int count, Func<Task> action)
+    public static async Task RepeatAsync(int count, Func<Task> action, CancellationToken ct = default)
     {
-        for (int i = 0; i < count; i++) await action();
+        for (int i = 0; i < count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            await action();
+        }
     }
 
     public Task Wait(int ms, CancellationToken ct) => Task.Delay(Jitter(ms), ct);
@@ -143,7 +153,7 @@ public sealed class Pad
     {
         int lo = Math.Clamp(Math.Min(minMs, maxMs), 0, 600_000);
         int hi = Math.Clamp(Math.Max(minMs, maxMs), lo, 600_000);
-        int ms = _pace is not null ? _pace.SampleRange(lo, hi) : _rnd.Next(lo, hi + 1);
+        int ms = _pace is not null ? _pace.SampleRange(lo, hi) : Random.Shared.Next(lo, hi + 1);
         return Task.Delay(ms, ct);
     }
 }

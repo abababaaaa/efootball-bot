@@ -155,13 +155,18 @@ public class RecogWalkHardeningTests
     // ---------------- 比赛页磁贴焦点 ----------------
 
     [Fact]
-    public void Decide_MatchHub_FocusWordUnreadable_PressesConfirmInsteadOfEndlessRightMove()
+    public void Decide_MatchHub_FocusWordUnreadable_KeepsMovingRight_NeverBlindA()
     {
-        // 磁贴标签被右缘裁成碎片（我），读不出「我的联赛」
+        // 磁贴标签被右缘裁成碎片（我），读不出「我的联赛」。
+        // v8.2.0：旧逻辑在 MatchHubFocusBlindStreak 轮后盲按 A（「试进当前卡」），实机证明会
+        // 误进第一张锦标赛卡（2026-11-23）。新逻辑始终右移换焦点，绝不盲按 A；
+        // 到 NavEscapeStreak 才走周期性 B 重导航。
         var ocr = Ocr(("比赛", 0.10, 0.12, 0.08, 0.04), ("我", 0.93, 0.55, 0.03, 0.03));
         Assert.Equal(MatchActionKind.PadMoveRight, MatchBrain.Decide(MatchScreen.MatchHub, ocr, 2).Kind);
-        Assert.Equal(MatchActionKind.PadConfirm,
+        Assert.Equal(MatchActionKind.PadMoveRight,
             MatchBrain.Decide(MatchScreen.MatchHub, ocr, MatchBrain.MatchHubFocusBlindStreak).Kind);
+        Assert.Equal(MatchActionKind.PadMoveRight,
+            MatchBrain.Decide(MatchScreen.MatchHub, ocr, MatchBrain.StuckStreak).Kind);
     }
 
     [Fact]

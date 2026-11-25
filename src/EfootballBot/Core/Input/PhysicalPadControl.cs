@@ -110,6 +110,60 @@ public static class PhysicalPadControl
     }
 
     /// <summary>
+    /// 挂机启动前禁用真实手柄：若当前进程已提权，直接在进程内同步执行（~100ms，摆脱计划任务在笔记本电源模式/单文件解压上的秒级延迟）；
+    /// 未提权时回退到提权计划任务。返回是否走进程内通道及其结论。
+    /// </summary>
+    public static (bool InProcess, bool Success, string Message) HidePhysicalPads()
+    {
+        if (Elevation.IsCurrentProcessElevated())
+        {
+            var (ok, msg) = DisableAll();
+            AppendControlLog("pad-hide", ok, msg);
+            return (true, ok, msg);
+        }
+        RequestPadHide();
+        return (false, false, "已触发提权计划任务");
+    }
+
+    /// <summary>
+    /// 停止挂机时异步恢复真实手柄：已提权时在后台线程直接恢复（带会话守卫）并返回任务以便宿主在杀死 Worker 前简要等待；未提权则触发计划任务。
+    /// </summary>
+    public static Task RestoreAsyncFireAndForget()
+    {
+        if (Elevation.IsCurrentProcessElevated())
+        {
+            return Task.Run(() =>
+            {
+                try
+                {
+                    if (IsBotSessionActive())
+                    {
+                        AppendControlLog("pad-restore", true, "新挂机会话已启动，跳过恢复");
+                        return;
+                    }
+                    var (ok, msg) = RestoreAll();
+                    AppendControlLog("pad-restore", ok, msg);
+                }
+                catch { }
+            });
+        }
+        RunTaskSilently(PadRestoreTaskName, waitForExit: false);
+        return Task.CompletedTask;
+    }
+
+    private static void AppendControlLog(string op, bool ok, string msg)
+    {
+        try
+        {
+            string logPath = Path.Combine(AppPaths.DataDir, "pad-control.log");
+            Directory.CreateDirectory(Path.GetDirectoryName(logPath)!);
+            string ts = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss");
+            File.AppendAllText(logPath, $"[{op} {ts}] {(ok ? "成功" : "失败")}：{msg}{Environment.NewLine}");
+        }
+        catch { }
+    }
+
+    /// <summary>
     /// 提权任务（另一个进程）写下的最后一条手柄控制结论，形如
     /// 「[pad-hide 2026-11-19 08:29:05] 失败：已禁用 3 个节点但玩家 1 仍被占用（可能被非物理设备占据）」。
     /// Worker 自己拿不到提权进程的返回值，只能回读这条日志——2026-11-19 反馈包里
@@ -247,9 +301,13 @@ public static class PhysicalPadControl
     public static (bool Success, string Message) DisableAll()
     {
         // 只禁「真的连着」的手柄：蓝牙配对但已关机的节点禁了也不产生输入，
-        // 还会把禁用升级（叶子→父设备，最长 16s）整条流程白跑一遍
-        var leaves = FindGamepadDevNodes()
+        // 还会把禁用升级（叶子→父设备，最长 16s）整条流程白跑一遍；
+        // 但若 slot0 确实已被占用且仅见未连接节点（部分接收器/蓝牙短暂误报离线），兜底禁掉已启用节点。
+        var allEnabled = FindGamepadDevNodes();
+        var leaves = allEnabled
             .Where(n => HidDeviceEnumerator.IsDevNodeConnected(n.DevInst)).ToList();
+        if (leaves.Count == 0 && allEnabled.Count > 0 && PadBackendProbe.IsSlot0Occupied())
+            leaves = allEnabled;
         if (leaves.Count == 0)
             return (true, "未发现已启用的物理手柄（可能已禁用或未连接）");
 

@@ -86,7 +86,7 @@ public static class HidDeviceEnumerator
     /// </summary>
     public static bool IsXInputStyleInstance(string instancePath) =>
         global::System.Text.RegularExpressions.Regex.IsMatch(instancePath,
-            @"^HID\\VID_[0-9A-F]{4}&PID_[0-9A-F]{4}&IG_0[0-3]\\",
+            @"^HID\\[^\\]+&IG_0[0-3]\\",
             global::System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     /// <summary>

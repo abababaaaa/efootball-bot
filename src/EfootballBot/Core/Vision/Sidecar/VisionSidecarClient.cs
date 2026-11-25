@@ -201,7 +201,7 @@ public sealed class VisionSidecarClient : IAsyncDisposable
         if (reply.Ev == "error")
             throw new InvalidOperationException($"sidecar OCR 失败：{reply.Text}");
         var words = (reply.Words ?? new List<SidecarWord>())
-            .Select(w => new OcrWord(w.T, w.X, w.Y, w.W, w.H))
+            .Select(w => new OcrWord(w.T, w.X, w.Y, w.W, w.H, w.S))
             .ToList();
         return new OcrResult(words, frame.Width, frame.Height);
     }
@@ -328,7 +328,7 @@ public sealed class VisionSidecarClient : IAsyncDisposable
 /// <summary>models 目录定位：配置路径 → 程序目录 → 仓库源码目录（开发期）。</summary>
 public static class SidecarModelLocator
 {
-    public static string Locate(string? configured)
+    public static string? Locate(string? configured)
     {
         if (!string.IsNullOrWhiteSpace(configured) && Directory.Exists(configured)) return configured;
 

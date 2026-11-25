@@ -555,6 +555,14 @@ public partial class MainWindow
         => await ToggleScenarioAsync(BtnTestSwap, ModuleIds.IntlSwapTest);
 
     /// <summary>
+    /// 训练帧自动采集（独立会话）：机器人自己导航到主菜单/比赛页/周活动卡片/锦标赛卡片/联赛主页，
+    /// 每页抓一张训练样本到 data\trainingframes\日期\，抓完自动停止。再点一次＝停止。
+    /// 与满级换人测试走同一套 ToggleScenarioAsync（启动确认、按钮禁用、热键、自动复位）。
+    /// </summary>
+    private async void BtnCollectTrainFrames_Click(object sender, RoutedEventArgs e)
+        => await ToggleScenarioAsync(BtnCollectTrainFrames, ModuleIds.IntlTrainFrames);
+
+    /// <summary>
     /// 开启「满级自动换人」时弹确认窗（SwapGuideWindow）：展示巡检路径图，要求用户先手动
     /// 验证路径能走完首发 11 人，并说明替补球员不参与换人；取消则回退勾选。
     /// 配置载入的 IsChecked 赋值由 _loadingConfig 守卫挡掉，弹窗只在用户手动勾选时出现。

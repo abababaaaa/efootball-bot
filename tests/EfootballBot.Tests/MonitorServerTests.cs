@@ -125,15 +125,37 @@ public sealed class MonitorServerTests
     }
 
     [Fact]
-    public async Task Commands_Require_Token()
+    public async Task Commands_Require_Token_And_Post()
     {
         using var server = Start("t0ken", out var url);
         using var http = Client();
 
-        using var denied = await http.GetAsync(url + "api/pause");
+        using var getDenied = await http.GetAsync(url + "api/pause?t=t0ken");
+        Assert.Equal(HttpStatusCode.MethodNotAllowed, getDenied.StatusCode);
+
+        using var denied = await http.PostAsync(url + "api/pause", content: null);
         Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
 
-        using var allowed = await http.GetAsync(url + "api/pause?t=t0ken");
+        using var allowed = await http.PostAsync(url + "api/pause?t=t0ken", content: null);
         Assert.Equal(HttpStatusCode.OK, allowed.StatusCode);
+
+        using var req = new HttpRequestMessage(HttpMethod.Post, url + "api/resume");
+        req.Headers.Add("X-Token", "t0ken");
+        using var headerAllowed = await http.SendAsync(req);
+        Assert.Equal(HttpStatusCode.OK, headerAllowed.StatusCode);
+    }
+
+    [Fact]
+    public async Task EmptyToken_IsReadOnly_CannotOperate()
+    {
+        using var server = Start("", out var url);
+        using var http = Client();
+
+        var statusJson = await http.GetStringAsync(url + "api/status");
+        using var doc = JsonDocument.Parse(statusJson);
+        Assert.False(doc.RootElement.GetProperty("canOperate").GetBoolean());
+
+        using var denied = await http.PostAsync(url + "api/stop", content: null);
+        Assert.Equal(HttpStatusCode.Forbidden, denied.StatusCode);
     }
 }

@@ -1,4 +1,6 @@
 using EfootballBot.Core.Bot.Scenarios.CnWeekly;
+using EfootballBot.Core.Bot.Scenarios.Weekly;
+using EfootballBot.Core.Bot.Scenarios.AiLadder;
 using EfootballBot.Core.Bot.Scenarios.MyLeague;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Input;
@@ -82,7 +84,11 @@ public sealed class PeakLadderScenario : IScenario
         _log = log;
         _matchPlay = new MatchPlay(engine, "天梯巅峰赛", log);
         _mouse = new BackgroundMouse();
+        _homeGuide = new ReturnToHomeGuide("天梯巅峰赛", log, engine.DumpSuspiciousFrame);
     }
+
+    /// <summary>启动引导：停在其他模块页时先 B 收敛回主页。</summary>
+    private readonly ReturnToHomeGuide _homeGuide;
 
     public async Task<int> RunOnceAsync(CancellationToken ct)
     {
@@ -105,6 +111,20 @@ public sealed class PeakLadderScenario : IScenario
                 MatchShared.LoginRecovery(_memory, now), pitch)
             : MatchScreen.Unknown;
         _memory.Record(ml, now);
+        // 启动引导：停在其他模块页（周活动/AI天梯/我的联赛）时先 B 收敛回主页。
+        bool inMatchFlow = matchContext || _matchSession.Active || ReturnToHomeGuide.IsSharedMatchFlow(ml);
+        bool myLeagueResidual = pl == PlScreen.None &&
+                                (ml is MatchScreen.PointsPage or MatchScreen.ItemList ||
+                                 (ml == MatchScreen.LeaguePage && MyLeagueBrain.LooksLikeLeagueHome(obs.Ocr)));
+        bool otherModule = !inMatchFlow &&
+                           (cw != CwScreen.None
+                            || WeeklyBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light) != WkScreen.None
+                            || AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
+                            || myLeagueResidual);
+        bool ownPage = pl != PlScreen.None || inMatchFlow;
+        int? guideWait = await _homeGuide.StepAsync(obs.Frame,
+            ml == MatchScreen.MainMenu, ownPage, otherModule, () => _engine.Pad.Back());
+        if (guideWait is not null) return guideWait.Value;
         if (!_takeoverLogged)
         {
             _takeoverLogged = true;
@@ -161,64 +181,29 @@ public sealed class PeakLadderScenario : IScenario
         {
             return 2000;
         }
-        switch (action.Kind)
-        {
-            case MatchActionKind.PadEnterMatch:
+        return await MatchActionExecutor.ExecuteAsync(
+            _engine, _matchPlay, action, obs, _log, "天梯巅峰赛", ct,
+            onEnterMatch: async () =>
+            {
                 // 国服主页：上×2 进页签行 → 左×4 饱和归位「推荐」→ 右×1 进「比赛」页签
-                // （卡行进入天梯巅峰赛由 Flow 的主页分支处理）
                 _log("[天梯巅峰赛] 主页导航：上×2 → 左×4 归位推荐页签 → 右进比赛页签", LogLevel.Info);
                 await _engine.Pad.DpadRepeat(PadDir.Up, 2);
                 await _engine.Pad.DpadRepeat(PadDir.Left, 4);
                 await _engine.Pad.Dpad(PadDir.Right);
-                break;
-            case MatchActionKind.PadConfirm:
-                // 国服键序（用户 2026-11-21）：① RT（页面所印提示键）→ ② A → ③ 后台鼠标点击。
-                // 比赛中的回放/中场小弹窗不掺进来——比赛里 RT 有游戏内含义，只按 A。
+                return null;
+            },
+            onConfirm: async () =>
+            {
+                // 国服键序：比赛中的弹窗只按 A；赛外走 RT → A → 鼠标
                 if (_matchSession.Active)
                 {
                     _log($"[天梯巅峰赛] 比赛中弹窗 A：{action.Target}", LogLevel.Info);
                     await _engine.Pad.Confirm();
-                    break;
+                    return null;
                 }
                 return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, action.Target,
                     "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, ct);
-            case MatchActionKind.PadUpConfirm:
-                _log($"[天梯巅峰赛] 弹窗上移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Up);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadDownConfirm:
-                _log($"[天梯巅峰赛] 弹窗下移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadStartPress:
-                _log($"[天梯巅峰赛] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Start();
-                break;
-            case MatchActionKind.PadXPress:
-                _log($"[天梯巅峰赛] {action.Target}", LogLevel.Info);
-                await _engine.Pad.X();
-                break;
-            case MatchActionKind.PadLoginNav:
-                // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
-                _log($"[天梯巅峰赛] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Dpad(PadDir.Right);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.GamepadBack:
-                _log($"[天梯巅峰赛] {action.Target}", LogLevel.Warn);
-                await _engine.Pad.Back();
-                break;
-            case MatchActionKind.MatchIdleTap:
-                // 比赛中挂机点击：按 A + 用户「挂机节奏」区间随机间隔（共享层 MatchPlay，拟人化）
-                return await _matchPlay.IdleTapAsync(ct);
-            case MatchActionKind.PadMoveRight:
-                await _engine.Pad.Dpad(PadDir.Right);
-                break;
-        }
-        return action.WaitMs;
+            });
     }
 
     // ---------------- 菜单侧状态机 ----------------

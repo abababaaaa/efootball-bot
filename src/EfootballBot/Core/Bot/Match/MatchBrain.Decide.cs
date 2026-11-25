@@ -44,31 +44,30 @@ public static partial class MatchBrain
                 // 焦点异常，按 B 清一次盖层（主菜单 B 最坏情况是弹退出确认窗 → HasConfirm 上移+确认
                 // 退出 → 标题画面 X 重进，仍可自愈），此后每 5 轮一次——好过静默死等。
                 if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 2400, "主菜单导航失效，B 清盖层重试");
+                    return PeriodicBackAction(screenStreak, NavEscapeStreak, "主菜单导航失效，B 清盖层重试");
                 return new MatchAction(MatchActionKind.PadEnterMatch,
                     screenStreak >= StuckStreak ? 5000 : 3000, "主菜单→比赛卡片");
             }
             case MatchScreen.MatchHub:
             {
-                // 右移选中「我的联赛」磁贴：进入比赛页后默认焦点在最左卡（新 UI 2026-10-21 实拍：
-                // 卡排 锦标赛/活动/eFootball™联赛/我的联赛）。
-                // 焦点确认认「我的联赛」词、y 不限——新 UI 没有旧版预览区（旧判据 y<0.6 恒假会
-                // 无限右移卡死）：未聚焦时该卡被屏幕右缘裁掉只读出碎片（我/自），聚焦后卡排
-                // 滚入、标签完整可读。误读提前按 A 的最坏情况是进错卡详情页，其分类不再是
-                // MatchHub，B 逃生自愈。焦点词整排漏读时 ≥NavEscapeStreak 按 B 回主菜单重导航。
+                // 右移选中「我的联赛」磁贴：进入比赛页后默认焦点在最左卡。
+                // ★ v8.2.0 修复（用户 2026-11-23 实机）：旧逻辑拿「标题词可读」当焦点确认——
+                // 但卡排滚动后标题可见、焦点仍停在锦标赛卡上时按 A 会误进锦标赛。改为以
+                // 焦点白框为准（frame 可用时）；白框明确在目标卡才按 A，明确在别卡则右移，
+                // 白框读不出（闪烁暗相位）才退回标题词判据。frame 不可用（纯函数单测）时
+                // 保持旧标题词判据，不改变无像素场景的行为。
                 if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 2400, "比赛页导航失效，B 回主菜单重导航");
-                bool focused = ocr.Lines.Any(l => l.Text.Contains("我的联赛"));
+                    return PeriodicBackAction(screenStreak, NavEscapeStreak, "比赛页导航失效，B 回主菜单重导航");
+
+                bool? frameFocused = frame is not null
+                    ? HubTileLocator.IsFocusedOnTarget(ocr, frame, "我的联赛")
+                    : null;
+                bool focused = frameFocused ?? ocr.Lines.Any(l => l.Text.Contains("我的联赛"));
                 if (focused)
                     return new MatchAction(MatchActionKind.PadConfirm,
                         screenStreak >= StuckStreak ? 5000 : 2500, "比赛页→我的联赛");
-                // 焦点词读不到就一直右移 → 到最右也不换动作，只有 20 轮后的 B 逃生兜着，
-                // 用户看到的是「比赛页来回晃、永远不开赛」（识别走查 2026-11-18 的主要僵局之一）：
-                // 新 UI 未聚焦时磁贴标签被右缘裁成碎片（我/自），OCR 读不出整词。
-                // 连续 6 轮（≈10s）仍读不到 → 按 A 试进当前焦点卡；进错板块的分类不会是
-                // MatchHub，B 逃生自愈，最坏是绕一次，好过无限右移。
-                if (screenStreak >= MatchHubFocusBlindStreak)
-                    return new MatchAction(MatchActionKind.PadConfirm, 2500, "比赛页焦点词读不到，按 A 试进当前卡");
+                // 焦点不在目标卡 → 继续右移。删掉旧的「读不到词就按 A 试进当前卡」兜底：
+                // 那正是误入第一张锦标赛卡的根源；改为到 NavEscapeStreak 走上面的周期 B 重导航。
                 return new MatchAction(MatchActionKind.PadMoveRight,
                     screenStreak >= StuckStreak ? 5000 : 1500, "比赛页右移→我的联赛");
             }
@@ -76,7 +75,7 @@ public static partial class MatchBrain
             {
                 // 物品列表：A 选中当前焦点行；多轮无效（≥NavEscapeStreak）B 退出由购买状态机重导航
                 if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 2400, "物品列表多轮无进展，B 退出重进");
+                    return PeriodicBackAction(screenStreak, NavEscapeStreak, "物品列表多轮无进展，B 退出重进");
                 return new MatchAction(MatchActionKind.PadConfirm,
                     screenStreak >= StuckStreak ? 5000 : 2500, "物品列表焦点行");
             }
@@ -91,7 +90,7 @@ public static partial class MatchBrain
                 // 超过退避轮数只放慢不停手：弹窗链的第 9+ 页仍需要 A 推进（见 StuckStreak 注释）。
                 // 到 ConfirmEscapeStreak 仍无进展（A 永不生效的 RT 型页）：B 退出该页自愈。
                 if (screenStreak >= ConfirmEscapeStreak && (screenStreak - ConfirmEscapeStreak) % 5 == 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 2400, "弹窗久按无效，B 逃生");
+                    return PeriodicBackAction(screenStreak, ConfirmEscapeStreak, "弹窗久按无效，B 逃生");
                 bool slow = screenStreak >= StuckStreak;
                 // 弹窗按键规则（用户 2026-11-10）：单按钮直接 A；多按钮看白底高光那枚是不是
                 // 确认/进行/OK/下一步 这类推进键，是 → 直接 A，不是 → 按上下关系挪一格再 A。
@@ -121,10 +120,39 @@ public static partial class MatchBrain
             }
             case MatchScreen.LeaguePage:
             {
+                // v8.0.16 双保险：共享分类已把周活动/合约页排除出 LeaguePage，但万一有
+                // 其它模块页仍被判进来，这些页底栏也印「进入/开始/继续」，直接按 A 会误进活动。
+                // ★v8.0.16.1 放宽（用户确认「真联赛子页只印继续/进入时该按 A」）：
+                //   旧版要求必须读到联赛词才推进，把只印「继续」的联赛子页也挡成 Wait→B；
+                //   现改为「证据拦截」——只有读到其它模块的证据词（周活动胶囊/赛事等级/
+                //   Team Effort/合约页专有词/锦标赛词）才拦，其余照旧按 A 推进。
+                // ★放行词仍含类别选择页（v8.0.9 修的「对阵AI类别」卡死），且类别词优先于
+                //   证据词（「对阵AI类别」同时含胶囊词「对阵AI」）。
+                bool leagueContext =
+                    ocr.ContainsJoined("我的联赛") || ocr.ContainsJoined("前往比赛") ||
+                    ocr.ContainsJoined("下个赛季") || ocr.ContainsJoined("赛程表") ||
+                    ocr.ContainsJoined("比赛记录") || ocr.ContainsJoined("排名") ||
+                    ocr.ContainsJoined("兑换积分") || ocr.ContainsJoined("赛季纪") ||
+                    ocr.ContainsJoined("对阵AI类别") || ocr.ContainsJoined("对阵玩家类别") ||
+                    ocr.ContainsJoined("AI类别") || ocr.ContainsJoined("玩家类别") ||
+                    // 联赛流程专属的强推进词：周活动卡片页底栏用的是「进入/开始/继续」，
+                    // 这些词不放行；但「下一步」是联赛起始/结算页的历史契约（见
+                    // MyLeagueBrainTests.Decide_LeaguePage_NextStep_Confirms），必须保留。
+                    ocr.ContainsJoined("下一步") || ocr.ContainsJoined("开始比赛") ||
+                    ocr.ContainsJoined("开赛") || ocr.ContainsJoined("进入比赛");
+                if (!leagueContext && HasOtherModuleEvidence(ocr))
+                    return screenStreak >= StuckStreak
+                        ? new MatchAction(MatchActionKind.GamepadBack, 3000, "其它模块证据页，B 返回自愈")
+                        : MatchAction.Wait(2500);
                 // 「前往比赛」= 联赛主页主按钮；「下个赛季」= 赛季结束替换词（实机 next_season：
                 // 前往比赛位置变为"下个赛季"，另有"前往下个赛季"，含"下个赛季"即覆盖）
+                // 「对阵AI类别/对阵玩家类别」= eFootball™联赛类别选择页（实机 2026-11-22：
+                // 我的联赛从比赛页按 A 进到该页后，OCR 只有「eFootball™联赛|对阵AI类别」，
+                // 旧词表无匹配 → 一直 Wait 卡死。本模块无前置 Brain，此页落到 LeaguePage，
+                // 补上类别词即可按 A 进入；AI天梯有自己的 AiLadderBrain 先认，不受此影响。）
                 var go = FindLine(ocr, "下一步", "开始比赛", "开赛", "继续", "前往比赛",
-                    "进入比赛", "下个赛季", "开始");
+                    "进入比赛", "下个赛季", "开始",
+                    "对阵AI类别", "对阵玩家类别", "AI类别", "玩家类别");
                 if (go is not null)
                     return new MatchAction(MatchActionKind.PadConfirm, 2500, go);
                 // 关键词里没有、但底栏确实印着一枚推进键（新版换了文案/整行被并读成本页
@@ -188,7 +216,12 @@ public static partial class MatchBrain
             case MatchScreen.PurchaseDialog:
             {
                 // 购买弹窗：焦点默认在「取消」→ 上移一格点上方带数字（积分价）的确认按钮。
-                // 上移+A 是唯一买法，退避只放慢不停手
+                // 上移+A 是买法；上移与 A 之间需留延时让游戏刷新焦点（见各模块 PadUpConfirm 执行）。
+                // 连续 ConfirmEscapeStreak 轮仍停在弹窗（上移+A 也不生效，焦点可能不在取消上）→
+                // B 关掉弹窗让购买状态机重新走一遍，别死在该页（2026-11-23 用户实机「覆盖弹窗只
+                // 按到取消」的兜底：即使判断错了也要能退出，而不是无限重按）。
+                if (screenStreak >= ConfirmEscapeStreak && (screenStreak - ConfirmEscapeStreak) % 5 == 0)
+                    return PeriodicBackAction(screenStreak, ConfirmEscapeStreak, "购买弹窗久按无效，B 关掉重来");
                 return new MatchAction(MatchActionKind.PadUpConfirm,
                     screenStreak >= StuckStreak ? 5000 : 2500, "购买确认（上移→数字按钮）");
             }
@@ -197,7 +230,7 @@ public static partial class MatchBrain
                 // 积分页：进入「我的联赛物品」（右选项）。导航序列由场景层校验重试；
                 // ≥NavEscapeStreak 按 B 回退重新导航（此前永久等待）
                 if (screenStreak >= NavEscapeStreak && (screenStreak - NavEscapeStreak) % 5 == 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 2400, "积分页导航失效，B 回退重导航");
+                    return PeriodicBackAction(screenStreak, NavEscapeStreak, "积分页导航失效，B 回退重导航");
                 return new MatchAction(MatchActionKind.PadConfirm,
                     screenStreak >= StuckStreak ? 5000 : 2500, "积分页→我的联赛物品");
             }
@@ -280,7 +313,7 @@ public static partial class MatchBrain
                 // 焦点（白底高亮）——直接 A 推进领奖，绝不上移（左下角 Y=详情，无关）。
                 // 退避只放慢不停手（弹窗链页通用）；久按无效周期 B 逃生（A 被吞时自愈）
                 if (screenStreak >= ConfirmEscapeStreak && (screenStreak - ConfirmEscapeStreak) % 5 == 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 2400, "活动奖励页久按无效，B 逃生");
+                    return PeriodicBackAction(screenStreak, ConfirmEscapeStreak, "活动奖励页久按无效，B 逃生");
                 return new MatchAction(MatchActionKind.PadConfirm,
                     screenStreak >= StuckStreak ? 5000 : 2200, "活动奖励页→A 继续");
             }
@@ -342,10 +375,59 @@ public static partial class MatchBrain
                     screenStreak < escapeAt && ocr.Words.Count > 0)
                     return new MatchAction(MatchActionKind.PadConfirm, 2000, "认不出的界面：按 A 试探");
                 if (screenStreak >= escapeAt && ocr.Words.Count > 0)
-                    return new MatchAction(MatchActionKind.GamepadBack, 3000, "B 键逃生");
+                    // 用周期换招替代裸 B：非比赛 6 轮起、比赛上下文 30 轮起，每 2 轮一次 B，
+                    // 第 3 次（非比赛约 10 轮）升级为「上→A→B」。水印/加载页已在前面 return，不会误触发。
+                    return PeriodicBackAction(screenStreak, escapeAt, "B 键逃生", period: 2);
                 return MatchAction.Wait(4000);
             }
         }
+    }
+
+    /// <summary>
+    /// 周期性 B 逃生动作：每 Period(5) 轮按一次 B；连续按 B 失败（界面/分类一直没变，
+    /// 表现为 screenStreak 持续增长）达到 BackFailEscalations 次后，升级为「上 → A → B」换招
+    /// ——先上移把焦点从「取消」移到确认键（直接 A 会落在取消上继续死循环），再 A 确认、最后 B 退出。
+    /// 之后每 3 次 B 再换一次，避免一直重复换招。
+    /// 纯函数、复用 screenStreak，不引入 OCR 复核开销。
+    /// </summary>
+    /// <summary>
+    /// 其它模块页的 OCR 证据（v8.0.16.1）：这些词只在周活动/合约/锦标赛板块出现，
+    /// 联赛流程任何页面都不带 —— 判成 LeaguePage 却读到这些词，说明是别的模块页误判进来，
+    /// 底栏「进入/开始/继续」不能盲按 A（周活动卡片页就是这样误进活动的）。
+    /// 词源：周活动（MyLeagueScenario eventFeature / WeeklyBrain 特征）、
+    /// 合约页（Classify v8.0.16 排除词）、锦标赛（MyLeagueScenario tournamentPage）。
+    /// 注意「对阵AI类别/对阵玩家类别」是联赛类别页，调用方必须先判联赛词再看本方法。
+    /// </summary>
+    /// <summary>
+    /// 周活动板块页的 OCR 证据（胶囊词 + 活动特征词，排除联赛类别页）。
+    /// 被 HasOtherModuleEvidence（联赛门控）与 CollectTrainingFrame（训练帧识别）共用，
+    /// 词表只此一份——这些词是历次实机调优的结果，复制多处会漏改（v8.1.1 审查发现）。
+    /// 注意「对阵AI类别/对阵玩家类别」是联赛类别页，必须先排除。
+    /// </summary>
+    internal static bool HasWeeklyEvidence(OcrResult ocr)
+        => (ocr.ContainsJoined("对阵AI") && !ocr.ContainsJoined("对阵AI类别"))
+           || (ocr.ContainsJoined("对阵玩家") && !ocr.ContainsJoined("对阵玩家类别"))
+           || ocr.ContainsJoined("赛事等级") || ocr.ContainsJoined("Team Effort")
+           || ocr.ContainsJoined("巡回活动") || ocr.ContainsJoined("结束倒数");
+
+    private static bool HasOtherModuleEvidence(OcrResult ocr)
+        => HasWeeklyEvidence(ocr)
+           || ocr.ContainsJoined("特殊球员名单") || ocr.ContainsJoined("组合包")
+           // 锦标赛板块页（实机 2026-11-23 用户截图）：标题「锦标赛」+ 卡片
+           // 「Championship Club Event / 已结束 / Round 3 Ranking Event」+ 卡上「查看」，
+           // 页面根本没有「淘汰赛/小组赛」词 —— 只靠赛事阶段词会漏，必须认标题词。
+           // 「锦标赛」已覆盖「自定义锦标赛/参加锦标赛」；英文卡名兜住标题 OCR 漏读。
+           || ocr.ContainsJoined("锦标赛")
+           || ocr.ContainsJoined("Championship")
+           || ocr.ContainsJoined("淘汰赛") || ocr.ContainsJoined("小组赛");
+
+    private static MatchAction PeriodicBackAction(int screenStreak, int threshold, string backTarget, int period = 5)
+    {
+        int k = (screenStreak - threshold) / Math.Max(1, period); // 第几次周期 B（0 起）
+        bool escalate = k >= BackFailEscalations - 1 && (k - (BackFailEscalations - 1)) % BackFailEscalations == 0;
+        return escalate
+            ? new MatchAction(MatchActionKind.GamepadBackAfterConfirm, 3000, backTarget + "（B 多次无效，上→A→B 换招）")
+            : new MatchAction(MatchActionKind.GamepadBack, 2400, backTarget);
     }
 
     /// <summary>

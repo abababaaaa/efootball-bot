@@ -121,9 +121,12 @@ internal sealed class MatchSessionTracker
     /// <summary>本轮是否因为「本场才刚开始」把一次菜单类关场拦下了（供 MatchPlay 打日志：
     /// 用户在日志里能看到「判到 MatchHub 但只走了 00:21，按误判处理」而不是凭空少一场）。</summary>
     internal bool MenuCloseSuppressed { get; private set; }
-    /// <summary>最近一场用时的 mm:ss 文本（无记录时 --:--）。</summary>
-    internal string LastDurationText =>
-        LastDuration is TimeSpan d ? $"{d.Minutes:00}:{d.Seconds:00}" : "--:--";
+    /// <summary>最近一场用时的 mm:ss 文本（无记录时 --:--）。
+    /// 负时长（系统时钟被校正/回拨导致 now &lt; started）显示为「时长异常」，
+    /// 不再输出 "-4 分钟"这种让人以为踢了负场、实为记账时钟问题的误导文字。</summary>
+    internal string LastDurationText => LastDuration is TimeSpan d
+        ? (d < TimeSpan.Zero ? "时长异常(时钟回拨)" : $"{(int)d.TotalMinutes:00}:{d.Seconds:00}")
+        : "--:--";
     /// <summary>观察一轮；返回 true 表示本轮判定一场比赛结束。
     /// isHome：LeaguePage 是否为真主页（OCR 含前往比赛/下个赛季）——开场过渡帧会被
     /// YOLO btn_back 误判 LeaguePage（实机 2026-10-10 21:23 开场 2 秒误关场次），

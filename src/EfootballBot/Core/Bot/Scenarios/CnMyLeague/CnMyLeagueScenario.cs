@@ -59,6 +59,8 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
     public override string Name => "我的联赛（国服）";
     /// <summary>赛后活动任务页仅国际服独享：国服不识别不接管。</summary>
     protected override bool SupportsPostMatchActivity => false;
+    /// <summary>国服比赛页导航由 InterceptAsync 自行处理（含 CnAdvance 键序），不走国际服的 OCR 磁贴定位。</summary>
+    protected override bool SupportsOcrTileNav => false;
     /// <summary>只打关键比赛（杀进程跳过普通比赛）仅国际服：国服比赛内有「跳过比赛」菜单项，
     /// 不需要重启游戏。</summary>
     protected override bool SupportsSkipNormalMatch => false;

@@ -132,6 +132,10 @@ public sealed class YoloConfig
 
     /// <summary>NMS IoU 阈值（仅非端到端导出格式使用）。</summary>
     public double NmsIou { get; set; } = 0.45;
+
+    /// <summary>共享层界面判定的最低置信度（MatchBrain.MinScore）。换模型后可微调；
+    /// 默认 0.45 与历史行为一致。调低=更容易认出目标但误报增多，调高=更保守。</summary>
+    public double ClassifyScore { get; set; } = 0.45;
 }
 
 /// <summary>
@@ -163,6 +167,19 @@ public sealed class FrameDumpConfig
 
     /// <summary>存帧间隔毫秒（≥2000，过密会产生大量近似重复帧）。</summary>
     public int IntervalMs { get; set; } = 10000;
+}
+
+/// <summary>
+/// 可疑帧自动收集（半自动学习闭环的输入）：判定卡住/低置信度时把当前画面存到
+/// data\suspicious\日期\，供用户抽查后补进 OcrText 替换表/探针。只存图，不改任何判定行为。
+/// </summary>
+public sealed class LearningConfig
+{
+    /// <summary>是否自动收集可疑帧。默认关——需要时在「工具→开发者」主动开启；只写图片、不影响挂机动作。</summary>
+    public bool CollectSuspicious { get; set; } = false;
+
+    /// <summary>同一类问题的转储节流秒数，防同一帧刷屏。</summary>
+    public int ThrottleSeconds { get; set; } = 60;
 }
 
 /// <summary>全局热键配置（低级钩子实现：支持键盘任意键与鼠标键，可不带修饰键）。
@@ -676,6 +693,9 @@ public sealed class AppConfig
 
     // —— 训练数据采集 ——
     public FrameDumpConfig FrameDump { get; set; } = new();
+
+    // —— 可疑帧自动收集（半自动学习的输入；只存图不改判定）——
+    public LearningConfig Learning { get; set; } = new();
 
     // —— 设置面板：结束行为 ——
     public bool AutoCloseWhenDone { get; set; } = false;

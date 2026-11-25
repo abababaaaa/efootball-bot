@@ -638,11 +638,12 @@ public class MyLeagueBrainTests
         // 周期性（每 5 轮）按 B 逃生，其余轮继续导航
         Assert.Equal(MatchActionKind.PadEnterMatch,
             MatchBrain.Decide(MatchScreen.MainMenu, OcrResult.Empty, MatchBrain.StuckStreak).Kind);
-        // 比赛页例外（识别走查 2026-11-18）：焦点词读不到时右移是空转，连续
-        // MatchHubFocusBlindStreak 轮还读不到就按 A 试进当前卡，别等到 NavEscapeStreak
+        // 比赛页（v8.2.0 修复）：焦点词读不到时右移换焦点，绝不盲按 A（旧逻辑按 A 会误进
+        // 锦标赛卡——标题可见≠光标选中，实机 2026-11-23 日志印证）。到 NavEscapeStreak
+        // 才走周期性 B 重导航。
         Assert.Equal(MatchActionKind.PadMoveRight,
             MatchBrain.Decide(MatchScreen.MatchHub, OcrResult.Empty, MatchBrain.MatchHubFocusBlindStreak - 1).Kind);
-        Assert.Equal(MatchActionKind.PadConfirm,
+        Assert.Equal(MatchActionKind.PadMoveRight,
             MatchBrain.Decide(MatchScreen.MatchHub, OcrResult.Empty, MatchBrain.StuckStreak).Kind);
         Assert.Equal(MatchActionKind.PadConfirm,
             MatchBrain.Decide(MatchScreen.ItemList, OcrResult.Empty, MatchBrain.StuckStreak).Kind);

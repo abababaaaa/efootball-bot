@@ -41,19 +41,26 @@ public static class PadSlotWitness
     }
 
     /// <summary>
-    /// 一次性探测：先读基线，再打微码并读回（保持 <see cref="WitnessDurationMs"/>），
-    /// 最后把摇杆打回中位。<paramref name="stomp"/> 为"打微码"、<paramref name="clear"/> 为"打回中位"。
+    /// 一次性探测：先读基线，再打微码并多次轮询读回（40ms 间隔，最长 480ms），
+    /// 一旦确认在 slot0 立即返回，最后把摇杆打回中位。
     /// </summary>
     public static WitnessResult Witness(short code, Action<short, short> stomp, Action clear)
     {
         var before = PadBackendProbe.TryRead(0);
-        WitnessResult result;
+        WitnessResult result = new(before is not null, false, null);
         try
         {
             stomp(code, code);
-            Thread.Sleep(WitnessDurationMs);
-            var during = PadBackendProbe.TryRead(0);
-            result = new WitnessResult(before is not null, during is not null && IsVirtualPadInSlot0(during, code), during);
+            int waited = 0;
+            while (waited < WitnessMaxWaitMs)
+            {
+                Thread.Sleep(WitnessPollIntervalMs);
+                waited += WitnessPollIntervalMs;
+                var during = PadBackendProbe.TryRead(0);
+                bool inSlot0 = during is not null && IsVirtualPadInSlot0(during, code);
+                result = new WitnessResult(before is not null || during is not null, inSlot0, during);
+                if (inSlot0) break;
+            }
         }
         catch
         {
@@ -66,8 +73,27 @@ public static class PadSlotWitness
         return result;
     }
 
-    /// <summary>微码保持时长：够 2 个轮询周期（系统 XInput 约 4~8ms 刷新一次状态）。</summary>
+    /// <summary>单轮微码保持基准时长（保留供诊断/兼容性参考）。</summary>
     public const int WitnessDurationMs = 120;
+    /// <summary>微码轮询步长（ms）。</summary>
+    public const int WitnessPollIntervalMs = 40;
+    /// <summary>单次探测最长等待微码回读窗口（ms）。</summary>
+    public const int WitnessMaxWaitMs = 480;
+
+    /// <summary>纯逻辑：slot0 实际空闲但虚拟手柄尚未落入时，允许断开重连再试一次。</summary>
+    public static bool ShouldRetryEmptySlot0(WitnessResult r, int attempt)
+        => !r.VirtualInSlot0 && r.Slot0State is null && attempt < 1;
+
+    /// <summary>
+    /// 纯逻辑：等待禁用真实手柄生效时何时可结束轮询。
+    /// slot0 空闲立即结束；若设备节点全已禁用且宽限满 6s（父设备/驱动注销窗口）也可结束，
+    /// 不得在物理节点刚变为禁用、slot0 尚未释放的那一毫秒提前跳出。
+    /// </summary>
+    public static bool ShouldExitHideWait(bool slot0Occupied, int enabledPhysicalNodes, long elapsedSinceNodesZeroMs)
+    {
+        if (!slot0Occupied) return true;
+        return enabledPhysicalNodes == 0 && elapsedSinceNodesZeroMs >= 6000;
+    }
 
     public readonly record struct WitnessResult(bool Slot0Occupied, bool VirtualInSlot0,
         PadBackendProbe.XINPUT_STATE? Slot0State);
@@ -112,44 +138,84 @@ public static class PadSlotWitness
             return (YieldOutcome.NoPadMode, "");
 
         var r1 = WitnessPad(pad);
+        if (!r1.VirtualInSlot0)
+        {
+            // 上电后系统/驱动可能还在枚举新槽位，宽限 400ms 复核一次避免误判拆线重连
+            await Task.Delay(400);
+            r1 = WitnessPad(pad);
+        }
         log(DescribeWitness(r1, VigemPad.IdentityCode), LogLevel.Info);
         if (r1.VirtualInSlot0) return (YieldOutcome.Ready, "");
 
         // 玩家 1 不是我们：禁用真实手柄后重进虚拟手柄（重连才会重新参与槽位分配）
         log("真实手柄仍占着玩家 1，正在禁用它以便虚拟手柄抢回玩家 1（停止挂机时自动恢复）…",
             LogLevel.Warn);
-        bool physicalPresent = HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count > 0;
-        if (physicalPresent)
+        var activePhysical = HidDeviceEnumerator.FindConnectedPhysicalGamepadDevNodes();
+        if (activePhysical.Count == 0 && PadBackendProbe.IsSlot0Occupied())
+            activePhysical = HidDeviceEnumerator.FindPhysicalGamepadDevNodes();
+        if (activePhysical.Count > 0)
         {
-            PhysicalPadControl.RequestPadHide();
-            // 退出条件按「目标达成」判：slot0 空闲就说明真实手柄已经让位。
-            // 旧实现每 500ms 全量枚举一次 HID 节点（SetupAPI + 祖先链，几十毫秒），
-            // 而且禁用升级走父设备时子节点状态不会消失——既慢又永远等满 20 秒。
-            // 现在先读 XInput 槽位（微秒级），只有槽位仍被占时才回头枚举节点。
-            var deadline = DateTime.Now.AddSeconds(20);
-            while (DateTime.Now < deadline)
+            var (inProcess, _, hideMsg) = await Task.Run(PhysicalPadControl.HidePhysicalPads);
+            if (inProcess)
             {
-                if (!PadBackendProbe.IsSlot0Occupied()) break;
-                if (HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count == 0) break;
-                await Task.Delay(250);
+                log($"[pad-hide] {hideMsg}", LogLevel.Info);
+                var settleDeadline = Environment.TickCount64 + 2000;
+                while (PadBackendProbe.IsSlot0Occupied() && Environment.TickCount64 < settleDeadline)
+                    await Task.Delay(200);
+            }
+            else
+            {
+                var sw = global::System.Diagnostics.Stopwatch.StartNew();
+                long? nodesZeroAt = null;
+                while (sw.ElapsedMilliseconds < 20_000)
+                {
+                    bool slot0 = PadBackendProbe.IsSlot0Occupied();
+                    int enabled = HidDeviceEnumerator.FindPhysicalGamepadDevNodes().Count;
+                    if (enabled == 0) nodesZeroAt ??= sw.ElapsedMilliseconds;
+                    else nodesZeroAt = null;
+                    long zeroMs = nodesZeroAt is { } t ? sw.ElapsedMilliseconds - t : 0;
+                    if (ShouldExitHideWait(slot0, enabled, zeroMs)) break;
+                    await Task.Delay(250);
+                }
             }
         }
 
-        // 重进：先断开释放自己的槽位，再按"允许 slot0 被占"的宽松模式连回来
-        try { pad.Disconnect(); } catch { }
-        try
+        async Task<WitnessResult> ReconnectAndWitnessAsync()
         {
-            if (pad is VigemPad vg) vg.Connect(allowSlot0Occupied: true);
-            else pad.Connect();
-        }
-        catch (Exception ex)
-        {
-            log($"重新连接虚拟手柄失败：{ex.Message}", LogLevel.Error);
+            try { pad.Disconnect(); } catch { }
+            // 等旧虚拟手柄从内核/XInput 彻底卸载，再按宽松模式重建抢槽
+            await Task.Delay(500);
+            var freeDeadline = Environment.TickCount64 + 2500;
+            while (PadBackendProbe.IsSlot0Occupied() && Environment.TickCount64 < freeDeadline)
+                await Task.Delay(100);
+
+            try
+            {
+                if (pad is VigemPad vg) vg.Connect(allowSlot0Occupied: true);
+                else pad.Connect();
+            }
+            catch (Exception ex)
+            {
+                log($"重新连接虚拟手柄失败：{ex.Message}", LogLevel.Error);
+            }
+
+            WitnessResult latest = default;
+            for (int probe = 0; probe < 3; probe++)
+            {
+                await Task.Delay(400);
+                latest = WitnessPad(pad);
+                if (latest.VirtualInSlot0) return latest;
+            }
+            return latest;
         }
 
-        // 重连后给系统一点时间把设备重新挂到槽位上（ViGEm 设备热插拔是异步的）
-        await Task.Delay(300);
-        var r2 = WitnessPad(pad);
+        var r2 = await ReconnectAndWitnessAsync();
+        if (ShouldRetryEmptySlot0(r2, attempt: 0))
+        {
+            log("检测到玩家 1 实际空闲（虚拟手柄落入后序槽位），正在重新分配玩家 1…", LogLevel.Warn);
+            await Task.Delay(500);
+            r2 = await ReconnectAndWitnessAsync();
+        }
         log(DescribeWitness(r2, VigemPad.IdentityCode), LogLevel.Info);
         if (r2.VirtualInSlot0)
         {

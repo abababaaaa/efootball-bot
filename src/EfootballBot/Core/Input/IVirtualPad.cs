@@ -31,27 +31,36 @@ public interface IVirtualPad : IDisposable
     /// <summary>全键释放并提交一次空报告。</summary>
     void ResetAll();
 
-    async Task TapAsync(PadButton button, int holdMs, int postDelayMs)
+    Task TapAsync(PadButton button, int holdMs, int postDelayMs)
+        => TapAsync(button, holdMs, postDelayMs, CancellationToken.None);
+
+    async Task TapAsync(PadButton button, int holdMs, int postDelayMs, CancellationToken ct)
     {
         SetButton(button, true);
-        await Task.Delay(holdMs);
-        SetButton(button, false);
-        await Task.Delay(postDelayMs);
+        try { await Task.Delay(holdMs, ct); }
+        finally { SetButton(button, false); }
+        await Task.Delay(postDelayMs, ct);
     }
 
-    Task TapAsync(PadButton button) => TapAsync(button, 120, 180);
+    Task TapAsync(PadButton button) => TapAsync(button, 120, 180, CancellationToken.None);
 
-    async Task TapDpadAsync(PadDir dir, int holdMs, int postDelayMs)
+    Task TapDpadAsync(PadDir dir, int holdMs, int postDelayMs)
+        => TapDpadAsync(dir, holdMs, postDelayMs, CancellationToken.None);
+
+    async Task TapDpadAsync(PadDir dir, int holdMs, int postDelayMs, CancellationToken ct)
     {
         SetDpad(dir);
-        await Task.Delay(holdMs);
-        SetDpad(null);
-        await Task.Delay(postDelayMs);
+        try { await Task.Delay(holdMs, ct); }
+        finally { SetDpad(null); }
+        await Task.Delay(postDelayMs, ct);
     }
 
-    Task TapDpadAsync(PadDir dir) => TapDpadAsync(dir, 120, 200);
+    Task TapDpadAsync(PadDir dir) => TapDpadAsync(dir, 120, 200, CancellationToken.None);
 
-    async Task FlickLeftStickAsync(PadDir dir, int holdMs, int postDelayMs)
+    Task FlickLeftStickAsync(PadDir dir, int holdMs, int postDelayMs)
+        => FlickLeftStickAsync(dir, holdMs, postDelayMs, CancellationToken.None);
+
+    async Task FlickLeftStickAsync(PadDir dir, int holdMs, int postDelayMs, CancellationToken ct)
     {
         const short v = 26000;
         (short x, short y) = dir switch
@@ -63,14 +72,17 @@ public interface IVirtualPad : IDisposable
             _ => ((short)0, (short)0),
         };
         SetLeftStick(x, y);
-        await Task.Delay(holdMs);
-        SetLeftStick(0, 0);
-        await Task.Delay(postDelayMs);
+        try { await Task.Delay(holdMs, ct); }
+        finally { SetLeftStick(0, 0); }
+        await Task.Delay(postDelayMs, ct);
     }
 
-    Task FlickLeftStickAsync(PadDir dir) => FlickLeftStickAsync(dir, 160, 200);
+    Task FlickLeftStickAsync(PadDir dir) => FlickLeftStickAsync(dir, 160, 200, CancellationToken.None);
 
-    async Task FlickRightStickAsync(PadDir dir, int holdMs, int postDelayMs)
+    Task FlickRightStickAsync(PadDir dir, int holdMs, int postDelayMs)
+        => FlickRightStickAsync(dir, holdMs, postDelayMs, CancellationToken.None);
+
+    async Task FlickRightStickAsync(PadDir dir, int holdMs, int postDelayMs, CancellationToken ct)
     {
         const short v = 26000;
         (short x, short y) = dir switch
@@ -82,10 +94,10 @@ public interface IVirtualPad : IDisposable
             _ => ((short)0, (short)0),
         };
         SetRightStick(x, y);
-        await Task.Delay(holdMs);
-        SetRightStick(0, 0);
-        await Task.Delay(postDelayMs);
+        try { await Task.Delay(holdMs, ct); }
+        finally { SetRightStick(0, 0); }
+        await Task.Delay(postDelayMs, ct);
     }
 
-    Task FlickRightStickAsync(PadDir dir) => FlickRightStickAsync(dir, 160, 200);
+    Task FlickRightStickAsync(PadDir dir) => FlickRightStickAsync(dir, 160, 200, CancellationToken.None);
 }

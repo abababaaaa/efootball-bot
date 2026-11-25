@@ -53,8 +53,10 @@ public static class PopupBrain
     /// <summary>两枚按钮都偏亮/偏暗时，靠亮度差判聚焦（差值够大才算数）。</summary>
     public const int FocusedButtonLumaGap = 40;
     /// <summary>推进键词素（规范化 + 去尾部数字后整词比较）。</summary>
+    // 「覆盖」：购买道具替换已有物品确认弹窗（"要覆盖目前的物品吗？"覆盖/取消），
+    // 2026-11-23 实机——焦点默认在下方蓝色「取消」，需上移到上方白底「覆盖」才是确认。
     private static readonly string[] ConfirmWords =
-        { "确认", "確定", "确定", "下一步", "进行", "进入", "继续", "领取", "获取", "ok", "yes", "next", "confirm" };
+        { "确认", "確定", "确定", "下一步", "进行", "进入", "继续", "领取", "获取", "覆盖", "购买", "使用", "ok", "yes", "next", "confirm" };
     /// <summary>非推进键词素：命中这些一律视为「不该按的键」。</summary>
     private static readonly string[] CancelWords =
         { "取消", "返回", "关闭", "稍后", "否", "离开", "退出", "cancel", "back", "close", "no" };
@@ -93,6 +95,15 @@ public static class PopupBrain
     /// </summary>
     public static PopupAction Decide(FrameData? frame, OcrResult ocr, out string note)
     {
+        // 替换物品确认弹窗（用户 2026-11-23 实机）：标题「要覆盖目前的物品吗？」+「覆盖」/「取消」，
+        // 焦点默认在下方「取消」。实测按钮词经常只读出「取消」一枚（「覆盖」被并进标题或漏读），
+        // 于是旧逻辑走进「单按钮 → 直接 A」，A 正好点掉取消 —— 购买白做、下一轮又弹同一个窗。
+        // 这类弹窗版式固定（覆盖在上、取消在下），不靠按钮 OCR，只认标题里的「覆盖」→ 上×1 再 A。
+        if (IsReplaceDialog(ocr))
+        {
+            note = "替换物品确认弹窗（标题含「覆盖」）→ 上×1 → A";
+            return PopupAction.UpThenConfirm;
+        }
         if (frame is null)
         {
             // 没有像素帧就判不了「白底高光」：交回调用方的旧规则（有取消/关闭就先上移），
@@ -108,8 +119,13 @@ public static class PopupBrain
         }
         if (buttons.Count == 1)
         {
-            note = $"单按钮「{buttons[0].Label}」→ 直接 A";
-            return PopupAction.PressConfirm;
+            if (buttons[0].IsConfirm)
+            {
+                note = $"单按钮「{buttons[0].Label}」→ 直接 A";
+                return PopupAction.PressConfirm;
+            }
+            note = $"仅识别到非推进键「{buttons[0].Label}」（疑似双按钮漏读推进词），交由兜底策略处理";
+            return PopupAction.None;
         }
         var confirm = buttons.FirstOrDefault(b => b.IsConfirm);
         var focused = Focused(buttons);
@@ -126,13 +142,41 @@ public static class PopupBrain
         }
         if (confirm is null)
         {
-            note = $"高光在「{focused.Label}」但没有推进键（{Describe(buttons)}）→ 直接 A";
-            return PopupAction.PressConfirm;
+            note = $"高光在「{focused.Label}」且未识别到推进键（{Describe(buttons)}），交由兜底策略处理";
+            return PopupAction.None;
         }
         bool confirmBelow = confirm.CenterY > focused.CenterY;
         note = $"高光在「{focused.Label}」上，推进键「{confirm.Label}」在{(confirmBelow ? "下" : "上")}方" +
                $" → {(confirmBelow ? "下" : "上")}×1 → A（{Describe(buttons)}）";
         return confirmBelow ? PopupAction.DownThenConfirm : PopupAction.UpThenConfirm;
+    }
+
+    /// <summary>
+    /// 是不是「要覆盖目前的物品吗？」这类替换确认弹窗（购买道具时目标格已有同类物品）。
+    /// ★这是共享层判据，所有模块的 HasConfirm 都会走，所以必须收紧，否则别的模块页面上
+    /// 出现「覆盖范围：全部球员」这类说明文字就会被误判成替换弹窗、白按一次「上 + A」：
+    /// ① 词必须落在弹窗文字带内；② 同屏必须读到「取消」按钮词（替换弹窗一定有）；
+    /// ③ 词必须是这句标题的说法（含 目前/物品/吗）或按钮整词「覆盖」，单看「覆盖」二字不算。
+    /// 标题被整行合并读长（超过 TitleMaxChars）时这里会漏，但 Classify 的全文拼接判据
+    /// 「覆盖目前的物品 / 要覆盖」仍会把它判成 PurchaseDialog，双保险不丢。
+    /// </summary>
+    public static bool IsReplaceDialog(OcrResult ocr)
+    {
+        // 替换弹窗必带「取消」；没有就不是（也避免把普通说明页当弹窗）
+        if (!ocr.ContainsJoined("取消")) return false;
+        foreach (var w in ocr.MergedWords)
+        {
+            if (!InDialogBand(w)) continue;
+            string t = w.NormText;
+            if (t.Length == 0 || t.Length > TitleMaxChars) continue;
+            if (!t.Contains("覆盖", StringComparison.Ordinal)) continue;
+            if (t.Contains("目前", StringComparison.Ordinal) ||
+                t.Contains("物品", StringComparison.Ordinal) ||
+                t.Contains("吗", StringComparison.Ordinal) ||
+                t.Equals("覆盖", StringComparison.Ordinal))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>Buttons 的可读摘要（日志用）。</summary>

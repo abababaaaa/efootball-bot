@@ -4,6 +4,8 @@ using EfootballBot.Core.Capture;
 using EfootballBot.Core.Input;
 using EfootballBot.Core.Vision;
 using EfootballBot.Core.Bot.Match;
+using EfootballBot.Core.Bot.Scenarios.AiLadder;
+using EfootballBot.Core.Bot.Scenarios.PeakLadder;
 
 // ===========================================================================
 // 架构锁 · 模块层 Core/Bot/Scenarios（v7.2）
@@ -143,7 +145,11 @@ public sealed partial class WeeklyEventScenario : IScenario
         _engine = engine;
         _log = log;
         _matchPlay = new MatchPlay(engine, "周活动", log);
+        _homeGuide = new ReturnToHomeGuide("周活动", log, engine.DumpSuspiciousFrame);
     }
+
+    /// <summary>启动引导：停在其他模块页时先 B 收敛回主页。</summary>
+    private readonly ReturnToHomeGuide _homeGuide;
 
     public async Task<int> RunOnceAsync(CancellationToken ct)
     {
@@ -168,6 +174,25 @@ public sealed partial class WeeklyEventScenario : IScenario
                 MatchShared.LoginRecovery(_memory, now), pitch)
             : MatchScreen.Unknown;
         _memory.Record(ml, now);
+        // 启动引导：停在其他模块页（我的联赛/天梯/巅峰赛）时先 B 收敛回主页，
+        // 否则共享分类会把该页当"前往比赛"直接开赛，导致从别的模块页启动周活动到不了。
+        // ★双守卫：
+        // 1) 已处于比赛上下文或共用比赛流程（开赛页/比赛中/过场弹窗/终场）时不触发引导，立即放行清零；
+        // 2) LeaguePage 只有真的含我的联赛专有词（LooksLikeLeagueHome）才算我的联赛残留页，
+        //    避免把周活动点「前往比赛」后的纯 btn_back 过渡页（MatchBrain 兜底成 LeaguePage）误踢回主页。
+        bool inMatchFlow = matchContext || _matchSession.Active || ReturnToHomeGuide.IsSharedMatchFlow(ml);
+        bool myLeagueResidual = wk == WkScreen.None &&
+                                (ml is MatchScreen.PointsPage or MatchScreen.ItemList ||
+                                 (ml == MatchScreen.LeaguePage && MyLeagueBrain.LooksLikeLeagueHome(obs.Ocr)));
+        bool otherModule = !inMatchFlow &&
+                           (AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
+                            || PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None
+                            || myLeagueResidual);
+        bool ownPage = wk != WkScreen.None || inMatchFlow;
+        int? guideWait = await _homeGuide.StepAsync(obs.Frame,
+            ml == MatchScreen.MainMenu, ownPage, otherModule,
+            () => _engine.Pad.Back());
+        if (guideWait is not null) return guideWait.Value;
         if (!_takeoverLogged)
         {
             _takeoverLogged = true;
@@ -222,57 +247,7 @@ public sealed partial class WeeklyEventScenario : IScenario
         {
             return 2000;
         }
-        switch (action.Kind)
-        {
-            case MatchActionKind.PadEnterMatch:
-                // 主菜单进比赛卡：下×2（新 UI 进底部卡行，用户 2026-10-19 实测）→ 左×6 归位最左 → A
-                _log("[周活动] 主菜单导航：下×2→左×6→A 进比赛页", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadConfirm:
-                _log($"[周活动] 手柄 A：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadUpConfirm:
-                _log($"[周活动] 弹窗上移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Up);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadDownConfirm:
-                _log($"[周活动] 弹窗下移确认：{action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.PadStartPress:
-                _log($"[周活动] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Start();
-                break;
-            case MatchActionKind.PadXPress:
-                _log($"[周活动] {action.Target}", LogLevel.Info);
-                await _engine.Pad.X();
-                break;
-            case MatchActionKind.PadLoginNav:
-                // eFootball 2027 标题页登录序列：下→右→A（A 落在「登录」上，用户实机序列）
-                _log($"[周活动] {action.Target}", LogLevel.Info);
-                await _engine.Pad.Dpad(PadDir.Down);
-                await _engine.Pad.Dpad(PadDir.Right);
-                await _engine.Pad.Confirm();
-                break;
-            case MatchActionKind.GamepadBack:
-                _log($"[周活动] {action.Target}", LogLevel.Warn);
-                await _engine.Pad.Back();
-                break;
-            case MatchActionKind.MatchIdleTap:
-                // 比赛中挂机点击：按 A + 用户「挂机节奏」区间随机间隔（共享层 MatchPlay，拟人化）
-                return await _matchPlay.IdleTapAsync(ct);
-            case MatchActionKind.PadMoveRight:
-                await _engine.Pad.Dpad(PadDir.Right);
-                break;
-        }
-        return action.WaitMs;
+        return await MatchActionExecutor.ExecuteAsync(_engine, _matchPlay, action, obs, _log, "周活动", ct);
     }
 
     // ---------------- 菜单侧状态机 ----------------
@@ -465,11 +440,7 @@ public sealed partial class WeeklyEventScenario : IScenario
                         await _engine.Pad.Back();
                         return 2400;
                     }
-                    _log("[周活动] 主菜单导航：下×2→左×6→A 进比赛页", LogLevel.Info);
-                    await _engine.Pad.Dpad(PadDir.Down);
-                    await _engine.Pad.Dpad(PadDir.Down);
-                    await _engine.Pad.DpadRepeat(PadDir.Left, 6);
-                    await _engine.Pad.Confirm();
+                    await MatchActionExecutor.EnterMatchFromMainMenuAsync(_engine, obs, _log, "周活动");
                     return 3000;
                 }
                 if (ml == MatchScreen.MatchHub)
@@ -556,6 +527,14 @@ public sealed partial class WeeklyEventScenario : IScenario
                     return 600;
                 }
                 if (wk == WkScreen.EventsList) { SetPhase(WkPhase.Flow); return 800; }
+                // 单场活动/特殊活动从列表进入后不经过活动主页直接进开赛页或比赛中：立即切回 Flow 交还共享比赛流程
+                if (ml is MatchScreen.MatchStartPage or MatchScreen.InMatch)
+                {
+                    _introEnterTries = 0;
+                    _introStuckDumped = false;
+                    SetPhase(WkPhase.Flow);
+                    return null;
+                }
                 if (wk == WkScreen.EventIntro) return await PressIntroEnterAsync(obs);
                 if (wk == WkScreen.ChallengeList)
                     return await EnterChallengeListPhaseAsync(); // 挑战活动：介绍页按进入后弹的是挑战清单
@@ -637,6 +616,8 @@ public sealed partial class WeeklyEventScenario : IScenario
                 return await HandleSettingsAsync(wk, ml, obs);
             case WkPhase.LevelDropdown:
             {
+                if (WeeklyBrain.IsEventSettingsDropdown(obs.Ocr))
+                    return await HandleSettingsDropdownAsync(obs.Frame, obs.Ocr);
                 if (ml == MatchScreen.DifficultyPage)
                     return await HandleLevelOptionsAsync(obs.Frame, obs.Ocr);
                 // 下拉展开样式未识别（待实机校准）：B 收起回浮层；改选预算在 Settings 侧
@@ -766,21 +747,11 @@ public sealed partial class WeeklyEventScenario : IScenario
         _planFixAttempts = 0; // 换了活动/重进：比赛计划修复次数重新计
         await _engine.Pad.Dpad(PadDir.Down);          // 页签行→卡行（已在卡行则到头无害）
         await _engine.Pad.DpadRepeat(PadDir.Left, 6); // 饱和到最左第 1 卡（到头多按无害）
-        // 绿勾探针（已完成活动）或本运行内已拉黑：右移跳过。第 4 卡屏幕外探不到勾，
-        // 直接进入后由主页完成态判定兜底（完成→B 返回拉黑），不会重复刷
-        while (_slotIndex < 4)
-        {
-            bool blacklisted = _doneSlots.Contains(_slotIndex);
-            bool greenCheck = !blacklisted && WeeklyBrain.DetectGreenCheck(obs.Frame, _slotIndex);
-            if (!blacklisted && !greenCheck) break;
-            if (greenCheck)
-            {
-                _doneSlots.Add(_slotIndex);
-                _log($"[周活动] 卡位 {_slotIndex + 1} 右上角绿勾（主要奖励已完成），跳过不进入", LogLevel.Info);
-            }
-            await _engine.Pad.Dpad(PadDir.Right);
-            _slotIndex++;
-        }
+        // 绿勾探针（已完成活动）或本运行内已拉黑：算出目标槽位后统一一次右移到位
+        // （旧实现循环里右移一次、跳出循环后又按 _slotIndex 再右移，导致双倍右移跳过未完成活动）。
+        _slotIndex = ResolveNextEventSlot(_slotIndex, _doneSlots,
+            slot => WeeklyBrain.DetectGreenCheck(obs.Frame, slot),
+            slot => _log($"[周活动] 卡位 {slot + 1} 右上角绿勾（主要奖励已完成），跳过不进入", LogLevel.Info));
         if (_slotIndex >= 4)
             return await FinishAllEventsAsync();
         if (_slotIndex > 0) await _engine.Pad.DpadRepeat(PadDir.Right, _slotIndex);
@@ -788,6 +759,26 @@ public sealed partial class WeeklyEventScenario : IScenario
         SetPhase(WkPhase.IntroPopups);
         await _engine.Pad.Confirm();
         return 2800;
+    }
+
+    /// <summary>纯函数（可单测）：从起始槽位向后跳过已拉黑与右上角绿勾槽位，返回目标槽位序号（≥4=全部完成）。</summary>
+    internal static int ResolveNextEventSlot(int startSlot, ISet<int> doneSlots,
+        Func<int, bool> isGreenCheck, Action<int>? onGreenCheck = null)
+    {
+        int slot = startSlot;
+        while (slot < 4)
+        {
+            bool blacklisted = doneSlots.Contains(slot);
+            bool greenCheck = !blacklisted && isGreenCheck(slot);
+            if (!blacklisted && !greenCheck) break;
+            if (greenCheck)
+            {
+                doneSlots.Add(slot);
+                onGreenCheck?.Invoke(slot);
+            }
+            slot++;
+        }
+        return slot;
     }
 
     /// <summary>周活动全部刷完（可见槽位全部完成或被跳过）：配置了「全部完成后接力」就先 B 退回
@@ -844,6 +835,14 @@ public sealed partial class WeeklyEventScenario : IScenario
     {
         _phase = phase;
         _attempts = 0;
+        if (phase == WkPhase.AtHome)
+        {
+            _levelAttempts = 0; // 每次回到主页/重新核验设置，允许重新尝试改选难度
+        }
+        if (phase == WkPhase.LevelDropdown)
+        {
+            _dropdownMoves = 0;
+        }
         if (phase == WkPhase.MatchPlanSetup)
         {
             _planStep = PlanStep.Open;      // 新的一次修复：先按 Y，再按屏幕往下走
@@ -892,6 +891,7 @@ public sealed partial class WeeklyEventScenario : IScenario
             case PopupAction.UpThenConfirm:
                 _log($"[周活动] {context}：{note}", LogLevel.Info);
                 await _engine.Pad.Dpad(PadDir.Up);
+                await Task.Delay(250); // 上移后留时给游戏刷新焦点，否则A落在旧焦点(取消)
                 await _engine.Pad.Confirm();
                 return 2400;
             case PopupAction.PressConfirm:
@@ -899,10 +899,20 @@ public sealed partial class WeeklyEventScenario : IScenario
                 await _engine.Pad.Confirm();
                 return 2400;
             default:
-                // 按钮词没读到：有推进词就按 A（同比赛中弹窗规则），否则等一拍由上层重判
+                // 仅读到取消/关闭或高光非推进键且未读出推进键：按默认焦点避让取消，先上移一格留足焦点刷新后再 A
+                if (obs.Ocr.ContainsJoined("取消") || obs.Ocr.ContainsJoined("关闭"))
+                {
+                    _log($"[周活动] {context}：{note}，兜底上移避开取消/关闭后再 A", LogLevel.Info);
+                    await _engine.Pad.Dpad(PadDir.Up);
+                    await Task.Delay(250);
+                    await _engine.Pad.Confirm();
+                    return 2400;
+                }
+                // 按钮词没读到：有推进词（含底栏「前往比赛/开始比赛/下一步」等）就按 A，否则等一拍由上层重判
                 if (obs.Ocr.ContainsJoined("下一步") || obs.Ocr.ContainsJoined("OK") ||
                     obs.Ocr.ContainsJoined("确认") || obs.Ocr.ContainsJoined("进入") ||
-                    obs.Ocr.ContainsJoined("继续"))
+                    obs.Ocr.ContainsJoined("继续") || obs.Ocr.ContainsJoined("前往比赛") ||
+                    MatchBrain.FindBottomPushWord(obs.Ocr) is not null)
                 {
                     _log($"[周活动] {context}：{note}，OCR 有推进词 → A", LogLevel.Info);
                     await _engine.Pad.Confirm();
@@ -982,5 +992,3 @@ public sealed partial class WeeklyEventScenario : IScenario
         });
     }
 }
-
-

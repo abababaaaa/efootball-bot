@@ -32,6 +32,8 @@ public static class MyLeagueBrain
     public enum MlItemKind { ExpBoost, CoachBoost, ConditionBoost }
     /// <summary>一个待购道具目标：类别 + 档位（x2/x3/x4；普通/好/极佳；教练强化无档位置空）。</summary>
     public sealed record MlItemTarget(MlItemKind Kind, string Level = "");
+    /// <summary>逐行扫描购买：当前帧该往哪走 / 是否停下按 A。Stop=命中目标可购买。</summary>
+    public enum ItemScanAction { Down, Up, Stop }
     /// <summary>道具行匹配结果：行文本 + 该行在物品列表区的序号（0 起，自上而下）+ 是否使用中（已购买）。</summary>
     public sealed record MlItemRow(int Index, string Text, double CenterY, bool InUse);
     /// <summary>
@@ -210,6 +212,65 @@ public static class MyLeagueBrain
         return new MlItemRow(index, hit.Text, hit.CenterY, inUse);
     }
 
+    /// <summary>
+    /// 检测物品列表当前焦点行（白色高亮条）的文字。逐行 OCR 扫描定位用：
+    /// 焦点行背景是近白（实机 ≈230+）、未聚焦是深灰（≈40~60），采样每条 OCR 行中心附近的
+    /// 背景亮度取最亮者，且须明显高于次高，否则认为读不准返回 null。
+    /// 返回该行文字（如「经验值:4x 有效场数:5场 使用中」）；读不准返回 null。
+    /// </summary>
+    public static string? DetectFocusedItemText(FrameData frame, OcrResult ocr)
+    {
+        var (w, h, bgra) = (frame.Width, frame.Height, frame.Bgra);
+        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return null;
+        double RegionAvg(double x0, double x1, double y0, double y1)
+        {
+            long sum = 0; int n = 0;
+            for (int y = (int)(h * y0); y < (int)(h * y1); y += 2)
+                for (int x = (int)(w * x0); x < (int)(w * x1); x += 2)
+                {
+                    int cx = x < 0 ? 0 : (x >= w ? w - 1 : x);
+                    int cy = y < 0 ? 0 : (y >= h ? h - 1 : y);
+                    int i = (cy * w + cx) * 4;
+                    sum += (bgra[i] + bgra[i + 1] + bgra[i + 2]) / 3;
+                    n++;
+                }
+            return n == 0 ? 0 : (double)sum / n;
+        }
+        // 只取物品列表区的行（排除标题/顶部积分栏/底部按键提示）
+        var lines = ocr.Lines.Where(l => l.CenterY is > 0.20 and < 0.88).ToList();
+        if (lines.Count == 0) return null;
+        // 整行横向扫描取亮度中位数：焦点行整条白底、未聚焦深灰。用中位数而非平均值，
+        // 抗行内白色文字笔画/绿色图标的局部亮点（旧版只采右侧窄带 x0.86~0.94 落在卡片外黑区
+        // 或边缘，实机读不准 → 14 格扫描全 miss）。
+        double RowMedian(double cy, double hh)
+        {
+            var vals = new List<double>();
+            for (double yy = cy - hh * 0.5; yy <= cy + hh * 0.5; yy += 0.004)
+                for (double xx = 0.10; xx <= 0.90; xx += 0.006)
+                    vals.Add(RegionAvg(xx, xx + 0.005, yy, yy + 0.004));
+            if (vals.Count == 0) return 0;
+            vals.Sort();
+            return vals[vals.Count / 2];
+        }
+        var scored = new List<(OcrLine Line, double Avg)>();
+        foreach (var l in lines)
+            scored.Add((l, RowMedian(l.CenterY, l.H)));
+        // ★2026-11-23 修复「14 格扫描全 miss」：一张焦点卡会被 OCR 拆成多行——标题行
+        // （「主教练强化1000」）+ 副标题行（「有效场数10场」），两行落在**同一条白底**上，
+        // 实机 med 都是 255。旧判据「第一名比第二名亮 ≥45」此刻 255-255=0，误判成读不准。
+        // 改为组判据：先按绝对白底线圈出所有白底行，要求**白底组整体**显著亮于其余深灰行，
+        // 焦点物品名取白底组里最靠上的一行（标题在上、副标题在下）。深灰行实测 27~56、
+        // 白底行 239~255，组间差极大，组内多行不影响判定。
+        const double WhiteFloor = 150; // 白底绝对下限（深灰 ≤56，白底 ≥239）
+        const double WhiteGap = 45;    // 白底组最低分须高出深色组最高分
+        var bright = scored.Where(s => s.Avg >= WhiteFloor).ToList();
+        if (bright.Count == 0) return null;
+        double darkestRest = scored.Where(s => s.Avg < WhiteFloor)
+                                   .Select(s => s.Avg).DefaultIfEmpty(0).Max();
+        if (bright.Min(s => s.Avg) - darkestRest < WhiteGap) return null;
+        return bright.OrderBy(s => s.Line.CenterY).First().Line.Text;
+    }
+
     /// <summary>行文本里的加成数字位（游戏格式"4x"，OCR 偶见"x4"；无则 null）。</summary>
     private static string? LevelDigit(string lineText)
     {
@@ -221,6 +282,38 @@ public static class MyLeagueBrain
 
     private static string? ExpDigit(string level) =>
         level switch { "3x" => "3", "4x" => "4", _ => "2" };
+    /// <summary>
+    /// 逐行扫描购买的经验值道具导航决策（2026-11-23 用户实机规律）：
+    /// 物品页行序固定 普通+(1)/好+(2)/杰出(3)/2x(4)/3x(5)/4x(6)。用户要求「出现目标档位即停」：
+    ///   · 目标 3x/4x：画面 OCR 出现「经验值3x/4x」→ Stop（焦点就在该行，按 A 购买）。
+    ///   · 目标 2x：2x 在 3x 正上方——出现「经验值3x」说明滑过头一格 → Up（上移一格），
+    ///     下一轮读到「经验值2x」→ Stop。这是用户给的 2x 兜底（2x 数字小、OCR 常读不出）。
+    ///   · 未出现任何经验值档位（还在状态加成区/已滑过）→ Down 继续滑。
+    /// 只处理 ExpBoost；其它类别由调用方按焦点行/固定行号另行处理，返回 null。
+    /// </summary>
+    /// <returns>导航决策；目标非 ExpBoost 时返回 null（交给调用方）。</returns>
+    public static ItemScanAction? ItemScanStepExpBoost(OcrResult ocr, MlItemTarget target,
+                                                       string? focusedLine = null)
+    {
+        if (target.Kind != MlItemKind.ExpBoost) return null;
+        int want = int.Parse(ExpDigit(target.Level)!); // 2/3/4
+        // 收集当前画面里所有「经验值 Nx」档位
+        var seen = new HashSet<int>();
+        foreach (var l in ocr.Lines.Where(l => l.Text.Contains("经验值")))
+            if (LevelDigit(l.Text) is { } d && int.TryParse(d, out int n) && n >= 1 && n <= 9)
+                seen.Add(n);
+        // ★用户 2026-11-23 明确规律：「画面第一次出现 4x/3x 时，焦点当时就在 4x/3x」——
+        //   逐格下滑每次只滚一行，目标档位刚进入画面那一刻就是焦点行。故直接以画面 OCR 为准：
+        //   出现目标档位 → Stop（按 A 买它）；2x 难读时用「出现 3x 往上 1 格」兜底；
+        //   只见到更大档位（滑过头）→ Up 逼近；都没有 → Down 继续滑。
+        //   focusedLine 仅作签名保留（调用方日志用），不参与决策——避免焦点探针偶发误读干扰。
+        _ = focusedLine;
+        if (seen.Contains(want)) return ItemScanAction.Stop;
+        // 2x 兜底：看到 3x（在 2x 下一行）说明滑过头 → 上移一格
+        if (seen.Any(n => n > want)) return ItemScanAction.Up;
+        return ItemScanAction.Down;
+    }
+
     /// <summary>状态档位词（OCR 常把「普通+」的加号丢掉，匹配时去掉加号）。</summary>
     private static string CondWord(string level) => level.TrimEnd('+');
     /// <summary>状态档位序：普通 0 &lt; 好 1 &lt; 杰出 2（高档位满足低档位需求）。</summary>
@@ -305,6 +398,42 @@ public static class MyLeagueBrain
         }
         return count;
     }
+
+    // ---------------- 联赛主页固定特征词（用户 2026-11-22 实机截图红框标注）----------------
+    // 那张主页截图用红框圈出了这一批固定词：前往比赛 / 排名 / 比赛记录 / 最近 5 场比赛 /
+    // 兑换积分 / 赛季纪录 / 赛事信息 / 建议，另外还有赛程表。版面固定、随赛季不会变。
+    // 用户要求「判断差不多就可以确定」：不必把这些词全读全，命中任意若干个就认作我的联赛主页。
+    // 用途：比赛页按 A 进卡后核验"确实进了我的联赛"，避免 OCR 偶发漏读某几个大字时
+    // 把正确进入误判成进错卡 B 退出。
+    // ★不收单个「赛事」「排名」这种过短词：赛事等级页/排名页也会命中，配合 ≥2 个词 +
+    // 场景层的其它模块特征排除才安全。
+    /// <summary>主页固定特征词（写全词，OCR 归一化会去掉空格，所以「最近 5 场比赛」写作「最近5场比赛」）。</summary>
+    public static readonly string[] LeagueHomeFixedWords =
+    {
+        "前往比赛", "下个赛季", "排名", "比赛记录", "最近5场比赛",
+        "兑换积分", "赛季纪录", "赛季记录", "赛事信息", "建议", "赛程表",
+    };
+    /// <summary>
+    /// 其中版面专有性最强的一批词：「排名」「建议」「前往比赛」在别的板块页也可能出现，
+    /// 光靠它们凑够两个词不足以确认是主页；必须至少有一个这种主页专有词才认。
+    /// </summary>
+    private static readonly string[] LeagueHomeStrongWords =
+    {
+        "比赛记录", "最近5场比赛", "兑换积分", "赛季纪录", "赛季记录", "赛事信息", "赛程表",
+    };
+
+    /// <summary>这一帧命中了几个主页固定特征词（去重按词表条目，同一词多处只算一次）。</summary>
+    public static int CountLeagueHomeWords(OcrResult ocr)
+        => LeagueHomeFixedWords.Count(w => ocr.ContainsJoined(w));
+
+    /// <summary>
+    /// 「差不多就是我的联赛主页」：命中 ≥2 个固定特征词，且其中至少一个是主页专有强词。
+    /// OCR 漏读一两个大字不影响判定；只在通用词（排名/建议/前往比赛）上凑够两个不认，
+    /// 避免周活动/天梯页蹭到一两个通用词就被当成主页、错过 B 退回。
+    /// </summary>
+    public static bool LooksLikeLeagueHome(OcrResult ocr, int minHits = 2)
+        => CountLeagueHomeWords(ocr) >= Math.Max(2, minHits) &&
+           LeagueHomeStrongWords.Any(w => ocr.ContainsJoined(w));
 
     // ---------------- 联赛主页光标检测与智能导航 ----------------
     /// <summary>主页可聚焦磁贴（固定 UI 词；「i」为前往比赛旁的信息图标，无文字不可检）。</summary>

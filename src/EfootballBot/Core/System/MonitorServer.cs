@@ -56,6 +56,8 @@ public sealed class MonitorServer : IDisposable
     private HttpListener? _listener;
     private CancellationTokenSource? _cts;
     private readonly ConcurrentDictionary<Guid, Stream> _streams = new();
+    private string? _cachedLanUrl;
+    private const int MaxStreams = 16;
 
     /// <summary>SSE 推送间隔：1 秒（原来三路轮询是 3 秒，这里更实时且只占一条连接）。</summary>
     private static readonly TimeSpan StreamInterval = TimeSpan.FromSeconds(1);
@@ -84,23 +86,25 @@ public sealed class MonitorServer : IDisposable
     {
         if (_listener is not null) return;
         int port = _cfg.Port is > 0 and < 65536 ? _cfg.Port : 18321;
-        var listener = new HttpListener();
         // 先试全网卡（需要管理员/URL ACL），失败退回仅本机
         string[] prefixes = { $"http://+:{port}/", $"http://localhost:{port}/" };
         foreach (var prefix in prefixes)
         {
+            var listener = new HttpListener();
             try
             {
-                listener = new HttpListener();
-                listener.Prefixes.Clear();
                 listener.Prefixes.Add(prefix);
                 listener.Start();
                 Url = prefix.Replace("+", Environment.MachineName);
                 _allInterfaces = prefix.StartsWith("http://+:");
+                _cachedLanUrl = _allInterfaces ? ResolveLanUrl(port) : "";
                 _listener = listener;
                 _cts = new CancellationTokenSource();
                 _ = Task.Run(() => LoopAsync(_cts.Token));
-                _log?.Invoke($"监控页已启动：{Url}（局域网同网段可访问；操作需 token）", LogLevel.Success);
+                string scope = _allInterfaces
+                    ? "局域网同网段可访问；需配置 token 才能操作"
+                    : "仅本机可访问；需配置 token 才能操作";
+                _log?.Invoke($"监控页已启动：{Url}（{scope}）", LogLevel.Success);
                 return;
             }
             catch (Exception ex)
@@ -116,7 +120,14 @@ public sealed class MonitorServer : IDisposable
     private string LanUrl()
     {
         if (!_allInterfaces) return "";
+        if (_cachedLanUrl is not null) return _cachedLanUrl;
         int port = _cfg.Port is > 0 and < 65536 ? _cfg.Port : 18321;
+        _cachedLanUrl = ResolveLanUrl(port);
+        return _cachedLanUrl;
+    }
+
+    private static string ResolveLanUrl(int port)
+    {
         try
         {
             using var s = new global::System.Net.Sockets.Socket(
@@ -149,7 +160,7 @@ public sealed class MonitorServer : IDisposable
         {
             string path = ctx.Request.Url?.AbsolutePath ?? "/";
             string token = ctx.Request.QueryString["t"] ?? ctx.Request.Headers["X-Token"] ?? "";
-            bool canOperate = _cfg.Token.Length == 0 || token == _cfg.Token;
+            bool canOperate = IsTokenValid(_cfg.Token, token);
 
             switch (path)
             {
@@ -215,6 +226,12 @@ public sealed class MonitorServer : IDisposable
                 case "/api/resume":
                 case "/api/stop":
                 case "/api/step":
+                    if (!string.Equals(ctx.Request.HttpMethod, "POST", StringComparison.OrdinalIgnoreCase))
+                    {
+                        ctx.Response.Headers["Allow"] = "POST";
+                        await WriteAsync(ctx, 405, "text/plain; charset=utf-8", "Method Not Allowed");
+                        return;
+                    }
                     if (!canOperate)
                     {
                         await WriteAsync(ctx, 403, "text/plain; charset=utf-8", "需要 token");
@@ -267,6 +284,11 @@ public sealed class MonitorServer : IDisposable
 
     private async Task StreamAsync(HttpListenerContext ctx, bool canOperate)
     {
+        if (_streams.Count >= MaxStreams)
+        {
+            await WriteAsync(ctx, 503, "text/plain; charset=utf-8", "too many streams");
+            return;
+        }
         var res = ctx.Response;
         res.StatusCode = 200;
         res.ContentType = "text/event-stream; charset=utf-8";
@@ -278,12 +300,12 @@ public sealed class MonitorServer : IDisposable
         _streams[id] = stream;
         try
         {
-            await WriteEventAsync(stream, Snapshot(canOperate));
             var ct = _cts?.Token ?? CancellationToken.None;
+            await WriteEventAsync(stream, Snapshot(canOperate), ct);
             while (!ct.IsCancellationRequested)
             {
                 await Task.Delay(StreamInterval, ct);
-                await WriteEventAsync(stream, Snapshot(canOperate));
+                await WriteEventAsync(stream, Snapshot(canOperate), ct);
             }
         }
         catch
@@ -297,11 +319,23 @@ public sealed class MonitorServer : IDisposable
         }
     }
 
-    private static async Task WriteEventAsync(Stream stream, string json)
+    private static async Task WriteEventAsync(Stream stream, string json, CancellationToken ct)
     {
         var payload = Encoding.UTF8.GetBytes($"data: {json}\n\n");
-        await stream.WriteAsync(payload);
-        await stream.FlushAsync();
+        using var writeTimeout = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        using var linked = CancellationTokenSource.CreateLinkedTokenSource(ct, writeTimeout.Token);
+        await stream.WriteAsync(payload, linked.Token);
+        await stream.FlushAsync(linked.Token);
+    }
+
+    internal static bool IsTokenValid(string? expected, string? provided)
+    {
+        if (string.IsNullOrEmpty(expected) || string.IsNullOrEmpty(provided))
+            return false;
+        var expectedBytes = Encoding.UTF8.GetBytes(expected);
+        var providedBytes = Encoding.UTF8.GetBytes(provided);
+        return expectedBytes.Length == providedBytes.Length &&
+               CryptographicOperations.FixedTimeEquals(expectedBytes, providedBytes);
     }
 
     // ---------------- 静态资源 ----------------
@@ -387,6 +421,8 @@ public sealed class MonitorServer : IDisposable
     public void Dispose()
     {
         try { _cts?.Cancel(); } catch { }
+        try { _cts?.Dispose(); } catch { }
+        _cts = null;
         try { _listener?.Stop(); } catch { }
         try { _listener?.Close(); } catch { }
         foreach (var s in _streams.Values)

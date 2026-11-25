@@ -123,6 +123,32 @@ public class PopupBrainTests
     }
 
     [Fact]
+    public void SingleNonConfirmButton_ReturnsNoneInsteadOfBlindConfirm()
+    {
+        // 双按钮弹窗只读出「取消」而漏读推进词时，绝不能当作单键确认弹窗直接按 A
+        var frame = MakeFrame(1280, 720, (0.40, 0.66, 0.60, 0.78, 255));
+        var ocr = Ocr(("是否要购买此道具？", 0.50, 0.40, 0.25, 0.04), ("取消", 0.50, 0.72, 0.05, 0.04));
+        var buttons = PopupBrain.FindButtons(frame, ocr);
+        Assert.Single(buttons);
+        Assert.False(buttons[0].IsConfirm);
+        Assert.Equal(PopupAction.None, PopupBrain.Decide(frame, ocr, out _));
+
+        // 交由 MatchBrain.Decide 兜底时应走「上移避开取消/关闭」而非直接 A
+        var action = MatchBrain.Decide(MatchScreen.HasConfirm, ocr, screenStreak: 0, inMatchRecently: false, frame);
+        Assert.Equal(MatchActionKind.PadUpConfirm, action.Kind);
+    }
+
+    [Fact]
+    public void TwoButtons_PurchaseFocusedOnCancel_MovesUpToConfirm()
+    {
+        var frame = MakeFrame(1280, 720,
+            (0.40, 0.48, 0.60, 0.60, 40),
+            (0.40, 0.66, 0.60, 0.78, 255));
+        var ocr = Ocr(("购买", 0.50, 0.54, 0.05, 0.04), ("取消", 0.50, 0.72, 0.05, 0.04));
+        Assert.Equal(PopupAction.UpThenConfirm, PopupBrain.Decide(frame, ocr, out _));
+    }
+
+    [Fact]
     public void BodyTextContainingCancel_IsNotAButton()
     {
         // 正文「取消比赛」不是按钮（长度超限）；底栏 y>0.92 的热键提示也不算

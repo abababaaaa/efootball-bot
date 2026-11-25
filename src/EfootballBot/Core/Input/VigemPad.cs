@@ -37,7 +37,7 @@ public sealed class VigemPad : IVirtualPad
     public const short IdentityCode = -31000;
 
     /// <summary>slot0 被占用时的宽限（毫秒）：等系统把上一个设备/进程占的槽位真正释放。</summary>
-    public const int SlotZeroGraceMs = 3000;
+    public const int SlotZeroGraceMs = 5000;
 
     /// <summary>把身份微码打到左摇杆上（之后须用 <see cref="ClearIdentityCode"/> 打回中位）。</summary>
     public void StampIdentityCode() => SetLeftStick(IdentityCode, IdentityCode);
@@ -124,9 +124,9 @@ public sealed class VigemPad : IVirtualPad
 
         // 库本身常回报 -1，主动探测真实 slot（最多等约 2.5 秒系统注册设备）
         UserIndex = -1;
-        for (int attempt = 0; attempt < 10 && UserIndex < 0; attempt++)
+        for (int attempt = 0; attempt < 12 && UserIndex < 0; attempt++)
         {
-            Thread.Sleep(250);
+            Thread.Sleep(attempt == 0 ? 100 : 200);
             for (int i = 0; i < 4; i++)
                 if (!before.Contains(i) && PadBackendProbe.IsSlotOccupied(i)) { UserIndex = i; break; }
         }

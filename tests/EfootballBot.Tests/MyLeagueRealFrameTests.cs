@@ -97,7 +97,14 @@ public class MyLeagueRealFrameTests
         var dets = det.Detect(frame);
         var ocrRes = TestOcr.Run(ocr, frame);
 
-        Assert.Contains(dets, d => d.ClassName == "btn_confirm" && d.Score >= MatchBrain.MinScore);
+        // 旧模型会把该页蓝框误判成 btn_confirm 0.58；v8.0.13 重训后这个误检已消失
+        // （实测最高 0.299 < MinScore 0.45，模型改而正确检出 item_row 0.72）。
+        // 原断言「必须检出 btn_confirm」锁定的是旧模型的误检，不是产品契约，故改为：
+        // 用一枚合成的高置信度误检来验证测试的真正意图 —— 即使 YOLO 误报 btn_confirm，
+        // 共享分类也必须判 MatchHistory（B 退回主页），绝不落 HasConfirm 盲按 A。
+        var falseConfirm = new YoloDetection("btn_confirm", 2, 0.63f, 0.42, 0.90, 0.16, 0.06);
+        var withFalseConfirm = new List<YoloDetection>(dets) { falseConfirm };
+        Assert.Equal(MatchScreen.MatchHistory, MatchBrain.Classify(withFalseConfirm, ocrRes));
         Assert.Equal(MatchScreen.MatchHistory, MatchBrain.Classify(dets, ocrRes));
         Assert.Equal(MatchActionKind.GamepadBack,
             MatchBrain.Decide(MatchScreen.MatchHistory, OcrResult.Empty, 1).Kind);

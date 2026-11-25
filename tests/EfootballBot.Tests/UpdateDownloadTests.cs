@@ -230,11 +230,25 @@ public class UpdateDownloadTests : IDisposable
     {
         byte[] payload = Payload(50_000);
         var (url, loop) = StartStub(payload);
-        string expected = Convert.ToHexString(SHA256.HashData(payload)).ToLowerInvariant();
+        string expected = Convert.ToHexString(SHA256.HashData(payload)).ToUpperInvariant();
 
         long n = await UpdateApplier.DownloadAsync(new[] { url }, _target, payload.Length, null, expected);
 
         Assert.Equal(payload.Length, n);
+        await loop;
+    }
+
+    [Fact]
+    public async Task 下载_SHA256过短_报错不越界()
+    {
+        byte[] payload = Payload(10_000);
+        var (url, loop) = StartStub(payload);
+
+        var ex = await Assert.ThrowsAsync<InvalidDataException>(
+            () => UpdateApplier.DownloadAsync(new[] { url }, _target, payload.Length, null, "ABCD"));
+
+        Assert.Contains("SHA256 校验失败", ex.Message);
+        Assert.Contains("abcd", ex.Message);
         await loop;
     }
 
