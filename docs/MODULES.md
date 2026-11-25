@@ -23,6 +23,10 @@ Core/Bot/
 │   ├── MatchBrain.Types.cs     界面/动作枚举 + 阈值常量（MatchScreen / MatchActionKind / MatchAction）
 │   ├── MatchBrain.Classify.cs  界面分类（纯函数，可单测；判定顺序有硬约束）
 │   ├── MatchBrain.Decide.cs    共享决策（界面+OCR+连续轮数 → 手柄动作）
+│   ├── MatchBrain.TrainingFrames.cs  训练样本主动采集判据（只出 tag+reason，不影响任何判定）
+│   ├── MatchActionExecutor.cs  ★共享手柄动作分发 + 主菜单进「比赛」磁贴导航（六模块共用一份）
+│   ├── ReturnToHomeGuide.cs    ★跨模块启动收拢：停在别的模块页时先按 B 回主菜单再交给模块
+│   ├── HubTileLocator.cs       ★比赛页磁贴 OCR 动态定位 + 焦点白框检测（磁贴随活动增减漂移）
 │   ├── MatchPlay.cs            赛中匹配：开赛/终场/超时判定 + 场内挂机节奏 + 场次记账
 │   ├── MatchFlowMemory.cs      流程帧记忆 + 场次跟踪器（MatchSessionTracker）
 │   ├── MatchShared.cs          标题宽限 / 比赛上下文 / 掉线重登窗口 / 决策快照
@@ -33,7 +37,7 @@ Core/Bot/
 └── Scenarios/                  模块层（三层：每个模块只认自己的界面与状态机）
     ├── Weekly/        国际服·周活动（WeeklyBrain + WeeklyEventScenario，按小活动拆 partial，见 §1.1）
     ├── AiLadder/      国际服·AI 天梯联赛
-    ├── MyLeague/      国际服·我的联赛（+ 满级换人巡检），国服我的联赛继承它
+    ├── MyLeague/      国际服·我的联赛（+ 满级换人巡检 + 训练帧采集），国服我的联赛继承它
     ├── CnWeekly/      国服·周活动（同样按小活动拆 partial，见 §1.1）
     ├── CnMyLeague/    国服·我的联赛（继承国际服基类，只覆写三个钩子）
     ├── PeakLadder/    国服·天梯巅峰赛
@@ -102,6 +106,7 @@ Core/Bot/
 | `intlstudbuy` | 种马购买 | 场景 | — | 合同页筛选/购买/到手确认 |
 | `intlstudtrain` | 种马培训 | 场景 | — | 筛选 + 技巧训练 |
 | `intlswaptest` | 满级换人测试 | 场景 | — | 只跑一次巡检即自动停（排障） |
+| `intltrainframes` | 训练帧采集 | 场景 | — | 自动导航主页/比赛页/周活动卡/锦标赛卡/联赛主页，每页抓一张样本到 `data\trainingframes\`，抓完自动停（开发者选项） |
 | `intlprematch` | 赛前快捷设置 | 工具 | — | 启动本体/打开 Settings.exe/打开游戏目录 |
 
 ### 国服（`ServerRegion.Cn`，窗口进程 eFootballOnline）
