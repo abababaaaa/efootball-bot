@@ -30,6 +30,8 @@ public sealed unsafe class SharedPadWriter : IDisposable
     private readonly Timer _heartbeat;
     private readonly object _gate = new();
     private long _seq;
+    private volatile bool _disposed;
+    private int _stopping;
     private ushort _buttons;
     private byte _lt, _rt;
     private short _lx, _ly, _rx, _ry;
@@ -48,23 +50,47 @@ public sealed unsafe class SharedPadWriter : IDisposable
         *(int*)(_p + OffWriterPid) = Environment.ProcessId;
         *(uint*)(_p + OffFlags) = 0;
         *(uint*)(_p + OffTargetMask) = 0;
+        var existingSeq = Volatile.Read(ref *(long*)(_p + OffSeq));
+        _seq = (existingSeq & 1) == 0 ? existingSeq : existingSeq + 1;
+        if ((existingSeq & 1) != 0)
+            Volatile.Write(ref *(long*)(_p + OffSeq), _seq);
 
-        _heartbeat = new Timer(_ => WriteRaw(OffHeartbeat, (long)Environment.TickCount64), null, 0, 200);
+        _heartbeat = new Timer(_ =>
+        {
+            lock (_gate)
+            {
+                if (!_disposed && _stopping == 0)
+                    Volatile.Write(ref *(long*)(_p + OffHeartbeat), (long)Environment.TickCount64);
+            }
+        }, null, 0, 200);
     }
 
     /// <summary>接管开关：ACTIVE 时目标游戏看到的是本程序的手柄；否则代理完全透传。</summary>
     public void SetActive(bool active, bool panic = false)
     {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            SetActiveCore(active, panic);
+        }
+    }
+
+    private void SetActiveCore(bool active, bool panic)
+    {
         uint f = *(uint*)(_p + OffFlags);
         f = active ? f | FlagActive : f & ~FlagActive;
         f = panic ? f | FlagPanic : f & ~FlagPanic;
-        WriteRaw(OffFlags, (uint)f);
+        Volatile.Write(ref *(uint*)(_p + OffFlags), f);
     }
 
-    public void SetTargets(uint mask) => WriteRaw(OffTargetMask, mask);
-
-    private void WriteRaw(int offset, long value) => Volatile.Write(ref *(long*)(_p + offset), value);
-    private void WriteRaw(int offset, uint value) => Volatile.Write(ref *(uint*)(_p + offset), value);
+    public void SetTargets(uint mask)
+    {
+        lock (_gate)
+        {
+            if (_disposed) return;
+            Volatile.Write(ref *(uint*)(_p + OffTargetMask), mask);
+        }
+    }
 
     public void SetButton(ushort mask) { lock (_gate) { _buttons = mask; Publish(); } }
     public void SetTriggers(byte left, byte right) { lock (_gate) { _lt = left; _rt = right; Publish(); } }
@@ -76,7 +102,9 @@ public sealed unsafe class SharedPadWriter : IDisposable
     /// <summary>一次完整状态发布：seq 奇数 → 写 16 字节 → seq 偶数（代理读侧据此判断撕裂）。</summary>
     private void Publish()
     {
+        if (_disposed) return;
         Volatile.Write(ref *(long*)(_p + OffSeq), ++_seq);         // odd: writing
+        Thread.MemoryBarrier();
         *(ushort*)(_p + OffButtons) = _buttons;
         *(_p + OffLt) = _lt;
         *(_p + OffRt) = _rt;
@@ -84,22 +112,37 @@ public sealed unsafe class SharedPadWriter : IDisposable
         *(short*)(_p + OffLy) = _ly;
         *(short*)(_p + OffRx) = _rx;
         *(short*)(_p + OffRy) = _ry;
+        Thread.MemoryBarrier();
         Volatile.Write(ref *(long*)(_p + OffSeq), ++_seq);         // even: stable
     }
 
     /// <summary>游戏进程是否真的在读我们的状态（>0 且 proxySeenMs 新鲜）。</summary>
     public bool ProxySeen(int withinMs = 3000)
     {
-        long seen = Volatile.Read(ref *(long*)(_p + OffProxySeen));
-        return seen > 0 && Environment.TickCount64 - seen <= withinMs;
+        lock (_gate)
+        {
+            if (_disposed) return false;
+            long seen = Volatile.Read(ref *(long*)(_p + OffProxySeen));
+            return seen > 0 && Environment.TickCount64 - seen <= withinMs;
+        }
     }
 
     public void Dispose()
     {
-        _heartbeat.Dispose();
-        SetActive(false, panic: true);
-        _view.SafeMemoryMappedViewHandle.ReleasePointer();
-        _view.Dispose();
-        _mmf.Dispose();
+        if (Interlocked.CompareExchange(ref _stopping, 1, 0) == 0)
+        {
+            using var done = new ManualResetEvent(false);
+            if (_heartbeat.Dispose(done))
+                done.WaitOne(1000);
+        }
+        lock (_gate)
+        {
+            if (_disposed) return;
+            SetActiveCore(false, panic: true);
+            _disposed = true;
+            _view.SafeMemoryMappedViewHandle.ReleasePointer();
+            _view.Dispose();
+            _mmf.Dispose();
+        }
     }
 }

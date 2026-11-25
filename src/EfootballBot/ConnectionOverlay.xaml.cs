@@ -60,6 +60,8 @@ public partial class ConnectionOverlay : Window
         {
             if (!IsVisible) return;
             _userHidden = false;
+            _clickThrough = false;
+            TxtHint.Text = "拖动移位 · 双击贴回 · 中键穿透 · 右键关闭";
             EnsureUsable();
             ClampToScreen();
             ApplyClickThrough();
@@ -202,11 +204,14 @@ public partial class ConnectionOverlay : Window
             double left = clientLeft + clientWidth - ActualWidth - 12;
             double top = clientTop + 12;
 
-            // 游戏被「屏外停靠」（BackgroundParker 会把窗口挪到负坐标）时，跟着算出来的位置
-            // 也在屏幕外——悬浮窗就"凭空消失"了。落在所有显示器之外就不跟，保持当前位置。
-            if (left + ActualWidth < 0 || top + ActualHeight < 0
-                || left > SystemParameters.VirtualScreenWidth - 40
-                || top > SystemParameters.VirtualScreenHeight - 40)
+            // 游戏被「屏外停靠」（BackgroundParker 会把窗口挪到虚拟屏之外）时，跟着算出来的位置
+            // 也在屏幕外——悬浮窗就"凭空消失"了。需用 VirtualScreenLeft/Top（副屏在主屏左侧/上方时坐标为负）。
+            double vLeft = SystemParameters.VirtualScreenLeft;
+            double vTop = SystemParameters.VirtualScreenTop;
+            double vRight = vLeft + SystemParameters.VirtualScreenWidth;
+            double vBottom = vTop + SystemParameters.VirtualScreenHeight;
+            if (left + ActualWidth < vLeft || top + ActualHeight < vTop
+                || left > vRight - 40 || top > vBottom - 40)
                 return;
 
             if (Math.Abs(Left - left) > 0.5 || Math.Abs(Top - top) > 0.5)
@@ -262,9 +267,21 @@ public partial class ConnectionOverlay : Window
         _clickThrough = !_clickThrough;
         ApplyClickThrough();
         TxtHint.Text = _clickThrough
-            ? "已穿透（点击直达游戏） · 中键恢复 · 右键关闭"
+            ? "已穿透（点击直达游戏） · 重新点「显示悬浮窗」恢复交互"
             : "拖动移位 · 双击贴回 · 中键穿透 · 右键关闭";
         e.Handled = true;
+    }
+
+    /// <summary>供「显示悬浮窗」按钮在窗口已可见时强制退出鼠标穿透并恢复交互。</summary>
+    public void ExitClickThrough()
+    {
+        _userHidden = false;
+        if (_clickThrough)
+        {
+            _clickThrough = false;
+            ApplyClickThrough();
+        }
+        TxtHint.Text = "拖动移位 · 双击贴回 · 中键穿透 · 右键关闭";
     }
 
     private void ApplyClickThrough()
@@ -280,14 +297,18 @@ public partial class ConnectionOverlay : Window
         catch { }
     }
 
-    /// <summary>把窗口拉回可见区域（换分辨率/副屏拔掉后不至于飘到屏幕外，看得见却没反应）。</summary>
+    /// <summary>把窗口拉回可见区域（换分辨率/副屏拔掉后不至于飘到屏幕外，看得见却没反应；兼容负坐标副屏）。</summary>
     private void ClampToScreen()
     {
         try
         {
             var wa = SystemParameters.WorkArea;
-            if (double.IsNaN(Left) || Left < wa.Left - ActualWidth + 60 || Left > wa.Right - 60) Left = wa.Right - Width - 24;
-            if (double.IsNaN(Top) || Top < wa.Top - 10 || Top > wa.Bottom - 40) Top = wa.Top + 24;
+            double vLeft = SystemParameters.VirtualScreenLeft;
+            double vTop = SystemParameters.VirtualScreenTop;
+            double vRight = vLeft + SystemParameters.VirtualScreenWidth;
+            double vBottom = vTop + SystemParameters.VirtualScreenHeight;
+            if (double.IsNaN(Left) || Left < vLeft - ActualWidth + 60 || Left > vRight - 60) Left = wa.Right - Width - 24;
+            if (double.IsNaN(Top) || Top < vTop - 10 || Top > vBottom - 40) Top = wa.Top + 24;
         }
         catch { }
     }

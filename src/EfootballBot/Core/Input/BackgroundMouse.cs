@@ -40,9 +40,16 @@ public sealed class BackgroundMouse
     public async Task ClickAsync(IntPtr hWnd, int x, int y, int downHoldMs = 60, CancellationToken ct = default)
     {
         await MoveToAsync(hWnd, x, y, ct);
+        ct.ThrowIfCancellationRequested();
         PostMessage(hWnd, WM_LBUTTONDOWN, (IntPtr)MK_LBUTTON, LParam(x, y));
-        await Task.Delay(downHoldMs, ct);
-        PostMessage(hWnd, WM_LBUTTONUP, IntPtr.Zero, LParam(x, y));
+        try
+        {
+            await Task.Delay(downHoldMs, ct);
+        }
+        finally
+        {
+            PostMessage(hWnd, WM_LBUTTONUP, IntPtr.Zero, LParam(x, y));
+        }
     }
 
     /// <summary>归一化坐标（0~1）单击，需传入客户区尺寸。</summary>
@@ -66,9 +73,16 @@ public sealed class BackgroundMouse
     public async Task RightClickAsync(IntPtr hWnd, int x, int y, int downHoldMs = 60, CancellationToken ct = default)
     {
         await MoveToAsync(hWnd, x, y, ct);
+        ct.ThrowIfCancellationRequested();
         PostMessage(hWnd, WM_RBUTTONDOWN, (IntPtr)MK_RBUTTON, LParam(x, y));
-        await Task.Delay(downHoldMs, ct);
-        PostMessage(hWnd, WM_RBUTTONUP, IntPtr.Zero, LParam(x, y));
+        try
+        {
+            await Task.Delay(downHoldMs, ct);
+        }
+        finally
+        {
+            PostMessage(hWnd, WM_RBUTTONUP, IntPtr.Zero, LParam(x, y));
+        }
     }
 
     /// <summary>同步 SendMessage 版本（等待窗口处理完返回），个别窗口更可靠。保持单步。</summary>

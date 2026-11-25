@@ -71,18 +71,35 @@ public static class CnAdvance
         params string[] words)
     {
         IEnumerable<string> keys = words is { Length: > 0 } ? words : AdvanceWords;
-        OcrWord? best = null;
-        foreach (var w in ocr.MergedWords)
+        OcrWord? Pick(IEnumerable<OcrWord> pool)
         {
-            if (w.CenterY < 0.55) continue; // 顶栏页签/标题行不参与（推进键只在下半屏）
-            if (!keys.Any(k => w.NormText.Contains(k, StringComparison.OrdinalIgnoreCase))) continue;
-            if (best is null || w.CenterY > best.CenterY ||
-                (Math.Abs(w.CenterY - best.CenterY) < 0.02 && w.CenterX > best.CenterX))
-                best = w;
+            OcrWord? best = null;
+            foreach (var w in pool)
+            {
+                if (w.CenterY < 0.55 || w.W > 0.35) continue; // 顶栏不参与，且剔除跨半屏整行合并伪框
+                if (!MatchesAnyAdvanceKey(w.NormText, keys)) continue;
+                if (best is null || w.CenterY > best.CenterY + 0.02 ||
+                    (Math.Abs(w.CenterY - best.CenterY) <= 0.02 && w.CenterX > best.CenterX))
+                    best = w;
+            }
+            return best;
         }
-        if (best is not null) return (best.CenterX, best.CenterY);
+        var hit = Pick(ocr.Words) ?? Pick(ocr.MergedWords);
+        if (hit is not null) return (hit.CenterX, hit.CenterY);
         if (FindRightBottomConfirm(dets) is { } box) return (box.CenterX, box.CenterY);
         return null;
+    }
+
+    private static bool MatchesAnyAdvanceKey(string normText, IEnumerable<string> keys)
+    {
+        foreach (var k in keys)
+        {
+            bool ascii = k.Length > 0 && k.All(c => c < 128);
+            if (ascii ? normText.Equals(k, StringComparison.OrdinalIgnoreCase)
+                      : normText.Contains(k, StringComparison.OrdinalIgnoreCase))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -158,5 +175,16 @@ public static class CnAdvance
         if (w <= 0 || h <= 0) (w, h) = (1280, 720);
         await engine.Pad.HumanWait(150, 320, ct); // 拟人预停顿
         await mouse.ClickNormalizedAsync(win.Handle, nx, ny, w, h, downHoldMs: 70, ct: ct);
+    }
+
+    /// <summary>国服主页只吃鼠标的提示弹窗（「来试试技巧提升吧」等）：先点确定/确认/知道了，防止吃光 D-pad。</summary>
+    public static async Task<bool> TryDismissHomePopupAsync(BotEngine engine, BackgroundMouse mouse, OcrResult ocr,
+        string module, Action<string, LogLevel> log, CancellationToken ct)
+    {
+        var hit = FindButton(ocr, null, "确定", "确认", "知道了");
+        if (hit is not { } pos) return false;
+        log($"[{module}] 国服主页有鼠标提示弹窗（确定/知道了），鼠标点击关闭后再继续导航", LogLevel.Info);
+        await ClickAsync(engine, mouse, pos.X, pos.Y, module, log, ct);
+        return true;
     }
 }

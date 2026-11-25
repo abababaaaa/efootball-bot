@@ -300,7 +300,8 @@ public sealed class NetworkProbe
         {
             using var c = new TcpClient();
             var ar = c.BeginConnect(ip, port, null, null);
-            if (ar.AsyncWaitHandle.WaitOne(timeoutMs))
+            using var wh = ar.AsyncWaitHandle;
+            if (wh.WaitOne(timeoutMs))
             {
                 c.EndConnect(ar);
                 sw.Stop();

@@ -561,50 +561,76 @@ public partial class MainWindow
         if (_measureCts is not null) return; // 测量进行中
         _measureCts = new CancellationTokenSource();
         BtnMeasureAll.IsEnabled = false;
+        BtnGithubMeasure.IsEnabled = false;
         BtnMeasureCancel.IsEnabled = true;
-        AppendLog("开始测量国际服服务器延迟…", LogLevel.Info);
+        AppendLog("[测速] 开始测量国际服服务器延迟…", LogLevel.Info);
         int n = 0;
         var ct = _measureCts.Token;
-        bool completed = await Probe.MeasureAllAsync(ct, (t, ms) => Dispatcher.BeginInvoke(() =>
+        try
         {
-            var row = _serverRows.FirstOrDefault(r => r.Id == t.Id);
-            if (row is null) return;
-            row.Ip = t.Ip;
-            row.Ms = ms;
-            n++;
-            UpdateServerSummary();
-        }), t => t.Domain is null);
-        _measureCts.Dispose();
-        _measureCts = null;
-        BtnMeasureAll.IsEnabled = true;
-        BtnMeasureCancel.IsEnabled = false;
-        AppendLog(completed
-            ? $"延迟测量完成（{n} 个目标）。"
-            : "延迟测量已取消。", completed ? LogLevel.Success : LogLevel.Info);
-        ((System.ComponentModel.ICollectionView)LvServers.Items).Refresh();
+            bool completed = await Probe.MeasureAllAsync(ct, (t, ms) => Dispatcher.BeginInvoke(() =>
+            {
+                var row = _serverRows.FirstOrDefault(r => r.Id == t.Id);
+                if (row is null) return;
+                row.Ip = t.Ip;
+                row.Ms = ms;
+                n++;
+                UpdateServerSummary();
+            }), t => t.Domain is null);
+            AppendLog(completed
+                ? $"[测速] 延迟测量完成（{n} 个目标）。"
+                : "[测速] 延迟测量已取消。", completed ? LogLevel.Success : LogLevel.Info);
+            ((System.ComponentModel.ICollectionView)LvServers.Items).Refresh();
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[测速] 延迟测量异常：{ex.Message}", LogLevel.Warn);
+        }
+        finally
+        {
+            _measureCts?.Dispose();
+            _measureCts = null;
+            BtnMeasureAll.IsEnabled = true;
+            BtnGithubMeasure.IsEnabled = true;
+            BtnMeasureCancel.IsEnabled = false;
+        }
     }
 
     private async void BtnGithubMeasure_Click(object sender, RoutedEventArgs e)
     {
         if (_measureCts is not null) return;
         _measureCts = new CancellationTokenSource();
+        BtnMeasureAll.IsEnabled = false;
         BtnGithubMeasure.IsEnabled = false;
+        BtnMeasureCancel.IsEnabled = true;
         int n = 0;
         var ct = _measureCts.Token;
-        bool completed = await Probe.MeasureAllAsync(ct, (t, ms) => Dispatcher.BeginInvoke(() =>
+        try
         {
-            var row = _githubRows.FirstOrDefault(r => r.Id == t.Id);
-            if (row is null) return;
-            row.Ip = t.Ip;
-            row.Ms = ms;
-            n++;
-            UpdateGithubSummary();
-        }), t => t.Domain is not null);
-        _measureCts.Dispose();
-        _measureCts = null;
-        BtnGithubMeasure.IsEnabled = true;
-        AppendLog(completed ? $"GitHub 域名测量完成（{n} 个）。" : "GitHub 域名测量已取消。",
-            completed ? LogLevel.Success : LogLevel.Info);
+            bool completed = await Probe.MeasureAllAsync(ct, (t, ms) => Dispatcher.BeginInvoke(() =>
+            {
+                var row = _githubRows.FirstOrDefault(r => r.Id == t.Id);
+                if (row is null) return;
+                row.Ip = t.Ip;
+                row.Ms = ms;
+                n++;
+                UpdateGithubSummary();
+            }), t => t.Domain is not null);
+            AppendLog(completed ? $"[测速] GitHub 域名测量完成（{n} 个）。" : "[测速] GitHub 域名测量已取消。",
+                completed ? LogLevel.Success : LogLevel.Info);
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[测速] GitHub 域名测量异常：{ex.Message}", LogLevel.Warn);
+        }
+        finally
+        {
+            _measureCts?.Dispose();
+            _measureCts = null;
+            BtnMeasureAll.IsEnabled = true;
+            BtnGithubMeasure.IsEnabled = true;
+            BtnMeasureCancel.IsEnabled = false;
+        }
     }
 
     private void UpdateGithubSummary()
@@ -663,7 +689,9 @@ public partial class MainWindow
         if (SelectedRow is not { } row) { TxtServerSummary.Text = "先在表格中选中一行。"; return; }
         Probe.Remove(row.Id);
         _serverRows.Remove(row);
+        _githubRows.Remove(row);
         UpdateServerSummary();
+        UpdateGithubSummary();
     }
 
     // ---------------- 游戏内连接监控（Npcap 抓包 + 每秒 ping） ----------------
@@ -744,6 +772,7 @@ public partial class MainWindow
             _overlay.Closed += (_, _) => _overlay = null;
         }
         _overlay.Topmost = true;
+        _overlay.ExitClickThrough();
         _overlay.Show();
         if (_inGame?.Last is { } last) _overlay.Update(last);
     }

@@ -65,7 +65,7 @@ impl YoloEngine {
         let dims: Vec<usize> = shape.iter().map(|d| *d as usize).collect();
 
         self.last_dims = dims.clone();
-        self.last_max_score = data.iter().fold(f32::NEG_INFINITY, |a, b| a.max(*b));
+        self.last_max_score = data.iter().copied().filter(|v| v.is_finite()).fold(f32::NEG_INFINITY, f32::max);
         // 两种布局：[1, N, 4+nc] / [1, 4+nc, N] / 端到端 [1, N, 6]
         let mut dets = Vec::new();
         if dims.len() == 3 {
@@ -74,22 +74,22 @@ impl YoloEngine {
                 for i in 0..d1 {
                     let base = i * 6;
                     let s = data[base + 4];
-                    if s < score_thresh {
+                    if !(s >= score_thresh) {
                         continue;
                     }
-                    dets.push(map_box(data[base], data[base + 1], data[base + 2], data[base + 3], s, data[base + 5] as i32, scale, ox, oy, iw, ih, img));
+                    dets.push(map_box_xyxy(data[base], data[base + 1], data[base + 2], data[base + 3], s, data[base + 5] as i32, scale, ox, oy, iw, ih, img));
                 }
             } else if d1 == 6 {
                 for i in 0..d2 {
                     let s = data[4 * d2 + i];
-                    if s < score_thresh {
+                    if !(s >= score_thresh) {
                         continue;
                     }
-                    dets.push(map_box(data[i], data[d2 + i], data[2 * d2 + i], data[3 * d2 + i], s, data[5 * d2 + i] as i32, scale, ox, oy, iw, ih, img));
+                    dets.push(map_box_xyxy(data[i], data[d2 + i], data[2 * d2 + i], data[3 * d2 + i], s, data[5 * d2 + i] as i32, scale, ox, oy, iw, ih, img));
                 }
             } else {
-                // 常规预测头：行 = 4+nc，列 = N（或反过来）
-                let (rows, cols, transposed) = if d2 <= 512 && d1 > d2 { (d1, d2, true) } else { (d1, d2, false) };
+                // 常规预测头：默认 [1, 4+nc, N]；若 d2 <= 512 && d1 > d2 则是转置 [1, N, 4+nc]
+                let (rows, cols, transposed) = if d2 <= 512 && d1 > d2 { (d2, d1, true) } else { (d1, d2, false) };
                 let at = |r: usize, c: usize| -> f32 {
                     if transposed { data[c * rows + r] } else { data[r * cols + c] }
                 };
@@ -101,7 +101,7 @@ impl YoloEngine {
                         let s = at(4 + k, c);
                         if s > best_s { best_s = s; best = k; }
                     }
-                    if best_s < score_thresh {
+                    if !(best_s >= score_thresh) {
                         continue;
                     }
                     dets.push(map_box(at(0, c), at(1, c), at(2, c), at(3, c), best_s, best as i32, scale, ox, oy, iw, ih, img));
@@ -112,6 +112,13 @@ impl YoloEngine {
         self.last_ms = t0.elapsed().as_secs_f64() * 1000.0;
         Ok(nms(dets, iou_thresh))
     }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn map_box_xyxy(x0: f32, y0: f32, x1: f32, y1: f32, score: f32, cls: i32, scale: f32, ox: u32, oy: u32, iw: u32, ih: u32, img: &Bgra<'_>) -> Detect {
+    let w = (x1 - x0).max(0.0);
+    let h = (y1 - y0).max(0.0);
+    map_box(x0 + w * 0.5, y0 + h * 0.5, w, h, score, cls, scale, ox, oy, iw, ih, img)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -133,7 +140,7 @@ fn map_box(cx: f32, cy: f32, w: f32, h: f32, score: f32, cls: i32, scale: f32, o
 }
 
 fn nms(mut dets: Vec<Detect>, iou_thresh: f32) -> Vec<Detect> {
-    dets.sort_by(|a, b| b.s.partial_cmp(&a.s).unwrap_or(std::cmp::Ordering::Equal));
+    dets.sort_by(|a, b| b.s.total_cmp(&a.s));
     let mut out: Vec<Detect> = Vec::new();
     for d in dets {
         let mut keep = true;
@@ -270,7 +277,7 @@ impl OcrEngine {
     pub fn recognize(&mut self, img: &Bgra<'_>) -> Result<Vec<Word>, Box<dyn std::error::Error>> {
         // ---- det ----
         let t_det = Instant::now();
-        let (chw, iw, ih) = det_preprocess(img, self.det_limit);
+        let (chw, iw, ih, rw, rh) = det_preprocess(img, self.det_limit);
         let input = Tensor::<f32>::from_array(([1usize, 3, ih as usize, iw as usize], chw))?;
         let outputs = self.det.run(ort::inputs![input])?;
         let (shape, prob) = outputs[0].try_extract_tensor::<f32>()?;
@@ -281,8 +288,9 @@ impl OcrEngine {
             (ih as usize, iw as usize)
         };
 
-        let scale_x = img.w as f32 / iw as f32;
-        let scale_y = img.h as f32 / ih as f32;
+        // 坐标还原按实际缩放后的有效内容区 (rw, rh) 计算，不把右侧/底部 32 对齐补零区算进去
+        let scale_x = (img.w as f32 / rw.max(1) as f32) * (iw.max(1) as f32 / pw.max(1) as f32);
+        let scale_y = (img.h as f32 / rh.max(1) as f32) * (ih.max(1) as f32 / ph.max(1) as f32);
         let boxes: Vec<DetBox> = db_postprocess(prob, pw, ph, scale_x, scale_y, 0.3, 3, 1.7);
         self.last_det_ms = t_det.elapsed().as_secs_f64() * 1000.0;
         self.last_boxes = boxes.len();
@@ -389,16 +397,25 @@ impl OcrEngine {
         }
 
         self.last_rec_ms = t_rec.elapsed().as_secs_f64() * 1000.0;
-        // 分桶批量推理会打乱顺序：按阅读顺序（先 y 后 x）还原，探针/日志才稳定
-        words.sort_by(|a, b| {
-            let ay = a.0.center().1;
-            let by = b.0.center().1;
-            if (ay - by).abs() > a.0.h().max(b.0.h()) * 0.6 {
-                ay.partial_cmp(&by).unwrap_or(std::cmp::Ordering::Equal)
-            } else {
-                a.0.center().0.partial_cmp(&b.0.center().0).unwrap_or(std::cmp::Ordering::Equal)
+        // 分桶批量推理会打乱顺序：按严格全序先按行聚类，再行内按 x 排序
+        words.sort_by(|a, b| a.0.center().1.total_cmp(&b.0.center().1));
+        let mut start = 0usize;
+        while start < words.len() {
+            let anchor_y = words[start].0.center().1;
+            let mut band_h = words[start].0.h();
+            let mut end = start + 1;
+            while end < words.len() {
+                let cy = words[end].0.center().1;
+                let tol = band_h.max(words[end].0.h()) * 0.6;
+                if (cy - anchor_y).abs() > tol {
+                    break;
+                }
+                band_h = band_h.max(words[end].0.h());
+                end += 1;
             }
-        });
+            words[start..end].sort_by(|a, b| a.0.center().0.total_cmp(&b.0.center().0));
+            start = end;
+        }
         Ok(words.into_iter().map(|(_, w)| w).collect())
     }
 }

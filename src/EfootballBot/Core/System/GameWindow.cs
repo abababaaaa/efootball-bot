@@ -21,13 +21,16 @@ public static class GameWindow
         var list = new List<GameWindowInfo>();
         foreach (var proc in Process.GetProcessesByName(processName))
         {
-            try
+            using (proc)
             {
-                var h = proc.MainWindowHandle;
-                if (h != nint.Zero && IsWindowVisible(h))
-                    list.Add(new GameWindowInfo(h, proc.Id, proc.ProcessName, proc.MainWindowTitle ?? ""));
+                try
+                {
+                    var h = proc.MainWindowHandle;
+                    if (h != nint.Zero && IsWindowVisible(h))
+                        list.Add(new GameWindowInfo(h, proc.Id, proc.ProcessName, proc.MainWindowTitle ?? ""));
+                }
+                catch { /* 进程可能已退出 */ }
             }
-            catch { /* 进程可能已退出 */ }
         }
         return list;
     }

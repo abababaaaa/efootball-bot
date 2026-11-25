@@ -370,7 +370,7 @@ public static class PhysicalPadControl
         int swept = 0;
         foreach (var node in HidDeviceEnumerator.EnumerateAllInstances())
         {
-            if (!HidDeviceEnumerator.IsXInputStyleInstance(node.InstancePath)) continue;
+            if (!HidDeviceEnumerator.IsPhysicalGamepadInstance(node.InstancePath)) continue;
             if (HidDeviceEnumerator.IsVirtualBusChild(node.DevInst)) continue;
             if (!IsDevNodeDisabled(node.DevInst)) continue;
             if (CM_Enable_DevNode(node.DevInst, 0) == CrSuccess) swept++;
@@ -397,7 +397,7 @@ public static class PhysicalPadControl
         try
         {
             return HidDeviceEnumerator.EnumerateAllInstances().Any(n =>
-                HidDeviceEnumerator.IsXInputStyleInstance(n.InstancePath)
+                HidDeviceEnumerator.IsPhysicalGamepadInstance(n.InstancePath)
                 && !HidDeviceEnumerator.IsVirtualBusChild(n.DevInst)
                 && IsDevNodeDisabled(n.DevInst));
         }

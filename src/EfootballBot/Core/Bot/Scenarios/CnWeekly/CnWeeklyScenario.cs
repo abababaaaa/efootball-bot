@@ -1,4 +1,6 @@
+using EfootballBot.Core.Bot.Scenarios.AiLadder;
 using EfootballBot.Core.Bot.Scenarios.MyLeague;
+using EfootballBot.Core.Bot.Scenarios.PeakLadder;
 using EfootballBot.Core.Bot.Scenarios.Weekly;
 using EfootballBot.Core.Capture;
 using EfootballBot.Core.Input;
@@ -157,12 +159,29 @@ public sealed partial class CnWeeklyScenario : IScenario
     // ---- 巡回赛主要奖励核验（主页勾 → i 信息弹窗 x/x，用户 2026-10-17 流程） ----
     /// <summary>核验步：0=未在核验；1=已右移到 i；2=已按 A 等弹窗；3=已确认拿满（退场）。</summary>
     private int _rewardCheckStage;
+    /// <summary>i 信息弹窗触发按 A 次数（用于打不开弹窗的上限判定）。</summary>
+    private int _rewardOpenAttempts;
     /// <summary>i 信息弹窗多次打不开：放弃 x/x 核验，按未拿满继续刷（保守不提前退场）。</summary>
     private bool _rewardPopupGaveUp;
     /// <summary>弹窗已判「未拿满」：本场打完前不再重复核验（勾一直挂在主页上，
     /// 不加此门控会 主页→弹窗→主页 原地循环，永远走不到前往比赛——2026-10-17 实机教训）。
     /// 比赛结束后复位，下次回主页再核验一次。</summary>
+    /// <summary>活动列表右移饱和防重复的待转正指纹：在 Retreating 真正回到列表且 _slotIndex++ 后才写入 _lastFullCardSig。</summary>
+    private string _pendingFullCardSig = "";
+    /// <summary>主页「前往比赛」独立重试计数（不随换屏清零，防乒乓绕过）。</summary>
+    private int _goMatchAttempts;
+    /// <summary>阵容退出/保存弹窗独立尝试计数（不随 Squad↔SavePopup 乒乓清零）。</summary>
+    private int _squadExitAttempts;
+    /// <summary>信息弹窗打开/读数独立尝试计数（不随乒乓清零）。</summary>
     private bool _rewardContinueUntilMatch;
+    /// <summary>从奖励弹窗 B 返回主页后再发送一次 Left 回到「前往比赛」（防动画吃键）。</summary>
+    private bool _needLeftFromRewardInfo;
+    /// <summary>国服确认页独立推进轮次（1=RT、2=A、≥3=鼠标，防跳步跳过 A）。</summary>
+    private int _cnConfirmAttempts;
+    /// <summary>挑战清单 OCR 连续未扫出任何卡号的帧数，用于区别加载过渡与真正无卡。</summary>
+    private int _chEmptyReads;
+    /// <summary>跨模块启动引导：停在其他模块页时先 B 收敛回主页。</summary>
+    private readonly ReturnToHomeGuide _homeGuide;
 
     private string _lastScreenName = "";
 
@@ -189,6 +208,7 @@ public sealed partial class CnWeeklyScenario : IScenario
         _engine = engine;
         _log = log;
         _matchPlay = new MatchPlay(engine, "国服周活动", log);
+        _homeGuide = new ReturnToHomeGuide("国服周活动", log, engine.DumpSuspiciousFrame);
     }
 
     public async Task<int> RunOnceAsync(CancellationToken ct)
@@ -203,26 +223,60 @@ public sealed partial class CnWeeklyScenario : IScenario
         bool matchContext = _memory.SawWithin(MatchScreen.InMatch, TimeSpan.FromSeconds(90), now) ||
                             _memory.SawWithin(MatchScreen.MatchStartPage, TimeSpan.FromSeconds(90), now);
         // 国服周活动界面先判：命中时 ml 记 Unknown（由状态机处理，不走共享决策），
-        // 未命中交 MyLeagueBrain（比赛中/终场/共用弹窗/标题画面等）
+        // 未命中交 MatchBrain（比赛中/终场/共用弹窗/标题画面等）
         var cw = CnWeeklyBrain.Classify(obs.Detections, obs.Ocr);
         var ml = cw == CwScreen.None
             ? MatchBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light,
                 MatchShared.LoginRecovery(_memory, now), pitch)
             : MatchScreen.Unknown;
+        // 国服 YOLO 未训练：CnWeeklyBrain 靠 CenterPopupWord 将弹窗让渡为 None 后，若 MatchBrain 因缺
+        // btn_confirm 判成 Unknown/LeaguePage，直接补回 HasConfirm 交 PopupBrain/CnAdvance 推进。
+        if (cw == CwScreen.None && (ml is MatchScreen.Unknown or MatchScreen.LeaguePage) &&
+            CnWeeklyBrain.CenterPopupWord(obs.Ocr))
+            ml = MatchScreen.HasConfirm;
         _memory.Record(ml, now);
+        // 跨模块残留页引导：停在其他模块页（天梯巅峰赛/我的联赛/国际服模块）时先 B 收敛回主页
+        if (_phase != CwPhase.Handoff)
+        {
+            bool inMatchFlow = matchContext || _matchSession.Active || ReturnToHomeGuide.IsSharedMatchFlow(ml);
+            bool myLeagueResidual = cw == CwScreen.None &&
+                                    (ml is MatchScreen.PointsPage or MatchScreen.ItemList ||
+                                     (ml == MatchScreen.LeaguePage && MyLeagueBrain.LooksLikeLeagueHome(obs.Ocr)));
+            bool otherModule = !inMatchFlow &&
+                               (PeakLadderBrain.Classify(obs.Ocr, obs.Detections) != PlScreen.None
+                                || WeeklyBrain.Classify(obs.Detections, obs.Ocr, corner, matchContext, light) != WkScreen.None
+                                || AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
+                                || myLeagueResidual);
+            bool ownPage = cw != CwScreen.None || inMatchFlow;
+            int? guideWait = await _homeGuide.StepAsync(obs.Frame,
+                ml == MatchScreen.MainMenu || CnWeeklyBrain.LooksLikeCnHome(obs.Ocr),
+                ownPage, otherModule, () => _engine.Pad.Back());
+            if (guideWait is not null) return guideWait.Value;
+        }
         if (!_takeoverLogged)
         {
             _takeoverLogged = true;
             _log($"[国服周活动] 智能接管：当前界面「{(cw != CwScreen.None ? cw.ToString() : ml.ToString())}」，从该阶段继续", LogLevel.Success);
         }
         // ---- 赛中匹配（共享层 MatchPlay）：开赛/终场/超时判定 + 场次与关键比赛记账
-        var tick = _matchPlay.Tick(ml, now,
+        bool isCnMenu = cw is CwScreen.EventHome or CwScreen.EventHomeTour or CwScreen.ChallengeCardHome
+            or CwScreen.ChallengeList or CwScreen.Bracket or CwScreen.EventsList or CwScreen.EventIntro
+            or CwScreen.HomeMatch or CwScreen.HomeRecommended;
+        if (isCnMenu) _matchPlay.MarkAtMenu();
+        bool isModuleHome = cw is CwScreen.EventsList or CwScreen.EventHome or CwScreen.EventHomeTour
+            or CwScreen.ChallengeCardHome or CwScreen.ChallengeList;
+        var tick = _matchPlay.Tick(isModuleHome && ml == MatchScreen.Unknown ? MatchScreen.LeaguePage : ml, now,
             sawKeyMatchHint: ml == MatchScreen.KeyMatchDialog || obs.Ocr.ContainsJoined("关键比赛"),
-            isHome: false);
+            isHome: isModuleHome);
         if (tick.Started)
         {
             _tourPanelReopens = 0; // 比赛开打：游戏会重置主页焦点，乒乓探测复位
             _skipBlockedThisMatch = false; // 新一场：重新给一次跳过机会
+            _goMatchAttempts = 0;
+            _squadExitAttempts = 0;
+            _rewardOpenAttempts = 0;
+            _rewardCheckStage = 0;
+            _needLeftFromRewardInfo = false;
         }
         if (tick.Ended && tick.EndedTrusted)
         {
@@ -260,6 +314,7 @@ public sealed partial class CnWeeklyScenario : IScenario
             _streak = 0;
             _lastScreenName = screenName;
             _attempts = 0; // 换屏即重置当前阶段预算：Flow 各屏幕的失败预算互不侵占
+            _cnConfirmAttempts = 0;
             _log($"[国服周活动] 界面：{screenName}", LogLevel.Info);
         }
         // ---- 国服菜单侧状态机：接管国服周活动界面与阶段内无特征界面 ----
@@ -320,13 +375,16 @@ public sealed partial class CnWeeklyScenario : IScenario
             },
             onConfirm: async () =>
             {
-                if (_matchSession.Active)
+                bool preKickoffCutscene = ml == MatchScreen.Unknown && matchContext;
+                if (InMatch || ml is MatchScreen.InMatch or MatchScreen.CnMatchPause
+                    or MatchScreen.PaymentConfirmDialog || preKickoffCutscene)
                 {
-                    _log($"[国服周活动] 比赛中弹窗 A：{action.Target}", LogLevel.Info);
+                    _log($"[国服周活动] 赛中/过场 A：{action.Target}", LogLevel.Info);
                     await _engine.Pad.Confirm();
-                    return null;
+                    return action.WaitMs;
                 }
-                return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, action.Target,
+                int attempt = ++_cnConfirmAttempts;
+                return await CnAdvance.AdvanceAsync(_engine, _mouse, attempt, action.Target,
                     "国服周活动", _log, obs.Ocr, obs.Detections, null, ct);
             });
     }
@@ -344,6 +402,8 @@ public sealed partial class CnWeeklyScenario : IScenario
                 {
                     case CwScreen.HomeRecommended:
                     case CwScreen.HomeMatch:
+                        if (await CnAdvance.TryDismissHomePopupAsync(_engine, _mouse, obs.Ocr, "国服周活动", _log, ct))
+                            return 2400;
                         if (++_attempts > 4)
                         {
                             _log("[国服周活动] 主页导航多轮未进入比赛活动，暂停 8s 后重试（若反复出现请回报日志）", LogLevel.Error);
@@ -416,6 +476,13 @@ public sealed partial class CnWeeklyScenario : IScenario
                         return 700; // 下一轮 RT 教练入场
                     case CwScreen.EventHomeTour:
                         if (_streak < 1) return 800; // 过渡帧防抖
+                        if (_needLeftFromRewardInfo)
+                        {
+                            _needLeftFromRewardInfo = false;
+                            _log("[国服周活动] 从 i 弹窗回到巡回赛主页：左移回「前往比赛」", LogLevel.Info);
+                            await _engine.Pad.Dpad(PadDir.Left);
+                            return 1200;
+                        }
                         if (_challengeMode || WeeklyBrain.IsChallengeCardHome(obs.Ocr) ||
                             CnWeeklyBrain.IsCnChallengeCardHome(obs.Ocr))
                         {
@@ -450,8 +517,9 @@ public sealed partial class CnWeeklyScenario : IScenario
                                 _log("[国服周活动] 活动设置多次未能核验，照常开赛；若比赛无法自动进行，请手动在活动设置开启 教练模式=开 + 完全托管", LogLevel.Error);
                             }
                         }
-                        if (++_attempts > 4)
+                        if (++_goMatchAttempts > 4)
                         {
+                            _goMatchAttempts = 0;
                             _log("[国服周活动] 前往比赛多次未生效，B 返回活动列表重导航", LogLevel.Warn);
                             SetPhase(CwPhase.Flow);
                             await _engine.Pad.Back();
@@ -459,7 +527,7 @@ public sealed partial class CnWeeklyScenario : IScenario
                         }
                         // A 未生效多因焦点停在底栏「活动设置」上（B 关面板后焦点不在前往比赛，
                         // A 会再开面板形成乒乓）：先上移焦点再 A
-                        if (_attempts >= 3 || _tourPanelReopens >= 2)
+                        if (_goMatchAttempts >= 3 || _tourPanelReopens >= 2)
                         {
                             _log("[国服周活动] 巡回赛主页：上移焦点避开活动设置 → A 前往比赛", LogLevel.Info);
                             await _engine.Pad.Dpad(PadDir.Up);
@@ -500,7 +568,11 @@ public sealed partial class CnWeeklyScenario : IScenario
                         }
                         if (CnWeeklyBrain.TourSettingsReady(obs.Ocr))
                         {
-                            if (_tourReady) _tourPanelReopens++; // 未请求却又见面板=焦点停在活动设置上
+                            if (_tourReady)
+                            {
+                                _tourPanelReopens++; // 未请求却又见面板=焦点停在活动设置上
+                                _rewardCheckStage = 0; // 防 Stage=2 + A 重开设置面板乒乓死循环
+                            }
                             else
                             {
                                 _tourReady = true;
@@ -597,8 +669,9 @@ public sealed partial class CnWeeklyScenario : IScenario
                     }
                     // 加成已应用：B 完成（右上角 B 完成；保存确认弹窗由下方弹窗分支承接）
                     if (_streak < 1) return 800; // 应用加成后的过场防抖
-                    if (++_attempts > 3)
+                    if (++_squadExitAttempts > 3)
                     {
+                        _squadExitAttempts = 0;
                         _squadConfigured = true;
                         _log("[国服周活动] B 完成多次未退出阵容页，B 逃生照常开赛", LogLevel.Warn);
                         SetPhase(CwPhase.Flow);
@@ -614,6 +687,7 @@ public sealed partial class CnWeeklyScenario : IScenario
                     if (_menuApplied)
                     {
                         _squadConfigured = true;
+                        _squadExitAttempts = 0;
                         SetPhase(CwPhase.LaunchReady);
                         _log("[国服周活动] 阵容配置完成，回到活动主页", LogLevel.Success);
                         return 700;
@@ -629,8 +703,9 @@ public sealed partial class CnWeeklyScenario : IScenario
                     obs.Ocr.ContainsJoined("确认") || obs.Ocr.ContainsJoined("保存") ||
                     obs.Ocr.FindButton("OK") is not null)
                 {
-                    if (++_attempts > 4)
+                    if (++_squadExitAttempts > 4)
                     {
+                        _squadExitAttempts = 0;
                         _squadConfigured = true;
                         SetPhase(CwPhase.Flow);
                         await _engine.Pad.Back();

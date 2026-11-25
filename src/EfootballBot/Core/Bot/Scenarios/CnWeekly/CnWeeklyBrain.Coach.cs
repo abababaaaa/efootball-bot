@@ -63,7 +63,8 @@ public static partial class CnWeeklyBrain
         foreach (var w in ocr.Words)
         {
             if (!IsCoachRatingWord(w, out int rating)) continue;
-            if (found.Any(f => f.Rating == rating)) continue;
+            // 按横向位置去重，保留同评分不同教练卡，只合并同一数字被拆成的相邻碎片
+            if (found.Any(f => Math.Abs(f.X - w.CenterX) < 0.05)) continue;
             found.Add((rating, w.CenterX));
         }
         var ordered = found.OrderBy(f => f.X).ToList();

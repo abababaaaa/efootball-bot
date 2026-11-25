@@ -86,6 +86,11 @@ public sealed class StudFlowController
 
     private int _rounds;
 
+    /// <summary>无实质进展（买人计数/培训计数/球员下标均未推进）的连续轮数上限，防两阶段来回乒乓绕过 MaxStall。</summary>
+    private int _noProgressRounds;
+    private (int gk, int outfield, int trained, int playerIdx, int posIdx, int seekSteps) _lastProgressKey;
+    private const int MaxNoProgressRounds = 45;
+
     private int _gkLeft;
 
     private int _outfieldLeft;
@@ -153,6 +158,16 @@ public sealed class StudFlowController
     {
         if (++_rounds > MaxRounds)
             return Abort("流程轮数超限");
+        var progressKey = (_gkLeft, _outfieldLeft, _trainedRuns, _playerIndex, _positionIndex, _trainingSeekSteps);
+        if (progressKey != _lastProgressKey)
+        {
+            _lastProgressKey = progressKey;
+            _noProgressRounds = 0;
+        }
+        else if (++_noProgressRounds > MaxNoProgressRounds)
+        {
+            return Abort($"流程长时间无进展（阶段 {_phase} / 画面 {Describe(_lastScreen)}）");
+        }
         var screen = StudTrainingBrain.Classify(obs.Ocr);
         if (screen != _lastScreen)
         {
@@ -940,7 +955,7 @@ public sealed class StudFlowController
             ? $"[种马培训] 打开第 {_playerIndex + 1} 名球员（全部）"
             : $"[种马培训] 打开第 {_playerIndex + 1}/{_playerIndex + _trainRemaining} 名球员", LogLevel.Info);
         var pad = _engine.Pad;
-        await pad.DpadRepeatFast(PadDir.Up, 9);
+        await pad.DpadRepeatFast(PadDir.Up, Math.Max(9, _playerIndex + 3));
         if (_playerIndex > 0)
             await pad.DpadRepeatFast(PadDir.Down, _playerIndex);
         await pad.Confirm();

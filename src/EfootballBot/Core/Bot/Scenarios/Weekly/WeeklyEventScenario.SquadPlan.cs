@@ -111,10 +111,8 @@ public sealed partial class WeeklyEventScenario : IScenario
         {
             if (WeeklyBrain.DetectPlanBadge(obs.Frame, obs.Ocr))
             {
-                if (++_attempts > 3) return await AbandonPlanFixAsync("修完红点仍在");
-                _log($"[周活动·阵容挑战] 比赛计划仍有红色叹号（第 {_attempts} 次）：再按 Y 重进修一次", LogLevel.Warn);
-                await _engine.Pad.Y();
-                return 2600;
+                _log("[周活动·阵容挑战] 返回后比赛计划仍有红色叹号，走总尝试计数复修", LogLevel.Warn);
+                return await BeginMatchPlanFixAsync();
             }
             _log("[周活动·阵容挑战] 比赛计划红色叹号已消失：回主页开下一场", LogLevel.Success);
             _planFixAttempts = 0;

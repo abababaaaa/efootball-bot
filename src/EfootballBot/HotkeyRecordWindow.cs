@@ -30,12 +30,17 @@ public sealed class HotkeyRecordWindow : Window
         WindowStartupLocation = WindowStartupLocation.CenterOwner;
         ResizeMode = ResizeMode.NoResize;
         ShowInTaskbar = false;
+        var bg = TryFindResource("BgCard") as System.Windows.Media.Brush;
+        var fg = TryFindResource("TextPrimary") as System.Windows.Media.Brush;
+        if (bg is not null) Background = bg;
+        if (fg is not null) Foreground = fg;
         _hint = new TextBlock
         {
             Text = "请按下要记录的按键组合（键盘任意键或鼠标键，可含 Ctrl/Shift/Alt/Win）\n按 Esc 取消",
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(16),
         };
+        if (fg is not null) _hint.Foreground = fg;
         Content = _hint;
         PreviewKeyDown += OnKey;
         PreviewMouseDown += OnMouse;

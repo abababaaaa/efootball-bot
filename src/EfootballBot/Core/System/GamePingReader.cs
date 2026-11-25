@@ -95,13 +95,13 @@ public sealed class GamePingReader
         if (cfg is null || !cfg.Enabled) { LastMs = -1; Status = "未启用（gameping.json enabled=false）"; return -1; }
         if (cfg.ModuleOffset == 0 && cfg.AbsoluteAddress == 0) { LastMs = -1; Status = "未定位偏移"; return -1; }
 
-        Process? proc = null;
+        Process[]? list = null;
         IntPtr h = IntPtr.Zero;
         try
         {
-            var list = Process.GetProcessesByName(cfg.Process);
+            list = Process.GetProcessesByName(cfg.Process);
             if (list.Length == 0) { LastMs = -1; Status = $"未找到进程 {cfg.Process}"; return -1; }
-            proc = list[0];
+            var proc = list[0];
             h = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, false, proc.Id);
             if (h == IntPtr.Zero)
             {
@@ -146,7 +146,8 @@ public sealed class GamePingReader
         finally
         {
             if (h != IntPtr.Zero) CloseHandle(h);
-            proc?.Dispose();
+            if (list is not null)
+                foreach (var p in list) p.Dispose();
         }
     }
 

@@ -159,6 +159,9 @@ public sealed class MaxLevelSwapController
     private bool _exitUsedA;
 
     private bool _errorDumped;
+    /// <summary>Phase.Done 累计轮数上限（防 Lineup/Bench 持续清零 _stall 时无限卡死）。</summary>
+    private int _doneRounds;
+    internal const int MaxDoneRounds = 15;
     /// <summary>巡检是否空闲（空闲时场景层才允许触发新的巡检）。</summary>
     public bool Idle => _phase == Phase.Idle;
 
@@ -175,6 +178,7 @@ public sealed class MaxLevelSwapController
         _darkProbeTries = 0;
         _exitUsedA = false;
         _errorDumped = false;
+        _doneRounds = 0;
     }
 
     /// <summary>在联赛主页（无弹窗）触发：按 Y 打开比赛计划。返回下一轮延时。</summary>
@@ -332,7 +336,7 @@ public sealed class MaxLevelSwapController
         if (++_rounds > MaxRounds)
             return await AbortAsync("巡检轮数超限", pad, log);
         var screen = MaxLevelSwapBrain.Classify(ocr);
-        bool home = ocr.ContainsJoined("前往比赛");
+        bool home = ocr.ContainsJoined("前往比赛") || ocr.ContainsJoined("下个赛季");
         // 游戏错误弹窗（功能目前无法使用 代码:C_XIQX_0019，实机 2026-10-25 换人流程
         // 被同名卡打乱后出现）：B 按不掉，只能 A 点 OK——任何阶段出现都先关掉再继续。
         if (MaxLevelSwapBrain.IsGameErrorDialog(ocr))
@@ -892,6 +896,12 @@ public sealed class MaxLevelSwapController
                 if (home)
                 {
                     log("[我的联赛] 满级巡检结束，交还正常流程", LogLevel.Info);
+                    Reset();
+                    return null;
+                }
+                if (++_doneRounds > MaxDoneRounds)
+                {
+                    log($"[我的联赛] 满级巡检收尾超过 {MaxDoneRounds} 轮仍未回主页，强制结束收尾交还正常流程", LogLevel.Warn);
                     Reset();
                     return null;
                 }

@@ -78,19 +78,29 @@ public sealed class SharedFrameRing : IDisposable
             if (w <= 0 || h <= 0 || stride < w * 4) { Misses++; return false; }
 
             var need = stride * h;
-            if (need > SlotBytes) { Misses++; return false; }
+            if (need <= 0 || stride < w * 4 || need > SlotBytes) { Misses++; return false; }
             if (_buf.Length != need) _buf = new byte[need];
 
+            var ts = (long)_view.ReadUInt64(OffTs);
             var slot = (int)((seq / 2) % (ulong)SlotCount);
             _view.ReadArray(HeaderBytes + slot * SlotBytes, _buf, 0, need);
 
             if (_view.ReadUInt64(OffSeq) != seq) continue; // 写者翻页了，重读
 
             _lastSeq = seq;
-            var ts = (long)_view.ReadUInt64(OffTs);
             // 拷贝一份交给下游：FrameData 会被 OCR/预览并发持有，不能复用 _buf
-            var copy = new byte[need];
-            Buffer.BlockCopy(_buf, 0, copy, 0, need);
+            var rowBytes = w * 4;
+            var packedLen = rowBytes * h;
+            var copy = new byte[packedLen];
+            if (stride == rowBytes)
+            {
+                Buffer.BlockCopy(_buf, 0, copy, 0, packedLen);
+            }
+            else
+            {
+                for (var y = 0; y < h; y++)
+                    Buffer.BlockCopy(_buf, y * stride, copy, y * rowBytes, rowBytes);
+            }
             frame = new Capture.FrameData(copy, w, h, ts);
             Reads++;
             return true;

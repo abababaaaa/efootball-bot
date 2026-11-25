@@ -241,6 +241,8 @@ public static class UpdateApplier
                 using var stall = new CancellationTokenSource(TimeSpan.FromSeconds(60));
                 using var resp = await http.GetAsync(url, HttpCompletionOption.ResponseHeadersRead, stall.Token);
                 resp.EnsureSuccessStatusCode();
+                if (string.Equals(resp.Content.Headers.ContentType?.MediaType, "text/html", StringComparison.OrdinalIgnoreCase))
+                    throw new IOException("远端返回了 HTML 页面而非下载文件");
                 using var stream = await resp.Content.ReadAsStreamAsync(stall.Token);
                 long written = 0;
                 int n;
@@ -252,9 +254,13 @@ public static class UpdateApplier
                     stall.CancelAfter(TimeSpan.FromSeconds(60)); // 收到数据即续命
                     progress?.Report((written, expectedTotal));
                 }
-                // 反代吐 200 错误页/连接提前收尾时不会有异常，用 Content-Length 兜住
+                if (written == 0)
+                    throw new IOException("下载内容为空");
+                // 反代吐 200 错误页/连接提前收尾时不会有异常，用 Content-Length 与预期大小兜住
                 if (resp.Content.Headers.ContentLength is long d && d != written)
                     throw new IOException($"内容长度不符：收到 {written} 字节，标称 {d}");
+                if (expectedTotal > 0 && written != expectedTotal)
+                    throw new IOException($"文件大小与预期不符：收到 {written} 字节，期望 {expectedTotal}");
 
                 if (hasher is not null && expected is not null)
                 {
@@ -315,6 +321,7 @@ public static class UpdateApplier
         try { File.Delete(oldPath); } catch { /* 无残留或被占用（上轮备份待清）则继续 */ }
 
         File.Move(exePath, oldPath);
+        try { File.SetLastWriteTimeUtc(oldPath, DateTime.UtcNow); } catch { }
         try
         {
             File.Move(newExePath, exePath);

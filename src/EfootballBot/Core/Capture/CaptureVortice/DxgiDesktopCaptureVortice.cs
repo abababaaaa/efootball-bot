@@ -17,7 +17,7 @@ public sealed class DxgiDesktopCaptureVortice : ICaptureProvider
     private nint _hwnd;
     private int _clientW;
     private int _clientH;
-    private bool _running;
+    private volatile bool _running;
     private DateTime _lastFrameAt = DateTime.MinValue;
     private FrameData? _latest;
     private volatile int _minFrameIntervalMs;
@@ -52,9 +52,20 @@ public sealed class DxgiDesktopCaptureVortice : ICaptureProvider
 
     public void Start(nint hwnd, int clientW, int clientH)
     {
+        Thread? oldThread = null;
         lock (_gate)
         {
             if (_running) return;
+            oldThread = _captureThread;
+            if (oldThread is { IsAlive: true })
+                _stopRequested = true;
+        }
+        if (oldThread is { IsAlive: true })
+            try { oldThread.Join(1000); } catch { }
+        lock (_gate)
+        {
+            if (_running) return;
+            ReleaseResources();
             _hwnd = hwnd;
             _clientW = Math.Max(2, clientW);
             _clientH = Math.Max(2, clientH);
@@ -74,6 +85,7 @@ public sealed class DxgiDesktopCaptureVortice : ICaptureProvider
             }
             catch
             {
+                _running = false;
                 ReleaseResources();
                 throw;
             }
@@ -361,6 +373,9 @@ public sealed class DxgiDesktopCaptureVortice : ICaptureProvider
     {
         if (_stagingTexture is not null && _stagingW == w && _stagingH == h) return;
         _stagingTexture?.Dispose();
+        _stagingTexture = null;
+        _stagingW = 0;
+        _stagingH = 0;
         _stagingTexture = _device!.CreateTexture2D(new Texture2DDescription
         {
             Width = (uint)w,
@@ -397,16 +412,25 @@ public sealed class DxgiDesktopCaptureVortice : ICaptureProvider
 
     public void Stop()
     {
+        Thread? t;
         lock (_gate)
         {
-            if (!_running && _captureThread is null) return;
+            if (!_running && _captureThread is null && _device is null) return;
             _stopRequested = true;
             _running = false;
+            t = _captureThread;
         }
-        _captureThread?.Join(1000);
-        _captureThread = null;
-        ReleaseResources();
-        _latest = null;
+        bool joined = t is null || !t.IsAlive || t.Join(1000);
+        lock (_gate)
+        {
+            if (joined)
+            {
+                if (ReferenceEquals(_captureThread, t))
+                    _captureThread = null;
+                ReleaseResources();
+            }
+            _latest = null;
+        }
     }
 
     private void ReleaseResources()

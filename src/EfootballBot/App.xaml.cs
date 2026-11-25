@@ -109,6 +109,7 @@ public partial class App : Application
                 }
                 catch (Exception ex)
                 {
+                    Environment.ExitCode = 1;
                     try
                     {
                         if (args.Length > 2 && args[1] == "--report")
@@ -134,6 +135,7 @@ public partial class App : Application
                 }
                 catch (Exception ex)
                 {
+                    Environment.ExitCode = 1;
                     try
                     {
                         string dir = AppPaths.DataDir;

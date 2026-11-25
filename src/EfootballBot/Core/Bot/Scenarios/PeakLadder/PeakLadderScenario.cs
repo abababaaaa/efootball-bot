@@ -63,6 +63,12 @@ public sealed class PeakLadderScenario : IScenario
     private int _attempts;
     /// <summary>活动主页连续读不到可参赛场次的轮数（超阈值 B 逃生清遮挡，绝不盲点前往比赛）。</summary>
     private int _countUnknownRounds;
+    /// <summary>活动主页点击「前往比赛」的独立次数（不随 Flow↔Launching 切换清零）。</summary>
+    private int _goMatchClicks;
+    /// <summary>国服确认页独立推进轮次（从 1 起：1=RT、2=A、≥3=鼠标，不因重定位浪费 direct A）。</summary>
+    private int _cnConfirmAttempts;
+    /// <summary>本场暂停菜单已确认无法跳过时置位，防止每 5 秒 Start↔B 无限暂停循环。</summary>
+    private bool _skipBlockedThisMatch;
 
     private DateTime _lastCountWarnAt = DateTime.MinValue;
 
@@ -130,12 +136,19 @@ public sealed class PeakLadderScenario : IScenario
             _takeoverLogged = true;
             _log($"[天梯巅峰赛] 智能接管：当前界面「{(pl != PlScreen.None ? pl.ToString() : ml.ToString())}」，从该阶段继续", LogLevel.Success);
         }
-        // ---- 赛中匹配（共享层 MatchPlay）：本模块不回我的联赛主页（isHome 恒 false），
+        // ---- 赛中匹配（共享层 MatchPlay）：本模块不回我的联赛主页（isHome 仅用于模块主页/菜单门），
         //      终场 FullTime 是权威关场信号，超时兜底 5 分钟，记账全在 MatchPlay 内
-        if (pl is PlScreen.HomeMatch or PlScreen.HomeRecommended or PlScreen.ModeSelect)
-            _matchPlay.MarkAtMenu();
-        _matchPlay.Tick(ml, now, sawKeyMatchHint: false, isHome: false,
+        bool isModuleMenu = pl is PlScreen.ActivityHome or PlScreen.HomeMatch
+            or PlScreen.HomeRecommended or PlScreen.ModeSelect;
+        if (isModuleMenu) _matchPlay.MarkAtMenu();
+        var tick = _matchPlay.Tick(pl is PlScreen.ActivityHome ? MatchScreen.LeaguePage : ml, now,
+            sawKeyMatchHint: false, isHome: pl is PlScreen.ActivityHome or PlScreen.ModeSelect,
             startNote: "教练模式挂机等待比赛结束（按节奏随机点击）");
+        if (tick.Started || (tick.Ended && tick.EndedTrusted))
+        {
+            _skipBlockedThisMatch = false;
+            _goMatchClicks = 0;
+        }
         string screenName = pl != PlScreen.None ? $"天梯巅峰赛.{pl}" : ml.ToString();
         if (screenName == _lastScreenName) _streak++;
         else
@@ -143,6 +156,7 @@ public sealed class PeakLadderScenario : IScenario
             _streak = 0;
             _lastScreenName = screenName;
             _attempts = 0; // 换屏即重置当前阶段预算
+            _cnConfirmAttempts = 0;
             _log($"[天梯巅峰赛] 界面：{screenName}", LogLevel.Info);
         }
         // 国服比赛起始页：底栏印「设置|球场|RT 下一步」。按用户 2026-11-21 规则，国服「下一步/确认」
@@ -151,16 +165,16 @@ public sealed class PeakLadderScenario : IScenario
         // （国服周活动 2026-10-14 卡死教训）。
         if (ml == MatchScreen.MatchStartPage)
         {
+            _goMatchClicks = 0;
+            if (_phase == PlPhase.Launching) SetPhase(PlPhase.Flow);
             if (_streak < 1) return 800; // 过渡帧防抖
             return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, "起始页", "天梯巅峰赛", _log,
                 obs.Ocr, obs.Detections, (0.850, 0.920), ct);
         }
-        // Flow 阶段 HasConfirm 页面连续多轮无进展：国服键序（RT→A→鼠标）都用完仍不动才按 B 退出。
-        // 阈值放在键序之后（第 8 轮）：前 7 轮 = RT/A/鼠标各试过，页面真死了才逃生，绝不抢在
-        // 鼠标点击（第 3 轮，段位积分页/对阵表这类网页层页面唯一有效输入）之前 B 掉。
-        if (_phase == PlPhase.Flow && ml == MatchScreen.HasConfirm && _streak >= 8)
+        // Flow 阶段 HasConfirm 页面连续多轮无进展：周期 B 退出（预留足够轮次走完 RT → A → 鼠标，防止多弹窗链被连续按 B 卡死）。
+        if (_phase == PlPhase.Flow && ml == MatchScreen.HasConfirm && _streak >= 12 && (_streak - 12) % 5 == 0)
         {
-            _log("[天梯巅峰赛] 确认页面 RT/A/鼠标多轮无进展，按 B 退出", LogLevel.Warn);
+            _log("[天梯巅峰赛] 确认页面 RT/A/鼠标多轮无进展，周期性按 B 退出", LogLevel.Warn);
             await _engine.Pad.Back();
             return 2400;
         }
@@ -169,7 +183,13 @@ public sealed class PeakLadderScenario : IScenario
         if (plWait is > 0) return plWait.Value;
         if (plWait is not null) return 1500;
         // pl==None 且阶段已交回共享流程：走共用决策（比赛中/终场/弹窗/逃生）
-        var action = MatchBrain.Decide(ml, obs.Ocr, _streak, matchContext, obs.Frame);
+        var action = MatchBrain.Decide(ml, obs.Ocr, _streak, matchContext, obs.Frame,
+            allowMatchSkip: !_skipBlockedThisMatch);
+        if (ml == MatchScreen.CnMatchPause && action.Kind == MatchActionKind.GamepadBack && !_skipBlockedThisMatch)
+        {
+            _skipBlockedThisMatch = true;
+            _log("[天梯巅峰赛] 暂停菜单不可跳过或未读到「对局获胜」，本场不再尝试跳过", LogLevel.Warn);
+        }
         MatchShared.DecisionSnapshot(_log, "天梯巅峰赛", ml, _streak, action, obs.Ocr);
         // 标题画面宽限（共享实现，含赛后弹窗链 90s 档）：比赛上下文中的品牌过场帧会
         // 连续出现 30s 以上，宽限 90s
@@ -194,14 +214,17 @@ public sealed class PeakLadderScenario : IScenario
             },
             onConfirm: async () =>
             {
-                // 国服键序：比赛中的弹窗只按 A；赛外走 RT → A → 鼠标
-                if (_matchSession.Active)
+                // 国服键序：比赛内与赛前/中场过场确认只按 A；赛外走 RT → A → 鼠标
+                bool preKickoffCutscene = ml == MatchScreen.Unknown && matchContext;
+                if (InMatch || ml is MatchScreen.InMatch or MatchScreen.CnMatchPause
+                    or MatchScreen.PaymentConfirmDialog || preKickoffCutscene)
                 {
-                    _log($"[天梯巅峰赛] 比赛中弹窗 A：{action.Target}", LogLevel.Info);
+                    _log($"[天梯巅峰赛] 赛中/过场 A：{action.Target}", LogLevel.Info);
                     await _engine.Pad.Confirm();
-                    return null;
+                    return action.WaitMs;
                 }
-                return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, action.Target,
+                int attempt = ++_cnConfirmAttempts;
+                return await CnAdvance.AdvanceAsync(_engine, _mouse, attempt, action.Target,
                     "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, ct);
             });
     }
@@ -288,6 +311,7 @@ public sealed class PeakLadderScenario : IScenario
             {
                 if (pl == PlScreen.ModeDialog)
                 {
+                    _goMatchClicks = 0;
                     // 弹窗自带「当前剩余参赛场次」：=0 即场次用尽（活动主页的橙色 0 偶发被
                     // OCR 误读成 99 并循环点前往比赛，实机 2026-10-14 13:37）——取消并退出
                     var dlgCount = PeakLadderBrain.ParsePlayableCount(obs.Ocr);
@@ -330,6 +354,7 @@ public sealed class PeakLadderScenario : IScenario
                 }
                 if (ml == MatchScreen.InMatch)
                 {
+                    _goMatchClicks = 0;
                     SetPhase(PlPhase.Flow); // 已开赛：交共享比赛流程，赛后屏幕驱动自动续
                     return null;
                 }
@@ -342,6 +367,8 @@ public sealed class PeakLadderScenario : IScenario
                     return await CnAdvance.AdvanceAsync(_engine, _mouse, _attempts, "赛前确认弹窗",
                         "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, ct);
                 }
+                if (InputLivenessProbe.IsWatermarkPage(obs.Ocr) || MatchShared.MatchContext(_memory, DateTime.Now))
+                    return 1800; // 匹配/加载水印期不按 B 取消匹配
                 if (++_attempts > 12)
                 {
                     _log("[天梯巅峰赛] 开赛链多轮未推进，B 返回重走流程", LogLevel.Warn);
@@ -430,8 +457,9 @@ public sealed class PeakLadderScenario : IScenario
             return 2400;
         }
         if (_streak < 1) return 800; // 过渡帧防抖
-        if (++_attempts > 4)
+        if (++_goMatchClicks > 4)
         {
+            _goMatchClicks = 0;
             _log("[天梯巅峰赛] 前往比赛多次未生效，B 返回重导航", LogLevel.Warn);
             await _engine.Pad.Back();
             return 2400;

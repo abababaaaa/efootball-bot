@@ -15,3 +15,9 @@ EXPORTS
     XInputGetBatteryInformation    @7
     XInputGetKeystroke             @8
     XInputGetAudioDeviceIds        @10
+
+    ; 未文档化导出（部分游戏/SDL2 通过序号读取 Guide 键或音频/电源接口）
+    XInputGetStateEx               @100 NONAME
+    XInputWaitForGuideButton       @101 NONAME
+    XInputCancelGuideButtonWait    @102 NONAME
+    XInputPowerOffController       @103 NONAME

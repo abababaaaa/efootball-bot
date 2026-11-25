@@ -381,14 +381,32 @@ public static class GameSettingsLocator
 
         foreach (var line in lines)
         {
-            var trimmed = line.Trim();
-            if (!trimmed.StartsWith("\"path\"", StringComparison.OrdinalIgnoreCase)) continue;
-            // 形如 "path"		"D:\\SteamLibrary" → 取行内首尾引号之间的值
-            int first = trimmed.IndexOf('"');
-            int last = trimmed.LastIndexOf('"');
-            if (first < 0 || last <= first + 1) continue;
-            var value = trimmed[(first + 1)..last].Replace("\\\\", "\\");
-            if (Directory.Exists(value)) yield return value;
+            var value = ParseVdfPathLine(line);
+            if (value is not null && Directory.Exists(value)) yield return value;
         }
+    }
+
+    /// <summary>解析 libraryfolders.vdf 中形如 <c>"path" "D:\\SteamLibrary"</c> 的行，提取第二个引号串值。</summary>
+    internal static string? ParseVdfPathLine(string line)
+    {
+        var trimmed = line.Trim();
+        if (!trimmed.StartsWith("\"path\"", StringComparison.OrdinalIgnoreCase)) return null;
+        int keyEnd = trimmed.IndexOf('"', 1);
+        if (keyEnd < 0) return null;
+        int valStart = trimmed.IndexOf('"', keyEnd + 1);
+        if (valStart < 0) return null;
+        var sb = new global::System.Text.StringBuilder(trimmed.Length - valStart);
+        for (int i = valStart + 1; i < trimmed.Length; i++)
+        {
+            char c = trimmed[i];
+            if (c == '\\' && i + 1 < trimmed.Length)
+            {
+                char next = trimmed[i + 1];
+                if (next is '\\' or '"') { sb.Append(next); i++; continue; }
+            }
+            if (c == '"') return sb.ToString();
+            sb.Append(c);
+        }
+        return null;
     }
 }

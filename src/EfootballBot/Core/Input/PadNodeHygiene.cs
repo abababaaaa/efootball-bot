@@ -338,9 +338,12 @@ public static class PadNodeHygiene
             foreach (var a in args) psi.ArgumentList.Add(a);
             using var p = Process.Start(psi);
             if (p is null) return (-1, "pnputil 启动失败");
-            string stdout = p.StandardOutput.ReadToEnd();
-            string stderr = p.StandardError.ReadToEnd();
+            var stdoutTask = p.StandardOutput.ReadToEndAsync();
+            var stderrTask = p.StandardError.ReadToEndAsync();
             if (!p.WaitForExit(15000)) { try { p.Kill(true); } catch { } return (-2, "pnputil 超时"); }
+            Task.WaitAll(new[] { stdoutTask, stderrTask }, 2000);
+            string stdout = stdoutTask.IsCompletedSuccessfully ? stdoutTask.Result : "";
+            string stderr = stderrTask.IsCompletedSuccessfully ? stderrTask.Result : "";
             var text = (stdout + stderr).Trim();
             return (p.ExitCode, text.Length > 400 ? text[..400] : text);
         }

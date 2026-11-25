@@ -142,9 +142,11 @@ public sealed class ObservationService : IDisposable
                 }
             }
 
-            // 窗口仍在（独占全屏/最小化也能查到）→ 重建捕获；窗口没了才是真终止
-            if (Window is null || GameWindow.FindFirst(Window.ProcessName) is null)
+            // 窗口仍在（独占全屏/最小化也能查到）→ 同步最新 HWND 并重建捕获；窗口没了才是真终止
+            var found = Window is null ? null : GameWindow.FindFirst(Window.ProcessName);
+            if (found is null)
                 throw new InvalidOperationException("游戏窗口已关闭，停止挂机。");
+            if (found.Handle != Window!.Handle) Window = found;
 
             await RestartCaptureAsync(ct, DescribeFrameGap());
         }

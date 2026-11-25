@@ -6,16 +6,15 @@
 //! `GraphicsCaptureItem` → `Direct3D11CaptureFramePool` → 帧表面 → D3D11 纹理 → staging 回读。
 
 use std::io;
-use std::sync::Once;
 
-use windows::core::{HSTRING, Interface, Result as WResult};
+use windows::core::{HSTRING, Interface};
 use windows::Foundation::TimeSpan;
 use windows::Graphics::Capture::{
     Direct3D11CaptureFramePool, GraphicsCaptureItem, GraphicsCaptureSession,
 };
 use windows::Graphics::DirectX::Direct3D11::IDirect3DDevice;
 use windows::Graphics::DirectX::DirectXPixelFormat;
-use windows::Win32::Foundation::{HINSTANCE, HWND, RECT};
+use windows::Win32::Foundation::{HMODULE, HWND, POINT, RECT};
 use windows::Win32::Graphics::Direct3D::D3D_DRIVER_TYPE_HARDWARE;
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, D3D11_BOX, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
@@ -24,23 +23,23 @@ use windows::Win32::Graphics::Direct3D11::{
 };
 use windows::Win32::Graphics::Dxgi::Common::DXGI_FORMAT_B8G8R8A8_UNORM;
 use windows::Win32::Graphics::Dxgi::{IDXGIDevice, IDXGIResource};
+use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::WinRT::Direct3D11::{CreateDirect3D11DeviceFromDXGIDevice, IDirect3DDxgiInterfaceAccess};
 use windows::Win32::System::WinRT::Graphics::Capture::IGraphicsCaptureItemInterop;
 use windows::Win32::System::WinRT::{RoGetActivationFactory, RoInitialize, RO_INIT_MULTITHREADED};
-use windows::Win32::UI::WindowsAndMessaging::GetClientRect;
+use windows::Win32::UI::WindowsAndMessaging::{GetClientRect, GetWindowRect};
 
-use crate::capture::{client_rect_of, GrabResult};
+use crate::capture::GrabResult;
 
-static RO_INIT: Once = Once::new();
-
-/// WinRT 必须在任何 RoGetActivationFactory 之前初始化一次（MTA 适合后台线程捕获）。
+/// WinRT 公寓初始化是按线程生效的，每次新线程建 WGC 时调用（已初始化时返回 S_FALSE / RPC_E_CHANGED_MODE，安全幂等）。
 fn ensure_winrt() {
-    RO_INIT.call_once(|| unsafe {
+    unsafe {
         let _ = RoInitialize(RO_INIT_MULTITHREADED);
-    });
+    }
 }
 
 pub struct WgcCapturer {
+    hwnd: HWND,
     device: ID3D11Device,
     ctx: ID3D11DeviceContext,
     pool: Direct3D11CaptureFramePool,
@@ -48,8 +47,6 @@ pub struct WgcCapturer {
     winrt_device: IDirect3DDevice,
     staging: Option<(ID3D11Texture2D, D3D11_TEXTURE2D_DESC)>,
     frame_size: (u32, u32),
-    /// 目标客户区尺寸（0 = 全帧）
-    client: (u32, u32),
     buf: Vec<u8>,
     pub last_frame_time: TimeSpan,
 }
@@ -66,7 +63,7 @@ fn make_device() -> io::Result<(ID3D11Device, ID3D11DeviceContext)> {
         D3D11CreateDevice(
             None,
             D3D_DRIVER_TYPE_HARDWARE,
-            HINSTANCE::default(),
+            HMODULE::default(),
             D3D11_CREATE_DEVICE_BGRA_SUPPORT,
             Some(&levels),
             D3D11_SDK_VERSION,
@@ -126,12 +123,8 @@ impl WgcCapturer {
                 .StartCapture()
                 .map_err(|e| io::Error::other(format!("StartCapture 失败: {e}")))?;
 
-            let client = match client_rect_of(HWND(hwnd as *mut _)) {
-                Ok(c) => (c.w, c.h),
-                Err(_) => (0, 0),
-            };
-
             Ok(WgcCapturer {
+                hwnd: HWND(hwnd as *mut _),
                 device,
                 ctx,
                 pool,
@@ -139,7 +132,6 @@ impl WgcCapturer {
                 winrt_device,
                 staging: None,
                 frame_size: (size.Width.max(1) as u32, size.Height.max(1) as u32),
-                client,
                 buf: Vec::new(),
                 last_frame_time: TimeSpan::default(),
             })
@@ -199,10 +191,34 @@ impl WgcCapturer {
         let texture: ID3D11Texture2D = access
             .GetInterface()
             .map_err(|e| io::Error::other(format!("GetInterface(ID3D11Texture2D) 失败: {e}")))?;
+        let mut tdesc = D3D11_TEXTURE2D_DESC::default();
+        texture.GetDesc(&mut tdesc);
+        let tw = tdesc.Width.max(1);
+        let th = tdesc.Height.max(1);
 
-        // 只回读目标客户区（WGC 帧本身就是窗口内容，坐标从 0 开始）
-        let cw = if self.client.0 == 0 { fw } else { self.client.0.min(fw) };
-        let ch = if self.client.1 == 0 { fh } else { self.client.1.min(fh) };
+        // 只回读目标客户区（WGC 帧含窗口外框与标题栏，需按 GetWindowRect/ClientToScreen 偏移裁剪，
+        // 且上限严格夹到源纹理实际宽高，避免窗口变大过渡帧 src_box 越界）
+        let (off_x, off_y, cw, ch) = {
+            let mut wr = RECT::default();
+            let mut cr = RECT::default();
+            let mut pt = POINT { x: 0, y: 0 };
+            if GetWindowRect(self.hwnd, &mut wr).is_ok()
+                && GetClientRect(self.hwnd, &mut cr).is_ok()
+                && ClientToScreen(self.hwnd, &mut pt).as_bool()
+            {
+                let ox = (pt.x - wr.left).max(0) as u32;
+                let oy = (pt.y - wr.top).max(0) as u32;
+                let rw = (cr.right - cr.left).max(0) as u32;
+                let rh = (cr.bottom - cr.top).max(0) as u32;
+                if ox < tw && oy < th && rw > 0 && rh > 0 {
+                    (ox, oy, rw.min(tw - ox), rh.min(th - oy))
+                } else {
+                    (0, 0, tw, th)
+                }
+            } else {
+                (0, 0, tw, th)
+            }
+        };
 
         let need_new = match &self.staging {
             None => true,
@@ -231,11 +247,11 @@ impl WgcCapturer {
 
         let (staging, _) = self.staging.as_ref().unwrap();
         let src_box = D3D11_BOX {
-            left: 0,
-            top: 0,
+            left: off_x,
+            top: off_y,
             front: 0,
-            right: cw,
-            bottom: ch,
+            right: off_x + cw,
+            bottom: off_y + ch,
             back: 1,
         };
         self.ctx.CopySubresourceRegion(staging, 0, 0, 0, 0, &texture, 0, Some(&src_box as *const _));
@@ -259,7 +275,7 @@ impl WgcCapturer {
         }
 
         let mut probe_nonzero = 0usize;
-        let probe_len = (src_pitch * 64).min(1 << 20);
+        let probe_len = (src_pitch * (ch as usize).min(64)).min(1 << 20);
         for i in (0..probe_len).step_by(16) {
             if *src_ptr.add(i) != 0 {
                 probe_nonzero += 1;

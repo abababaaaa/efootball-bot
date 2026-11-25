@@ -28,6 +28,8 @@ public sealed class YoloDetector : IDisposable
     // Mat + ~4.9MB DenseTensor，约 8MB/次的 LOH churn；形状固定后全部预分配复用
     private readonly byte[] _letterboxRgb;
     private readonly DenseTensor<float> _inputTensor;
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private volatile bool _disposed;
 
     public bool Enabled => true;
     public string ModelLabel { get; }
@@ -87,20 +89,29 @@ public sealed class YoloDetector : IDisposable
     /// <summary>对一帧 BGRA 画面做检测，返回归一化坐标结果。</summary>
     public IReadOnlyList<YoloDetection> Detect(FrameData frame, CancellationToken ct = default)
     {
-        ct.ThrowIfCancellationRequested();
-        var input = Letterbox(frame, out float scale, out int padX, out int padY);
-        var tensor = ToCHWTensor(input);
-
-        // InferenceSession.Run 走 IReadOnlyCollection<NamedOnnxValue> 重载（名称携带在 NamedOnnxValue 上）
-        var inputs = new List<NamedOnnxValue>
+        _gate.Wait(ct);
+        try
         {
-            NamedOnnxValue.CreateFromTensor(_inputNames[0], tensor),
-        };
-        using var results = _session.Run(inputs, new[] { _outputName });
-        var output = results.First().AsTensor<float>();
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            ct.ThrowIfCancellationRequested();
+            var input = Letterbox(frame, out float scale, out int padX, out int padY);
+            var tensor = ToCHWTensor(input);
 
-        var boxes = ParseOutput(output, _classes.Length);
-        return MapAndFilter(boxes, scale, padX, padY, frame.Width, frame.Height);
+            // InferenceSession.Run 走 IReadOnlyCollection<NamedOnnxValue> 重载（名称携带在 NamedOnnxValue 上）
+            var inputs = new List<NamedOnnxValue>
+            {
+                NamedOnnxValue.CreateFromTensor(_inputNames[0], tensor),
+            };
+            using var results = _session.Run(inputs, new[] { _outputName });
+            var output = results.First().AsTensor<float>();
+
+            var boxes = ParseOutput(output, _classes.Length);
+            return MapAndFilter(boxes, scale, padX, padY, frame.Width, frame.Height);
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 
     // ---------------- 预处理 ----------------
@@ -163,21 +174,25 @@ public sealed class YoloDetector : IDisposable
         int d1 = dims[1];
         int d2 = dims[2];
 
-        // 端到端 NMS-free：[1, N, 6] 或 [1, 6, N]（cx,cy,w,h,score,cls）
+        // 端到端 NMS-free：[1, N, 6] 或 [1, 6, N]（Ultralytics 导出为 x1,y1,x2,y2,score,cls）
         if (d1 == 6 || d2 == 6)
         {
             bool rowsFirst = d1 == 6 && d2 >= d1; // [1,6,N]
             int n = rowsFirst ? d2 : d1;
             for (int i = 0; i < n; i++)
             {
-                float cx = rowsFirst ? output[0, 0, i] : output[0, i, 0];
-                float cy = rowsFirst ? output[0, 1, i] : output[0, i, 1];
-                float w = rowsFirst ? output[0, 2, i] : output[0, i, 2];
-                float h = rowsFirst ? output[0, 3, i] : output[0, i, 3];
+                float x1 = rowsFirst ? output[0, 0, i] : output[0, i, 0];
+                float y1 = rowsFirst ? output[0, 1, i] : output[0, i, 1];
+                float x2 = rowsFirst ? output[0, 2, i] : output[0, i, 2];
+                float y2 = rowsFirst ? output[0, 3, i] : output[0, i, 3];
                 float score = rowsFirst ? output[0, 4, i] : output[0, i, 4];
                 int cls = (int)(rowsFirst ? output[0, 5, i] : output[0, i, 5]);
                 if (score >= _scoreThreshold)
-                    list.Add((cx, cy, w, h, score, cls));
+                {
+                    float w = Math.Max(0f, x2 - x1);
+                    float h = Math.Max(0f, y2 - y1);
+                    list.Add(((x1 + x2) * 0.5f, (y1 + y2) * 0.5f, w, h, score, cls));
+                }
             }
             return list;
         }
@@ -279,6 +294,16 @@ public sealed class YoloDetector : IDisposable
 
     public void Dispose()
     {
-        _session.Dispose();
+        _gate.Wait();
+        try
+        {
+            if (_disposed) return;
+            _disposed = true;
+            _session.Dispose();
+        }
+        finally
+        {
+            _gate.Release();
+        }
     }
 }

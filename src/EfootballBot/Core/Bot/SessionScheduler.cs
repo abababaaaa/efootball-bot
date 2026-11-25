@@ -61,11 +61,18 @@ public sealed class SessionScheduler
         RollDayIfNeeded(now);
 
         // 活跃时间内的运行时长累计（引擎按秒级粒度轮询，累计误差可忽略）
-        if (_running && _lastTick is { } t && now > t)
+        bool timeJump = _lastTick is { } prevTick && (now - prevTick) > TimeSpan.FromMinutes(10);
+        if (_running && _lastTick is { } t && now > t && !timeJump)
             _acc += now - t;
         _lastTick = now;
+        if (timeJump)
+            _nextBreakAt = DateTime.MaxValue;
 
         bool should = !_restDay && InWindow(now.TimeOfDay) && !CapReached() && now >= _breakUntil;
+        if (should && _nextBreakAt == DateTime.MaxValue)
+            _nextBreakAt = now.AddMinutes(_rnd.Next(30, 71));
+        else if (!should && now >= _breakUntil)
+            _nextBreakAt = DateTime.MaxValue;
 
         // 运行中偶尔短暂离开（真实感停顿，不打断挂机流程状态）
         if (should && now >= _nextBreakAt)
@@ -77,6 +84,9 @@ public sealed class SessionScheduler
             should = false;
         }
 
+        string winStart = $"{NormalizeTimeOfDay(_start + _drift):hh\\:mm}";
+        string winEnd = $"{NormalizeTimeOfDay(_end + _drift):hh\\:mm}";
+
         if (should != _running)
         {
             PauseJustBegan = !should;
@@ -86,16 +96,16 @@ public sealed class SessionScheduler
                 // 进入运行态才开始排程下一次短暂离开（离上次运行起点 30~70 分钟）
                 _nextBreakAt = now.AddMinutes(_rnd.Next(30, 71));
                 _breakUntil = DateTime.MinValue;
-                _log($"作息调度：进入活跃时段（今日 {_start + _drift:hh\\:mm}–{_end + _drift:hh\\:mm}），恢复挂机", LogLevel.Info);
+                _log($"作息调度：进入活跃时段（今日 {winStart}–{winEnd}），恢复挂机", LogLevel.Info);
             }
             else if (CapReached())
-                _log($"作息调度：今日挂机已达上限 {_cfg.DailyCapHours:0.#} 小时，休息至明天 {_start + _drift:hh\\:mm} 自动恢复", LogLevel.Warn);
+                _log($"作息调度：今日挂机已达上限 {_cfg.DailyCapHours:0.#} 小时，休息至明天 {winStart} 自动恢复", LogLevel.Warn);
             else if (_restDay)
-                _log($"作息调度：今日随机整日休息，明天 {_start + _drift:hh\\:mm} 自动恢复", LogLevel.Warn);
+                _log($"作息调度：今日随机整日休息，明天 {winStart} 自动恢复", LogLevel.Warn);
             else if (now < _breakUntil)
                 _log($"作息调度：短暂离开至 {_breakUntil:HH:mm}", LogLevel.Info);
             else
-                _log($"作息调度：超出活跃时段（今日 {_start + _drift:hh\\:mm}–{_end + _drift:hh\\:mm}），明天 {_start + _drift:hh\\:mm} 自动恢复", LogLevel.Warn);
+                _log($"作息调度：超出活跃时段（今日 {winStart}–{winEnd}），明天 {winStart} 自动恢复", LogLevel.Warn);
         }
         else
         {
@@ -104,7 +114,7 @@ public sealed class SessionScheduler
 
         Note = _running
             ? $"运行中（今日已挂机 {_acc.TotalHours:0.0}/{_cfg.DailyCapHours:0.#}h）"
-            : $"作息休息中（今日 {_start + _drift:hh\\:mm}–{_end + _drift:hh\\:mm}，已挂机 {_acc.TotalHours:0.0}h）";
+            : $"作息休息中（今日 {winStart}–{winEnd}，已挂机 {_acc.TotalHours:0.0}h）";
         return should;
     }
 
@@ -114,10 +124,11 @@ public sealed class SessionScheduler
         _lastDate = now.Date;
         _acc = TimeSpan.Zero;
         _breakUntil = DateTime.MinValue;
+        _nextBreakAt = DateTime.MaxValue;
         int drift = Math.Clamp(_cfg.DriftMinutes, 0, 120);
         _drift = TimeSpan.FromMinutes(Math.Round((_rnd.NextDouble() * 2 - 1) * drift));
         if (drift > 0)
-            _log($"作息调度：今日活跃时段 {_start + _drift:hh\\:mm}–{_end + _drift:hh\\:mm}（含 ±{drift} 分钟随机漂移），上限 {_cfg.DailyCapHours:0.#} 小时", LogLevel.Info);
+            _log($"作息调度：今日活跃时段 {NormalizeTimeOfDay(_start + _drift):hh\\:mm}–{NormalizeTimeOfDay(_end + _drift):hh\\:mm}（含 ±{drift} 分钟随机漂移），上限 {_cfg.DailyCapHours:0.#} 小时", LogLevel.Info);
 
         // 随机整日休息：每天固定上线时长本身就是行为指纹。按「日期 + 启动盐」做确定性
         // 哈希——当天内多次判定结果一致（不会挂到一半突然变休息日），跨天重新抽。
@@ -137,12 +148,16 @@ public sealed class SessionScheduler
 
     private bool CapReached() => _cfg.DailyCapHours > 0 && _acc.TotalHours >= _cfg.DailyCapHours;
 
+    private static TimeSpan NormalizeTimeOfDay(TimeSpan x)
+    {
+        long ticks = ((x.Ticks % TimeSpan.TicksPerDay) + TimeSpan.TicksPerDay) % TimeSpan.TicksPerDay;
+        return TimeSpan.FromTicks(ticks);
+    }
+
     /// <summary>当前时刻（含漂移后）是否在活跃窗口内。start &gt; end 视为跨午夜窗口。</summary>
     private bool InWindow(TimeSpan t)
     {
-        TimeSpan s = _start + _drift, e = _end + _drift;
-        s -= TimeSpan.FromDays((int)(s / TimeSpan.FromDays(1)));
-        e -= TimeSpan.FromDays((int)(e / TimeSpan.FromDays(1)));
+        TimeSpan s = NormalizeTimeOfDay(_start + _drift), e = NormalizeTimeOfDay(_end + _drift);
         return s <= e ? t >= s && t < e : t >= s || t < e;
     }
 }

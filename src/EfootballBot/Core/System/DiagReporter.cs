@@ -48,6 +48,9 @@ public static class DiagReporter
         progress?.Invoke("启动 dxdiag（后台收集显卡信息）…");
         string dxPath = Path.Combine(dir, "dxdiag.txt");
         Process? dx = StartDxdiag(dxPath);
+        bool dxWaited = false;
+        try
+        {
 
         report.AppendLine("eFootball Bot diagnostic report");
         report.AppendLine($"Generated   : {DateTime.Now:yyyy-MM-dd HH:mm:ss}");
@@ -237,6 +240,16 @@ if ($steam) {
         progress?.Invoke("等待 dxdiag 完成…");
         Head("SECTION 18 - DXDIAG (full dxdiag.txt attached separately in this folder)");
         report.AppendLine(await WaitDxdiagAsync(dx, dxPath, ct));
+        dxWaited = true;
+        }
+        finally
+        {
+            if (!dxWaited && dx is not null)
+            {
+                try { if (!dx.HasExited) dx.Kill(true); } catch { }
+                try { dx.Dispose(); } catch { }
+            }
+        }
 
         report.AppendLine();
         report.AppendLine("End of report.");
@@ -274,7 +287,15 @@ if ($steam) {
                     var rel = Path.GetRelativePath(srcRoot, file);
                     var target = Path.Combine(dst, rel);
                     Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-                    File.Copy(file, target, true);
+                    if (NeedsRedaction(file))
+                    {
+                        var text = ReadAllTextShared(file);
+                        File.WriteAllText(target, RedactSecrets(text), Utf8Bom);
+                    }
+                    else
+                    {
+                        File.Copy(file, target, true);
+                    }
                     copied++;
                 }
                 catch { /* 单个文件失败不影响整体 */ }
@@ -294,6 +315,13 @@ if ($steam) {
                 : $"{n} | not present");
         }
         return $"app files copied: {copied}";
+    }
+
+    internal static string ReadAllTextShared(string path)
+    {
+        using var fs = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+        using var sr = new StreamReader(fs, Encoding.UTF8, detectEncodingFromByteOrderMarks: true);
+        return sr.ReadToEnd();
     }
 
     /// <summary>
@@ -497,11 +525,36 @@ if ($steam) {
         return await RunAsync(psi, Encoding.UTF8, timeoutSec);
     }
 
-    /// <summary>原生命令采集：输出按系统 OEM 代码页（中文系统 GBK）解码。</summary>
+    private static bool NeedsRedaction(string path)
+        => path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".yml", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".log", StringComparison.OrdinalIgnoreCase)
+        || path.EndsWith(".txt", StringComparison.OrdinalIgnoreCase);
+
+    internal static string RedactSecrets(string input)
+    {
+        if (string.IsNullOrEmpty(input)) return input;
+        string s = global::System.Text.RegularExpressions.Regex.Replace(
+            input,
+            @"(""(?:WebhookUrl|ApiKey|Token|Secret|Password)""\s*:\s*"")([^""\\]*(?:\\.[^""\\]*)*)("")",
+            "$1***REDACTED***$3",
+            global::System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        s = global::System.Text.RegularExpressions.Regex.Replace(
+            s,
+            @"https://(?:qyapi\.weixin\.qq\.com|oapi\.dingtalk\.com|open\.feishu\.cn|hooks\.slack\.com|discord\.com/api/webhooks)/[^\s""'\\]+",
+            "https://***REDACTED_WEBHOOK***",
+            global::System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        return s;
+    }
+
+    [global::System.Runtime.InteropServices.DllImport("kernel32.dll")]
+    private static extern uint GetOEMCP();
+
+    /// <summary>原生命令采集：输出按系统 OEM 代码页（中文系统 CP936/GBK）解码。</summary>
     private static async Task<string> RunNativeAsync(string fileName, string arguments, int timeoutSec, CancellationToken ct)
     {
         Encoding oem;
-        try { oem = Encoding.GetEncoding(0); }
+        try { oem = Encoding.GetEncoding((int)GetOEMCP()); }
         catch { oem = Encoding.UTF8; }
         var psi = new ProcessStartInfo
         {
@@ -518,6 +571,8 @@ if ($steam) {
 
     private static async Task<string> RunAsync(ProcessStartInfo psi, Encoding encoding, int timeoutSec, CancellationToken ct = default)
     {
+        psi.StandardOutputEncoding = encoding;
+        psi.StandardErrorEncoding = encoding;
         using var p = Process.Start(psi);
         if (p is null) return "(failed to start)";
         var so = p.StandardOutput.ReadToEndAsync(ct).WaitAsync(TimeSpan.FromSeconds(timeoutSec));
@@ -534,6 +589,11 @@ if ($steam) {
         {
             try { p.Kill(true); } catch { }
             return "(timeout)";
+        }
+        catch
+        {
+            try { p.Kill(true); } catch { }
+            throw;
         }
         var text = stdout.TrimEnd() + (stderr.Length > 0 ? "\n[stderr] " + stderr.TrimEnd() : "");
         return text.Length == 0 ? "(no output)" : text;

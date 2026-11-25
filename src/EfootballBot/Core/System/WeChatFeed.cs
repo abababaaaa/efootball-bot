@@ -127,6 +127,7 @@ public static class WeChatFeed
             }
             int interval = cfg.Notify.SummaryIntervalMinutes;
             if (summaryBody is not null && cfg.Notify.OnRunningSummary && interval > 0 &&
+                !string.IsNullOrWhiteSpace(cfg.Notify.WebhookUrl) &&
                 (_lastSummaryAt == DateTime.MinValue || (now - _lastSummaryAt).TotalMinutes >= interval))
             {
                 _lastSummaryAt = now;

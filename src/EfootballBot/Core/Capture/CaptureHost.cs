@@ -10,7 +10,7 @@ namespace EfootballBot.Core.Capture;
 public sealed class CaptureHost : ICaptureProvider
 {
     private readonly WindowCapture _wgc = new();
-    private SidecarCaptureProvider? _sidecar;
+    private volatile SidecarCaptureProvider? _sidecar;
 
     public CaptureHost()
     {
@@ -60,10 +60,10 @@ public sealed class CaptureHost : ICaptureProvider
     /// <summary>回退到 WGC（sidecar 启不来/运行中崩了时用）。</summary>
     public void DisableSidecar()
     {
-        if (_sidecar is null) return;
-        try { _sidecar.Stop(); } catch { }
-        try { _sidecar.Dispose(); } catch { }
-        _sidecar = null;
+        var old = Interlocked.Exchange(ref _sidecar, null);
+        if (old is null) return;
+        try { old.Stop(); } catch { }
+        try { old.Dispose(); } catch { }
     }
 
     public void Start(nint hwnd, int clientW, int clientH) => Active.Start(hwnd, clientW, clientH);

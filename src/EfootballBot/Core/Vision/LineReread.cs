@@ -131,7 +131,7 @@ public static class LineReread
                 if (newText.Length <= oldText.Length || sub.Words.Count == 0) continue;
 
                 foreach (var w in line) replaced.Add(w);
-                added.AddRange(sub.Words.Select(w => MapBack(w, offX, offY, cropW, cropH, frame)));
+                added.AddRange(sub.Words.Select(w => MapBack(w, offX, offY, cropW, cropH, tuning.LineRereadScale, frame)));
                 changed++;
             }
             catch (OperationCanceledException) { throw; }
@@ -151,13 +151,15 @@ public static class LineReread
             new Stats(considered, reread, changed));
     }
 
-    /// <summary>裁切图上的归一化词坐标 → 整帧归一化坐标。</summary>
-    private static OcrWord MapBack(OcrWord w, int offX, int offY, int cropW, int cropH, FrameData frame)
+    /// <summary>裁切图上的归一化词坐标 → 整帧归一化坐标（cropW/cropH 为放大后像素，映射回原图须除以 scale）。</summary>
+    internal static OcrWord MapBack(OcrWord w, int offX, int offY, int cropW, int cropH, int scale, FrameData frame)
     {
-        double px = offX + w.X * cropW;
-        double py = offY + w.Y * cropH;
-        double pw = w.W * cropW;
-        double ph = w.H * cropH;
+        double srcW = (double)cropW / Math.Max(1, scale);
+        double srcH = (double)cropH / Math.Max(1, scale);
+        double px = offX + w.X * srcW;
+        double py = offY + w.Y * srcH;
+        double pw = w.W * srcW;
+        double ph = w.H * srcH;
         return new OcrWord(w.Text,
             Math.Clamp(px / frame.Width, 0, 1),
             Math.Clamp(py / frame.Height, 0, 1),

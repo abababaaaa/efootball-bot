@@ -199,9 +199,12 @@ public sealed partial class WeeklyEventScenario : IScenario
             _log($"[周活动] 智能接管：当前界面「{(wk != WkScreen.None ? wk.ToString() : ml.ToString())}」，从该阶段继续", LogLevel.Success);
         }
         // ---- 赛中匹配（共享层 MatchPlay）：开赛/终场/超时判定 + 场次与关键比赛记账
-        var tick = _matchPlay.Tick(ml, now,
+        bool isModuleHome = wk is WkScreen.EventsList or WkScreen.EventHome
+            or WkScreen.TeamEffortHome or WkScreen.ChallengeList;
+        if (isModuleHome) _matchPlay.MarkAtMenu();
+        var tick = _matchPlay.Tick(isModuleHome && ml == MatchScreen.Unknown ? MatchScreen.LeaguePage : ml, now,
             sawKeyMatchHint: ml == MatchScreen.KeyMatchDialog || obs.Ocr.ContainsJoined("关键比赛"),
-            isHome: false);
+            isHome: isModuleHome);
         if (tick.Started)
         {
             _launchNudge = 0; // 开赛成功：焦点归位档位不再需要（赛后回主页焦点通常回前往比赛）
@@ -502,6 +505,7 @@ public sealed partial class WeeklyEventScenario : IScenario
                 {
                     _hubStep = 0;
                     _hubRound = 0;
+                    if (_streak >= 6) return null; // 弹窗多轮未推进：交还 MatchBrain.Decide 走裸 A / 周期 B 逃生
                     return await HandlePopupAsync(obs, "弹窗");
                 }
                 // 扫描途中按 A 打开了别的板块页面（锦标赛/eFootball联赛/我的联赛子页等）：
@@ -535,12 +539,9 @@ public sealed partial class WeeklyEventScenario : IScenario
                     SetPhase(WkPhase.Flow);
                     return null;
                 }
-                if (wk == WkScreen.EventIntro) return await PressIntroEnterAsync(obs);
                 if (wk == WkScreen.ChallengeList)
                     return await EnterChallengeListPhaseAsync(); // 挑战活动：介绍页按进入后弹的是挑战清单
-                if (wk == WkScreen.EntryPopup || ml == MatchScreen.HasConfirm)
-                    return await HandlePopupAsync(obs, "入场弹窗");
-                if (++_attempts > 15)
+                if (++_attempts > 20)
                 {
                     // 比赛上下文中的过场（加载/品牌帧）可能连续超过预算：B 在比赛附近危险
                     //（铲球/误退出），只继续等待；菜单上下文才 B 退回列表重试
@@ -555,6 +556,9 @@ public sealed partial class WeeklyEventScenario : IScenario
                         return 2200;
                     }
                 }
+                if (wk == WkScreen.EventIntro) return await PressIntroEnterAsync(obs);
+                if (wk == WkScreen.EntryPopup || ml == MatchScreen.HasConfirm)
+                    return await HandlePopupAsync(obs, "入场弹窗");
                 // 卡在既非主页也非弹窗的页面上：第 6 帧转存一次实机帧 + OCR 原文，
                 // 下一份反馈包就能直接看到那个"认不出来"的页面长什么样（远程排障用）。
                 if (_attempts == 6 && !_introStuckDumped)

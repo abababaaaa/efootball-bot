@@ -3209,7 +3209,7 @@
                                   SelectionChanged="CmbLogFiles_SelectionChanged"/>
                         <ComboBox x:Name="CmbHistoryLogFilter" Grid.Column="1" Width="118" FontSize="11.5"
                                   Margin="8,0,0,0" VerticalAlignment="Center" SelectedIndex="0"
-                                  ToolTip="历史日志显示过滤（文件内容不受影响，与运行日志同款三档）"
+                                  ToolTip="历史日志显示过滤（文件内容不受影响：仅关键流程含里程碑与提醒/报错）"
                                   SelectionChanged="CmbHistoryLogFilter_SelectionChanged">
                             <ComboBoxItem Content="全部"/>
                             <ComboBoxItem Content="仅关键流程"/>
@@ -3415,7 +3415,7 @@
                         <StackPanel Orientation="Horizontal" Grid.Column="2" VerticalAlignment="Center">
                             <ComboBox x:Name="CmbRuntimeLogFilter" Width="104" FontSize="11.5" Height="26" MinHeight="26"
                                       VerticalAlignment="Center" SelectedIndex="0"
-                                      ToolTip="应用内日志显示过滤（文件日志始终全量）"
+                                      ToolTip="应用内日志显示过滤（文件日志始终全量；仅关键流程含里程碑与提醒/报错）"
                                       SelectionChanged="CmbRuntimeLogFilter_SelectionChanged">
                                 <ComboBoxItem Content="全部"/>
                                 <ComboBoxItem Content="仅关键流程"/>

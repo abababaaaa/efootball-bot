@@ -190,7 +190,8 @@ public static class Updater
             // 清单自带文件名（带版本号）时按它下；老清单没有该字段则用固定名。远端清单是
             // 不可信输入，文件名先过一遍净化，拼不出桶外路径。
             return UpdateResult.Available(remoteVer, $"v{remoteVer}",
-                BuildDownloadUrls(remoteVer, ResolveManifestFileName(m.File)), m.Size, null, singleExecutable: true,
+                BuildDownloadUrls(remoteVer, ResolveManifestFileName(m.File), githubFileName: "EfootballBot.exe"),
+                m.Size, null, singleExecutable: true,
                 expectedSha256: string.IsNullOrWhiteSpace(m.Sha256) ? null : m.Sha256.ToLowerInvariant());
         }
         catch
@@ -257,9 +258,10 @@ public static class Updater
     /// <summary>构建下载候选地址序列（同一份字节的多个来源，任一成功即可，非分卷拼接）：
     /// 主源直连（已配置且目标是 exe 时）→ 各加速镜像 → GitHub 直连（恒在最后兜底）。
     /// CI 用同一构建产物发布到所有来源，ExpectedSha256 对全部候选一体适用。</summary>
-    internal static List<string> BuildDownloadUrls(Version v, string fileName = "EfootballBot.exe")
+    internal static List<string> BuildDownloadUrls(Version v, string fileName = "EfootballBot.exe",
+        string? githubFileName = null)
     {
-        string gh = $"https://github.com/{DefaultRepository}/releases/download/v{v}/{fileName}";
+        string gh = $"https://github.com/{DefaultRepository}/releases/download/v{v}/{githubFileName ?? fileName}";
         var urls = new List<string>();
         if (!string.IsNullOrEmpty(PrimaryBaseUrl) &&
             fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))

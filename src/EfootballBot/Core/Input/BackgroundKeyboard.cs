@@ -24,9 +24,16 @@ public sealed class BackgroundKeyboard
     /// <summary>向指定窗口投递一次按键（按下 → 保持 holdMs → 抬起）。</summary>
     public async Task TapAsync(IntPtr hWnd, int virtualKey, int holdMs = 60, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         PostMessage(hWnd, WM_KEYDOWN, (IntPtr)virtualKey, KeyLParam(virtualKey, up: false));
-        await Task.Delay(holdMs, ct);
-        PostMessage(hWnd, WM_KEYUP, (IntPtr)virtualKey, KeyLParam(virtualKey, up: true));
+        try
+        {
+            await Task.Delay(holdMs, ct);
+        }
+        finally
+        {
+            PostMessage(hWnd, WM_KEYUP, (IntPtr)virtualKey, KeyLParam(virtualKey, up: true));
+        }
     }
 
     /// <summary>

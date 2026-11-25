@@ -32,9 +32,13 @@ public static class HdrStatus
                 using (output)
                 {
                     // RDP 虚拟输出/老驱动可能没有 Output6：QueryInterface 失败即跳过该输出
-                    using var o6 = output.QueryInterface<IDXGIOutput6>();
-                    if (o6.Description1.ColorSpace == HdrColorSpace)
-                        hdr.Add(o6.Description1.DeviceName);
+                    IDXGIOutput6? o6 = null;
+                    try { o6 = output.QueryInterface<IDXGIOutput6>(); } catch { }
+                    using (o6)
+                    {
+                        if (o6 is not null && o6.Description1.ColorSpace == HdrColorSpace)
+                            hdr.Add(o6.Description1.DeviceName);
+                    }
                 }
             }
             return hdr;

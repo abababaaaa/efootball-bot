@@ -11,18 +11,20 @@ public partial class MainWindow
 {
     // ---------------- 全局热键（暂停/停止 + 恢复） ----------------
 
+    private System.Windows.Threading.DispatcherTimer? _autoCloseTimer;
+
     /// <summary>主热键：运行中第一次按=暂停；暂停中再按=彻底停止。</summary>
     private void Hotkey_PauseStop_Triggered()
     {
         if (_workerHost is not { ScenarioRunning: true }) return;
         if (_paused)
         {
-            AppendLog($"已通过快捷键「{_cfg.Hotkey.DisplayString()}」停止。", LogLevel.Success);
+            AppendLog($"[热键] 已通过「{_cfg.Hotkey.DisplayString()}」请求停止。", LogLevel.Success);
             _ = StopScenarioAsync();
         }
         else
         {
-            AppendLog($"已通过快捷键「{_cfg.Hotkey.DisplayString()}」暂停。", LogLevel.Success);
+            AppendLog($"[热键] 已通过「{_cfg.Hotkey.DisplayString()}」请求暂停。", LogLevel.Success);
             _ = TogglePauseAsync();
         }
     }
@@ -39,7 +41,7 @@ public partial class MainWindow
         }
         catch (System.Exception ex)
         {
-            AppendLog($"暂停命令发送失败：{ex.Message}", LogLevel.Error);
+            AppendLog($"[暂停] 命令发送失败：{ex.Message}", LogLevel.Error);
             return;
         }
         _paused = next;
@@ -47,28 +49,65 @@ public partial class MainWindow
         // 全权接管（v3.3.0）：暂停=纯场景暂停并清空手柄输出。真实手柄挂机期间本就处于
         // 禁用让位态，拿去玩其他游戏请先停止挂机（停止即自动恢复）。
         if (next)
-            AppendLog("已暂停：已清空手柄输出，暂停观察与操作（真实手柄仍处让位态，拿去玩游戏请先停止挂机）。", LogLevel.Success);
+            AppendLog("[暂停] 已暂停观察与操作并清空手柄输出（真实手柄仍处让位态，需先停止挂机才能自用）。", LogLevel.Success);
         else
-            AppendLog("已恢复挂机。", LogLevel.Info);
+            AppendLog("[继续] 已恢复挂机执行。", LogLevel.Info);
     }
 
-    /// <summary>统一停止（GUI 按钮与热键共用）。allowAutoClose=false 用于手动停止后仍需弹窗交互的场景。</summary>
-    private async Task StopScenarioAsync(bool allowAutoClose = true)
+    /// <summary>统一停止（GUI 按钮与热键共用）。手动停止默认不自动关闭程序；自然结束由 WorkerHost.Exited 触发。</summary>
+    private async Task StopScenarioAsync(bool allowAutoClose = false)
     {
+        if (!allowAutoClose) CancelAutoClose();
+        if (_stopping) return;
         var host = _workerHost;
         if (host is null) return;
+        _stopping = true;
         _hotkey.Unregister();
-        AppendLog("正在停止…", LogLevel.Info);
-        ResetButtons();
-        await host.StopAsync();
-        MuteGameOnScenarioStopped(); // 停挂机即恢复游戏声音（只静音了游戏，系统音量不受影响）
-        AppendLog("已停止。", LogLevel.Info);
-        if (allowAutoClose && _cfg.AutoCloseWhenDone)
+        AppendLog("[停止] 正在停止挂机并释放手柄…", LogLevel.Info);
+        RefreshRunButtons(); // _stopping=true 期间禁用所有启动/切换/暂停按钮，防止在 StopAsync 等待期间重入
+        try
         {
-            AppendLog("全部流程完毕，2 秒后自动关闭…", LogLevel.Success);
-            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-            timer.Tick += (_, _) => { timer.Stop(); Close(); };
-            timer.Start();
+            await host.StopAsync();
+            MuteGameOnScenarioStopped(); // 停挂机即恢复游戏声音（必须在按钮恢复可点之前，防止误取消新会话静音）
+            AppendLog("[停止] 挂机已停止，手柄与窗口状态已恢复。", LogLevel.Info);
+        }
+        finally
+        {
+            _stopping = false;
+            ResetButtons();
+        }
+        if (allowAutoClose && _cfg.AutoCloseWhenDone)
+            ScheduleAutoClose();
+    }
+
+    private bool _autoCloseScheduled;
+
+    private void ScheduleAutoClose()
+    {
+        if (_autoCloseScheduled) return;
+        _autoCloseScheduled = true;
+        AppendLog("[自动关闭] 全部流程已完成，将在 2 秒后自动关闭程序…", LogLevel.Success);
+        _autoCloseTimer?.Stop();
+        var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _autoCloseTimer = timer;
+        timer.Tick += (_, _) =>
+        {
+            timer.Stop();
+            if (!_autoCloseScheduled) return;
+            Close();
+        };
+        timer.Start();
+    }
+
+    private void CancelAutoClose()
+    {
+        if (!_autoCloseScheduled && _autoCloseTimer is null) return;
+        _autoCloseTimer?.Stop();
+        _autoCloseTimer = null;
+        if (_autoCloseScheduled)
+        {
+            _autoCloseScheduled = false;
+            AppendLog("[自动关闭] 已取消自动关闭。", LogLevel.Info);
         }
     }
 
@@ -118,7 +157,8 @@ public partial class MainWindow
         _cfg.Hotkey.IsMouse = w.IsMouse;
         _cfg.Hotkey.VirtualKey = w.Code;
         _cfg.Hotkey.Modifiers = w.Modifiers;
-        _cfg.Save();
+        PersistConfigSafe("保存热键设置");
+        AppendLog($"[设置] 全局热键已设为：{_cfg.Hotkey.DisplayString()}", LogLevel.Info);
         ReregisterIfRunning("暂停/终止");
         RefreshHotkeyUi();
     }
@@ -130,7 +170,8 @@ public partial class MainWindow
     {
         if (_loadingConfig || _cfg is null || ChkHotkeyEnabled is null) return;
         _cfg.Hotkey.Enabled = ChkHotkeyEnabled.IsChecked == true;
-        _cfg.Save();
+        PersistConfigSafe("保存热键开关");
+        AppendLog($"[设置] 全局热键：{(_cfg.Hotkey.Enabled ? "已启用" : "已禁用")}", LogLevel.Info);
         if (_workerHost is { ScenarioRunning: true })
         {
             if (_cfg.Hotkey.Enabled) ReregisterIfRunning("热键");
@@ -145,13 +186,13 @@ public partial class MainWindow
         try
         {
             if (!_hotkey.Register(_cfg.Hotkey))
-                AppendLog($"{what}热键注册失败。", LogLevel.Warn);
+                AppendLog($"[热键] {what}热键注册失败。", LogLevel.Warn);
             else
-                AppendLog($"{what}热键已更新：{_cfg.Hotkey.DisplayString()}（第一次暂停，第二次终止）", LogLevel.Info);
+                AppendLog($"[热键] {what}热键已更新：{_cfg.Hotkey.DisplayString()}（第一次暂停，第二次终止）", LogLevel.Info);
         }
         catch (System.Exception ex)
         {
-            AppendLog($"{what}热键注册异常：{ex.Message}", LogLevel.Warn);
+            AppendLog($"[热键] {what}热键注册异常：{ex.Message}", LogLevel.Warn);
         }
     }
 }

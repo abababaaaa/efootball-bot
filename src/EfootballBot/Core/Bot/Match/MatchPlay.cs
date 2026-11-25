@@ -85,7 +85,12 @@ public sealed class MatchPlay
         if (!ended && _session.MenuCloseSuppressed && now - _lastMenuVetoLogAt > TimeSpan.FromSeconds(30))
         {
             _lastMenuVetoLogAt = now;
-            _log($"[{_module}] 判到「{screen}」但本场才走了 {_session.LastDurationText}（<1 分钟）——按识别误判处理，不计场次（真正的比赛结束会见到终场页或回菜单）",
+            // 措辞说明：这是「刚开赛就误判成回到菜单」的护栏日志，不是你踢错了或比赛异常。
+            // 直接用本场当前已走时间（而非 LastDurationText 的上一场遗留值），时钟异常则给出提示。
+            string elapsedText = _session.StartedAt is { } st
+                ? (now >= st ? $"{(int)(now - st).TotalMinutes:D2}:{(now - st).Seconds:D2}" : "时长异常(时钟回拨)")
+                : _session.LastDurationText;
+            _log($"[{_module}] 识别到「{screen}」但开赛仅 {elapsedText}，按误识别忽略并继续挂机（不计场次）",
                 LogLevel.Warn);
         }
         if (!ended) return new MatchTick(false, false, false, false, _session.LastDurationText);

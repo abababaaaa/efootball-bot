@@ -272,7 +272,8 @@ public static partial class MaxLevelSwapBrain
     /// 以「确定/确认/是否」为准——原页固定词里没有这三个词（完成/返回/战术…），命中即有弹窗。
     /// </summary>
     public static bool HasDialogConfirmWords(OcrResult ocr) =>
-        ocr.ContainsJoined("确定") || ocr.ContainsJoined("确认") || ocr.ContainsJoined("是否");
+        ocr.ContainsJoined("确定") || ocr.ContainsJoined("确认") || ocr.ContainsJoined("是否") ||
+        ocr.FindButtonWords("OK").Any() || ocr.FindButtonWords("是").Any();
     // ---------------- 后备列表暗卡探针（同名在首发/替补名单的卡整体压暗，用户 2026-10-25） ----------------
     /// <summary>列几何（兜底）：5 列卡心 x（实机 2026-10-25 截图 1280×720 归一化）。
     /// 网格会随窗口/预览面板变化（实测两帧列距 0.116 vs 0.097），优先用
@@ -330,7 +331,7 @@ public static partial class MaxLevelSwapBrain
             for (int x = x0; x < x1; x++)
             {
                 int i = (y * f.Width + x) * 4;
-                int lum = (f.Bgra[i] * 299 + f.Bgra[i + 1] * 587 + f.Bgra[i + 2] * 114) / 1000;
+                int lum = (f.Bgra[i] * 114 + f.Bgra[i + 1] * 587 + f.Bgra[i + 2] * 299) / 1000;
                 if (lum >= 180) hi++;
             }
         return hi;
@@ -364,7 +365,7 @@ public static partial class MaxLevelSwapBrain
         long sum = 0; int n = 0;
         for (int i = 0; i < f.Bgra.Length; i += 16)
         {
-            sum += (f.Bgra[i] * 299 + f.Bgra[i + 1] * 587 + f.Bgra[i + 2] * 114) / 1000;
+            sum += (f.Bgra[i] * 114 + f.Bgra[i + 1] * 587 + f.Bgra[i + 2] * 299) / 1000;
             n++;
         }
         return n == 0 ? 0 : (double)sum / n;

@@ -92,6 +92,7 @@ public partial class MainWindow
     {
         if (!IsLoaded || _suppressTopNav) return;
         if (sender is not RadioButton { Tag: string tag }) return;
+        SaveUiToConfig();
         switch (tag)
         {
             case "Home": NavigateTo(NavMode.Home); break;
@@ -432,7 +433,8 @@ public partial class MainWindow
         // 两个轴一起下发：颜色 Token + 渐变/投影/噪点 + 窗口不透明度都由 ApplyTheme 重建
         ThemeManager.ApplyTheme(_cfg.Theme, _cfg.Appearance.World);
         ApplyWindowAppearance();   // ApplyTheme 复原了纯色外壳，材质要重新贴上去
-        _cfg.Save();
+        PersistConfigSafe("保存主题外观设置");
+        AppendLog($"[设置] 主题外观已更新：{_cfg.Theme}/{_cfg.Appearance.World}", LogLevel.Info);
         HideThemeOverlay();
     }
 
@@ -465,6 +467,7 @@ public partial class MainWindow
             {
                 OcrEngineKind.RapidV6 => "OCR 引擎（RapidOCR Small）",
                 OcrEngineKind.UnlimitedOcr => "OCR 引擎（Unlimited-OCR 外部服务）",
+                OcrEngineKind.Sidecar => "OCR 引擎（Rust Sidecar）",
                 _ => "OCR 引擎（SimdPaddle）",
             };
         }
@@ -634,6 +637,7 @@ public partial class MainWindow
 
     private void BtnLogViewer_Click(object sender, RoutedEventArgs e)
     {
+        SaveUiToConfig();
         NavigateTo(NavMode.LogViewer);
     }
 

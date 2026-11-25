@@ -71,7 +71,7 @@ public partial class MainWindow
             m.Pause.Content = (running && _paused ? "继续" : "暂停") + hk;
             m.Manual.IsEnabled = running;
             if (m.Step is not null)
-                m.Step.IsEnabled = active && _paused;
+                m.Step.IsEnabled = !_starting && !_stopping && running && _paused;
         }
         // 换人测试按钮：未激活时显示专用文案（ModuleRun 循环会把它改成「开始」）
         bool swapActive = running && _activeStartBtn == BtnTestSwap;
@@ -90,14 +90,14 @@ public partial class MainWindow
         if (_manualStopBusy) return;
         if (_workerHost is not { ScenarioRunning: true })
         {
-            AppendLog("【手动停止】当前没有运行中的挂机。", LogLevel.Info);
+            AppendLog("[手动停止] 当前没有运行中的挂机。", LogLevel.Info);
             return;
         }
         _manualStopBusy = true;
         foreach (var m in _moduleRuns) m.Manual.IsEnabled = false;
         try
         {
-            AppendLog("【手动停止】正在截取当前游戏画面…", LogLevel.Info);
+            AppendLog("[手动停止] 正在截取当前游戏画面…", LogLevel.Info);
             var (frame, info) = await Task.Run(() => GameFrameGrabber.GrabOnce(TimeSpan.FromSeconds(3)));
             string shotPath = "";
             if (frame is not null)
@@ -108,31 +108,31 @@ public partial class MainWindow
                     Directory.CreateDirectory(dir);
                     shotPath = Path.Combine(dir, $"game_{DateTime.Now:yyyyMMdd_HHmmss}.png");
                     SaveFramePng(frame, shotPath);
-                    AppendLog($"【手动停止】已截图：{shotPath}（{info}）", LogLevel.Success);
+                    AppendLog($"[手动停止] 已截图：{shotPath}（{info}）", LogLevel.Success);
                 }
                 catch (Exception ex)
                 {
                     shotPath = "";
-                    AppendLog($"【手动停止】截图保存失败：{ex.Message}", LogLevel.Warn);
+                    AppendLog($"[手动停止] 截图保存失败：{ex.Message}", LogLevel.Warn);
                 }
             }
             else
             {
-                AppendLog($"【手动停止】未取到游戏画面：{info}（反馈包仍会生成）", LogLevel.Warn);
+                AppendLog($"[手动停止] 未取到游戏画面：{info}（反馈包仍会生成）", LogLevel.Warn);
             }
             await StopScenarioAsync(allowAutoClose: false);
-            AppendLog("【手动停止】挂机已停止。", LogLevel.Info);
+            AppendLog("[手动停止] 挂机已停止。", LogLevel.Info);
             string? note = NotePromptWindow.Ask(this,
                 "已为你截取当前游戏画面。可选：描述遇到的问题（卡在哪一步、点了什么没反应、什么时候开始），" +
                 "会写进反馈包，帮助作者快速定位。");
             if (note is null)
             {
-                AppendLog("【手动停止】已取消生成反馈包（挂机已停止，截图保留在 data\\ManualStopShots）。", LogLevel.Info);
+                AppendLog("[手动停止] 已取消生成反馈包（挂机已停止，截图保留在 data\\ManualStopShots）。", LogLevel.Info);
                 return;
             }
-            AppendLog("【手动停止】正在生成反馈包（约 1~2 分钟，请勿关闭程序）…", LogLevel.Info);
+            AppendLog("[手动停止] 正在生成反馈包（约 1~2 分钟，请勿关闭程序）…", LogLevel.Info);
             string result = await Task.Run(() => DiagReporter.CollectAsync(userNote: note, screenshotPath: shotPath));
-            AppendLog($"【手动停止】反馈包已生成：{result}", LogLevel.Success);
+            AppendLog($"[手动停止] 反馈包已生成：{result}", LogLevel.Success);
             var ans = MessageBox.Show(this,
                 "反馈包已生成完毕。\n\n请把下面这个文件直接发给作者（或发到反馈群），即可帮你定位问题：\n\n" +
                 result + "\n\n是否现在打开反馈包所在目录？",
@@ -142,7 +142,7 @@ public partial class MainWindow
         }
         catch (Exception ex)
         {
-            AppendLog($"【手动停止】生成反馈包失败：{ex}", LogLevel.Error);
+            AppendLogError($"[手动停止] 生成反馈包失败：{ex.Message}", ex);
             MessageBox.Show(this,
                 "生成反馈包失败：" + ex.Message + "\n\n截图与日志仍保留在程序 data 目录。",
                 "反馈包生成失败", MessageBoxButton.OK, MessageBoxImage.Warning);

@@ -249,7 +249,7 @@ public sealed class BackgroundParker
                 GetSystemMetrics(SM_CXVIRTUALSCREEN));
             int parkTop = _target?.Y ?? _original.Top;
 
-            if (checkDrift && !IsAtParkPosition(rc.Left, rc.Top, parkX, parkTop, checkTop: true))
+            if (checkDrift && !IsAtParkPosition(rc.Left, rc.Top, parkX, parkTop, checkTop: _target is not null))
             {
                 if (SetWindowPos(hwnd, nint.Zero, parkX, parkTop,
                         0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE))
@@ -309,7 +309,7 @@ public sealed class BackgroundParker
     private static string ParkRecordPath =>
         Path.Combine(AppPaths.DataDir, "parked-window.json");
 
-    private sealed record ParkRecord(string ProcessName, nint Hwnd, int Left, int Top, int Width, int Height, string ParkedAt);
+    internal sealed record ParkRecord(string ProcessName, long Hwnd, int Left, int Top, int Width, int Height, string ParkedAt);
 
     /// <summary>停靠成功后落盘：进程名 + 移出前的原矩形。强制关闭/更新/崩溃等非正常退出后，
     /// 下次启动按记录还原（正常停止走 Stop 还原并删除记录）。</summary>
@@ -325,7 +325,7 @@ public sealed class BackgroundParker
                 procName = p.ProcessName;
             }
             catch { }
-            var rec = new ParkRecord(procName, hwnd, original.Left, original.Top,
+            var rec = new ParkRecord(procName, hwnd.ToInt64(), original.Left, original.Top,
                 original.Right - original.Left, original.Bottom - original.Top,
                 DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"));
             Directory.CreateDirectory(Path.GetDirectoryName(ParkRecordPath)!);
@@ -374,7 +374,7 @@ public sealed class BackgroundParker
             var rec = JsonSerializer.Deserialize<ParkRecord>(File.ReadAllText(ParkRecordPath));
             if (rec is null) { DeleteParkRecord(); message = "停靠记录损坏已清除"; return false; }
 
-            nint hwnd = rec.Hwnd;
+            nint hwnd = unchecked((nint)rec.Hwnd);
             bool valid = hwnd != nint.Zero && IsWindow(hwnd);
             if (!valid)
             {
@@ -385,7 +385,7 @@ public sealed class BackgroundParker
                     {
                         using (p)
                         {
-                            if (p.MainWindowHandle != nint.Zero) { hwnd = p.MainWindowHandle; valid = true; break; }
+                            if (!valid && p.MainWindowHandle != nint.Zero) { hwnd = p.MainWindowHandle; valid = true; }
                         }
                     }
                 }

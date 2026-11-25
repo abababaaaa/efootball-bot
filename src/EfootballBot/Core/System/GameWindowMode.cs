@@ -144,16 +144,24 @@ public static class GameWindowMode
     /// <summary>发一次 Alt+Enter（UE 系游戏切全屏/窗口的通用键）。</summary>
     private static void SendAltEnter(nint hwnd)
     {
+        bool altDown = false;
         try
         {
             keybd_event(0x12, 0, 0, UIntPtr.Zero);                     // Alt 按下
+            altDown = true;
             PostMessage(hwnd, WM_SYSKEYDOWN, (nint)VK_RETURN, (nint)0x201C0001);   // Alt 上下文字位置 1
             Sleep(120);
-            PostMessage(hwnd, WM_SYSKEYUP, (nint)VK_RETURN, unchecked((nint)0xC01C0001) | 0x2);
+            PostMessage(hwnd, WM_SYSKEYUP, (nint)VK_RETURN, unchecked((nint)0xE01C0001));
             Sleep(80);
-            keybd_event(0x12, 0, KEYEVENTF_KEYUP, UIntPtr.Zero);       // Alt 抬起
         }
         catch { }
+        finally
+        {
+            if (altDown)
+            {
+                try { keybd_event(0x12, 0, KEYEVENTF_KEYUP, UIntPtr.Zero); } catch { }
+            }
+        }
     }
 
     private static void Sleep(int ms) => global::System.Threading.Thread.Sleep(ms);
@@ -180,7 +188,7 @@ public static class GameWindowMode
     [DllImport("user32.dll")]
     private static extern bool GetWindowRect(nint hWnd, out RECT lpRect);
 
-    [DllImport("user32.dll")]
+    [DllImport("user32.dll", SetLastError = true)]
     private static extern bool SetWindowPos(nint hWnd, nint hWndInsertAfter, int x, int y, int cx, int cy, uint flags);
 
     [DllImport("user32.dll")]

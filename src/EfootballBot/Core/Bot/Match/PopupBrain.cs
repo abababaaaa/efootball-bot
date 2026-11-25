@@ -26,9 +26,9 @@ public enum PopupAction
     DownThenConfirm,
 }
 
-/// <summary>弹窗里识别到的一枚按钮。<paramref name="Luma"/> 是按钮底色中位亮度（判定高光用）。</summary>
+/// <summary>弹窗里识别到的一枚按钮。<paramref name="Luma"/> 是按钮底色中位亮度（判定高光用），<paramref name="Accent"/> 是青蓝填充占比。</summary>
 public sealed record PopupButton(
-    string Label, bool IsConfirm, double CenterX, double CenterY, double H, int Luma);
+    string Label, bool IsConfirm, double CenterX, double CenterY, double H, int Luma, double Accent = 0);
 /// <summary>
 /// 弹窗按钮决策（用户 2026-11-10 实机规则，纯函数 + 像素探针，可单测）：
 /// <list type="number">
@@ -83,7 +83,8 @@ public static class PopupBrain
             bool cancel = CancelWords.Any(k => core.Equals(k, StringComparison.OrdinalIgnoreCase));
             if (!confirm && !cancel) continue;
             int luma = frame is null ? 0 : BandLuma(frame, w);
-            var hit = new PopupButton(core, confirm, w.CenterX, w.CenterY, w.H, luma);
+            double accent = frame is null ? 0 : AccentShare(frame, w);
+            var hit = new PopupButton(core, confirm, w.CenterX, w.CenterY, w.H, luma, accent);
             if (map.TryGetValue(core, out var exist) && exist.H >= hit.H) continue;
             map[core] = hit;
         }
@@ -182,9 +183,19 @@ public static class PopupBrain
     /// <summary>Buttons 的可读摘要（日志用）。</summary>
     public static string Describe(IReadOnlyList<PopupButton> buttons)
         => string.Join(" / ", buttons.Select(b => $"{b.Label}{(b.IsConfirm ? "·推进" : "·取消")}@y{b.CenterY:F2} L{b.Luma}"));
-    /// <summary>白底高亮的那一枚（亮度差不够大时返回 null = 认不出高光）。</summary>
+    /// <summary>白底高亮（或国服浅色弹窗青蓝填充高光）的那一枚（差值不够大时返回 null = 认不出高光）。</summary>
     private static PopupButton? Focused(IReadOnlyList<PopupButton> buttons)
     {
+        // 国服浅色弹窗：未聚焦是纯白（L≈255），聚焦是青蓝填充（Accent ≥ 0.35，L≈131）。
+        // 若按纯亮度差判会反转，优先看是否有唯一高青蓝按钮 + 其余亮白低青蓝按钮。
+        if (buttons.Count >= 2 && buttons.All(b => b.Luma >= FocusedButtonLuma))
+        {
+            var cyanLit = buttons.Where(b => b.Accent >= FocusedAccentShare).ToList();
+            if (cyanLit.Count == 1 &&
+                buttons.Where(b => !ReferenceEquals(b, cyanLit[0]))
+                       .All(b => b.Luma >= 200 && b.Accent < FocusedAccentShare * 0.5))
+                return cyanLit[0];
+        }
         var lit = buttons.Where(b => b.Luma >= FocusedButtonLuma).ToList();
         if (lit.Count == 1) return lit[0];
         var order = buttons.OrderByDescending(b => b.Luma).ToList();

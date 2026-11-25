@@ -8,7 +8,7 @@
 use std::io;
 
 use windows::core::Interface;
-use windows::Win32::Foundation::{HINSTANCE, HWND, POINT, RECT};
+use windows::Win32::Foundation::{HMODULE, HWND, POINT, RECT};
 use windows::Win32::Graphics::Direct3D::{D3D_DRIVER_TYPE_UNKNOWN, D3D_FEATURE_LEVEL};
 use windows::Win32::Graphics::Direct3D11::{
     D3D11CreateDevice, D3D11_CPU_ACCESS_READ, D3D11_CREATE_DEVICE_BGRA_SUPPORT,
@@ -45,6 +45,7 @@ pub(crate) struct Crop {
 }
 
 pub struct DxgiCapturer {
+    hwnd: isize,
     device: ID3D11Device,
     ctx: ID3D11DeviceContext,
     dupl: IDXGIOutputDuplication,
@@ -210,7 +211,7 @@ impl DxgiCapturer {
             D3D11CreateDevice(
                 &chosen_adapter,
                 D3D_DRIVER_TYPE_UNKNOWN,
-                HINSTANCE::default(),
+                HMODULE::default(),
                 D3D11_CREATE_DEVICE_BGRA_SUPPORT,
                 Some(&levels),
                 D3D11_SDK_VERSION,
@@ -227,6 +228,7 @@ impl DxgiCapturer {
             })?;
 
             Ok(DxgiCapturer {
+                hwnd,
                 device,
                 ctx,
                 dupl,
@@ -240,6 +242,7 @@ impl DxgiCapturer {
     }
 
     pub fn set_crop_from_window(&mut self, hwnd: isize) -> io::Result<()> {
+        self.hwnd = hwnd;
         self.crop = if hwnd != 0 {
             Some(client_rect_of(HWND(hwnd as *mut _))?)
         } else {
@@ -250,6 +253,11 @@ impl DxgiCapturer {
 
     /// 取一帧。超时/无新帧返回 Ok(None)，调用方可直接睡一下再来。
     pub fn next_frame(&mut self, timeout_ms: u32) -> io::Result<Option<GrabResult>> {
+        if self.hwnd != 0 {
+            if let Ok(c) = client_rect_of(HWND(self.hwnd as *mut _)) {
+                self.crop = Some(c);
+            }
+        }
         unsafe {
             let mut info = DXGI_OUTDUPL_FRAME_INFO::default();
             let mut resource: Option<IDXGIResource> = None;
@@ -282,20 +290,22 @@ impl DxgiCapturer {
         texture.GetDesc(&mut desc);
         self.last_format = desc.Format;
 
-        // 先在桌面坐标系里算好裁剪框，再按框大小建 staging —— GPU 侧只搬这块，
-        // 回读量与窗口客户区成正比（窗口化 1920×1080 时整屏 19.8MB → 8.3MB）。
+        // 先在桌面坐标系里算好裁剪框并按输出纹理矩形精确截断，再按框大小建 staging
         let (ox, oy, cw, ch) = match self.crop {
             Some(c) => {
-                let x = (c.x - self.output_origin.0).max(0) as u32;
-                let y = (c.y - self.output_origin.1).max(0) as u32;
-                let x = x.min(desc.Width.saturating_sub(1));
-                let y = y.min(desc.Height.saturating_sub(1));
-                (
-                    x,
-                    y,
-                    c.w.min(desc.Width - x).max(1),
-                    c.h.min(desc.Height - y).max(1),
-                )
+                if c.w == 0 || c.h == 0 {
+                    return Ok(None);
+                }
+                let rx0 = (c.x - self.output_origin.0).clamp(0, desc.Width as i32);
+                let ry0 = (c.y - self.output_origin.1).clamp(0, desc.Height as i32);
+                let rx1 = ((c.x as i64 - self.output_origin.0 as i64) + c.w as i64)
+                    .clamp(0, desc.Width as i64) as i32;
+                let ry1 = ((c.y as i64 - self.output_origin.1 as i64) + c.h as i64)
+                    .clamp(0, desc.Height as i64) as i32;
+                if rx1 <= rx0 || ry1 <= ry0 {
+                    return Ok(None);
+                }
+                (rx0 as u32, ry0 as u32, (rx1 - rx0) as u32, (ry1 - ry0) as u32)
             }
             None => (0, 0, desc.Width, desc.Height),
         };
@@ -358,9 +368,9 @@ impl DxgiCapturer {
             self.buf.resize(need, 0);
         }
 
-        // 诊断：前 64 行非零样本数（0 = 复制没生效，或桌面复制本身给了黑帧）
+        // 诊断：前 min(ch, 64) 行非零样本数（0 = 复制没生效，或桌面复制本身给了黑帧）
         let mut probe_nonzero = 0usize;
-        let probe_len = (src_pitch * 64).min(1 << 20);
+        let probe_len = (src_pitch * (ch as usize).min(64)).min(1 << 20);
         for i in (0..probe_len).step_by(16) {
             if *src_ptr.add(i) != 0 {
                 probe_nonzero += 1;

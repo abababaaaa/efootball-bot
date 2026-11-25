@@ -31,6 +31,7 @@ public static class DeltaPatch
 
     private const int MinChunk = 2 * 1024;
     private const int MaxChunk = 64 * 1024;
+    private const int MaxInsertOpBytes = 8 * 1024 * 1024;
     private const ulong Mask = (1UL << 13) - 1; // 平均块 ≈ 8KB
 
     private const byte OpCopy = 1;
@@ -59,7 +60,13 @@ public static class DeltaPatch
         void FlushInsert(int endExclusive)
         {
             if (insertStart < 0) return;
-            ops.Add(new Op(OpInsert, 0, endExclusive - insertStart, insertStart));
+            int pos = insertStart;
+            while (pos < endExclusive)
+            {
+                int chunk = Math.Min(MaxInsertOpBytes, endExclusive - pos);
+                ops.Add(new Op(OpInsert, 0, chunk, pos));
+                pos += chunk;
+            }
             insertStart = -1;
         }
 
@@ -133,6 +140,8 @@ public static class DeltaPatch
 
         long newLength = patch.ReadInt64();
         int opCount = patch.ReadInt32();
+        if (newLength < 0 || opCount < 0)
+            throw new InvalidDataException("补丁头部长度或操作数异常");
 
         using var oldFs = File.OpenRead(oldFile);
         using var outFs = File.Create(outFile);
@@ -149,8 +158,10 @@ public static class DeltaPatch
                 {
                     long offset = patch.ReadInt64();
                     int len = patch.ReadInt32();
-                    if (offset < 0 || len <= 0 || offset + len > oldFs.Length)
+                    if (offset < 0 || len <= 0 || offset > oldFs.Length || len > oldFs.Length - offset)
                         throw new InvalidDataException("补丁引用了旧文件之外的区间");
+                    if (len > newLength - written)
+                        throw new InvalidDataException("补丁产出超过声明长度");
 
                     oldFs.Seek(offset, SeekOrigin.Begin);
                     int remaining = len;
@@ -167,13 +178,15 @@ public static class DeltaPatch
                 else if (kind == OpInsert)
                 {
                     int len = patch.ReadInt32();
-                    if (len < 0 || len > 8 * 1024 * 1024)
+                    if (len < 0 || len > MaxInsertOpBytes)
                         throw new InvalidDataException("补丁插入段长度异常");
+                    if (len > newLength - written)
+                        throw new InvalidDataException("补丁产出超过声明长度");
 
                     int remaining = len;
                     while (remaining > 0)
                     {
-                        int n = patch.Read(buffer, 0, Math.Min(buffer.Length, remaining));
+                        int n = oldFs.CanRead ? patch.Read(buffer, 0, Math.Min(buffer.Length, remaining)) : 0;
                         if (n <= 0) throw new InvalidDataException("补丁数据不完整");
                         outFs.Write(buffer, 0, n);
                         hash.AppendData(buffer, 0, n);
@@ -193,6 +206,8 @@ public static class DeltaPatch
                 throw new InvalidDataException($"补丁产出长度不符：{written} != {newLength}");
 
             byte[] expected = patch.ReadBytes(32);
+            if (expected.Length != 32)
+                throw new InvalidDataException("补丁校验摘要不完整");
             string actual = Convert.ToHexString(hash.GetHashAndReset()).ToLowerInvariant();
             string want = Convert.ToHexString(expected).ToLowerInvariant();
             if (expected.Length != 32 || actual != want)

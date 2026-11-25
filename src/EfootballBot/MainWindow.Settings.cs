@@ -190,8 +190,10 @@ public partial class MainWindow
         // 全权接管（挂机禁用真实手柄）：开关见「手柄接管」卡
         ChkPadTakeover.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
 
-        // 手柄后端（进程内代理 / ViGEmBus）：下拉项由 PadBackendInfo.UiOrder 生成
+        // 手柄后端（进程内代理 / ViGEmBus）：加载赋值期间同样屏蔽 SelectionChanged，避免启动期误写配置
+        _loadingConfig = true;
         LoadPadBackendUi();
+        _loadingConfig = false;
 
         // OCR 性能档（0=默认 / 1=提速：检测长边 640）
         CmbOcrPerf.SelectedIndex = _cfg.OcrPerf.DetLimitSideLength > 0 ? 1 : 0;
@@ -546,10 +548,15 @@ public partial class MainWindow
         _cfg.Update.AutoDownloadInstall = ChkAutoDownloadInstall.IsChecked == true;
 
         // 手柄接管：DisabledPadDevs 恢复清单保存前从磁盘回读，避免 GUI 陈旧快照把
-        // 尚未消费的遗留记录清掉（LegacyPadRestore 靠它恢复旧版本卡禁用的手柄）
-        try { _cfg.HidHide.DisabledPadDevs = AppConfig.Load().HidHide.DisabledPadDevs; } catch { }
+        // 尚未消费的遗留记录清掉（LegacyPadRestore 靠它恢复旧版本卡禁用的手柄）；仅读取成功时覆盖
+        try
+        {
+            if (AppConfig.TryLoad(out var latest) && latest is not null)
+                _cfg.HidHide.DisabledPadDevs = latest.HidHide.DisabledPadDevs;
+        }
+        catch { }
 
-        _cfg.Save();
+        PersistConfigSafe("保存UI配置");
     }
 
     // ---------------- 挂机节奏 ----------------
@@ -582,7 +589,7 @@ public partial class MainWindow
             TxtIdleError.Visibility = Visibility.Collapsed;
             TxtIdleMin.ClearValue(Control.BorderBrushProperty);
             TxtIdleMax.ClearValue(Control.BorderBrushProperty);
-            if (persist) _cfg.Save();
+            if (persist) PersistConfigSafe("保存挂机节奏");
             return true;
         }
 
@@ -632,7 +639,7 @@ public partial class MainWindow
         _cfg.Schedule.EndTime = end.ToString(@"hh\:mm");
         _cfg.Schedule.DailyCapHours = cap;
         _cfg.Schedule.DriftMinutes = drift;
-        if (persist) _cfg.Save();
+        if (persist) PersistConfigSafe("保存作息调度设置");
         return true;
     }
 
@@ -640,7 +647,6 @@ public partial class MainWindow
     private async void BtnNotifyTest_Click(object sender, RoutedEventArgs e)
     {
         SaveUiToConfig();
-        _cfg.Save();
         BtnNotifyTest.IsEnabled = false;
         TxtNotifyTestResult.Text = "发送中…";
         string name = string.IsNullOrWhiteSpace(_cfg.Notify.InstanceName) ? "eFootballBot" : _cfg.Notify.InstanceName.Trim();
@@ -686,7 +692,8 @@ public partial class MainWindow
     {
         if (_loadingConfig || CmbPadBackend is null) return;
         _cfg.Pad.Backend = PadBackendInfo.FromUiIndex(CmbPadBackend.SelectedIndex);
-        _cfg.Save();
+        PersistConfigSafe("保存手柄后端设置");
+        AppendLog($"[设置] 手柄后端已切换为：{PadBackendInfo.DisplayName(_cfg.Pad.Backend)}", LogLevel.Info);
         RefreshPadBackendState();
     }
 
@@ -971,7 +978,7 @@ public partial class MainWindow
         catch (Exception ex)
         {
             TxtDiagStatus.Text = $"生成失败：{ex.Message}";
-            AppendLog($"生成诊断报告失败：{ex}", LogLevel.Error);
+            AppendLogError($"[诊断] 生成诊断报告失败：{ex.Message}", ex);
         }
         finally
         {
@@ -1236,7 +1243,8 @@ public partial class MainWindow
     {
         if (_loadingConfig) return;
         _cfg.HidHide.HidePhysicalGamepad = ChkPadTakeover.IsChecked == true;
-        _cfg.Save();
+        PersistConfigSafe("保存手柄接管设置");
+        AppendLog($"[设置] 物理手柄接管：{(_cfg.HidHide.HidePhysicalGamepad ? "已开启" : "已关闭")}", LogLevel.Info);
     }
 }
 

@@ -196,14 +196,8 @@ public sealed class WindowCapture : ICaptureProvider
             }
             catch
             {
-                // 启动中途失败：释放已创建的半套资源，保证下次 Start 干净重来
-                // （Stop 有 !_running 短路，不会清理这些）
-                if (_pool is not null) { try { _pool.FrameArrived -= OnFrameArrived; } catch { } }
-                try { _session?.Dispose(); } catch { }
-                try { _pool?.Dispose(); } catch { }
-                _session = null;
-                _pool = null;
-                FreeDevice();
+                // 启动中途失败：统一走完整清理，保证下次 Start 干净重来
+                CleanupLocked();
                 throw;
             }
         }
@@ -342,7 +336,7 @@ public sealed class WindowCapture : ICaptureProvider
                         catch (Exception ex)
                         {
                             recreateError = ex;
-                            _running = false; // 帧池已坏，等引擎 WaitForFreshFrameAsync 整套重建
+                            CleanupLocked(); // 帧池已坏：立即释放资源并停定时器，等 WaitForFreshFrameAsync 整套重建
                         }
                     }
                 }
@@ -505,23 +499,32 @@ public sealed class WindowCapture : ICaptureProvider
     {
         lock (_gate)
         {
-            if (!_running) return;
-            _running = false;
-            _minFrameIntervalMs = 0;
-            _throttleTimer?.Dispose();
-            _throttleTimer = null;
-            _throttleTimerPeriod = 0;
-            ReleaseHeldFrames();
-            try { _gpuScalerVortice?.Dispose(); } catch { }
-            _gpuScalerVortice = null;
-            _gpuFailed = false;
-            if (_pool is not null) { try { _pool.FrameArrived -= OnFrameArrived; } catch { } }
-            try { _session?.Dispose(); } catch { }
-            try { _pool?.Dispose(); } catch { }
-            _session = null;
-            _pool = null;
-            FreeDevice();
+            CleanupLocked();
         }
+    }
+
+    private void CleanupLocked()
+    {
+        bool dirty = _running || _session is not null || _pool is not null
+            || _winrtDevice is not null || _vorticeDevice is not null
+            || _gpuScalerVortice is not null || _throttleTimer is not null
+            || _latest is not null;
+        if (!dirty) return;
+        _running = false;
+        _minFrameIntervalMs = 0;
+        _throttleTimer?.Dispose();
+        _throttleTimer = null;
+        _throttleTimerPeriod = 0;
+        ReleaseHeldFrames();
+        try { _gpuScalerVortice?.Dispose(); } catch { }
+        _gpuScalerVortice = null;
+        _gpuFailed = false;
+        if (_pool is not null) { try { _pool.FrameArrived -= OnFrameArrived; } catch { } }
+        try { _session?.Dispose(); } catch { }
+        try { _pool?.Dispose(); } catch { }
+        _session = null;
+        _pool = null;
+        FreeDevice();
         _latest = null;
     }
 

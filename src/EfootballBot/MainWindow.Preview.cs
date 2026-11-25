@@ -184,6 +184,7 @@ public partial class MainWindow
         // 游戏进程退出/重启：旧句柄作废，直接放弃 DWM 路径
         if (!IsDwmSourceAlive(_dwmPreview.SourceHandle))
         {
+            AppendLog("[预览] 游戏窗口已关闭或重建，DWM 实时预览已自动回退到帧流", LogLevel.Info);
             StopDwmPreview();
             return;
         }

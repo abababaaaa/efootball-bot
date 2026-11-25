@@ -54,55 +54,42 @@ public sealed class FileLogger : IDisposable
     /// <param name="retentionDays">保留天数，早于该天数的日志一律删除</param>
     public void Initialize(bool enabled, string minLevel, int maxFiles, int retentionDays)
     {
-        _enabled = enabled;
-        _minLevel = ParseLevel(minLevel);
-
         lock (_lock)
         {
+            _enabled = enabled;
+            _minLevel = ParseLevel(minLevel);
             _writer?.Flush();
             _writer?.Close();
             _writer = null;
-        }
 
-        if (!enabled)
-        {
-            CurrentLogPath = "";
-            return;
-        }
-
-        Directory.CreateDirectory(LogDir);
-        CleanupOldLogs(maxFiles, retentionDays);
-
-        // 文件名带 PID：GUI 与 Worker 子进程同秒启动时不会撞同名文件
-        string filename = $"bot-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}.yml";
-        _sessionBase = Path.GetFileNameWithoutExtension(filename);
-        _rotateIndex = 0;
-        _bytesWritten = 0;
-        CurrentLogPath = Path.Combine(LogDir, filename);
-        try
-        {
-            // UTF-8 带 BOM：任何版本的记事本双击打开中文都不乱码
-            // AutoFlush=false + 2s 定时 flush：此前每行都落盘，Debug 级长会话是持续的
-            // 小写入风暴（挂机 8h 的 IO 与磁盘唤醒都白费）；改为定时刷盘后，
-            // Warn/Error 仍然立即 flush（崩溃前最后一条必在盘上）。
-            _writer = new StreamWriter(CurrentLogPath, append: false,
-                    encoding: new UTF8Encoding(encoderShouldEmitUTF8Identifier: true))
+            if (!enabled)
             {
-                AutoFlush = false
-            };
-        }
-        catch
-        {
-            // 文件创建失败（占用/权限/路径）→ 降级为不写文件，绝不让日志问题炸掉进程
-            CurrentLogPath = "";
-            _writer = null;
-            return;
-        }
+                try { _flushTimer?.Dispose(); } catch { }
+                _flushTimer = null;
+                CurrentLogPath = "";
+                return;
+            }
 
-        lock (_lock)
-        {
+            Directory.CreateDirectory(LogDir);
+            CleanupOldLogs(maxFiles, retentionDays);
+
+            // 文件名带 PID：GUI 与 Worker 子进程同秒启动时不会撞同名文件
+            string filename = $"bot-{DateTime.Now:yyyyMMdd-HHmmss}-{Environment.ProcessId}.yml";
+            _sessionBase = Path.GetFileNameWithoutExtension(filename);
+            _rotateIndex = 0;
+            _bytesWritten = 0;
+            CurrentLogPath = Path.Combine(LogDir, filename);
             try
             {
+                // UTF-8 带 BOM：任何版本的记事本双击打开中文都不乱码
+                // AutoFlush=false + 2s 定时 flush：此前每行都落盘，Debug 级长会话是持续的
+                // 小写入风暴（挂机 8h 的 IO 与磁盘唤醒都白费）；改为定时刷盘后，
+                // Warn/Error 仍然立即 flush（崩溃前最后一条必在盘上）。
+                _writer = new StreamWriter(CurrentLogPath, append: false,
+                        encoding: new UTF8Encoding(encoderShouldEmitUTF8Identifier: true))
+                {
+                    AutoFlush = false
+                };
                 _writer.WriteLine("# eFootball 挂机助手运行日志（YAML / UTF-8，记事本可直接打开）");
                 _writer.WriteLine($"session: \"{filename}\"");
                 _writer.WriteLine($"pid: {Environment.ProcessId}");
@@ -117,12 +104,19 @@ public sealed class FileLogger : IDisposable
                 WriteYamlLine(LogLevel.Info, $"=== 日志会话开始：{filename} ===");
                 _writer.Flush();
             }
-            catch { }
-        }
+            catch
+            {
+                // 文件创建失败（占用/权限/路径）→ 降级为不写文件，绝不让日志问题炸掉进程
+                try { _writer?.Dispose(); } catch { }
+                CurrentLogPath = "";
+                _writer = null;
+                return;
+            }
 
-        // 定时刷盘（AutoFlush=false 的配套）：2s 一次，代价可忽略，崩溃最多丢最后 2s
-        _flushTimer?.Dispose();
-        _flushTimer = new Timer(_ => FlushSafe(), null, FlushIntervalMs, FlushIntervalMs);
+            // 定时刷盘（AutoFlush=false 的配套）：2s 一次，代价可忽略，崩溃最多丢最后 2s
+            _flushTimer?.Dispose();
+            _flushTimer = new Timer(_ => FlushSafe(), null, FlushIntervalMs, FlushIntervalMs);
+        }
     }
 
     /// <summary>把缓冲区刷到磁盘（异常静默：磁盘满/句柄失效都不允许影响挂机）。</summary>
@@ -138,31 +132,46 @@ public sealed class FileLogger : IDisposable
     private static string EscapeYamlScalar(string key, string value) =>
         $"{key}: \"{value.Replace("\\", "\\\\").Replace("\"", "\\\"").Replace("\r", " ").Replace("\n", " ")}\"";
 
+    /// <summary>剥离 BotEngine 前置的 [HH:mm:ss] 时间戳，保留如 [MyLeague] 等方括号标签。</summary>
+    internal static string StripLeadingTimestamp(string message)
+    {
+        if (message.Length >= 10 &&
+            message[0] == '[' &&
+            message[9] == ']' &&
+            message[3] == ':' &&
+            message[6] == ':' &&
+            char.IsAsciiDigit(message[1]) && char.IsAsciiDigit(message[2]) &&
+            char.IsAsciiDigit(message[4]) && char.IsAsciiDigit(message[5]) &&
+            char.IsAsciiDigit(message[7]) && char.IsAsciiDigit(message[8]))
+        {
+            return message[10..].TrimStart();
+        }
+        return message;
+    }
+
     /// <summary>写一条日志，级别低于 minLevel 的跳过。线程安全。</summary>
     public void Write(string message, LogLevel level)
     {
-        if (!_enabled) return;
-        if (_writer is null) return;
-        // 严重度排序（与枚举数值顺序不一致，不能直接用 level > minLevel）：
-        // Debug 最轻 → Info/Success → Warn → Error。minLevel 语义：只写严重度 ≥ minLevel 的，
-        // 例如 Info 级别必须保留 Warn/Error（旧写法把它们误过滤，故障日志全丢）
-        if (Severity(level) < Severity(_minLevel)) return;
+        // BotEngine.LogInternal 传入的 message 已带 [HH:mm:ss] 前缀，前面补完整日期（避免误删 [MyLeague] 等 8 字符标签）
+        string fullMsg = StripLeadingTimestamp(message);
 
-        // BotEngine.LogInternal 传入的 message 已带 [HH:mm:ss] 前缀，前面补完整日期
-        string fullMsg = message;
-        if (fullMsg.Length > 11 && fullMsg.StartsWith("[") && fullMsg[9] == ']')
-        {
-            fullMsg = fullMsg[11..].TrimStart();
-        }
-
+        bool flushNow = false;
         lock (_lock)
         {
-            try { WriteYamlLine(level, fullMsg); }
+            if (!_enabled || _writer is null) return;
+            // 严重度排序（与枚举数值顺序不一致，不能直接用 level > minLevel）：
+            // Debug 最轻 → Info/Success → Warn → Error。minLevel 语义：只写严重度 ≥ minLevel 的，
+            // 例如 Info 级别必须保留 Warn/Error（旧写法把它们误过滤，故障日志全丢）
+            if (Severity(level) < Severity(_minLevel)) return;
+            try
+            {
+                WriteYamlLine(level, fullMsg);
+                // Warn/Error 立即落盘：崩溃前最后几条关键信息绝不能停在缓冲区里
+                flushNow = Severity(level) >= 2;
+                if (flushNow) _writer?.Flush();
+            }
             catch { /* 磁盘满/句柄关闭等异常静默 */ }
         }
-
-        // Warn/Error 立即落盘：崩溃前最后几条关键信息绝不能停在缓冲区里
-        if (Severity(level) >= 2) FlushSafe();
     }
 
     private void WriteYamlLine(LogLevel level, string msg)

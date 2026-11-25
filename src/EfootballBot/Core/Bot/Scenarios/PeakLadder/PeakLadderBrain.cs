@@ -106,7 +106,8 @@ public static class PeakLadderBrain
             (ocr.ContainsJoined("下一步") || ocr.ContainsJoined("升级") ||
              FindBottomConfirm(dets) is not null))
             return PlScreen.RankProgress;
-        // 活动主页：「本周可参赛场次」独有；前往比赛+比赛记录 兜底（OCR 漏读数字行时）
+        // 活动主页：「本周可参赛场次」独有；前往比赛+比赛记录 兜底（OCR 漏读数字行时；
+        // 与国服我的联赛主页同构，由 CnMyLeagueScenario.HasPeakLadderEvidence 排他）
         if (ocr.ContainsJoined("本周可参赛场次") ||
             (ocr.ContainsJoined("前往比赛") && ocr.ContainsJoined("比赛记录")))
             return PlScreen.ActivityHome;
@@ -119,7 +120,7 @@ public static class PeakLadderBrain
             if (ocr.ContainsJoined("好友对战") || ocr.ContainsJoined("我的联盟") ||
                 ocr.ContainsJoined("我的联赛") || ocr.ContainsJoined("比赛活动"))
                 return PlScreen.HomeMatch;
-            if (ocr.ContainsJoined("活动中心") || ocr.ContainsJoined("我的球队"))
+            if (ocr.ContainsJoined("活动中心") || ocr.ContainsJoined("我的球队") || ocr.ContainsJoined("设置"))
                 return PlScreen.HomeRecommended;
         }
         return PlScreen.None;
@@ -139,6 +140,9 @@ public static class PeakLadderBrain
         {
             if (!line.Text.Contains("本周可参赛场次") && !line.Text.Contains("当前剩余参赛场次"))
                 continue;
+            var direct = Regex.Match(line.Text, @"(?:本周可参赛场次|当前剩余参赛场次)\D{0,4}(\d+)");
+            if (direct.Success && int.TryParse(direct.Groups[1].Value, out int nDirect))
+                return nDirect;
             MatchCollection ms = Digits.Matches(line.Text);
             if (ms.Count > 0 && int.TryParse(ms[^1].Value, out int n))
                 return n;
@@ -205,16 +209,26 @@ public static class PeakLadderBrain
     /// </summary>
     public static OcrWord? FindAdvanceWord(OcrResult ocr, params string[] keywords)
     {
-        OcrWord? best = null;
-        foreach (var w in ocr.MergedWords)
+        static bool MatchKeyword(string normText, string k)
         {
-            if (w.CenterY < 0.55) continue;
-            if (!keywords.Any(k => w.NormText.Contains(k, StringComparison.OrdinalIgnoreCase))) continue;
-            if (best is null || w.CenterY > best.CenterY ||
-                (Math.Abs(w.CenterY - best.CenterY) < 0.02 && w.CenterX > best.CenterX))
-                best = w;
+            bool ascii = k.Length > 0 && k.All(c => c < 128);
+            return ascii ? normText.Equals(k, StringComparison.OrdinalIgnoreCase)
+                         : normText.Contains(k, StringComparison.OrdinalIgnoreCase);
         }
-        return best;
+        OcrWord? Pick(IEnumerable<OcrWord> pool)
+        {
+            OcrWord? best = null;
+            foreach (var w in pool)
+            {
+                if (w.CenterY < 0.55 || w.W > 0.35) continue;
+                if (!keywords.Any(k => MatchKeyword(w.NormText, k))) continue;
+                if (best is null || w.CenterY > best.CenterY + 0.02 ||
+                    (Math.Abs(w.CenterY - best.CenterY) <= 0.02 && w.CenterX > best.CenterX))
+                    best = w;
+            }
+            return best;
+        }
+        return Pick(ocr.Words) ?? Pick(ocr.MergedWords);
     }
 
     /// <summary>在 OCR 中找弹窗选项文字（参赛模式弹窗的「单场比赛」），限定卡片区 y 0.35~0.85。

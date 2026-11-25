@@ -21,7 +21,7 @@
 //! reader 只读偶数 seq，并按同一公式算槽位，天然避免撕裂；读慢于写时读到旧帧而非坏帧。
 
 use std::io;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{fence, AtomicU64, Ordering};
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{CloseHandle, HANDLE, INVALID_HANDLE_VALUE};
 use windows::Win32::System::Memory::{
@@ -128,6 +128,10 @@ impl FrameRing {
         self.total
     }
 
+    pub fn slots(&self) -> u32 {
+        self.slots
+    }
+
     /// 发布一帧 BGRA 数据（`stride >= w*4`，可为 0 表示 w*4）。返回新的 seq。
     pub fn publish(&mut self, w: u32, h: u32, stride: u32, data: &[u8]) -> u64 {
         let stride = if stride == 0 { w * 4 } else { stride };
@@ -153,6 +157,7 @@ impl FrameRing {
             atomic_at(base, OFF_TS).store(now_ms(), Ordering::Release);
             atomic_at(base, OFF_CAPTURES).store(captures, Ordering::Release);
 
+            fence(Ordering::Release);
             let even = odd + 1;
             seq_at.store(even, Ordering::Release);
             self.seq = even;
@@ -172,16 +177,20 @@ impl FrameRing {
             let w = std::ptr::read_volatile(base.add(OFF_WIDTH) as *const u32);
             let h = std::ptr::read_volatile(base.add(OFF_HEIGHT) as *const u32);
             let stride = std::ptr::read_volatile(base.add(OFF_STRIDE) as *const u32);
-            if w == 0 || h == 0 || stride == 0 {
+            if w == 0 || h == 0 || stride < w.saturating_mul(4) {
                 return None;
             }
-            let need = (stride as usize) * (h as usize);
-            if need > self.slot_bytes {
+            let need = (stride as usize).checked_mul(h as usize)?;
+            if need == 0 || need > self.slot_bytes {
                 return None;
             }
             let slot = ((seq / 2) as usize) % self.slots as usize;
             let mut out = vec![0u8; need];
             std::ptr::copy_nonoverlapping(base.add(HEADER_BYTES + slot * self.slot_bytes), out.as_mut_ptr(), need);
+            fence(Ordering::Acquire);
+            if atomic_at(base, OFF_SEQ).load(Ordering::Acquire) != seq {
+                return None;
+            }
             Some((out, w, h, stride))
         }
     }
@@ -209,6 +218,7 @@ const OFF_MAGIC_CONST: usize = 0;
 
 /// 只读帧环（用于 C# 上传的帧：OCR/检测在任意 FrameData 上跑）。
 pub struct FrameRingReader {
+    handle: HANDLE,
     view: MEMORY_MAPPED_VIEW_ADDRESS,
     base: *mut u8,
     pub w: u32,
@@ -237,10 +247,13 @@ impl FrameRingReader {
         unsafe {
             let magic = std::ptr::read_volatile(base.add(0) as *const u32);
             if magic != MAGIC {
+                let _ = UnmapViewOfFile(view);
+                let _ = CloseHandle(handle);
                 return Err(io::Error::other(format!("帧环 magic 不符: {magic:#x}")));
             }
         }
         let mut r = FrameRingReader {
+            handle,
             view,
             base,
             w: 0,
@@ -275,10 +288,10 @@ impl FrameRingReader {
             return None;
         }
         self.refresh();
-        if self.slots == 0 || self.slot_bytes == 0 || self.w == 0 || self.h == 0 {
+        if self.slots == 0 || self.slot_bytes == 0 || self.w == 0 || self.h == 0 || self.stride < self.w.saturating_mul(4) {
             return None;
         }
-        let need = (self.stride as usize) * (self.h as usize);
+        let need = (self.stride as usize).checked_mul(self.h as usize)?;
         if need == 0 || need > self.slot_bytes {
             return None;
         }
@@ -287,6 +300,10 @@ impl FrameRingReader {
         unsafe {
             let src = self.base.add(HEADER_BYTES + slot * self.slot_bytes);
             std::ptr::copy_nonoverlapping(src, out.as_mut_ptr(), need);
+        }
+        fence(Ordering::Acquire);
+        if self.seq() != seq {
+            return None;
         }
         self.last_seq = seq;
         Some((out, self.w, self.h, self.stride))
@@ -297,6 +314,7 @@ impl Drop for FrameRingReader {
     fn drop(&mut self) {
         unsafe {
             let _ = UnmapViewOfFile(self.view);
+            let _ = CloseHandle(self.handle);
         }
     }
 }

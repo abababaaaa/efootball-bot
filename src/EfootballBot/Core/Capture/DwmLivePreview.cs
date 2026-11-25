@@ -215,7 +215,7 @@ internal static class DwmNative
         public int cx, cy;
     }
 
-    [StructLayout(LayoutKind.Sequential)]
+    [StructLayout(LayoutKind.Sequential, Pack = 1)]
     public struct DwmThumbnailProperties
     {
         public int Flags;

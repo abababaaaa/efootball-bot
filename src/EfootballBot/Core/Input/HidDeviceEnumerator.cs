@@ -124,16 +124,18 @@ public static class HidDeviceEnumerator
     /// 且祖先链非虚拟总线（排除本程序自己的虚拟手柄——Xbox360 档与真实 360 手柄、
     /// DS4 档与真实 DS4 路径均完全同形）。全程不打开设备。
     /// </summary>
+    public static bool IsPhysicalGamepadInstance(string instancePath) =>
+        IsXInputStyleInstance(instancePath)
+        || PhysicalPlayStationPrefixes.Any(p =>
+            instancePath.StartsWith(p, StringComparison.OrdinalIgnoreCase))
+        || IsBleGamepadInstance(instancePath);
+
     public static List<HidInstance> FindPhysicalGamepadDevNodes()
     {
         var result = new List<HidInstance>();
         foreach (var inst in EnumerateAllInstances())
         {
-            bool gamepad = IsXInputStyleInstance(inst.InstancePath)
-                || PhysicalPlayStationPrefixes.Any(p =>
-                    inst.InstancePath.StartsWith(p, StringComparison.OrdinalIgnoreCase))
-                || IsBleGamepadInstance(inst.InstancePath);
-            if (!gamepad) continue;
+            if (!IsPhysicalGamepadInstance(inst.InstancePath)) continue;
             if (IsVirtualBusChild(inst.DevInst)) continue;
             if (IsDevNodeProblemDisabled(inst.DevInst)) continue;
             result.Add(inst);

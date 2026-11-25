@@ -217,7 +217,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         // 启动引导（国际服）：若游戏停在其他模块页（周活动/天梯/巅峰赛），先 B 收敛回主页，
         // 否则共享分类会把该页当"前往比赛"直接开赛，导致从别的模块页启动本模块时永远到不了。
         // 借其他模块 Brain 认残留页（架构锁允许只读借用 Brain.Classify）；本模块页/主页/比赛中跳过。
-        if (SupportsOcrTileNav) // 国际服标志（国服子类有自己的残留页兜底，关闭此引导）
+        if (SupportsOcrTileNav && !_enteredFromHub) // 国际服标志（进错卡交下方 _enteredFromHub 恢复；国服子类关闭此引导）
         {
             bool otherModule = weeklyPageByBrain || weeklyPageByOcr // OCR 特征提取在上文已算，覆盖 YOLO 误检
                                 || AiLadderBrain.Classify(obs.Ocr) != AlScreen.None
@@ -430,8 +430,10 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
             sawKeyMatchHint: screen == MatchScreen.KeyMatchDialog || obs.Ocr.ContainsJoined("关键比赛"),
             isHome: isLeagueHome,
             startNote: "挂机等待比赛结束（不按键）");
+        if (tick.Started) _skipBlockedThisMatch = false;
         if (tick.Ended && tick.EndedTrusted)
         {
+            _skipBlockedThisMatch = false;
             // 每场比赛结束后复位购买状态机（用户要求）：下一轮回联赛主页必定重新右拨
             // 核验「使用的物品」面板，加成道具耗尽（有效场数一般 3 场）当场补购。
             // 重验 2 次仍缺的放弃守卫保留——同一场内最多尝试 3 次，不会死循环。
@@ -584,7 +586,10 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
             await _engine.Pad.Back();
             return 2600;
         }
-        var action = MatchBrain.Decide(screen, obs.Ocr, _streak, inMatchRecently, obs.Frame);
+        var action = MatchBrain.Decide(screen, obs.Ocr, _streak, inMatchRecently, obs.Frame,
+            allowMatchSkip: !_skipBlockedThisMatch);
+        if (screen == MatchScreen.CnMatchPause && action.Kind == MatchActionKind.GamepadBack)
+            _skipBlockedThisMatch = true;
         MatchShared.DecisionSnapshot(_log, "我的联赛", screen, _streak, action, obs.Ocr);
         // 标题画面宽限（共享实现，含赛后弹窗链 90s 档，见 MatchShared.TitleGrace）：
         // 比赛流程上下文中的「eFootball™+X」帧多为开赛加载画面（实机 bot-20261011-140943：
@@ -613,7 +618,8 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
             return await HandleDifficultyAsync(obs.Frame, obs.Ocr);
         }
         _difficultyPageRounds = 0;
-        _difficultyConfirmRound = 0;
+        if (screen is MatchScreen.MatchStartPage or MatchScreen.InMatch or MatchScreen.FullTime or MatchScreen.MainMenu or MatchScreen.MatchHub)
+            _difficultyConfirmRound = 0;
         return await MatchActionExecutor.ExecuteAsync(
             _engine, _matchPlay, action, obs, _log, "我的联赛", ct,
             onConfirm: async () =>
@@ -666,6 +672,10 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
     private int _skipFailStreak;
     /// <summary>已对本场请求过重启（重启到新窗口需要时间，期间不能重复请求）。</summary>
     private bool _skipRequestedForThisMatch;
+    /// <summary>本场在国服暂停菜单已确认无法跳过（如非领先），避免继续 Start↔B 循环。</summary>
+    private bool _skipBlockedThisMatch;
+    /// <summary>熔断禁用跳过后的单次日志锁，防止每轮 InMatch 刷屏推送 Error。</summary>
+    private bool _skipDisabledLogged;
     /// <summary>
     /// 只打关键比赛（国服子类不支持——国服有「跳过比赛」菜单项，走自己的路径）：
     /// 开赛后确认这一场不是关键比赛 → 请求引擎杀进程重启游戏，把普通比赛快速跳过。
@@ -711,20 +721,26 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         // 熔断：连续失败/超出本次运行上限 → 停用，退回正常打完（绝不让一次故障变成重启循环）
         if (_skipFailStreak >= 3)
         {
-            _log("[我的联赛] 只打关键比赛：连续 3 次重启失败，本次运行停用跳过功能，改为正常打完", LogLevel.Error);
+            if (!_skipDisabledLogged)
+            {
+                _skipDisabledLogged = true;
+                _log("[我的联赛] 只打关键比赛：连续 3 次重启失败，本次运行停用跳过功能，改为正常打完", LogLevel.Error);
+            }
             return null;
         }
         if (_skipCount >= MaxSkipRetriesPerRun)
         {
-            _log($"[我的联赛] 只打关键比赛：本次运行已跳过 {_skipCount} 场，达到上限后停用", LogLevel.Warn);
+            if (!_skipDisabledLogged)
+            {
+                _skipDisabledLogged = true;
+                _log($"[我的联赛] 只打关键比赛：本次运行已跳过 {_skipCount} 场，达到上限后停用", LogLevel.Warn);
+            }
             return null;
         }
         _skipRequestedForThisMatch = true;
         _skipCountdownLogged = false;
-        _skipCount++;
-        _engine.Stats.SkippedMatches++;
         _engine.RequestGameRestart();
-        _log($"[我的联赛] 只打关键比赛：跳过第 {_skipCount} 场普通比赛（重启游戏）", LogLevel.Success);
+        _log("[我的联赛] 只打关键比赛：本场为普通比赛，请求重启游戏跳过…", LogLevel.Info);
         return 1500;
     }
 
@@ -748,9 +764,22 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
     /// </summary>
     public void OnGameRestarted(bool success)
     {
+        if (!success)
+        {
+            _skipFailStreak++;
+            _skipRequestedForThisMatch = true; // 本场仍存活：保持标记不再重复杀同一场
+            _log($"[我的联赛] 重启游戏失败（连续第 {_skipFailStreak} 次），本场按正常流程打完", LogLevel.Warn);
+            return;
+        }
+
+        _skipFailStreak = 0;
+        _skipCount++;
+        _engine.Stats.SkippedMatches++;
+        _log($"[我的联赛] 只打关键比赛：已重启跳过第 {_skipCount} 场普通比赛", LogLevel.Success);
         _memory.Clear();
         _matchSession.Abort();
         _skipRequestedForThisMatch = false;
+        _skipBlockedThisMatch = false;
         _skipCountdownLogged = false;
         _lastScreen = MatchScreen.Unknown;
         _streak = 0;
@@ -774,15 +803,6 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         _insufficientPoints = false;
         _phase = PurchasePhase.Idle;
         _navAttempts = 0;
-        if (!success)
-        {
-            _skipFailStreak++;
-            _log($"[我的联赛] 重启游戏失败（连续第 {_skipFailStreak} 次），本场按正常流程打完", LogLevel.Warn);
-        }
-        else
-        {
-            _skipFailStreak = 0;
-        }
     }
 
     // ---------------- 满级自动换人 ----------------
@@ -804,7 +824,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                 _log("[我的联赛] 手动测试：满级换人巡检已排队（回到联赛主页无弹窗时开始）", LogLevel.Success);
             }
         }
-        if (!LeagueConfig.AutoSwapMaxLevel && !_swapQueued) return null;
+        if (_maxSwap.Idle && !LeagueConfig.AutoSwapMaxLevel && !_swapQueued && !_swapTestOnly) return null;
         if (_maxSwap.Idle)
         {
             // 测试模式：巡检跑完（含中途放弃）即自动停止挂机；普通挂机继续正常流程
@@ -1017,7 +1037,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                 if (screen != MatchScreen.ItemList) return null;
                 // 找下一个未购买的目标（物品页用已购集合 + 使用中预检防重复买）
                 var target = _configuredItems.FirstOrDefault(t => !_bought.Contains(t));
-                if (target is null)
+                if (_insufficientPoints || target is null)
                 {
                     _log(_insufficientPoints
                         ? "[我的联赛] 积分不足跳过购买，返回主页前往比赛"
@@ -1354,7 +1374,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
                 norm.Contains("经验值") && (norm.Contains(level) ||
                     (level.Length >= 2 && norm.Contains(level[1] + level[0].ToString()))), // 4x / x4
             MyLeagueBrain.MlItemKind.CoachBoost => norm.Contains("教练"),
-            MyLeagueBrain.MlItemKind.ConditionBoost => norm.Contains("状态") && norm.Contains(target.Level),
+            MyLeagueBrain.MlItemKind.ConditionBoost => norm.Contains("状态") && norm.Contains(level.TrimEnd('+')),
             _ => false,
         };
     }

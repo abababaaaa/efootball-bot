@@ -327,7 +327,7 @@ public static class FastGithubKernel
         if (!IsInstalled) return;
         try
         {
-            Process.Start(new ProcessStartInfo(ExePath) { WorkingDirectory = Dir, UseShellExecute = true });
+            using var _ = Process.Start(new ProcessStartInfo(ExePath) { WorkingDirectory = Dir, UseShellExecute = true });
         }
         catch { }
     }
@@ -562,11 +562,14 @@ public static class FastGithubKernel
 
         if (repairs.Count > 0 || removed.Count > 0)
         {
-            string merged = StripBlock(ReadHosts()).TrimEnd('\r', '\n') + "\r\n\r\n" + BuildBlock(map);
-            if (WriteHosts(merged))
+            lock (HostsFileLock)
             {
-                SaveCache(map);
-                FlushDns();
+                string merged = StripBlock(ReadHosts()).TrimEnd('\r', '\n') + "\r\n\r\n" + BuildBlock(map);
+                if (WriteHosts(merged))
+                {
+                    SaveCache(map);
+                    FlushDns();
+                }
             }
         }
 
@@ -602,17 +605,34 @@ public static class FastGithubKernel
 
     internal static bool HasBlock(string text) => text.Contains(MarkBegin, StringComparison.Ordinal);
 
-    /// <summary>删掉加速段，其余内容原样保留。</summary>
-    internal static string StripBlock(string text)
+    /// <summary>删掉加速段，其余内容原样保留（必须成对匹配 Begin/End，防止缺 End 吞掉后续 hosts 条目）。</summary>
+    internal static string StripBlock(string text) => StripDelimitedBlock(text, MarkBegin, MarkEnd);
+
+    internal static string StripDelimitedBlock(string text, string beginMark, string endMark)
     {
+        var lines = text.Replace("\r\n", "\n").Split('\n');
         var sb = new StringBuilder();
-        bool inside = false;
-        foreach (var line in text.Replace("\r\n", "\n").Split('\n'))
+        int i = 0;
+        while (i < lines.Length)
         {
-            string trimmed = line.Trim();
-            if (trimmed == MarkBegin) { inside = true; continue; }
-            if (trimmed == MarkEnd) { inside = false; continue; }
-            if (!inside) sb.Append(line).Append("\r\n");
+            if (lines[i].Trim() == beginMark)
+            {
+                int endIdx = -1;
+                for (int j = i + 1; j < lines.Length; j++)
+                {
+                    if (lines[j].Trim() == endMark) { endIdx = j; break; }
+                }
+                if (endIdx >= 0)
+                {
+                    i = endIdx + 1;
+                    continue;
+                }
+                // 未闭合的 Begin 标记：仅移除该孤立标记行，不误删后面正常条目
+                i++;
+                continue;
+            }
+            sb.Append(lines[i]).Append("\r\n");
+            i++;
         }
         return sb.ToString();
     }
@@ -667,28 +687,37 @@ public static class FastGithubKernel
         return true;
     }
 
+    internal static readonly object HostsFileLock = new();
+    private static readonly object WatchdogLock = new();
+
     private static bool WriteHosts(string text)
     {
-        try
+        lock (HostsFileLock)
         {
-            string backup = HostsPath + ".fastgithub.bak";
-            if (!File.Exists(backup))
+            try
             {
-                try { File.Copy(HostsPath, backup, false); } catch { }
+                string backup = HostsPath + ".fastgithub.bak";
+                if (!File.Exists(backup) && File.Exists(HostsPath))
+                {
+                    try { File.Copy(HostsPath, backup, false); } catch { }
+                }
+                File.WriteAllText(HostsPath, text, new UTF8Encoding(false));
+                return true;
             }
-            File.WriteAllText(HostsPath, text, new UTF8Encoding(false));
-            return true;
+            catch { return false; }
         }
-        catch { return false; }
     }
 
     /// <summary>不依赖内核的还原：删块 + 还原被注释行 + 刷 DNS。</summary>
     private static bool RestoreByMarkers()
     {
-        string text = ReadHosts();
-        if (text.Length == 0) return false;
-        string restored = RestoreOverrides(StripBlock(text)).TrimEnd('\r', '\n') + "\r\n";
-        if (!WriteHosts(restored)) return false;
+        lock (HostsFileLock)
+        {
+            string text = ReadHosts();
+            if (text.Length == 0) return false;
+            string restored = RestoreOverrides(StripBlock(text)).TrimEnd('\r', '\n') + "\r\n";
+            if (!WriteHosts(restored)) return false;
+        }
         FlushDns();
         return true;
     }
@@ -696,18 +725,15 @@ public static class FastGithubKernel
     /// <summary>清掉 6.3 及更早版本 GitHostsOptimizer 写的静态 IP 段（两套方案不能同时写 github.com）。</summary>
     private static void StripLegacyOptimizeBlock()
     {
-        string text = ReadHosts();
-        if (text.Length == 0 || !text.Contains(LegacyMarkBegin, StringComparison.Ordinal)) return;
-        var sb = new StringBuilder();
-        bool inside = false;
-        foreach (var line in text.Replace("\r\n", "\n").Split('\n'))
+        bool wrote;
+        lock (HostsFileLock)
         {
-            string trimmed = line.Trim();
-            if (trimmed == LegacyMarkBegin) { inside = true; continue; }
-            if (trimmed == LegacyMarkEnd) { inside = false; continue; }
-            if (!inside) sb.Append(line).Append("\r\n");
+            string text = ReadHosts();
+            if (text.Length == 0 || !text.Contains(LegacyMarkBegin, StringComparison.Ordinal)) return;
+            string cleaned = StripDelimitedBlock(text, LegacyMarkBegin, LegacyMarkEnd);
+            wrote = WriteHosts(cleaned);
         }
-        if (WriteHosts(sb.ToString())) FlushDns();
+        if (wrote) FlushDns();
     }
 
     private static void FlushDns()
@@ -748,8 +774,11 @@ public static class FastGithubKernel
         count = 0;
         var cache = LoadCache();
         if (cache.Count == 0) return false;
-        string merged = StripBlock(ReadHosts()).TrimEnd('\r', '\n') + "\r\n\r\n" + BuildBlock(cache);
-        if (!WriteHosts(merged)) return false;
+        lock (HostsFileLock)
+        {
+            string merged = StripBlock(ReadHosts()).TrimEnd('\r', '\n') + "\r\n\r\n" + BuildBlock(cache);
+            if (!WriteHosts(merged)) return false;
+        }
         FlushDns();
         count = cache.Count;
         return true;
@@ -760,13 +789,21 @@ public static class FastGithubKernel
     /// <summary>每 60 秒检查一次 hosts：加速段丢了就按缓存补回（与内核面板的自愈行为一致）。</summary>
     public static void StartWatchdog()
     {
-        _watchdog ??= new Timer(_ => TickWatchdog(), null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+        lock (WatchdogLock)
+        {
+            _watchdog ??= new Timer(_ => TickWatchdog(), null, TimeSpan.FromSeconds(60), TimeSpan.FromSeconds(60));
+        }
     }
 
     public static void StopWatchdog()
     {
-        _watchdog?.Dispose();
-        _watchdog = null;
+        Timer? t;
+        lock (WatchdogLock)
+        {
+            t = _watchdog;
+            _watchdog = null;
+        }
+        t?.Dispose();
     }
 
     private static void TickWatchdog()

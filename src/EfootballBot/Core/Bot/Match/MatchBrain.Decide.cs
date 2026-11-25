@@ -375,7 +375,7 @@ public static partial class MatchBrain
                     screenStreak < escapeAt && ocr.Words.Count > 0)
                     return new MatchAction(MatchActionKind.PadConfirm, 2000, "认不出的界面：按 A 试探");
                 if (screenStreak >= escapeAt && ocr.Words.Count > 0)
-                    // 用周期换招替代裸 B：非比赛 6 轮起、比赛上下文 30 轮起，每 2 轮一次 B，
+                    // 用周期换招替代裸 B：非比赛 6 轮起、比赛上下文 30 轮起，每 2 轮计数一次，
                     // 第 3 次（非比赛约 10 轮）升级为「上→A→B」。水印/加载页已在前面 return，不会误触发。
                     return PeriodicBackAction(screenStreak, escapeAt, "B 键逃生", period: 2);
                 return MatchAction.Wait(4000);

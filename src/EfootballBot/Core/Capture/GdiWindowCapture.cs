@@ -30,6 +30,7 @@ public sealed class GdiWindowCapture : ICaptureProvider
 
     private Thread? _thread;
     private volatile bool _stopRequested;
+    private int _sessionGen;
 
     public event EventHandler? FrameUpdated;
 
@@ -90,7 +91,8 @@ public sealed class GdiWindowCapture : ICaptureProvider
             _stopRequested = false;
             _running = true;
             LastError = null;
-            _thread = new Thread(CaptureLoop)
+            int myGen = Interlocked.Increment(ref _sessionGen);
+            _thread = new Thread(() => CaptureLoop(myGen))
             {
                 IsBackground = true,
                 Name = "GdiWindowCapture",
@@ -99,7 +101,7 @@ public sealed class GdiWindowCapture : ICaptureProvider
         }
     }
 
-    private void CaptureLoop()
+    private void CaptureLoop(int myGen)
     {
         nint hdcMem = nint.Zero;
         nint hBmp = nint.Zero, hBmpOld = nint.Zero;
@@ -152,7 +154,8 @@ public sealed class GdiWindowCapture : ICaptureProvider
             if (hBmpOld != nint.Zero) SelectObject(hdcMem, hBmpOld);
             if (hBmp != nint.Zero) DeleteObject(hBmp);
             if (hdcMem != nint.Zero) DeleteDC(hdcMem);
-            _running = false;
+            if (Volatile.Read(ref _sessionGen) == myGen)
+                _running = false;
         }
     }
 
@@ -286,15 +289,21 @@ public sealed class GdiWindowCapture : ICaptureProvider
 
     public void Stop()
     {
+        Thread? t;
         lock (_gate)
         {
             if (!_running && _thread is null) return;
             _stopRequested = true;
             _running = false;
+            t = _thread;
         }
-        try { _thread?.Join(2000); } catch { }
-        _thread = null;
-        _latest = null;
+        try { t?.Join(2000); } catch { }
+        lock (_gate)
+        {
+            if (ReferenceEquals(_thread, t))
+                _thread = null;
+            _latest = null;
+        }
     }
 
     public void Dispose()

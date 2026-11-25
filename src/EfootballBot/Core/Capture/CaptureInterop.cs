@@ -75,7 +75,8 @@ internal static class CaptureInterop
         {
             hr = CreateDirect3D11DeviceFromDXGIDevice(dxgiDevice, out var inspectable);
             if (hr != 0) throw new InvalidOperationException($"CreateDirect3D11DeviceFromDXGIDevice 失败: 0x{hr:X}");
-            return MarshalInterface<IDirect3DDevice>.FromAbi(inspectable);
+            try { return MarshalInterface<IDirect3DDevice>.FromAbi(inspectable); }
+            finally { if (inspectable != nint.Zero) Marshal.Release(inspectable); }
         }
         finally
         {

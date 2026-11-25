@@ -126,11 +126,14 @@ public static class EngineServices
 
     private static string OcrKey(AppConfig cfg)
         => $"{cfg.OcrEngine}|{cfg.OcrPerf.DetLimitSideLength}|{cfg.OcrPerf.LineReread}|" +
-           $"{cfg.UnlimitedOcr.Endpoint}|{cfg.UnlimitedOcr.Model}|{cfg.UnlimitedOcr.TimeoutSeconds}";
+           $"{cfg.UnlimitedOcr.Endpoint}|{cfg.UnlimitedOcr.Model}|{cfg.UnlimitedOcr.Prompt}|{cfg.UnlimitedOcr.TimeoutSeconds}|" +
+           $"{cfg.VisionSidecar.ExePath}|{cfg.VisionSidecar.ModelsDir}|{cfg.VisionSidecar.Verbose}";
 
     private static string PerceptionKey(AppConfig cfg)
         => $"{cfg.Yolo.Enabled}|{cfg.Yolo.ScoreThreshold:F3}|{cfg.Yolo.NmsIou:F3}|" +
-           $"{cfg.Yolo.ClassifyScore:F3}";
+           $"{cfg.Yolo.ClassifyScore:F3}|{cfg.Inference.PreferredProvider}|" +
+           $"{cfg.VisionSidecar.Enabled}|{cfg.VisionSidecar.UseForYolo}|" +
+           $"{cfg.VisionSidecar.ExePath}|{cfg.VisionSidecar.ModelsDir}";
 
     /// <summary>把配置里的性能档翻译成 OcrTuning（全关时返回 Off，与历史行为逐字节一致）。</summary>
     private static OcrTuning BuildTuning(AppConfig cfg)

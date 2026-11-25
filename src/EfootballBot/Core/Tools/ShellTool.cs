@@ -49,12 +49,12 @@ public sealed class ShellTool : ITool
         {
             if (reveal && File.Exists(path))
             {
-                Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
+                using var _ = Process.Start(new ProcessStartInfo("explorer.exe", $"/select,\"{path}\"") { UseShellExecute = true });
                 return ToolResult.Success(path, path);
             }
             // 目录不存在时先建出来（日志/存帧/诊断目录首次打开的场景）
             if (!File.Exists(path)) Directory.CreateDirectory(path);
-            Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
+            using var __ = Process.Start(new ProcessStartInfo { FileName = path, UseShellExecute = true });
             return ToolResult.Success(path, path);
         }
         catch (Exception ex)
@@ -70,7 +70,7 @@ public sealed class ShellTool : ITool
         if (string.IsNullOrWhiteSpace(url)) return ToolResult.Fail("没有指定要打开的地址");
         try
         {
-            Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
+            using var _ = Process.Start(new ProcessStartInfo { FileName = url, UseShellExecute = true });
             return ToolResult.Success(url, url);
         }
         catch (Exception ex)

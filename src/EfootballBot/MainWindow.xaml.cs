@@ -33,6 +33,7 @@ public partial class MainWindow
     private readonly DispatcherTimer _statsTimer;
     private bool _previewOn;
     private bool _starting;
+    private bool _stopping;
     private string _pendingTheme = ThemeManager.Dark;
     private string _pendingWorld = ThemeManager.WorldFluent;
     private string _origTheme = ThemeManager.Dark;
@@ -96,8 +97,8 @@ public partial class MainWindow
         // 页脚版本：Win11 世界的界面不再挂旧品牌名，只留版本号本身
         TxtVersionChip.Text = $"v{Updater.FormatVersion(typeof(MainWindow).Assembly.GetName().Version)}";
 
-        AppendLog($"应用启动：v{Updater.FormatVersion(typeof(MainWindow).Assembly.GetName().Version)}，" +
-            $"{Environment.OSVersion.VersionString}", LogLevel.Info);
+        AppendLog($"[启动] 应用已就绪：v{Updater.FormatVersion(typeof(MainWindow).Assembly.GetName().Version)}" +
+            $"（{Environment.OSVersion.VersionString}）· 日志目录：{FileLogger.LogDir}", LogLevel.Info);
 
         // 启动后自动检查更新（不阻塞 UI）
         _ = AutoCheckUpdateOnStartupAsync();
@@ -180,17 +181,27 @@ public partial class MainWindow
         _workerHost.PreviewReceived += pngB64 => Dispatcher.BeginInvoke(() => ShowPreviewPng(pngB64));
         _workerHost.Exited += reason => Dispatcher.BeginInvoke(() =>
         {
-            AppendLog($"场景已结束：{reason}", LogLevel.Success);
+            // 若正在启动/切换/手动停止或新会话已在运行，忽略上一代迟到的退出回调
+            if (_starting || _stopping || _workerHost is { ScenarioRunning: true }) return;
+            bool isError = reason.StartsWith("启动失败", StringComparison.Ordinal)
+                        || reason.StartsWith("异常停止", StringComparison.Ordinal);
+            AppendLog($"[结束] 场景已结束：{reason}", isError ? LogLevel.Error : LogLevel.Success);
             ResetButtons();
             _statsTimer.Stop();
             _hotkey.Unregister();
+            MuteGameOnScenarioStopped();
+            if (!isError && _cfg.AutoCloseWhenDone)
+                ScheduleAutoClose();
         });
         _workerHost.Disconnected += () => Dispatcher.BeginInvoke(() =>
         {
-            AppendLog("Worker 进程已断开，场景已停止。", LogLevel.Warn);
+            // 若正在启动/切换/手动停止或新会话已运行，忽略旧 Worker 的迟到断开回调
+            if (_starting || _stopping || _workerHost is { ScenarioRunning: true }) return;
+            AppendLog("[断开] Worker 进程已断开，场景已停止。", LogLevel.Warn);
             ResetButtons();
             _statsTimer.Stop();
             _hotkey.Unregister();
+            MuteGameOnScenarioStopped();
             // Worker 非正常退出（更新重启/崩溃/强杀）可能没机会还原停靠的窗口：兜底还原
             EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
             // Worker 非正常退出（崩溃/强杀）没走停止流程：兜底恢复被禁用的真实手柄
@@ -305,7 +316,8 @@ public partial class MainWindow
     private async void BtnStartStud_Click(object sender, RoutedEventArgs e)
     {
         bool training = RbStudTrain.IsChecked == true;
-        if (_workerHost?.ScenarioRunning != true)
+        bool alreadyRunningStud = _workerHost?.ScenarioRunning == true && _activeStartBtn == BtnStartStud;
+        if (!alreadyRunningStud)
         {
             SaveUiToConfig();
             if (!training && _cfg.StudTraining.BuyGoalkeeperCount == 0
@@ -334,6 +346,7 @@ public partial class MainWindow
     {
         if (_starting) return;
         var host = GetOrCreateWorkerHost();
+        string targetName = BotModuleCatalog.Find(mode ?? "")?.DisplayName ?? mode ?? "目标模式";
 
         bool switching = false;
         if (host.ScenarioRunning)
@@ -349,8 +362,7 @@ public partial class MainWindow
             {
                 SetStartButtonsEnabled(false);
                 btn.Content = "切换中…";
-                string targetName = BotModuleCatalog.Find(mode ?? "")?.DisplayName ?? mode ?? "目标模式";
-                AppendLog($"正在切换至「{targetName}」…", LogLevel.Info);
+                AppendLog($"[切换] 正在切换至「{targetName}」…", LogLevel.Info);
                 await StopScenarioAsync(allowAutoClose: false);
             }
             catch
@@ -384,6 +396,7 @@ public partial class MainWindow
         if (hdrWarn is not null)
             AppendLog(hdrWarn, LogLevel.Warn);
 
+        CancelAutoClose();
         _starting = true;
         try
         {
@@ -392,7 +405,7 @@ public partial class MainWindow
 
             // 立即反馈：Worker 冷启动握手最长 30s，期间按钮必须显示"启动中…"而非无响应
             btn.Content = switching ? "切换中…" : "启动中…";
-            AppendLog("正在启动 Worker（首次冷启动需解压，可能 10 秒以上）…", LogLevel.Info);
+            AppendLog($"[启动] 正在启动「{targetName}」（首次冷启动可能需 10 秒以上）…", LogLevel.Info);
             // 总超时兜底：任何一步卡住都不允许「启动中…」永久驻留（按钮永久不可点）
             await host.StartAsync(mode!).WaitAsync(TimeSpan.FromSeconds(60));
             if (host.ScenarioRunning)
@@ -411,37 +424,33 @@ public partial class MainWindow
                     try
                     {
                         if (_hotkey.Register(_cfg.Hotkey))
-                            AppendLog($"全局热键已注册：{_cfg.Hotkey.DisplayString()}（第一次暂停，第二次终止）", LogLevel.Info);
+                            AppendLog($"[热键] 全局热键已注册：{_cfg.Hotkey.DisplayString()}（第一次暂停，第二次终止）", LogLevel.Info);
                         else
-                            AppendLog("全局热键注册失败。", LogLevel.Warn);
+                            AppendLog("[热键] 全局热键注册失败。", LogLevel.Warn);
                     }
                     catch (Exception ex)
                     {
-                        AppendLog($"全局热键注册异常：{ex.Message}", LogLevel.Warn);
+                        AppendLog($"[热键] 全局热键注册异常：{ex.Message}", LogLevel.Warn);
                     }
                 }
             }
         }
         catch (Exception ex)
         {
-            // 空 Message 的异常（如单文件 exe 发布写入中途启动导致的程序集加载失败）
-            // 只打 Message 什么都看不到，输出类型+堆栈+内部异常+HRESULT
             string detail = ex.ToString();
-            if (ex.InnerException is not null)
-                detail += $"\n → 内部异常：{ex.InnerException.GetType().Name}: {ex.InnerException.Message}\n{ex.InnerException.StackTrace}";
-            AppendLog($"启动失败：{detail}", LogLevel.Error);
+            AppendLogError($"[启动] 「{targetName}」启动失败：{ex.Message}", ex);
             // 卡死/超时的极端情况：弃用当前 Worker 句柄（下次开始重建）。
             // 否则上一次操作可能永远占着启停锁，之后每次点开始都石沉大海。
             if (ex is TimeoutException)
             {
                 try { _workerHost?.Dispose(); } catch { }
                 _workerHost = null;
-                AppendLog("启动超时：已重置挂机工作进程，请稍后重新点「开始」。", LogLevel.Warn);
+                AppendLog("[启动] 启动超时：已重置挂机工作进程，请稍后重新点「开始」。", LogLevel.Warn);
             }
             // Worker 秒退/连不上时的高频原因提示（2026-10-13 用户案例：Worker 反复启动即死，
             // 日志只见会话头）。这类环境的日志文件里往往查不到细节，先给用户可自查的动作。
             if (detail.Contains("Worker 进程已退出") || detail.Contains("无法连接到 Worker"))
-                AppendLog("排查建议：①把本程序加入杀毒软件/安全管家白名单（安全软件可能拦截 Worker 子进程）" +
+                AppendLog("[排查] ①把本程序加入杀毒软件/安全管家白名单（安全软件可能拦截 Worker 子进程）" +
                     "②右键 exe →属性→勾选「解除锁定」后确定 ③把整个程序文件夹解压到本地磁盘再运行" +
                     "（不要在微信/QQ 的下载目录里直接双击运行）④换一个磁盘目录（如 D:\\efootball-bot）重放一份再试", LogLevel.Warn);
             ResetButtons();
@@ -626,15 +635,6 @@ public partial class MainWindow
         StError.Visibility = string.IsNullOrEmpty(s.LastError) ? Visibility.Collapsed : Visibility.Visible;
         StPerf.Text = string.IsNullOrEmpty(s.PerfNote) ? "" : $"性能：{s.PerfNote}";
         StPerf.Visibility = string.IsNullOrEmpty(s.PerfNote) ? Visibility.Collapsed : Visibility.Visible;
-
-        // 场景自动结束（正常跑完 / 异常退出）：ScenarioRunning 变 false 后按钮需从"停止"恢复为"开始"
-        if (_workerHost is { ScenarioRunning: false } && _statsTimer.IsEnabled)
-        {
-            _hotkey.Unregister();
-            MuteGameOnScenarioStopped(); // 声音一并恢复（静音只服务于挂机期间）
-            AppendLog("场景已结束，自动停止。", LogLevel.Success);
-            ResetButtons();
-        }
     }
 
     /// <summary>将 Worker 传来的 PNG base64 解码显示到预览控件。</summary>
@@ -657,6 +657,7 @@ public partial class MainWindow
 
     protected override void OnClosing(CancelEventArgs e)
     {
+        CancelAutoClose();
         SaveUiToConfig();
         _previewTimer.Stop();
         _statsTimer.Stop();
@@ -683,6 +684,7 @@ public partial class MainWindow
         // 停靠中的游戏窗口还原兜底：Worker 已死，看门狗不会再对抗还原
         EfootballBot.Core.System.BackgroundParker.TryRestoreFromRecord();
         RestoreDisabledPadsIfNeeded();
+        try { FileLogger.Instance.Write("[退出] 应用正在关闭，已完成工作进程清理与窗口/手柄/音频恢复。", LogLevel.Info); } catch { }
         FileLogger.Instance.Dispose();
         base.OnClosing(e);
     }

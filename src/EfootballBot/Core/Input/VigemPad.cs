@@ -110,15 +110,27 @@ public sealed class VigemPad : IVirtualPad
         for (int i = 0; i < 4; i++)
             if (PadBackendProbe.IsSlotOccupied(i)) before.Add(i);
 
+        int gen;
+        IXbox360Controller? pad = null;
         try
         {
-            _client ??= new ViGEmClient();
-            _pad = _client.CreateXbox360Controller();
-            _pad.AutoSubmitReport = false; // 手动提交，保证一次状态变化一次上报
-            _pad.Connect();
+            lock (_ioLock)
+            {
+                gen = ++_connectGen;
+                _client ??= new ViGEmClient();
+                pad = _client.CreateXbox360Controller();
+                pad.AutoSubmitReport = false; // 手动提交，保证一次状态变化一次上报
+                pad.Connect();
+                _pad = pad;
+            }
         }
         catch (Exception ex)
         {
+            lock (_ioLock)
+            {
+                try { pad?.Disconnect(); } catch { }
+                if (ReferenceEquals(_pad, pad)) _pad = null;
+            }
             throw new InvalidOperationException($"连接 ViGEm 失败：{ex.Message}。请确认 ViGEmBus 驱动已正确安装并重启过电脑。", ex);
         }
 
@@ -126,17 +138,29 @@ public sealed class VigemPad : IVirtualPad
         UserIndex = -1;
         for (int attempt = 0; attempt < 12 && UserIndex < 0; attempt++)
         {
+            if (Volatile.Read(ref _connectGen) != gen) return;
             Thread.Sleep(attempt == 0 ? 100 : 200);
             for (int i = 0; i < 4; i++)
                 if (!before.Contains(i) && PadBackendProbe.IsSlotOccupied(i)) { UserIndex = i; break; }
         }
 
-        _connected = true;
-        _log?.Invoke($"ViGEm 虚拟手柄已连接（XInput 玩家 {(UserIndex + 1)}）。");
+        lock (_ioLock)
+        {
+            if (Volatile.Read(ref _connectGen) != gen || !ReferenceEquals(_pad, pad))
+            {
+                try { pad.Disconnect(); } catch { }
+                return;
+            }
+            _connected = true;
+            _log?.Invoke($"ViGEm 虚拟手柄已连接（XInput 玩家 {(UserIndex + 1)}）。");
 
-        // 上电后先提交一次“全释放”状态，确保游戏识别到手柄
-        SubmitReport();
+            // 上电后先提交一次“全释放”状态，确保游戏识别到手柄
+            _pad.ResetReport();
+            _pad.SubmitReport();
+        }
     }
+
+    private int _connectGen;
 
     // ---- 状态操作 ----
 
@@ -254,15 +278,16 @@ public sealed class VigemPad : IVirtualPad
     /// </summary>
     public void Disconnect()
     {
-        if (!_connected) return;
-        _connected = false;
         lock (_ioLock)
         {
+            Interlocked.Increment(ref _connectGen);
+            if (!_connected && _pad is null) return;
+            _connected = false;
             try { _pad?.ResetReport(); _pad?.SubmitReport(); } catch { }
             try { _pad?.Disconnect(); } catch { }
             _pad = null;
+            UserIndex = -1;
         }
-        UserIndex = -1;
     }
 
     public void Dispose()

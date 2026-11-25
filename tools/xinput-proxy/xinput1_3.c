@@ -54,16 +54,19 @@ typedef void  (WINAPI *PFN_ENABLE)(BOOL);
 typedef DWORD (WINAPI *PFN_GET_BATTERY)(DWORD, BYTE, XINPUT_BATTERY_INFORMATION*);
 typedef DWORD (WINAPI *PFN_GET_KEYSTROKE)(DWORD, DWORD, XINPUT_KEYSTROKE*);
 typedef DWORD (WINAPI *PFN_GET_GUIDS)(DWORD, GUID*, GUID*);
+typedef DWORD (WINAPI *PFN_GET_AUDIO_IDS)(DWORD, WCHAR*, UINT*, WCHAR*, UINT*);
 
 /* ---------------- 全局状态 ---------------- */
 static struct {
     PFN_GET_STATE      GetState;
+    PFN_GET_STATE      GetStateEx;
     PFN_SET_STATE      SetState;
     PFN_GET_CAPS       GetCaps;
     PFN_ENABLE         Enable;
     PFN_GET_BATTERY    GetBattery;
     PFN_GET_KEYSTROKE  GetKeystroke;
     PFN_GET_GUIDS      GetGuids;
+    PFN_GET_AUDIO_IDS  GetAudioIds;
 } g_real;
 
 static WCHAR        g_dllDir[MAX_PATH];
@@ -74,7 +77,12 @@ static int          g_targetCount;
 static UINT         g_targetBit = PAD_TARGET_GLOBAL;
 static PadSharedV1* g_shm;
 static HANDLE       g_shmHandle;
+static HMODULE      g_realMod;
+static HANDLE       g_watchdogThread;
+static volatile LONG g_watchdogStop;
 static BOOL         g_whitelisted;
+static BOOL         g_proxyEnabled = TRUE;
+static BOOL         g_logEnabled = TRUE;
 static BOOL         g_counterHook;
 static ULONGLONG    g_heartbeatTimeout = PAD_HEARTBEAT_TIMEOUT_MS;
 static volatile LONG g_initState;          /* 0=未初始化 1=初始化中 2=完成 */
@@ -85,13 +93,15 @@ static void*        g_steamTarget;
 static HMODULE      g_selfModule;
 static BOOL         g_callerScope = TRUE;
 static ULONGLONG    g_lastScopeLog;
+static ULONGLONG    g_lastShmRetry;
+static volatile LONG g_shmRetryBusy;
 typedef USHORT (WINAPI *PFN_RTL_CAPTURE)(ULONG FramesToSkip, ULONG FramesToCapture, PVOID* BackTrace, PULONG BackTraceHash);
 static PFN_RTL_CAPTURE g_capture;
 
 /* ---------------- 日志 ---------------- */
 static void LogW(const WCHAR* fmt, ...)
 {
-    if (!g_logPath[0]) return;
+    if (!g_logEnabled || !g_logPath[0]) return;
     WCHAR buf[1024];
     va_list ap; va_start(ap, fmt);
     vswprintf(buf, _countof(buf), fmt, ap);
@@ -123,15 +133,23 @@ void __stdcall ProxyOrdinal1(void) { }
 /* 导出函数前置声明（EnsureOwnHook 需要取地址） */
 DWORD WINAPI XInputGetState(DWORD idx, XINPUT_STATE* st);
 
-/* ---------------- 内联 JMP 改写（反 Steam overlay hook） ---------------- */
+/* ---------------- 内联 JMP 改写（反 Steam overlay hook，8B 原子 CAS 避免撕裂） ---------------- */
 static void PatchJmp(void* at, void* to)
 {
     DWORD old = 0;
     if (!VirtualProtect(at, 8, PAGE_EXECUTE_READWRITE, &old)) return;
-    unsigned char* p = (unsigned char*)at;
-    p[0] = 0xE9;
-    int32_t rel = (int32_t)((unsigned char*)to - (p + 5));
-    memcpy(p + 1, &rel, sizeof(rel));
+    volatile LONG64* slot = (volatile LONG64*)at;
+    int32_t rel = (int32_t)((unsigned char*)to - ((unsigned char*)at + 5));
+    for (int i = 0; i < 4; i++) {
+        LONG64 cur = *slot;
+        unsigned char bytes[8];
+        memcpy(bytes, &cur, 8);
+        bytes[0] = 0xE9;
+        memcpy(bytes + 1, &rel, sizeof(rel));
+        LONG64 next;
+        memcpy(&next, bytes, 8);
+        if (InterlockedCompareExchange64(slot, next, cur) == cur) break;
+    }
     VirtualProtect(at, 8, old, &old);
     FlushInstructionCache(GetCurrentProcess(), at, 8);
 }
@@ -152,13 +170,15 @@ static void EnsureOwnHook(void)
     LogW(L"反 hook：XInputGetState 被改写为 %p，已指回本代理", target);
 }
 
-static DWORD WINAPI HookWatchdog(LPVOID)
+static DWORD WINAPI HookWatchdog(LPVOID unused)
 {
-    for (;;) {
+    (void)unused;
+    while (InterlockedCompareExchange(&g_watchdogStop, 0, 0) == 0) {
         Sleep(1000);
+        if (InterlockedCompareExchange(&g_watchdogStop, 0, 0) != 0) break;
         EnsureOwnHook();
     }
-    return 0; /* 不可达，纯为消 -Wreturn-type */
+    return 0;
 }
 
 /* ---------------- 初始化 ---------------- */
@@ -227,6 +247,8 @@ static void LoadIni(void)
     }
     UINT id = GetPrivateProfileIntW(L"proxy", L"TargetId", 1, g_iniPath);
     g_targetBit = (id == 2) ? PAD_TARGET_CN : PAD_TARGET_GLOBAL;
+    g_proxyEnabled = GetPrivateProfileIntW(L"proxy", L"Enable", 1, g_iniPath) != 0;
+    g_logEnabled = GetPrivateProfileIntW(L"proxy", L"Log", 1, g_iniPath) != 0;
     g_counterHook = GetPrivateProfileIntW(L"proxy", L"CounterHook", 1, g_iniPath) != 0;
     g_callerScope = GetPrivateProfileIntW(L"proxy", L"CallerScope", 1, g_iniPath) != 0;
     g_heartbeatTimeout = (ULONGLONG)GetPrivateProfileIntW(L"proxy", L"HeartbeatTimeoutMs",
@@ -255,8 +277,13 @@ static void OpenShared(void)
                                          sizeof(PadSharedV1), name);
         LogW(L"共享内存不存在，已自建空映射：名字=%ls（Worker 未启动或 ini 里的名字不一致）", name);
     }
-    if (g_shmHandle)
+    if (g_shmHandle) {
         g_shm = (PadSharedV1*)MapViewOfFile(g_shmHandle, FILE_MAP_READ | FILE_MAP_WRITE, 0, 0, sizeof(PadSharedV1));
+        if (!g_shm) {
+            CloseHandle(g_shmHandle);
+            g_shmHandle = NULL;
+        }
+    }
 }
 
 static void InitOnce(void)
@@ -271,9 +298,14 @@ static void InitOnce(void)
                        (LPCWSTR)&InitOnce, &self);
     g_selfModule = self;
     g_capture = (PFN_RTL_CAPTURE)GetProcAddress(GetModuleHandleW(L"ntdll.dll"), "RtlCaptureStackBackTrace");
-    GetModuleFileNameW(self, g_dllDir, MAX_PATH);
+    WCHAR selfPath[MAX_PATH] = {0};
+    GetModuleFileNameW(self, selfPath, MAX_PATH);
+    wcsncpy(g_dllDir, selfPath, MAX_PATH - 1);
+    g_dllDir[MAX_PATH - 1] = 0;
     WCHAR* slash = wcsrchr(g_dllDir, L'\\');
     if (slash) *slash = 0;
+    const WCHAR* selfName = wcsrchr(selfPath, L'\\');
+    selfName = selfName ? selfName + 1 : L"xinput1_3.dll";
     BuildPath(g_iniPath, MAX_PATH, L"xinput_proxy.ini");
     BuildPath(g_logPath, MAX_PATH, L"xinput_proxy.log");
 
@@ -283,26 +315,35 @@ static void InitOnce(void)
 
     WCHAR sys[MAX_PATH];
     GetSystemDirectoryW(sys, MAX_PATH);
-    wcsncat(sys, L"\\xinput1_3.dll", MAX_PATH - wcslen(sys) - 1);
+    wcsncat(sys, L"\\", MAX_PATH - wcslen(sys) - 1);
+    wcsncat(sys, selfName, MAX_PATH - wcslen(sys) - 1);
     HMODULE real = LoadLibraryExW(sys, NULL, LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
     if (!real) real = LoadLibraryExW(sys, NULL, 0);
+    if (!real && _wcsicmp(selfName, L"xinput1_3.dll") != 0) {
+        GetSystemDirectoryW(sys, MAX_PATH);
+        wcsncat(sys, L"\\xinput1_3.dll", MAX_PATH - wcslen(sys) - 1);
+        real = LoadLibraryExW(sys, NULL, LOAD_LIBRARY_SEARCH_SYSTEM32 | LOAD_LIBRARY_SEARCH_DEFAULT_DIRS);
+        if (!real) real = LoadLibraryExW(sys, NULL, 0);
+    }
+    g_realMod = real;
     if (real) {
         g_real.GetState     = (PFN_GET_STATE)GetProcAddress(real, "XInputGetState");
+        g_real.GetStateEx   = (PFN_GET_STATE)GetProcAddress(real, (LPCSTR)100);
         g_real.SetState     = (PFN_SET_STATE)GetProcAddress(real, "XInputSetState");
         g_real.GetCaps      = (PFN_GET_CAPS)GetProcAddress(real, "XInputGetCapabilities");
         g_real.Enable       = (PFN_ENABLE)GetProcAddress(real, "XInputEnable");
         g_real.GetBattery   = (PFN_GET_BATTERY)GetProcAddress(real, "XInputGetBatteryInformation");
         g_real.GetKeystroke = (PFN_GET_KEYSTROKE)GetProcAddress(real, "XInputGetKeystroke");
         g_real.GetGuids     = (PFN_GET_GUIDS)GetProcAddress(real, "XInputGetDSoundAudioDeviceGuids");
+        g_real.GetAudioIds  = (PFN_GET_AUDIO_IDS)GetProcAddress(real, "XInputGetAudioDeviceIds");
     }
-    OpenShared();
+    if (g_proxyEnabled) OpenShared();
 
-    if (GetPrivateProfileIntW(L"proxy", L"Log", 1, g_iniPath))
-        LogW(L"代理已加载：进程=%ls 白名单=%d 目标位=0x%X 共享内存=%p 真身=%p",
-             g_whitelisted ? L"命中" : L"非目标", g_whitelisted, g_targetBit, g_shm, real);
+    LogW(L"代理(%ls)已加载：Enable=%d 进程=%ls 白名单=%d 目标位=0x%X 共享内存=%p 真身=%p",
+         selfName, g_proxyEnabled, g_whitelisted ? L"命中" : L"非目标", g_whitelisted, g_targetBit, g_shm, real);
 
-    if (g_whitelisted && g_counterHook)
-        CreateThread(NULL, 0, HookWatchdog, NULL, 0, NULL);
+    if (g_proxyEnabled && g_whitelisted && g_counterHook)
+        g_watchdogThread = CreateThread(NULL, 0, HookWatchdog, NULL, 0, NULL);
 
     InterlockedExchange(&g_initState, 2);
 }
@@ -342,28 +383,40 @@ static BOOL CallerIsGameModule(void)
 /* ---------------- 共享内存读取（seqlock） ---------------- */
 static BOOL ReadSnapshot(PadSharedV1* out)
 {
-    if (!g_shm) return FALSE;
-    for (int i = 0; i < 4; i++) {
+    if (!g_shm) {
+        ULONGLONG now = GetTickCount64();
+        if (now - g_lastShmRetry > 1000 && InterlockedCompareExchange(&g_shmRetryBusy, 1, 0) == 0) {
+            g_lastShmRetry = now;
+            OpenShared();
+            InterlockedExchange(&g_shmRetryBusy, 0);
+        }
+        if (!g_shm) return FALSE;
+    }
+    for (int i = 0; i < 8; i++) {
         LONG64 s1 = g_shm->seq;
-        if (s1 & 1) continue;
+        if (s1 & 1) { YieldProcessor(); continue; }
         MemoryBarrier();
         memcpy(out, g_shm, sizeof(*out));
         MemoryBarrier();
         if (g_shm->seq == s1) return TRUE;
+        YieldProcessor();
     }
     return FALSE;
 }
 
 static BOOL BotOwns(DWORD idx, PadSharedV1* snap)
 {
-    if (!g_whitelisted || idx != 0) return FALSE;
+    if (!g_proxyEnabled || !g_whitelisted || idx != 0) return FALSE;
     if (!CallerIsGameModule()) return FALSE;   /* Steam overlay 等非游戏模块一律透传 */
     if (InterlockedCompareExchange(&g_userEnabled, 1, 1) == 0) return FALSE; /* XInputEnable(FALSE) 期间透传 */
     if (!ReadSnapshot(snap)) return FALSE;
     if (snap->magic != PAD_SHM_MAGIC || snap->version != PAD_SHM_VERSION) return FALSE;
     if (!(snap->flags & PAD_FLAG_ACTIVE)) return FALSE;
     if (!(snap->targetMask & g_targetBit)) return FALSE;
-    if (GetTickCount64() - (ULONGLONG)snap->heartbeatMs > g_heartbeatTimeout) return FALSE; /* Worker 已死 → 透传 */
+    if (snap->heartbeatMs <= 0) return FALSE;
+    ULONGLONG now = GetTickCount64();
+    if (now > (ULONGLONG)snap->heartbeatMs &&
+        (now - (ULONGLONG)snap->heartbeatMs) > g_heartbeatTimeout) return FALSE; /* Worker 已死 → 透传 */
     return TRUE;
 }
 
@@ -378,8 +431,7 @@ static void NoteProxyUse(void)
     }
 }
 
-/* ---------------- 状态合成 ---------------- */
-static DWORD WINAPI FilterGetState(DWORD idx, XINPUT_STATE* st)
+static DWORD WINAPI FilterGetStateCore(DWORD idx, XINPUT_STATE* st, BOOL isEx)
 {
     PadSharedV1 snap;
     if (st && BotOwns(idx, &snap)) {
@@ -396,21 +448,27 @@ static DWORD WINAPI FilterGetState(DWORD idx, XINPUT_STATE* st)
         NoteProxyUse();
         return ERROR_SUCCESS;
     }
+    if (isEx && g_real.GetStateEx) return g_real.GetStateEx(idx, st);
     if (!g_real.GetState) return XI_ERROR_DEVICE_NOT_CONNECTED;
     return g_real.GetState(idx, st);
+}
+
+static DWORD WINAPI FilterGetState(DWORD idx, XINPUT_STATE* st)
+{
+    return FilterGetStateCore(idx, st, FALSE);
 }
 
 /* ---------------- 导出函数（名称 + 序号，见 xinput1_3.def） ---------------- */
 DWORD WINAPI XInputGetState(DWORD idx, XINPUT_STATE* st)
 {
     InitOnce();
-    return FilterGetState(idx, st);
+    return FilterGetStateCore(idx, st, FALSE);
 }
 
 DWORD WINAPI XInputGetStateEx(DWORD idx, XINPUT_STATE* st)
 {
     InitOnce();
-    return FilterGetState(idx, st);
+    return FilterGetStateCore(idx, st, TRUE);
 }
 
 DWORD WINAPI XInputSetState(DWORD idx, XINPUT_VIBRATION* vib)
@@ -498,7 +556,7 @@ DWORD WINAPI XInputGetAudioDeviceIds(DWORD idx, WCHAR* render, UINT* renderCount
         NoteProxyUse();
         return ERROR_SUCCESS;
     }
-    return XI_ERROR_DEVICE_NOT_CONNECTED;
+    return g_real.GetAudioIds ? g_real.GetAudioIds(idx, render, renderCount, capture, captureCount) : XI_ERROR_DEVICE_NOT_CONNECTED;
 }
 
 DWORD WINAPI XInputWaitForGuideButton(DWORD idx, DWORD flags, void* p) { (void)idx; (void)flags; (void)p; return XI_ERROR_DEVICE_NOT_CONNECTED; }
@@ -507,7 +565,20 @@ DWORD WINAPI XInputPowerOffController(DWORD idx) { (void)idx; return XI_ERROR_DE
 
 BOOL WINAPI DllMain(HINSTANCE inst, DWORD reason, LPVOID reserved)
 {
-    (void)inst; (void)reserved;
-    if (reason == DLL_PROCESS_ATTACH) DisableThreadLibraryCalls(inst);
+    (void)inst;
+    if (reason == DLL_PROCESS_ATTACH) {
+        DisableThreadLibraryCalls(inst);
+    } else if (reason == DLL_PROCESS_DETACH) {
+        InterlockedExchange(&g_watchdogStop, 1);
+        if (g_watchdogThread) {
+            /* DllMain 持 OS Loader Lock，绝不可 WaitForSingleObject 等线程退出或调 FreeLibrary */
+            CloseHandle(g_watchdogThread);
+            g_watchdogThread = NULL;
+        }
+        if (reserved == NULL) {
+            if (g_shm) { UnmapViewOfFile(g_shm); g_shm = NULL; }
+            if (g_shmHandle) { CloseHandle(g_shmHandle); g_shmHandle = NULL; }
+        }
+    }
     return TRUE;
 }

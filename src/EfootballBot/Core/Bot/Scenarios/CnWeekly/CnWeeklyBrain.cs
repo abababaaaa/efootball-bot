@@ -106,7 +106,11 @@ public static partial class CnWeeklyBrain
         bool tourHomeBody = ocr.ContainsJoined("前往比赛") && ocr.ContainsJoined("活动设置");
         // 挑战卡详情页：巡回赛主页样/杯赛主页样 + 挑战专属词「完成挑战」（2026-10-17 第二周实机）
         bool challengeCardBody = (tourHomeBody || eventHomeBody) && ocr.ContainsJoined("完成挑战");
-        bool bracketBody = ocr.ContainsJoined("重置") || ocr.ContainsJoined("冠军杯");
+        // 对阵表特征收紧：底栏「重置」（y > 0.85），或「冠军杯」同屏含赛程阶段/推进词（防活动列表/介绍页/联赛页含「重置」或活动名撞「冠军杯」）
+        bool bottomReset = ocr.Words.Any(w => w.CenterY > 0.85 && w.NormText.Contains("重置"));
+        bool bracketStage = ocr.ContainsJoined("小组赛") || ocr.ContainsJoined("淘汰赛") ||
+                            ocr.ContainsJoined("决赛") || ocr.ContainsJoined("下一步");
+        bool bracketBody = bottomReset || (ocr.ContainsJoined("冠军杯") && bracketStage);
         // 比赛活动列表：顶部「对阵电脑 / 对阵玩家」两枚页签。★必须限定在屏幕顶部（页签行
         // y≈0.08）：比赛页的「我的联赛」卡面海报里也有「对阵电脑」四个字（实机 cn_home_match
         // y≈0.19，回归测试抓到过），不限位置会把主页误判成活动列表。
@@ -189,15 +193,15 @@ public static partial class CnWeeklyBrain
         // 与右栏「下场比赛」为备份（教练入场 OCR 漏读时）
         if (eventHomeBody)
             return CwScreen.EventHome;
-        // 对阵表页：底栏「X 重置」独有；「冠军杯」页签徽章备份
-        if (bracketBody)
-            return CwScreen.Bracket;
         // 活动介绍页：进入 + 详情 按钮同屏（列表卡只有「进入」，无「详情」）
         if (introBody)
             return CwScreen.EventIntro;
         // 比赛活动列表：顶部「对阵电脑 / 对阵玩家」页签
         if (listBody)
             return CwScreen.EventsList;
+        // 对阵表页：底栏「X 重置」独有；「冠军杯」+ 阶段词备份
+        if (bracketBody)
+            return CwScreen.Bracket;
         // 国服主页：顶部页签行 推荐/比赛/签约/商店（同一行，y&lt;0.15），按内容词分页签
         if (HasTopTabs(ocr))
         {
@@ -210,7 +214,7 @@ public static partial class CnWeeklyBrain
     }
 
     /// <summary>屏幕中部（y&lt;0.82）的弹窗推进词：下一步/确认/确定，或整词 OK（防英文词含 ok 子串）。</summary>
-    private static bool CenterPopupWord(OcrResult ocr)
+    public static bool CenterPopupWord(OcrResult ocr)
     {
         foreach (var w in ocr.MergedWords)
         {

@@ -7,7 +7,7 @@ using EfootballBot.Core.Vision.Sidecar;
 namespace EfootballBot.Core.Vision;
 
 /// <summary>检测器抽象：进程内 YoloDetector 与 sidecar 版共用，PerceptionPipeline 只认这一个。</summary>
-internal interface IDetector
+internal interface IDetector : IDisposable
 {
     string Label { get; }
     Task<IReadOnlyList<YoloDetection>> DetectAsync(FrameData frame, CancellationToken ct);
@@ -21,6 +21,7 @@ internal sealed class InProcDetector : IDetector
     public string Label => _yolo.ModelLabel;
     public Task<IReadOnlyList<YoloDetection>> DetectAsync(FrameData frame, CancellationToken ct) =>
         Task.Run(() => _yolo.Detect(frame, ct), ct);
+    public void Dispose() => _yolo.Dispose();
 }
 
 /// <summary>
@@ -34,10 +35,14 @@ internal sealed class SidecarDetector : IDetector
     private readonly SemaphoreSlim _gate = new(1, 1);
     private VisionSidecarClient? _client;
     private bool _owned;
+    private bool _disposed;
 
     public SidecarDetector(VisionSidecarConfig cfg)
     {
         _cfg = cfg;
+        // 构造时先校验 vision-svc.exe 是否就位，缺失立即抛出以触发回退进程内 YOLO
+        if (VisionSidecarRuntime.SharedClient is null && VisionSidecarLocator.Locate(cfg.ExePath) is null)
+            throw new global::System.IO.FileNotFoundException("未找到 vision-svc.exe", cfg.ExePath);
         var classesPath = AppPaths.FindBundledFile("models", "yolo", "classes.txt");
         // 注意：命名空间 EfootballBot.Core.System 会遮蔽 System.IO，必须写 global::
         _classes = classesPath is not null && global::System.IO.File.Exists(classesPath)
@@ -47,19 +52,25 @@ internal sealed class SidecarDetector : IDetector
 
     public string Label => $"yolo26n（vision-svc，{_classes.Length} 类）";
 
-    private VisionSidecarClient EnsureClient()
+    private async Task<VisionSidecarClient> EnsureClientAsync(CancellationToken ct)
     {
         var shared = VisionSidecarRuntime.SharedClient;
-        if (shared is not null) return shared;
+        if (shared is { IsDisconnected: false }) return shared;
 
-        lock (_gate)
+        if (_client is { IsDisconnected: true })
         {
-            _client ??= VisionSidecarClient
-                .StartAsync(_cfg, hwnd: 0, width: 1920, height: 1080)
-                .GetAwaiter().GetResult();
-            _owned = true;
-            return _client;
+            if (_owned) { try { await _client.DisposeAsync().ConfigureAwait(false); } catch { } }
+            _client = null;
+            _owned = false;
         }
+        if (_client is null)
+        {
+            _client = await VisionSidecarClient
+                .StartAsync(_cfg, hwnd: 0, width: 1920, height: 1080, ct)
+                .ConfigureAwait(false);
+            _owned = true;
+        }
+        return _client;
     }
 
     public async Task<IReadOnlyList<YoloDetection>> DetectAsync(FrameData frame, CancellationToken ct)
@@ -67,7 +78,8 @@ internal sealed class SidecarDetector : IDetector
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var client = EnsureClient();
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            var client = await EnsureClientAsync(ct).ConfigureAwait(false);
             var fromCapture = ReferenceEquals(client, VisionSidecarRuntime.SharedClient)
                               && VisionSidecarRuntime.MatchesCapturedFrame(frame);
             var raw = await client.DetectAsync(frame, fromCapture, ct).ConfigureAwait(false);
@@ -86,10 +98,20 @@ internal sealed class SidecarDetector : IDetector
 
     public void Dispose()
     {
-        _gate.Dispose();
-        if (_owned && _client is not null)
+        _gate.Wait();
+        try
         {
-            try { _client.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
+            if (_disposed) return;
+            _disposed = true;
+            if (_owned && _client is not null)
+            {
+                try { _client.DisposeAsync().AsTask().GetAwaiter().GetResult(); } catch { }
+            }
+            _client = null;
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 }

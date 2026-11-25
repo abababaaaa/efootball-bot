@@ -65,6 +65,26 @@ public static class UpdateHostsOptimizer
         if (!GitHostsOptimizer.IsAdministrator())
             return "需要管理员权限：请以管理员身份运行本程序。";
 
+        // 0. 若当前已固定旧 IP，先临时解除并刷 DNS，防止 Dns.GetHostAddresses 只读回自己写死的 hosts
+        string? priorPinned = CurrentIp;
+        if (priorPinned is not null)
+        {
+            lock (FastGithubKernel.HostsFileLock)
+            {
+                try
+                {
+                    if (File.Exists(HostsPath))
+                    {
+                        var curLines = File.ReadAllLines(HostsPath).ToList();
+                        if (RemoveBlock(curLines))
+                            File.WriteAllLines(HostsPath, curLines, new UTF8Encoding(false));
+                    }
+                }
+                catch { }
+            }
+            FlushDns(new StringBuilder());
+        }
+
         // 1. 候选 IP：DNS 全部 + 少量已知 CloudFront 边缘兜底（解析失败时仍可测）
         var candidates = new HashSet<string>();
         try
@@ -73,6 +93,9 @@ public static class UpdateHostsOptimizer
                 if (a.AddressFamily == AddressFamily.InterNetwork) candidates.Add(a.ToString());
         }
         catch (Exception ex) { sb.AppendLine($"解析 {UpdateHost} 失败：{ex.Message}"); }
+
+        if (candidates.Count == 0 && priorPinned is not null)
+            candidates.Add(priorPinned);
 
         if (candidates.Count == 0)
         {
@@ -93,23 +116,45 @@ public static class UpdateHostsOptimizer
         }
         if (best is null)
         {
-            sb.AppendLine("全部超时，hosts 未修改。");
+            if (priorPinned is not null)
+            {
+                lock (FastGithubKernel.HostsFileLock)
+                {
+                    try
+                    {
+                        var restoreLines = File.Exists(HostsPath) ? File.ReadAllLines(HostsPath).ToList() : new List<string>();
+                        RemoveBlock(restoreLines);
+                        restoreLines.Add(BeginMark);
+                        restoreLines.Add($"{priorPinned}\t{UpdateHost}");
+                        restoreLines.Add(EndMark);
+                        File.WriteAllLines(HostsPath, restoreLines, new UTF8Encoding(false));
+                    }
+                    catch { }
+                }
+            }
+            sb.AppendLine("全部超时，hosts 保持原样。");
             return sb.ToString();
         }
 
         // 3. 备份 + 写块（先删旧块，保留 GitHostsOptimizer 的块）
         try
         {
-            string backup = HostsPath + ".efb-update.bak";
-            try { File.Copy(HostsPath, backup, true); sb.AppendLine($"已备份 hosts -> {backup}"); }
-            catch (Exception ex) { sb.AppendLine($"备份失败（继续）：{ex.Message}"); }
+            lock (FastGithubKernel.HostsFileLock)
+            {
+                string backup = HostsPath + ".efb-update.bak";
+                if (File.Exists(HostsPath))
+                {
+                    try { File.Copy(HostsPath, backup, true); sb.AppendLine($"已备份 hosts -> {backup}"); }
+                    catch (Exception ex) { sb.AppendLine($"备份失败（继续）：{ex.Message}"); }
+                }
 
-            var lines = File.ReadAllLines(HostsPath).ToList();
-            RemoveBlock(lines);
-            lines.Add(BeginMark);
-            lines.Add($"{best}\t{UpdateHost}");
-            lines.Add(EndMark);
-            File.WriteAllLines(HostsPath, lines, new UTF8Encoding(false));
+                var lines = File.Exists(HostsPath) ? File.ReadAllLines(HostsPath).ToList() : new List<string>();
+                RemoveBlock(lines);
+                lines.Add(BeginMark);
+                lines.Add($"{best}\t{UpdateHost}");
+                lines.Add(EndMark);
+                File.WriteAllLines(HostsPath, lines, new UTF8Encoding(false));
+            }
             sb.AppendLine($"已写入：{UpdateHost} -> {best}（{bestMs} ms）");
             FlushDns(sb);
         }
@@ -127,9 +172,13 @@ public static class UpdateHostsOptimizer
             return (false, "需要管理员权限：请以管理员身份运行本程序。");
         try
         {
-            var lines = File.ReadAllLines(HostsPath).ToList();
-            if (!RemoveBlock(lines)) return (true, "hosts 里没有本工具的记录，无需还原。");
-            File.WriteAllLines(HostsPath, lines, new UTF8Encoding(false));
+            lock (FastGithubKernel.HostsFileLock)
+            {
+                if (!File.Exists(HostsPath)) return (true, "hosts 文件不存在，无需还原。");
+                var lines = File.ReadAllLines(HostsPath).ToList();
+                if (!RemoveBlock(lines)) return (true, "hosts 里没有本工具的记录，无需还原。");
+                File.WriteAllLines(HostsPath, lines, new UTF8Encoding(false));
+            }
             var sb = new StringBuilder("已移除更新加速记录。");
             FlushDns(sb);
             return (true, sb.ToString());

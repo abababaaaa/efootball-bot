@@ -48,7 +48,7 @@ public sealed class SmartHotkey : IDisposable
     private IntPtr _kbHook, _msHook;
     // 委托必须强引用，否则被 GC 回收后钩子失效
     private readonly LowLevelProc _kbProc, _msProc;
-    private Config.HotkeyConfig? _cfg;
+    private volatile Config.HotkeyConfig? _cfg;
     // 防按住不放时的键盘自动连发：同一主键未松开前不重复触发，避免"按一次暂停变暂停+停止"
     private int _heldMainVk;
 
@@ -97,6 +97,7 @@ public sealed class SmartHotkey : IDisposable
     {
         if (_kbHook != IntPtr.Zero) { try { UnhookWindowsHookEx(_kbHook); } catch { } _kbHook = IntPtr.Zero; }
         if (_msHook != IntPtr.Zero) { try { UnhookWindowsHookEx(_msHook); } catch { } _msHook = IntPtr.Zero; }
+        _cfg = null;
         _heldMainVk = 0;
         IsRegistered = false;
     }
@@ -176,7 +177,7 @@ public sealed class SmartHotkey : IDisposable
                 WM_LBUTTONDOWN => 1,
                 WM_RBUTTONDOWN => 2,
                 WM_MBUTTONDOWN => 4,
-                WM_XBUTTONDOWN => (Marshal.ReadInt32(lParam, 8) >> 16) == 1 ? 5 : 6, // mouseData 高字
+                WM_XBUTTONDOWN => ((uint)Marshal.ReadInt32(lParam, 8) >> 16) == 1 ? 5 : 6, // mouseData 高字
                 _ => 0,
             };
             if (btn != 0)

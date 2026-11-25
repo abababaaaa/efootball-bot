@@ -38,9 +38,9 @@ public partial class MainWindow
     private ScrollViewer? _logScrollViewer;
     private int _copyLogBadgeSeq;
 
-    private static readonly System.Text.RegularExpressions.Regex LogPrefixRegex = new(
+    internal static readonly System.Text.RegularExpressions.Regex LogPrefixRegex = new(
         @"^\[(?<t>\d{2}:\d{2}:\d{2})\]\s*(?<tag>\[[^\]]+\])?\s*(?<rest>.*)$",
-        System.Text.RegularExpressions.RegexOptions.Compiled);
+        System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.Singleline);
 
     private static Brush LevelBrush(LogLevel lv) => lv switch
     {
@@ -89,6 +89,45 @@ public partial class MainWindow
             || _logScrollViewer.VerticalOffset >= _logScrollViewer.ScrollableHeight - 24;
     }
 
+    private bool PersistConfigSafe(string context = "保存配置")
+    {
+        if (_cfg is null) return false;
+        try
+        {
+            _cfg.Save();
+            return true;
+        }
+        catch (Exception ex)
+        {
+            AppendLog($"[配置] {context}失败：{ex.Message}", LogLevel.Warn);
+            return false;
+        }
+    }
+
+    private void AppendLogError(string uiMessage, Exception ex)
+    {
+        try
+        {
+            string detail = ex.ToString();
+            if (ex.InnerException is not null)
+                detail += $"\n → 内部异常：{ex.InnerException.GetType().Name}: {ex.InnerException.Message}\n{ex.InnerException.StackTrace}";
+            FileLogger.Instance.Write($"{uiMessage}\n{detail}", LogLevel.Error);
+        }
+        catch { }
+
+        string concise = $"{uiMessage}（详情见日志文件）";
+        if (!LogPrefixRegex.IsMatch(concise))
+            concise = $"[{DateTime.Now:HH:mm:ss}] {concise}";
+        lock (_logBuffer)
+        {
+            _logBuffer.Enqueue((concise, LogLevel.Error));
+            while (_logBuffer.Count > 300) _logBuffer.Dequeue();
+        }
+        TrackMonitorEvent(concise);
+        if (PassesLogFilter(LogLevel.Error, _runtimeLogFilter))
+            AppendLogItem(concise, LogLevel.Error);
+    }
+
     private void AppendLog(string msg, LogLevel lv)
     {
         // GUI 侧日志全部落盘（v1.1.19 修复）：此前 AppendLog 只写 UI 控件，"正在启动 Worker"、
@@ -97,18 +136,19 @@ public partial class MainWindow
         // 已移除，统一由这里落盘，避免双写。
         try { FileLogger.Instance.Write(msg, lv); } catch { }
         if (lv == LogLevel.Debug) return; // 默认不显示调试级（文件日志仍全量）
+        string displayMsg = LogPrefixRegex.IsMatch(msg) ? msg : $"[{DateTime.Now:HH:mm:ss}] {msg}";
         // 回放缓存（与显示上限同步 300 条）：切换过滤档时按当前档重渲，被隐藏的条目不丢失
         lock (_logBuffer)
         {
-            _logBuffer.Enqueue((msg, lv));
+            _logBuffer.Enqueue((displayMsg, lv));
             while (_logBuffer.Count > 300) _logBuffer.Dequeue();
         }
-        TrackMonitorEvent(msg);
+        TrackMonitorEvent(displayMsg);
         if (!PassesLogFilter(lv, _runtimeLogFilter)) return;
-        AppendLogItem(msg, lv);
+        AppendLogItem(displayMsg, lv);
     }
 
-    /// <summary>应用内显示过滤档：All=全部 / Key=仅关键流程（Success）/ Warn=仅报错与提醒（Warn+Error）。仅影响 UI，文件日志全量。</summary>
+    /// <summary>应用内显示过滤档：All=全部 / Key=仅关键流程（Success+Warn+Error）/ Warn=仅报错与提醒（Warn+Error）。仅影响 UI，文件日志全量。</summary>
     private string _runtimeLogFilter = "All";
 
     /// <summary>日志历史查看器的显示过滤档（与运行日志同款三档，选择持久化到配置）。</summary>
@@ -116,9 +156,9 @@ public partial class MainWindow
 
     private readonly Queue<(string Msg, LogLevel Lv)> _logBuffer = new();
 
-    private static bool PassesLogFilter(LogLevel lv, string mode) => mode switch
+    internal static bool PassesLogFilter(LogLevel lv, string mode) => mode switch
     {
-        "Key" => lv == LogLevel.Success,
+        "Key" => lv is LogLevel.Success or LogLevel.Warn or LogLevel.Error,
         "Warn" => lv is LogLevel.Warn or LogLevel.Error,
         _ => true,
     };
@@ -212,10 +252,12 @@ public partial class MainWindow
             _ => "All",
         };
         _cfg.RuntimeLogFilter = _runtimeLogFilter;
-        _cfg.Save();
+        PersistConfigSafe("保存运行日志过滤设置");
         // 切档即时生效：从回放缓存重渲（切回「全部」可看到此前被隐藏的日志）
+        (string Msg, LogLevel Lv)[] snapshot;
+        lock (_logBuffer) snapshot = _logBuffer.ToArray();
         LogList.Items.Clear();
-        foreach (var (msg, lv) in _logBuffer)
+        foreach (var (msg, lv) in snapshot)
             if (PassesLogFilter(lv, _runtimeLogFilter))
                 AppendLogItem(msg, lv);
     }
@@ -234,7 +276,7 @@ public partial class MainWindow
 
     private void BtnClearLog_Click(object sender, RoutedEventArgs e)
     {
-        _logBuffer.Clear();
+        lock (_logBuffer) _logBuffer.Clear();
         LogList.Items.Clear();
     }
 
@@ -350,7 +392,7 @@ public partial class MainWindow
             _ => "All",
         };
         _cfg.HistoryLogFilter = _historyLogFilter;
-        _cfg.Save();
+        PersistConfigSafe("保存历史日志过滤设置");
         // 当前已加载的文件按新档重渲
         if (CmbLogFiles.SelectedItem is ComboBoxItem ci && ci.Tag is string path)
             LoadLogFile(path);

@@ -149,11 +149,24 @@ public static class WorkerProgram
             });
         }
 
+        var writeLock = new SemaphoreSlim(1, 1);
+        int previewIntervalMs = PreviewFrameIntervalMs;
+
         async Task SendAsync(PipeProtocol.Msg msg)
         {
-            if (pipe is null || !pipe.IsConnected) return;
-            try { await PipeProtocol.WriteLineAsync(pipe, msg); }
+            var p = pipe;
+            if (p is null || !p.IsConnected) return;
+            await writeLock.WaitAsync();
+            try
+            {
+                if (p.IsConnected)
+                    await PipeProtocol.WriteLineAsync(p, msg);
+            }
             catch { /* 管道断开 */ }
+            finally
+            {
+                writeLock.Release();
+            }
         }
 
         void BridgeEvents(BotEngine e)
@@ -180,13 +193,15 @@ public static class WorkerProgram
             };
         }
 
+        Task? previewTask = null;
+
         void StartPreviewLoop()
         {
             previewCts?.Cancel();
             previewCts = new CancellationTokenSource();
             var ct = previewCts.Token;
             long lastFrameStamp = -1;
-            _ = Task.Run(async () =>
+            previewTask = Task.Run(async () =>
             {
                 while (!ct.IsCancellationRequested && previewOn)
                 {
@@ -201,9 +216,13 @@ public static class WorkerProgram
                             string b64 = EncodePreviewJpeg(f.Bgra, f.Width, f.Height);
                             await SendAsync(PipeProtocol.EvPreview(b64));
                         }
+                        await Task.Delay(Math.Clamp(Volatile.Read(ref previewIntervalMs), 100, 2000), ct);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        break;
                     }
                     catch { }
-                    await Task.Delay(PreviewFrameIntervalMs, ct);
                 }
             }, ct);
         }
@@ -213,6 +232,16 @@ public static class WorkerProgram
             previewOn = false;
             previewCts?.Cancel();
             previewCts = null;
+        }
+
+        async Task StopPreviewLoopAsync()
+        {
+            StopPreviewLoop();
+            var t = Interlocked.Exchange(ref previewTask, null);
+            if (t is not null)
+            {
+                try { await t.WaitAsync(TimeSpan.FromSeconds(1)); } catch { }
+            }
         }
 
         // 监听管道连接（循环，GUI 断开后等待重连）
@@ -276,20 +305,21 @@ public static class WorkerProgram
                         await SendAsync(PipeProtocol.EvLog("Warn", "场景已在运行中，忽略重复 start"));
                         return;
                     }
-                    // 每次 start 重建引擎（干净状态）
-                    engine?.Dispose();
-                    var freshCfg = AppConfig.Load(); // 每次 start 读最新配置
-                    // 瘦身发布（ExternalModels）：模型可能不在包里 → 首次开始前按需下载一次。
-                    // 失败不阻断启动：OCR 会给出明确的缺失提示，用户也可手动放 models 目录。
-                    await ModelPack.EnsureAsync((m, lv) =>
-                    {
-                        if (console) Console.WriteLine($"[{lv}] {m}");
-                        _ = SendAsync(PipeProtocol.EvLog(lv.ToString(), m));
-                    });
-                    engine = new BotEngine(freshCfg);
-                    BridgeEvents(engine);
                     try
                     {
+                        // 每次 start 重建引擎（干净状态）
+                        engine?.Dispose();
+                        var freshCfg = AppConfig.Load(); // 每次 start 读最新配置
+                        Volatile.Write(ref previewIntervalMs, freshCfg.PreviewIntervalMs);
+                        // 瘦身发布（ExternalModels）：模型可能不在包里 → 首次开始前按需下载一次。
+                        // 失败不阻断启动：OCR 会给出明确的缺失提示，用户也可手动放 models 目录。
+                        await ModelPack.EnsureAsync((m, lv) =>
+                        {
+                            if (console) Console.WriteLine($"[{lv}] {m}");
+                            _ = SendAsync(PipeProtocol.EvLog(lv.ToString(), m));
+                        });
+                        engine = new BotEngine(freshCfg);
+                        BridgeEvents(engine);
                         await engine.StartAsync(msg.Mode);
                         if (console) Console.WriteLine($"[Worker] 场景已启动: {msg.Mode}");
                         // 预览开关若处于开启状态：引擎重建后重新启动推送循环
@@ -299,8 +329,9 @@ public static class WorkerProgram
                     catch (Exception ex)
                     {
                         // 启动失败的引擎里可能残留已开启的捕获会话等资源，整套释放防僵尸抓帧
-                        engine?.Dispose();
-                        engine = null;
+                        var failed = Interlocked.Exchange(ref engine, null);
+                        failed?.Dispose();
+                        FileLogger.Instance.Write($"启动场景失败：{ex}", LogLevel.Error);
                         await SendAsync(PipeProtocol.EvLog("Error", $"启动失败：{ex.Message}"));
                         await SendAsync(PipeProtocol.EvExited($"启动失败：{ex.Message}"));
                         // 手柄未让路：记下退出码，GUI 据此弹窗且不再自动重启（用户不动手也是白跑）
@@ -319,7 +350,16 @@ public static class WorkerProgram
                     engine = null;
                     if (finishingEngine is not null)
                     {
-                        try { finishingEngine.Dispose(); } catch { }
+                        try
+                        {
+                            if (finishingEngine.IsRunning)
+                                finishingEngine.Stop();
+                            finishingEngine.Dispose();
+                        }
+                        catch (Exception ex)
+                        {
+                            FileLogger.Instance.Write($"Worker stop 回收引擎异常：{ex.Message}", LogLevel.Warn);
+                        }
                         try { await finishingEngine.WaitPendingRestoreAsync(1200); } catch { }
                     }
                     StopPreviewLoop();
@@ -384,14 +424,14 @@ public static class WorkerProgram
 
             // 管道断开后停止场景（避免无头 Worker 空跑）。
             // 引擎一律整套释放：即使场景未在运行，捕获会话等资源也不能留（防僵尸抓帧）。
-            if (engine is not null)
+            var toDispose = Interlocked.Exchange(ref engine, null);
+            if (toDispose is not null)
             {
-                engine.Stop();
-                engine.Dispose();
-                engine = null;
+                try { toDispose.Stop(); } catch { }
+                try { toDispose.Dispose(); } catch { }
                 if (console) Console.WriteLine("[Worker] 因 GUI 断开而停止并释放引擎");
             }
-            StopPreviewLoop();
+            await StopPreviewLoopAsync();
             readCts.Cancel();
             pipe.Dispose();
             pipe = null;

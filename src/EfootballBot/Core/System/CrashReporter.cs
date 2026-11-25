@@ -142,13 +142,15 @@ public static class CrashReporter
         catch { }
     }
 
-    [StructLayout(LayoutKind.Sequential)]
-    private struct MinidumpExceptionInformation
+    [StructLayout(LayoutKind.Sequential, Pack = 4)]
+    internal struct MinidumpExceptionInformation
     {
         public uint ThreadId;
         public nint ExceptionPointers;
         public int ClientPointers;
     }
+
+    internal static int MinidumpExceptionInfoSize => Marshal.SizeOf<MinidumpExceptionInformation>();
 
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern nint SetUnhandledExceptionFilter(ExceptionFilter filter);

@@ -22,6 +22,7 @@ public sealed class DryRunPad : IVirtualPad
     public int SuppressedActions { get; private set; }
 
     public PadBackendKind Kind => _inner.Kind;
+    internal IVirtualPad Inner => _inner;
     public int UserIndex => _inner.UserIndex;
     public bool IsConnected => _inner.IsConnected;
 
@@ -31,8 +32,17 @@ public sealed class DryRunPad : IVirtualPad
         _log = log;
     }
 
-    public void Connect() => _inner.Connect();
-    public void Disconnect() => _inner.Disconnect();
+    public void Connect()
+    {
+        if (_inner.Kind == PadBackendKind.XInputProxy) return;
+        _inner.Connect();
+    }
+
+    public void Disconnect()
+    {
+        if (_inner.Kind == PadBackendKind.XInputProxy) return;
+        _inner.Disconnect();
+    }
     public void ResetAll() { /* 影子模式无需清键：本来就没有按下任何键 */ }
 
     public void SetButton(PadButton btn, bool pressed)

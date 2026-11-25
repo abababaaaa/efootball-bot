@@ -103,29 +103,30 @@ public sealed class DriverInstaller
             return (DriverSetupResultKind.UserCancelled, 1602);
         }
 
-        try
-        {
-            using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
-            linked.CancelAfter(InstallTimeout);
-            await process.WaitForExitAsync(linked.Token);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        using (process)
         {
             try
             {
-                process.Kill(entireProcessTree: true);
+                using CancellationTokenSource linked = CancellationTokenSource.CreateLinkedTokenSource(ct);
+                linked.CancelAfter(InstallTimeout);
+                await process.WaitForExitAsync(linked.Token);
             }
-            catch
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested)
             {
-                // 进程可能已自行退出，忽略
+                try { process.Kill(entireProcessTree: true); } catch { }
+                _log("安装超时（超过 5 分钟），已中止。");
+                return (DriverSetupResultKind.Timeout, -1);
             }
-            _log("安装超时（超过 5 分钟），已中止。");
-            return (DriverSetupResultKind.Timeout, -1);
-        }
+            catch (OperationCanceledException)
+            {
+                try { process.Kill(entireProcessTree: true); } catch { }
+                throw;
+            }
 
-        int code = process.ExitCode;
-        _log($"驱动安装器退出码：{code}");
-        return (MsiExitCodes.Map(code), code);
+            int code = process.ExitCode;
+            _log($"驱动安装器退出码：{code}");
+            return (MsiExitCodes.Map(code), code);
+        }
     }
 
     private DriverSetupResult BuildResult(DriverSetupResultKind kind, bool ready)

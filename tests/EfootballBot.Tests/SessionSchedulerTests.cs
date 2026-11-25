@@ -74,7 +74,13 @@ public class SessionSchedulerTests
         var s = Make(Cfg(cap: 0));
         DateTime t = Day1.AddHours(9);
         for (int i = 0; i < 24 * 60 * 12; i++) { t = t.AddSeconds(5); s.ShouldRunNow(t); }
-        Assert.True(s.ShouldRunNow(t)); // 已连续挂满 24h 仍运行（时段内）
+        // 连续运行 24h 不应触发日上限（可能恰巧命中 2~5 分钟短暂离开，向前推进 ≤6 分钟必恢复运行）
+        bool runningSoon = false;
+        for (int k = 0; k <= 72; k++)
+        {
+            if (s.ShouldRunNow(t.AddSeconds(k * 5))) { runningSoon = true; break; }
+        }
+        Assert.True(runningSoon, "DailyCapHours=0 运行满 24h 后在活跃窗口内不应被日上限永久拦截");
     }
 
     [Fact]
@@ -123,16 +129,31 @@ public class SessionSchedulerTests
     [Fact]
     public void MicroBreak_TriggersWithinRollWindow()
     {
-        // 进入运行态 30~70 分钟后应出现一次 2~5 分钟短暂离开（90 分钟模拟必命中）
+        // 进入运行态 30~70 分钟后应出现一次 2~5 分钟短暂离开（90 分钟、每步 5 秒 = 1080 步内必命中）
         var s = Make(Cfg(cap: 0, drift: 0));
         DateTime t = Day1.AddHours(9);
         bool sawBreak = false;
-        for (int i = 0; i < 90 * 60 * 12 && !sawBreak; i++)
+        for (int i = 0; i < 90 * 12 && !sawBreak; i++)
         {
             t = t.AddSeconds(5);
             if (!s.ShouldRunNow(t) && t.TimeOfDay < TimeSpan.FromHours(23)) sawBreak = true;
         }
         Assert.True(sawBreak, "90 分钟内应出现至少一次模拟短暂离开");
+    }
+
+    [Fact]
+    public void OvernightWindow_NegativeDriftAtMidnight_WorksAcrossDayBoundary()
+    {
+        // 00:15~05:00 窗口 + 60 分钟负漂移 → 起点跨前一天 23:15，在 23:45 仍应正常允许运行且不抛异常
+        var cfg = Cfg(start: "00:15", end: "05:00", drift: 60, cap: 0);
+        for (int seed = 0; seed < 30; seed++)
+        {
+            var logs = new List<string>();
+            var s = new SessionScheduler(cfg, (m, _) => logs.Add(m), rnd: new Random(seed));
+            // 02:00 处于无漂移核心时段，恒应可运行；23:30 即使触发负漂移也不应抛格式异常
+            _ = s.ShouldRunNow(Day1.AddHours(23).AddMinutes(30));
+            Assert.True(s.ShouldRunNow(Day1.AddDays(1).AddHours(2)));
+        }
     }
 }
 

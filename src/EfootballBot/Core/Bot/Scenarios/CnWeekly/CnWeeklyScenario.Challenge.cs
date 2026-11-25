@@ -153,6 +153,18 @@ public sealed partial class CnWeeklyScenario : IScenario
             return 2600;
         }
         var cards = CnWeeklyBrain.ScanChallengeCards(obs.Ocr, obs.Frame);
+        if (cards.Count == 0)
+        {
+            // OCR 一张卡号都没扫出来 ≠ 全部打完：先等待/重试，超限刷新清单而不误判完成
+            if (++_chEmptyReads <= 4)
+            {
+                _log($"[国服周活动·挑战] 挑战清单未扫出卡号，等待重试（{_chEmptyReads}/4）", LogLevel.Debug);
+                return 1200;
+            }
+            _chEmptyReads = 0;
+            return await RefreshChallengeListAsync("挑战清单未扫出卡号");
+        }
+        _chEmptyReads = 0;
         // 看见绿勾直接拉黑（用户 2026-10-17 规则）：勾卡=已通关，本运行内绝不再进
         foreach (var c in cards.Where(c => c.Checked))
             _chLocalDone.Add(c.Index);
@@ -192,10 +204,11 @@ public sealed partial class CnWeeklyScenario : IScenario
             if (cursorCard is not null)
                 steps = target.Slot - cursorCard.Slot;
         }
+        bool returningFromCard = _chStaleA == 0;
         _chStaleA++;
-        // 同一张卡反复进入却始终没有比赛开始：应已通关而勾/胜场探针均未读出（完成态
-        // 探针未校准的兜底），按通关跳过——否则 清单↔卡页 无限打转
-        if (_chCurrentCard == target.Index && !_chMatchSinceEnter)
+        // 同一张卡反复进入（确实离过清单又回来，不是清单页内 A 键丢包 _chStaleA > 0）却始终没有比赛开始：
+        // 按已通关跳过——否则 清单↔卡页 无限打转；清单页原地丢包不误拉黑未打的卡。
+        if (returningFromCard && _chCurrentCard == target.Index && !_chMatchSinceEnter)
         {
             _chRepeatEnters++;
             if (_chRepeatEnters >= 2)
@@ -206,7 +219,7 @@ public sealed partial class CnWeeklyScenario : IScenario
                 return await RefreshChallengeListAsync($"卡 {target.Index:00} 反复进入无比赛开始");
             }
         }
-        else
+        else if (returningFromCard)
         {
             _chRepeatEnters = 0;
         }
@@ -240,14 +253,22 @@ public sealed partial class CnWeeklyScenario : IScenario
         bool noPlayable = reason.Contains("没有可挑战");
         _chRefreshs++;
         _chStaleA = 0;
+        _chEdgeProbes = 0;
         if (_chRefreshs > 3)
         {
-            ResetChallengeState();
             if (noPlayable)
             {
-                // 全部挑战已完成：与活动列表刷完同一条收尾路径（配了接力模块就继续挂机）
-                return await FinishAllEventsAsync("重进清单仍无可挑战的卡：全部挑战已完成");
+                // 本挑战活动已完成：优先退回活动列表切下一个槽位（周顺序常为 挑战赛 → 巡回赛）；
+                // 仅当槽位已达上限时才走全部完成收尾。
+                ResetChallengeState();
+                if (_slotIndex >= MaxEventSlots)
+                    return await FinishAllEventsAsync("重进清单仍无可挑战的卡且已达末尾活动槽位：全部活动已完成");
+                SetPhase(CwPhase.Retreating);
+                _log("[国服周活动·挑战] 本挑战活动已全部通关，退回活动列表继续下一个周活动槽位", LogLevel.Success);
+                await _engine.Pad.Back();
+                return 2200;
             }
+            ResetChallengeState();
             _log("[国服周活动] 挑战清单多次刷新仍无法进入挑战卡，停止挂机（请手动检查活动状态）", LogLevel.Error);
             _engine.StopWithError("挑战清单多次刷新仍无法进卡");
             return 0;
@@ -260,11 +281,12 @@ public sealed partial class CnWeeklyScenario : IScenario
     }
 
     /// <summary>挑战退出/重进：B 到介绍页；重进模式在介绍页按 A 回清单（光标复位+锁态刷新）；
-    /// 退到活动列表 = 非预期路径（刷新流程到不了这里），停止挂机并报错误。</summary>
+    /// 退到活动列表则复位并顺延或重进，不直接判死停机。</summary>
     private async Task<int?> HandleChallengeRetreatAsync(CwScreen cw, MatchScreen ml, Observation obs)
     {
         if (cw == CwScreen.ChallengeList)
         {
+            if (_streak < 1) return 800; // 退场防抖，防与 RefreshChallengeListAsync 叠加连按两次 B
             if (++_attempts > 6) { SetPhase(CwPhase.Flow); return 800; }
             await _engine.Pad.Back();
             return 2000;
@@ -274,6 +296,7 @@ public sealed partial class CnWeeklyScenario : IScenario
             if (_chRetreatReenter)
             {
                 _chRetreatReenter = false;
+                _chEdgeProbes = 0;
                 SetPhase(CwPhase.ChallengeList);
                 _log("[国服周活动·挑战] 重进清单（光标复位到待挑战卡）", LogLevel.Info);
                 await _engine.Pad.Confirm(); // 介绍页光标默认在「进入」
@@ -289,10 +312,19 @@ public sealed partial class CnWeeklyScenario : IScenario
         }
         if (cw == CwScreen.EventsList)
         {
+            if (_chRetreatReenter)
+            {
+                _chRetreatReenter = false;
+                _chEdgeProbes = 0;
+                SetPhase(CwPhase.Flow);
+                _log("[国服周活动·挑战] 重进刷新途中已回到活动列表，回 Flow 重新进入当前活动", LogLevel.Warn);
+                return 800;
+            }
             ResetChallengeState();
-            _log("[国服周活动] 已退出挑战活动，停止挂机（若非预期请回报日志）", LogLevel.Error);
-            _engine.StopWithError("挑战活动异常退出");
-            return 0;
+            _slotIndex++;
+            SetPhase(CwPhase.Flow);
+            _log($"[国服周活动·挑战] 已退回活动列表，顺延至槽位 {_slotIndex}", LogLevel.Success);
+            return 800;
         }
         if (ml == MatchScreen.HasConfirm)
         {
@@ -327,6 +359,7 @@ public sealed partial class CnWeeklyScenario : IScenario
         _chRepeatEnters = 0;
         _chMatchSinceEnter = false;
         _chEdgeProbes = 0;
+        _chEmptyReads = 0;
         _chLastVisibleCards = "";
     }
 }

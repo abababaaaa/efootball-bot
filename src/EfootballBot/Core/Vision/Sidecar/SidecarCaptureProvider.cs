@@ -39,6 +39,7 @@ public sealed class SidecarCaptureProvider : ICaptureProvider
     {
         if (IsRunning) return;
         _hwnd = hwnd;
+        _cts?.Dispose();
         _cts = new CancellationTokenSource();
         var ct = _cts.Token;
         _loop = Task.Run(() => RunAsync(hwnd, clientW, clientH, ct), ct);
@@ -71,7 +72,7 @@ public sealed class SidecarCaptureProvider : ICaptureProvider
 
             SidecarLog?.Invoke("Info", $"sidecar 已接管捕获（PID {client.Pid} v{client.Version}，帧环 {client.Ring.Name}）");
 
-            while (!ct.IsCancellationRequested)
+            while (!ct.IsCancellationRequested && !client.IsDisconnected)
             {
                 if (client.Ring.TryReadLatest(out var frame))
                 {
@@ -179,6 +180,9 @@ public sealed class SidecarCaptureProvider : ICaptureProvider
         _cts?.Dispose();
         _cts = null;
         _loop = null;
+        _latest = null;
+        _blackWarned = false;
+        _backendLogged = false;
     }
 
     public void Dispose() => Stop();

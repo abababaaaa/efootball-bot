@@ -36,8 +36,8 @@ impl DetBox {
 }
 
 /// det 预处理：等比缩放到长边 ≤ limit 且对齐 32，右侧/下侧补 0（PaddleOCR 同款）。
-/// 返回 (CHW f32 数据, 输入宽, 输入高)。
-pub fn det_preprocess(src: &Bgra<'_>, limit: u32) -> (Vec<f32>, u32, u32) {
+/// 返回 (CHW f32 数据, 补零后输入宽 in_w, 补零后输入高 in_h, 缩放后有效宽 rw, 缩放后有效高 rh)。
+pub fn det_preprocess(src: &Bgra<'_>, limit: u32) -> (Vec<f32>, u32, u32, u32, u32) {
     let (sw, sh) = (src.w.max(1), src.h.max(1));
     let ratio = (limit as f32 / sw as f32).min(limit as f32 / sh as f32);
     let mut rw = (sw as f32 * ratio).round() as u32;
@@ -60,7 +60,7 @@ pub fn det_preprocess(src: &Bgra<'_>, limit: u32) -> (Vec<f32>, u32, u32) {
 
     let mut chw = vec![0f32; (in_w * in_h * 3) as usize];
     rgb_to_chw_f32_norm(&padded, in_w, in_h, DET_MEAN, DET_STD, &mut chw);
-    (chw, in_w, in_h)
+    (chw, in_w, in_h, rw, rh)
 }
 
 /// DB 后处理：阈值 → 连通域 → bbox → unclip 外扩，坐标按 ratio 还原到原图。
@@ -135,35 +135,51 @@ pub fn db_postprocess(
         boxes.push(DetBox { x0: bx0, y0: by0, x1: bx1, y1: by1 });
     }
 
-    // 阅读顺序：先按行（y 中心聚类），行内按 x
-    boxes.sort_by(|a, b| {
-        let ay = a.center().1;
-        let by = b.center().1;
-        if (ay - by).abs() > a.h().max(b.h()) * 0.6 {
-            ay.partial_cmp(&by).unwrap_or(std::cmp::Ordering::Equal)
-        } else {
-            a.center().0.partial_cmp(&b.center().0).unwrap_or(std::cmp::Ordering::Equal)
+    // 阅读顺序：严格全序先按 y 聚类分档，每行内按 x 排序，避免非传递比较器在 sort_by 下触发 panic
+    boxes.sort_by(|a, b| a.center().1.total_cmp(&b.center().1));
+    let mut start = 0usize;
+    while start < boxes.len() {
+        let anchor_y = boxes[start].center().1;
+        let mut band_h = boxes[start].h();
+        let mut end = start + 1;
+        while end < boxes.len() {
+            let cy = boxes[end].center().1;
+            let tol = band_h.max(boxes[end].h()) * 0.6;
+            if (cy - anchor_y).abs() > tol {
+                break;
+            }
+            band_h = band_h.max(boxes[end].h());
+            end += 1;
         }
-    });
+        boxes[start..end].sort_by(|a, b| a.center().0.total_cmp(&b.center().0));
+        start = end;
+    }
     boxes
 }
 
 /// rec 预处理：按框裁剪 → 高度 48（宽等比，最长 640）→ 归一化 (x/255-0.5)/0.5。
 /// 返回 (CHW f32, 宽度)。
 pub fn rec_preprocess(src: &Bgra<'_>, b: &DetBox, dst_h: u32, max_w: u32) -> (Vec<f32>, u32) {
-    let x0 = b.x0.floor().max(0.0) as u32;
-    let y0 = b.y0.floor().max(0.0) as u32;
-    let x1 = b.x1.ceil().min(src.w as f32).max(1.0) as u32;
-    let y1 = b.y1.ceil().min(src.h as f32).max(1.0) as u32;
-    let cw = x1.saturating_sub(x0).max(1);
-    let ch = y1.saturating_sub(y0).max(1);
+    if src.w == 0 || src.h == 0 || (src.stride as usize) < (src.w as usize) * 4 {
+        return (Vec::new(), 0);
+    }
+    let x0 = (b.x0.floor().max(0.0) as u32).min(src.w - 1);
+    let y0 = (b.y0.floor().max(0.0) as u32).min(src.h - 1);
+    let x1 = (b.x1.ceil().max(0.0) as u32).clamp(x0 + 1, src.w);
+    let y1 = (b.y1.ceil().max(0.0) as u32).clamp(y0 + 1, src.h);
+    let cw = x1 - x0;
+    let ch = y1 - y0;
 
     // 先裁到局部 BGRA 缓冲
     let mut crop = vec![0u8; (cw * ch * 4) as usize];
     for row in 0..ch as usize {
-        let s = ((y0 as usize + row) * src.stride as usize + x0 as usize * 4) as usize;
+        let s = (y0 as usize + row) * src.stride as usize + x0 as usize * 4;
+        let end = s + cw as usize * 4;
+        if end > src.data.len() {
+            return (Vec::new(), 0);
+        }
         let d = row * cw as usize * 4;
-        crop[d..d + cw as usize * 4].copy_from_slice(&src.data[s..s + cw as usize * 4]);
+        crop[d..d + cw as usize * 4].copy_from_slice(&src.data[s..end]);
     }
     let crop_src = Bgra { data: &crop, w: cw, h: ch, stride: cw * 4 };
 

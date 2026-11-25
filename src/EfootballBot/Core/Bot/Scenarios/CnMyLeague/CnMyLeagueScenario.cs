@@ -50,6 +50,9 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
     private DateTime _lastKeyMatchPopupAt = DateTime.MinValue;
     /// <summary>后台鼠标（国服客户端部分页面只吃鼠标，见天梯巅峰赛/周活动同款用法）。</summary>
     private readonly BackgroundMouse _mouse = new();
+    /// <summary>国服确认页独立推进轮次（1=RT、2=A、≥3=鼠标，不因重定位浪费 A）。</summary>
+    private int _cnConfirmAttempts;
+    private MatchScreen _lastConfirmScreen;
 
     public CnMyLeagueScenario(BotEngine engine, Action<string, LogLevel> log)
         : base(engine, log)
@@ -75,7 +78,7 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
     /// </summary>
     protected override MatchScreen ClassifyScreen(Observation obs, bool matchContext)
     {
-        _pl = PeakLadderBrain.Classify(obs.Ocr);
+        _pl = PeakLadderBrain.Classify(obs.Ocr, obs.Detections);
         _cw = _pl == PlScreen.None
             ? CnWeeklyBrain.Classify(obs.Detections, obs.Ocr)
             : CwScreen.None;
@@ -90,7 +93,10 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
         if (_pl != PlScreen.None || _cw != CwScreen.None)
             return MatchScreen.Unknown;
         var ml = base.ClassifyScreen(obs, matchContext);
-        if (ml == MatchScreen.MatchHub)
+        if (ml == MatchScreen.MatchHub &&
+            (obs.Ocr.ContainsJoined("好友对战") || obs.Ocr.ContainsJoined("比赛活动") ||
+             obs.Ocr.ContainsJoined("天梯巅峰赛") || obs.Ocr.ContainsJoined("推荐") ||
+             obs.Ocr.ContainsJoined("签约") || obs.Ocr.ContainsJoined("商店")))
         {
             _pl = PlScreen.HomeMatch;
             return MatchScreen.Unknown;
@@ -124,23 +130,35 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
     /// </summary>
     protected override async Task<int?> InterceptAsync(Observation obs, MatchScreen screen, int streak, bool inMatchRecently)
     {
+        if (screen != _lastConfirmScreen || screen == MatchScreen.InMatch || IsCnHome)
+        {
+            _cnConfirmAttempts = 0;
+            _lastConfirmScreen = screen;
+        }
         // ---- 国服「关键比赛」预告弹窗（按钮=确定/取消，不是国际服的 OK）----
         // 实机 2026-11-11 16:20:32 起死循环：前往比赛 → 弹窗 →「高光在确定」直接 A → 弹窗关掉
         // 回主页 → 再前往比赛 → 又弹，连 60+ 轮零场次。国服这枚弹窗的选中态是青色
         // （取消 L137~146）、白色 255 只是按钮底色，与游戏内手柄 UI 相反，PopupBrain 的
         // 「白底=焦点」规则在这里判反了：A 每次落在下方「取消」上。国际服同款弹窗有 OK 词、
         // 走 KeyMatchDialog→上移+A，国服换成 确定/取消 后两头都不接。这里阶梯换招自愈。
-        if ((screen is MatchScreen.HasConfirm or MatchScreen.KeyMatchDialog or MatchScreen.Unknown) &&
+        if ((screen is MatchScreen.HasConfirm or MatchScreen.KeyMatchDialog or MatchScreen.LeaguePage or MatchScreen.Unknown) &&
             IsCnKeyMatchPopup(obs.Ocr))
+        {
+            _nextMatchIsKey = true;
             return await HandleCnKeyMatchPopupAsync(obs);
-        // 已进入比赛流程（难度页/起始页/比赛/终场）= 弹窗这一关过去了：阶梯轮次清零；
-        // 超过 2 分钟没再见到该弹窗（用户手动点过/换了画面）也把阶梯收回第 1 招
+        }
+        // 已进入比赛流程（起始页/比赛/终场）或回主页：清零关键比赛梯次与新式难度轮次；
+        // 注意：不在 Round 4 B 退回 LeaguePage 后清零 _diffRound，否则 5~9 轮与 StopWithError 不可达
+        if (screen is MatchScreen.MatchStartPage or MatchScreen.InMatch or MatchScreen.FullTime || IsCnHome)
+            _diffRound = 0;
         if (screen is MatchScreen.DifficultyPage or MatchScreen.MatchStartPage or MatchScreen.InMatch or MatchScreen.FullTime ||
             (_keyMatchRounds > 0 && (DateTime.Now - _lastKeyMatchPopupAt).TotalSeconds > 120))
             _keyMatchRounds = 0;
         // ---- 国服主页：饱和归位导航进「我的联赛」（任意焦点/页签状态皆可达，到头多按无害）----
         if (IsCnHome || screen == MatchScreen.MainMenu)
         {
+            if (await CnAdvance.TryDismissHomePopupAsync(_engine, _mouse, obs.Ocr, "我的联赛", _log, CancellationToken.None))
+                return 2400;
             if (++_homeAttempts > 4)
             {
                 _log("[我的联赛] 主页导航多轮未进入我的联赛，暂停 8s 后重试（若反复出现请回报日志）", LogLevel.Error);
@@ -159,11 +177,7 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
             return 3200;
         }
         // ---- 其他模块残留页（开始挂机时用户停在天梯巅峰赛/周活动里）：一律 B 退回主页 ----
-        if (_pl is PlScreen.ModeSelect or PlScreen.ActivityHome or PlScreen.ModeDialog ||
-            _cw is CwScreen.EventsList or CwScreen.EventIntro or CwScreen.Bracket or
-                    CwScreen.EventHome or CwScreen.Squad or CwScreen.SquadMenu or
-                    CwScreen.EventHomeTour or CwScreen.EventSettings or
-                    CwScreen.ChallengeList)
+        if (_pl != PlScreen.None || _cw != CwScreen.None)
         {
             if (++_escapeAttempts > 6)
             {
@@ -215,14 +229,16 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
     protected override async Task<int> AdvanceConfirmAsync(MatchAction action, Observation obs, int streak,
         CancellationToken ct)
     {
-        // 比赛中的回放/中场小弹窗不掺进来：比赛里 RT 有游戏内含义，只按 A
-        if (InMatch)
+        // 比赛中的回放/中场小弹窗或刚开赛过场不掺进 RT：比赛里 RT 有游戏内含义，只按 A
+        if (InMatch || action.Kind == MatchActionKind.PadConfirm && streak == 0 && !obs.Ocr.ContainsJoined("RT")
+            && (obs.Ocr.ContainsJoined("跳过") || obs.Ocr.ContainsJoined("开球")))
         {
-            _log($"[我的联赛] 比赛中弹窗 A：{action.Target}", LogLevel.Info);
+            _log($"[我的联赛] 赛中/过场弹窗 A：{action.Target}", LogLevel.Info);
             await _engine.Pad.Confirm();
             return action.WaitMs;
         }
-        return await CnAdvance.AdvanceAsync(_engine, _mouse, streak + 1, action.Target, "我的联赛",
+        int attempt = ++_cnConfirmAttempts;
+        return await CnAdvance.AdvanceAsync(_engine, _mouse, attempt, action.Target, "我的联赛",
             _log, obs.Ocr, obs.Detections, null, ct);
     }
 
@@ -357,8 +373,7 @@ public sealed class CnMyLeagueScenario : MyLeagueScenario
     {
         if (streak < 1)
         {
-            _diffAttempts = 0; // 页面刚出现（或重开后）：预算清零
-            _diffRound = 0;
+            _diffAttempts = 0; // 页面刚出现（或重开后）：旧式预算清零（_diffRound 保留到开赛再清，否则 Round 4 后退回会丢进度）
             return 800;        // 淡入防抖，等下一轮再读勾
         }
         if (HasBottomConfirmRow(obs.Ocr))

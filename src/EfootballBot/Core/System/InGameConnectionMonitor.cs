@@ -872,7 +872,7 @@ public sealed class InGameConnectionMonitor : IDisposable
                     int icmp = await Task.Run(() => NetworkProbe.IcmpPing(ip, ProbeTimeoutMs), ct);
                     if (icmp >= 0) { ms = icmp; src = _primaryRole == FlowRole.Relay ? "链路(节点)" : "链路ICMP"; }
                 }
-                if (ms >= 0) PushProbe(ms);
+                if (alive) PushProbe(ms);
 
                 // 双向探测史（xjbt 的 '.'/'X'/'_'）：这一秒里上行/下行有没有包
                 if (alive && _primary is not null)

@@ -27,9 +27,10 @@ public sealed class ForegroundMouse
     private int? _lastY;
 
     [StructLayout(LayoutKind.Sequential)]
-    private struct INPUT { public uint Type; public MOUSEINPUT Mi; public int Pad1; public int Pad2; }
+    internal struct INPUT { public uint Type; public MOUSEINPUT Mi; }
     [StructLayout(LayoutKind.Sequential)]
-    private struct MOUSEINPUT { public int Dx, Dy; public uint MouseData, Flags, Time; public IntPtr ExtraInfo; }
+    internal struct MOUSEINPUT { public int Dx, Dy; public uint MouseData, Flags, Time; public IntPtr ExtraInfo; }
+    internal static int InputStructSize => Marshal.SizeOf<INPUT>();
     [StructLayout(LayoutKind.Sequential)]
     private struct POINT { public int X, Y; }
 
@@ -77,9 +78,16 @@ public sealed class ForegroundMouse
             await Task.Delay(50, ct);
         }
 
+        ct.ThrowIfCancellationRequested();
         Send(0, MOUSEEVENTF_LEFTDOWN);
-        await Task.Delay(downHoldMs, ct);
-        Send(0, MOUSEEVENTF_LEFTUP);
+        try
+        {
+            await Task.Delay(downHoldMs, ct);
+        }
+        finally
+        {
+            Send(0, MOUSEEVENTF_LEFTUP);
+        }
 
         static void Send(int _, uint flags)
         {

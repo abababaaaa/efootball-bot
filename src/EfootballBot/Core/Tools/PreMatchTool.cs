@@ -52,7 +52,10 @@ public sealed class PreMatchTool : ITool
         string tag = $"[{ToolPaths.Of(ctx.Server).Label}]";
         try
         {
-            if (Process.GetProcessesByName(profile.ProcessName).Length > 0)
+            var existing = Process.GetProcessesByName(profile.ProcessName);
+            bool alreadyRunning = existing.Length > 0;
+            foreach (var p in existing) p.Dispose();
+            if (alreadyRunning)
             {
                 ctx.Log($"[赛前快捷设置]{tag} 游戏已在运行，未重复启动。", LogLevel.Info);
                 return ToolResult.Success($"{profile.Label}游戏已在运行，无需重复启动。");
@@ -63,7 +66,7 @@ public sealed class PreMatchTool : ITool
             {
                 try
                 {
-                    Process.Start(new ProcessStartInfo
+                    using var sp = Process.Start(new ProcessStartInfo
                     {
                         FileName = $"steam://rungameid/{appId}",
                         UseShellExecute = true,
@@ -87,7 +90,7 @@ public sealed class PreMatchTool : ITool
                 return ToolResult.Fail(hint);
             }
 
-            Process.Start(new ProcessStartInfo
+            using var gp = Process.Start(new ProcessStartInfo
             {
                 FileName = exe,
                 UseShellExecute = true,
@@ -118,7 +121,7 @@ public sealed class PreMatchTool : ITool
                     LogLevel.Warn);
                 return ToolResult.Fail(hint);
             }
-            Process.Start(new ProcessStartInfo { FileName = exe, UseShellExecute = true });
+            using var p = Process.Start(new ProcessStartInfo { FileName = exe, UseShellExecute = true });
             ctx.Log($"[赛前快捷设置] 已打开{label}游戏设置工具：{exe}", LogLevel.Success);
             return ToolResult.Success(exe, exe);
         }
@@ -140,7 +143,7 @@ public sealed class PreMatchTool : ITool
                 ctx.Log($"[赛前快捷设置] 未定位到{label}游戏安装目录：请先启动游戏再试。", LogLevel.Warn);
                 return ToolResult.Fail($"未定位到{label}游戏安装目录——请先启动游戏再点一次。");
             }
-            Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
+            using var _ = Process.Start(new ProcessStartInfo { FileName = dir, UseShellExecute = true });
             ctx.Log($"[赛前快捷设置] 已打开{label}游戏目录：{dir}", LogLevel.Success);
             return ToolResult.Success(dir, dir);
         }

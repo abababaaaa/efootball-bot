@@ -38,31 +38,37 @@ public static class UdpSocketMap
     public static Dictionary<ushort, int> PortToPid()
     {
         var map = new Dictionary<ushort, int>();
-        int size = 0;
-        uint rc = GetExtendedUdpTable(IntPtr.Zero, ref size, false, AF_INET, UdpTableClass.OwnerPid, 0);
         const uint ERROR_INSUFFICIENT_BUFFER = 122;
-        if (rc != ERROR_INSUFFICIENT_BUFFER && rc != 0) return map;
-        if (size <= 4) return map;
-
-        IntPtr buf = Marshal.AllocHGlobal(size);
-        try
+        int size = 0;
+        for (int attempt = 0; attempt < 4; attempt++)
         {
-            rc = GetExtendedUdpTable(buf, ref size, false, AF_INET, UdpTableClass.OwnerPid, 0);
-            if (rc != 0) return map;
-            int count = Marshal.ReadInt32(buf);
-            IntPtr row = IntPtr.Add(buf, 4);
-            int rowSize = Marshal.SizeOf<MIB_UDPROW_OWNER_PID>();
-            for (int i = 0; i < count; i++, row = IntPtr.Add(row, rowSize))
+            if (size <= 0)
             {
-                var r = Marshal.PtrToStructure<MIB_UDPROW_OWNER_PID>(row);
-                // dwLocalPort：低 16 位是网络字节序的端口号
-                ushort port = (ushort)(((r.LocalPort & 0xFF) << 8) | ((r.LocalPort >> 8) & 0xFF));
-                if (port == 0) continue;
-                map[port] = unchecked((int)r.OwningPid);
+                uint probe = GetExtendedUdpTable(IntPtr.Zero, ref size, false, AF_INET, UdpTableClass.OwnerPid, 0);
+                if ((probe != ERROR_INSUFFICIENT_BUFFER && probe != 0) || size <= 4) return map;
             }
+            IntPtr buf = Marshal.AllocHGlobal(size);
+            try
+            {
+                uint rc = GetExtendedUdpTable(buf, ref size, false, AF_INET, UdpTableClass.OwnerPid, 0);
+                if (rc == ERROR_INSUFFICIENT_BUFFER) continue;
+                if (rc != 0) return map;
+                int count = Marshal.ReadInt32(buf);
+                IntPtr row = IntPtr.Add(buf, 4);
+                int rowSize = Marshal.SizeOf<MIB_UDPROW_OWNER_PID>();
+                for (int i = 0; i < count; i++, row = IntPtr.Add(row, rowSize))
+                {
+                    var r = Marshal.PtrToStructure<MIB_UDPROW_OWNER_PID>(row);
+                    // dwLocalPort：低 16 位是网络字节序的端口号
+                    ushort port = (ushort)(((r.LocalPort & 0xFF) << 8) | ((r.LocalPort >> 8) & 0xFF));
+                    if (port == 0) continue;
+                    map[port] = unchecked((int)r.OwningPid);
+                }
+                return map;
+            }
+            catch { return map; }
+            finally { Marshal.FreeHGlobal(buf); }
         }
-        catch { }
-        finally { Marshal.FreeHGlobal(buf); }
         return map;
     }
 

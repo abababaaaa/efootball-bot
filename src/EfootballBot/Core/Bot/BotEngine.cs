@@ -170,14 +170,22 @@ public sealed class BotEngine : IDisposable
     /// </summary>
     public volatile bool SwapTestRequested;
     /// <summary>请求一次满级换人巡检（GUI「一键测试换人」按钮入口）。</summary>
-    public void RequestSwapInspection() => SwapTestRequested = true;
+    public void RequestSwapInspection()
+    {
+        SwapTestRequested = true;
+        LogInternal("[满级换人] 已收到测试请求，将在回到我的联赛主页且无弹窗时立即巡检", LogLevel.Info);
+    }
     /// <summary>
     /// 「只打关键比赛」请求：场景判定当前这场是普通比赛后置位，由引擎在场景返回后执行
     /// 杀进程重启游戏（场景自身不改捕获/停靠/窗口，全部由引擎集中处理）。
     /// </summary>
     public volatile bool RestartGameRequested;
     /// <summary>请求重启游戏以跳过当前这场普通比赛（只打关键比赛模式）。</summary>
-    public void RequestGameRestart() => RestartGameRequested = true;
+    public void RequestGameRestart()
+    {
+        RestartGameRequested = true;
+        LogInternal("[关键比赛] 已请求重启游戏跳过当前普通比赛", LogLevel.Info);
+    }
 
     // ---------------- 微信实时动态（WeChatFeed 接线） ----------------
     /// <summary>写会话摘要期间的日志不再转发推送（摘要本身以 Stop/Error 种类推送，避免双发）。</summary>
@@ -186,10 +194,10 @@ public sealed class BotEngine : IDisposable
     private void FeedQuietLog(string msg, LogLevel lv) => Log?.Invoke($"[{DateTime.Now:HH:mm:ss}] {msg}", lv);
     /// <summary>比赛完成 → 微信动态（合并/配额在 feed 内部）。各场景在 MatchesDone++ 落点调用。</summary>
     public void ReportMatchDone(bool keyMatch)
-        => WeChatFeed.MatchDone(Scenario?.Name ?? "挂机", keyMatch, Stats.MatchesDone, Stats.KeyMatches, LogInternal);
+        => WeChatFeed.MatchDone(Scenario?.Name ?? "挂机", keyMatch, Stats.MatchesDone, Stats.KeyMatches, FeedQuietLog);
     /// <summary>满级球员 → 微信动态。detail 带「第 N/11 位」（巡检）或「比赛中满级提示」上下文。</summary>
     public void ReportMaxLevel(string detail)
-        => WeChatFeed.MaxLevel(detail, Stats.PlayersMaxed, LogInternal);
+        => WeChatFeed.MaxLevel(detail, Stats.PlayersMaxed, FeedQuietLog);
     /// <summary>运行中摘要正文（定时推送用；与停止摘要同一套口径）。</summary>
     private string BuildRunningSummaryText()
     {
@@ -232,8 +240,11 @@ public sealed class BotEngine : IDisposable
     /// 安静等这么久再复核一次——加载慢/过场长的场景一次误判就白丢整晚（2026-11-20 00:52）。</summary>
     private long _livenessRetryAt;
 
-    /// <summary>连续判死轮次：1 = 只警告并进入冷却；2 = 真停。签名一变（画面终于动了）就清零。</summary>
+    /// <summary>连续判死轮次：1 = 只警告并进入冷却；2 = 真停。签名离开失败页时才清零。</summary>
     private int _livenessDeadStreak;
+
+    /// <summary>上一次进入 3 分钟冷却时锁定的卡死页面签名（用于冷却到期后核对是否仍停在同一页）。</summary>
+    private string _livenessDeadSig = "";
 
     // ---- 玩家 1 归属巡检（P0-2）：启动验证过一次，运行中每 5 分钟再确认 ----
     private long _lastWitnessTick;
@@ -327,8 +338,15 @@ public sealed class BotEngine : IDisposable
         catch
         {
             // 启动中途失败（如找不到窗口/捕获异常）：捕获会话与虚拟手柄/会话标记可能已开启，必须一并清干净，
-            // 否则 Worker 空闲却在后台全速抓帧或留存假标记/占用槽位
-            try { Input.PhysicalPadControl.RemoveSessionMarker(); } catch { }
+            // 否则 Worker 空闲却在后台全速抓帧或留存假标记/占用槽位；并标停以防 Dispose 误写"正常停止"摘要与推送。
+            _summaryWritten = true;
+            try
+            {
+                Input.PhysicalPadControl.RemoveSessionMarker();
+                if (_cfg.HidHide.HidePhysicalGamepad && Input.PhysicalPadControl.HasPendingRestore())
+                    _pendingRestoreTask = Input.PhysicalPadControl.RestoreAsyncFireAndForget();
+            }
+            catch { }
             try { Pad360.Disconnect(); } catch { }
             try { Capture.Stop(); } catch { }
             try { _dxgi?.Stop(); } catch { }
@@ -345,10 +363,15 @@ public sealed class BotEngine : IDisposable
             LogInternal($"目标检测：复用已加载会话（{_perception.YoloLabel}）", LogLevel.Info);
         // 场景由注册表造（BotModuleCatalog.Create）：本引擎不认识任何具体场景类型
         Scenario = scenarioMode ? CreateScenario(mode) : null;
+        string captureSummary = _dxgi is not null ? "DXGI" : (_gdi is not null ? "GDI" : _cfg.CaptureMode.ToString());
+        string parkSummary = _cfg.BackgroundParking.Enabled
+            ? (_cfg.VirtualDisplayPark.Enabled ? "虚拟屏" : "屏外")
+            : "关";
         LogInternal(
-            $"引擎就绪（模式：{mode}）—— EP={_factory.ActiveProvider}，" +
-            (_perception.YoloEnabled ? $"YOLO 已启用（{_perception.YoloLabel}）" : "YOLO 未启用（仅 OCR 观察）") +
-            (Scenario is not null ? $"，场景：{Scenario.Name}" : ""),
+            $"[启动] 场景就绪：{Scenario?.Name ?? mode}（{(cn ? "国服" : "国际服")}）· 捕获={captureSummary} · " +
+            $"OCR={Ocr.EngineKind} · EP={_factory.ActiveProvider} · 手柄={PadBackendInfo.DisplayName(_cfg.Pad.Backend)} · " +
+            $"停靠={parkSummary}{(_cfg.DryRun ? " · 影子模式" : "")} · " +
+            (_perception.YoloEnabled ? $"YOLO={_perception.YoloLabel}" : "YOLO=无"),
             LogLevel.Success);
         if (Scenario is not null && !_perception.YoloEnabled)
             LogInternal("YOLO 模型缺失，场景决策将大量退化为等待模式", LogLevel.Warn);
@@ -358,7 +381,7 @@ public sealed class BotEngine : IDisposable
             LogInternal($"训练数据采集已开启：每 {_cfg.FrameDump.IntervalMs / 1000.0:F0} 秒存帧至 captures\\（exe 同级目录）", LogLevel.Info);
         // 微信实时动态：会话期间的事件合并/配额/定时摘要（配置为 Worker 启动时快照，
         // 设置页改动在下次开始挂机生效——与 Webhook 一致）
-        WeChatFeed.SessionStart(_cfg, BuildRunningSummaryText, LogInternal);
+        WeChatFeed.SessionStart(_cfg, BuildRunningSummaryText, FeedQuietLog);
         // 后台停靠：场景模式下把游戏窗口移出屏幕（观察模式用户要亲眼看画面，不隐藏）。
         // 放在捕获会话建立之后：WGC/GDI 绑定的是窗口本身，与窗口是否在屏幕上无关。
         // 测试版可改用虚拟显示器停靠：游戏停靠到一块"看不见的屏幕"上，非 RDP，游戏不拒绝。
@@ -660,11 +683,11 @@ public sealed class BotEngine : IDisposable
                         await Task.Delay(backoffMs, token);
                     }
                 }
-                LogInternal("已停止。", LogLevel.Info);
+                LogInternal("[停止] 挂机引擎循环已结束。", LogLevel.Info);
             }
             catch (OperationCanceledException)
             {
-                LogInternal("已停止。", LogLevel.Info);
+                LogInternal("[停止] 挂机引擎循环已结束。", LogLevel.Info);
             }
             finally
             {
@@ -873,12 +896,12 @@ public sealed class BotEngine : IDisposable
                 }
             }
             await ConnectPadWithFallbackAsync();
-            if (Pad360.Kind == PadBackendKind.XInputProxy)
+            if (Pad360 is ProxyPad proxy)
             {
                 // 代理模式：系统槽位无关紧要，真实手柄可以照常插着；只验证"游戏真的读到了"。
                 LogInternal("进程内代理已接管：按键只在游戏进程内生效，系统 XInput 与前台其他应用不受影响",
                     LogLevel.Success);
-                if (!((ProxyPad)Pad360).WaitForProxy(ProxyPad.DefaultProbeTimeoutMs))
+                if (!proxy.WaitForProxy(ProxyPad.DefaultProbeTimeoutMs))
                 {
                     // 2026-11-19 反馈包 R4：代理没被游戏加载时只打一行 Warn 就继续跑，
                     // 之后每一次按键都落空、画面停在同一个菜单页 —— 现场表现就是「挂机卡死」。
@@ -923,6 +946,10 @@ public sealed class BotEngine : IDisposable
                     // 换回虚拟手柄正好可能撞上真实手柄占着 slot0 的情况。
                     await VerifyVirtualPadSlotAsync();
                 }
+            }
+            else if (Pad360 is DryRunPad { Kind: PadBackendKind.XInputProxy })
+            {
+                LogInternal("影子模式（代理后端）：跳过代理就绪探测，不会激活手柄接管", LogLevel.Info);
             }
             else
             {
@@ -1600,7 +1627,7 @@ public sealed class BotEngine : IDisposable
             Directory.CreateDirectory(AppPaths.DataDir);
             File.AppendAllText(path, global::System.Text.Json.JsonSerializer.Serialize(record) + Environment.NewLine);
             Notifier.Send(_cfg, $"挂机{(isError ? "异常停止" : "已停止")}", line,
-                isError ? NotifyKind.Error : NotifyKind.Stop, LogInternal);
+                isError ? NotifyKind.Error : NotifyKind.Stop, FeedQuietLog);
         }
         catch (Exception ex)
         {
@@ -1726,6 +1753,8 @@ public sealed class BotEngine : IDisposable
         {
             _stuckText = "";
             _livenessProbed = false;
+            _livenessDeadSig = "";
+            _livenessDeadStreak = 0;
             return;
         }
         long now = Environment.TickCount64;
@@ -1736,7 +1765,12 @@ public sealed class BotEngine : IDisposable
             _stuckSinceTick = now;
             _stuckActionBase = Pad.ActionCount;
             _livenessProbed = false;
-            _livenessDeadStreak = 0; // 画面文字终于变了：之前的"无响应"结论作废
+            // 仅当画面文字真正离开失败签名时清零连续判死计数；冷却结束回到同一失败页须保留计数=1
+            if (sig != _livenessDeadSig)
+            {
+                _livenessDeadStreak = 0;
+                _livenessDeadSig = "";
+            }
             return;
         }
         if (_livenessProbed) return;                       // 本轮卡住只探一次，避免反复按键
@@ -1751,6 +1785,7 @@ public sealed class BotEngine : IDisposable
             LogInternal($"[输入自检] 输入正常（{r.Detail}），继续挂机", LogLevel.Info);
             _stuckText = "";
             _livenessDeadStreak = 0;
+            _livenessDeadSig = "";
             return;
         }
         // 给"刚好在加载/过场"留一条退路：等 2 秒看页面文字会不会自己更新（加载页的提示语、
@@ -1761,6 +1796,8 @@ public sealed class BotEngine : IDisposable
         {
             LogInternal("[输入自检] 页面自行更新（加载/过场），判定输入正常，继续挂机", LogLevel.Info);
             _stuckText = "";
+            _livenessDeadStreak = 0;
+            _livenessDeadSig = "";
             return;
         }
         // 第二轮确认：仍然三次按键都无反应才判死
@@ -1770,6 +1807,7 @@ public sealed class BotEngine : IDisposable
             LogInternal($"[输入自检] 输入正常（第二轮：{r2.Detail}），继续挂机", LogLevel.Info);
             _stuckText = "";
             _livenessDeadStreak = 0;
+            _livenessDeadSig = "";
             return;
         }
         // 判死前最后一道复核：探针前后已经花掉 6 秒，画面可能刚好切进加载/过场
@@ -1779,6 +1817,7 @@ public sealed class BotEngine : IDisposable
             LogInternal("[输入自检] 复核时画面已进入加载/过场（水印或球场），判定输入正常，继续挂机", LogLevel.Info);
             _stuckText = "";
             _livenessDeadStreak = 0;
+            _livenessDeadSig = "";
             return;
         }
         _livenessDeadStreak++;
@@ -1789,6 +1828,7 @@ public sealed class BotEngine : IDisposable
             LogInternal($"[输入自检] 两轮按键都没反应（{r.Detail} / 二轮 {r2.Detail}），" +
                 $"但先不停挂机：安静等 {LivenessRetryCooldownMs / 60_000} 分钟再复核一次" +
                 "（加载慢/长过场也会这样；确实已死的话下一轮会停）", LogLevel.Warn);
+            _livenessDeadSig = sig;
             _livenessRetryAt = Environment.TickCount64 + LivenessRetryCooldownMs;
             _stuckText = "";
             _livenessProbed = false;

@@ -55,37 +55,47 @@ public partial class MainWindow
         _muteTimer.Start();
     }
 
+    private bool _muteFailLogged;
+
     /// <summary>任一模块页的开关变动：写配置 + 同步其余 5 个复选框 + 立刻生效。</summary>
     private void ChkMuteGame_Toggled(object sender, RoutedEventArgs e)
     {
         if (_syncingMuteUi || _cfg is null) return;
         bool on = sender is CheckBox { IsChecked: true };
         _cfg.Audio.MuteGame = on;
-        _cfg.Save();
+        PersistConfigSafe("保存静音设置");
 
         _syncingMuteUi = true;
         foreach (var c in MuteCheckboxes())
             if ((c.IsChecked == true) != on) c.IsChecked = on;
         _syncingMuteUi = false;
 
+        bool running = _workerHost is { ScenarioRunning: true };
+        if (on && !running)
+        {
+            AppendLog("[设置] 挂机时静音游戏：已开启（开始挂机后自动生效）", LogLevel.Info);
+            return;
+        }
         SetGameMute(on, userAction: true);
     }
 
     /// <summary>挂机启动成功后调用（配置开着就立刻静音）。</summary>
     private void MuteGameOnScenarioStarted()
     {
+        _muteFailLogged = false;
         if (_cfg.Audio.MuteGame) SetGameMute(true, userAction: false);
     }
 
     /// <summary>挂机停止时调用：恢复游戏声音（用户关掉开关时已经恢复过，这里幂等）。</summary>
     private void MuteGameOnScenarioStopped()
     {
+        _muteFailLogged = false;
         if (_muteApplied) SetGameMute(false, userAction: false);
     }
 
     /// <summary>
     /// 设置游戏静音。<paramref name="userAction"/>=true 表示用户手动点开关，
-    /// 失败/无会话时给出可读日志；自动调用只静默重试，不刷屏。
+    /// 失败/无会话时给出可读日志；自动调用失败仅首次记录一次告警，避免刷屏。
     /// </summary>
     private void SetGameMute(bool mute, bool userAction)
     {
@@ -93,25 +103,30 @@ public partial class MainWindow
         int sessions = GameAudioMute.Apply(mute, out string error);
         if (!string.IsNullOrEmpty(error))
         {
-            if (userAction) AppendLog($"静音游戏失败：{error}", LogLevel.Warn);
-            return;
+            if (userAction || !_muteFailLogged)
+            {
+                AppendLog($"[音频] 静音游戏失败：{error}", LogLevel.Warn);
+                if (!userAction) _muteFailLogged = true;
+            }
+            if (!mute || sessions <= 0) return;
         }
         if (mute)
         {
             if (sessions > 0)
             {
+                _muteFailLogged = false;
                 if (!_muteApplied)
-                    AppendLog($"已静音游戏（{sessions} 个音频会话），系统音量与其他软件不受影响", LogLevel.Success);
+                    AppendLog($"[音频] 已静音游戏（{sessions} 个音频会话），系统音量与其他软件不受影响", LogLevel.Success);
                 _muteApplied = true;
             }
             else if (userAction)
             {
-                AppendLog("没找到游戏的音频会话（游戏没启动或还没出过声）——挂机中会自动重试", LogLevel.Warn);
+                AppendLog("[音频] 没找到游戏的音频会话（游戏没启动或还没出过声）——挂机中会自动重试", LogLevel.Warn);
             }
         }
         else
         {
-            if (_muteApplied || sessions > 0) AppendLog("已恢复游戏声音", LogLevel.Info);
+            if (_muteApplied || sessions > 0) AppendLog("[音频] 已恢复游戏声音", LogLevel.Info);
             _muteApplied = false;
         }
     }

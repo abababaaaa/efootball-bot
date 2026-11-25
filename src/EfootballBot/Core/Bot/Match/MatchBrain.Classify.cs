@@ -179,6 +179,12 @@ public static partial class MatchBrain
         // 作（上移→A），按钮读不全也不影响。
         if (ocr.ContainsJoined("覆盖目前的物品") || ocr.ContainsJoined("要覆盖"))
             return MatchScreen.PurchaseDialog;
+        // 物品购买确认弹窗：标题「使用物品」/「消耗我的联赛积分」+「取消」，
+        // 焦点默认在取消——必须上移点上方带数字（积分价格）的按钮（实机 2026-10-10 flow_8）。
+        // 同样叠在物品列表上：必须先于 ItemList（YOLO 仍可能检出背景 item_row + btn_back）和 btn_confirm。
+        if (ocr.ContainsJoined("取消") &&
+            (ocr.ContainsJoined("使用物品") || ocr.ContainsJoined("消耗我的联赛积分")))
+            return MatchScreen.PurchaseDialog;
         if (Count("main_menu") >= 1) return MatchScreen.MainMenu;
         if (Count("item_row") >= 2 && Count("btn_back") >= 1) return MatchScreen.ItemList;
         // 全场结束（FullTime）终场判定：顶部「全场」+ 比分/球员评价页（实机 2026-10-10 截图：
@@ -204,12 +210,6 @@ public static partial class MatchBrain
         if (ocr.ContainsJoined("跳过比赛") &&
             (ocr.ContainsJoined("比赛回放") || ocr.ContainsJoined("重新开始") || ocr.ContainsJoined("放弃")))
             return MatchScreen.CnMatchPause;
-        // 物品购买确认弹窗：标题「使用物品」/「消耗我的联赛积分」+「取消」，
-        // 焦点默认在取消——必须上移点上方带数字（积分价格）的按钮（实机 2026-10-10 flow_8）。
-        // 先于 YOLO btn_confirm：该弹窗也检出确认按钮，直接按 A 会点到「取消」
-        if (ocr.ContainsJoined("取消") &&
-            (ocr.ContainsJoined("使用物品") || ocr.ContainsJoined("消耗我的联赛积分")))
-            return MatchScreen.PurchaseDialog;
         // 难度选择页兜底：标题「选择赛事等级」被 OCR 漏读时，用「确认按钮 + 纵向难度名列表」识别。
         // （实机 bot-20261011-140943：该页 OCR 30 词含难度名、btn_confirm 0.83，但标题词漏读 →
         //   被判 HasConfirm 盲按 A，用默认难度开赛——用户反馈「不能自动选难度」）

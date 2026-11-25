@@ -46,16 +46,19 @@ public sealed class ProxyPad : IVirtualPad
     /// <summary>代理恒为玩家 1。</summary>
     public int UserIndex => ProxySlot;
 
-    public bool IsConnected { get; private set; }
+    private volatile bool _connected;
+    public bool IsConnected => _connected;
 
     /// <summary>接管 slot0：此后目标游戏读到的是本对象写入的状态。</summary>
     public void Connect()
     {
         lock (_gate)
         {
+            _buttons = 0; _leftTrigger = _rightTrigger = 0;
+            _leftX = _leftY = _rightX = _rightY = 0;
             _writer.ResetAll();
             _writer.SetActive(true);
-            IsConnected = true;
+            _connected = true;
         }
         _log?.Invoke("代理手柄已接管 XInput 玩家 1（共享内存通道，游戏进程内生效）。");
     }
@@ -81,19 +84,23 @@ public sealed class ProxyPad : IVirtualPad
     {
         lock (_gate)
         {
-            if (!IsConnected) return;
-            _writer.SetActive(false, panic: true);
+            if (!_connected) return;
+            _connected = false;
+            _buttons = 0; _leftTrigger = _rightTrigger = 0;
+            _leftX = _leftY = _rightX = _rightY = 0;
             _writer.ResetAll();
-            IsConnected = false;
+            _writer.SetActive(true, panic: true);
+            Thread.Sleep(50);
+            _writer.SetActive(false, panic: true);
         }
         _log?.Invoke("代理手柄已交还 XInput 玩家 1。");
     }
 
     public void SetButton(PadButton btn, bool pressed)
     {
-        if (!IsConnected) return;
         lock (_gate)
         {
+            if (!_connected) return;
             var bit = (ushort)btn;
             _buttons = pressed ? (ushort)(_buttons | bit) : (ushort)(_buttons & ~bit);
             _writer.SetButton(_buttons);
@@ -102,10 +109,10 @@ public sealed class ProxyPad : IVirtualPad
 
     public void SetDpad(PadDir? dir)
     {
-        if (!IsConnected) return;
         const ushort mask = (ushort)(PadButton.DpadUp | PadButton.DpadDown | PadButton.DpadLeft | PadButton.DpadRight);
         lock (_gate)
         {
+            if (!_connected) return;
             _buttons = (ushort)(_buttons & ~mask);
             _buttons |= dir switch
             {
@@ -121,33 +128,45 @@ public sealed class ProxyPad : IVirtualPad
 
     public void SetLeftStick(short x, short y)
     {
-        if (!IsConnected) return;
-        lock (_gate) { _leftX = x; _leftY = y; _writer.SetLeftStick(x, y); }
+        lock (_gate)
+        {
+            if (!_connected) return;
+            _leftX = x; _leftY = y; _writer.SetLeftStick(x, y);
+        }
     }
 
     public void SetRightStick(short x, short y)
     {
-        if (!IsConnected) return;
-        lock (_gate) { _rightX = x; _rightY = y; _writer.SetRightStick(x, y); }
+        lock (_gate)
+        {
+            if (!_connected) return;
+            _rightX = x; _rightY = y; _writer.SetRightStick(x, y);
+        }
     }
 
     public void SetLeftTrigger(byte value)
     {
-        if (!IsConnected) return;
-        lock (_gate) { _leftTrigger = value; _writer.SetTriggers(_leftTrigger, _rightTrigger); }
+        lock (_gate)
+        {
+            if (!_connected) return;
+            _leftTrigger = value; _writer.SetTriggers(_leftTrigger, _rightTrigger);
+        }
     }
 
     public void SetRightTrigger(byte value)
     {
-        if (!IsConnected) return;
-        lock (_gate) { _rightTrigger = value; _writer.SetTriggers(_leftTrigger, _rightTrigger); }
+        lock (_gate)
+        {
+            if (!_connected) return;
+            _rightTrigger = value; _writer.SetTriggers(_leftTrigger, _rightTrigger);
+        }
     }
 
     public void ResetAll()
     {
-        if (!IsConnected) return;
         lock (_gate)
         {
+            if (!_connected) return;
             _buttons = 0; _leftTrigger = _rightTrigger = 0;
             _leftX = _leftY = _rightX = _rightY = 0;
             _writer.ResetAll();
