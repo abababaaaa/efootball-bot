@@ -13,56 +13,59 @@
     <ScrollViewer Style="{StaticResource PageScroll}">
         <StackPanel Margin="0,2,0,0" MaxWidth="760" HorizontalAlignment="Left">
             <TextBlock Text="关于" Style="{StaticResource PageTitle}"/>
-            <TextBlock Style="{StaticResource PageSub}" Margin="0,6,0,18"
+            <TextBlock Style="{StaticResource PageSub}" Margin="0,6,0,16"
                        Text="使用建议、风险提示与版权信息。"/>
 
             <StackPanel Margin="0,2,0,0">
                 <!-- ===== 声明 ===== -->
-                <Border Style="{StaticResource Card}" Margin="0,0,0,0">
+                <Border Style="{StaticResource Card}" Margin="0">
                     <StackPanel>
                         <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
                             <Rectangle Style="{StaticResource CardTitleBar}"/>
                             <TextBlock Text="声明" Style="{StaticResource H2}"/>
                         </StackPanel>
 
-                        <TextBlock Text="分辨率建议" Style="{StaticResource SubHead}"/>
-                                                    <Grid Margin="0,3,0,11">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                        <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="理论支持全分辨率，强烈建议游戏以"/><Run Text="「窗口化 720p」"/><Run Text="运行：分辨率过高会拖慢后台捕获与 OCR，影响稳定性"/></TextBlock>
-                        </Grid>
+                        <Border Style="{StaticResource Inset}" Padding="14,12" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="分辨率建议" Style="{StaticResource GroupLabel}" Margin="0,0,0,6"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Style="{StaticResource BulletDot}"/>
+                                    <TextBlock Grid.Column="1" Style="{StaticResource BulletText}" Margin="0"><Run Text="理论支持全分辨率，强烈建议游戏以"/><Run Text="「窗口化 720p」" FontWeight="SemiBold" Foreground="{DynamicResource TextPrimary}"/><Run Text="运行：分辨率过高会拖慢后台捕获与 OCR，影响稳定性"/></TextBlock>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
 
-                        <TextBlock Text="封号风险" Style="{StaticResource SubHead}"/>
-                                                    <Grid Margin="0,3,0,11">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                        <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="仅供学习交流与个人使用；使用自动化工具"/><Run Text="存在被官方封号的风险" Foreground="{DynamicResource Warning}"/><Run Text="，后果自负，与作者无关"/></TextBlock>
-                        </Grid>
+                        <Border Style="{StaticResource Inset}" Padding="14,12" Margin="0,0,0,10">
+                            <StackPanel>
+                                <TextBlock Text="封号风险" Style="{StaticResource GroupLabel}" Margin="0,0,0,6"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Style="{StaticResource BulletDot}"/>
+                                    <TextBlock Grid.Column="1" Style="{StaticResource BulletText}" Margin="0"><Run Text="仅供学习交流与个人使用；使用自动化工具"/><Run Text="存在被官方封号的风险" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/><Run Text="，后果自负，与作者无关"/></TextBlock>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
 
-                        <TextBlock Text="版权与分发" Style="{StaticResource SubHead}"/>
-                                                    <Grid Margin="0,3,0,2">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="Auto"/>
-                                <ColumnDefinition Width="*"/>
-                            </Grid.ColumnDefinitions>
-                            <Grid.RowDefinitions>
-                            <RowDefinition Height="Auto"/>
-                            </Grid.RowDefinitions>
-                        <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                        <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="本软件无偿免费，"/><Run Text="禁止二次售卖、付费分发" Foreground="{DynamicResource Warning}"/><Run Text="，禁止篡改或移除作者信息后重新发布；转载请注明作者 Dabao#1392"/></TextBlock>
-                        </Grid>
+                        <Border Style="{StaticResource Inset}" Padding="14,12">
+                            <StackPanel>
+                                <TextBlock Text="版权与分发" Style="{StaticResource GroupLabel}" Margin="0,0,0,6"/>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="Auto"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Ellipse Style="{StaticResource BulletDot}"/>
+                                    <TextBlock Grid.Column="1" Style="{StaticResource BulletText}" Margin="0"><Run Text="本软件无偿免费，"/><Run Text="禁止二次售卖、付费分发" Foreground="{DynamicResource Warning}" FontWeight="SemiBold"/><Run Text="，禁止篡改或移除作者信息后重新发布；转载请注明作者 Dabao#1392"/></TextBlock>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
                 </Border>
             </StackPanel>

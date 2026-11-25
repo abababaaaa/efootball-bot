@@ -21,12 +21,12 @@ namespace EfootballBot;
 
 /// <summary>
 /// 各模块统一的「开始 / 暂停 / 发现问题手动停止」三按钮状态与手动停止反馈流程。
-/// 所有模块共用同一个 Worker（同一时刻只跑一个场景），因此只有当前运行的模块
-/// 的暂停与手动停止按钮可用，其余模块的开始按钮在运行期间禁用，避免误触切换。
+/// 所有模块共用同一个 Worker（同一时刻只跑一个场景），因此当前运行模块的开始按钮变为「一键结束」，
+/// 其余可切换挂机模块的开始按钮变为「切换」（点击后自动停掉当前模式并启动目标模式）。
 /// </summary>
 public partial class MainWindow
 {
-    private sealed record ModuleRun(Button Start, Button Pause, Button Manual, string Mode, Button? Step);
+    private sealed record ModuleRun(Button Start, Button Pause, Button Manual, string Mode, Button? Step, bool CanSwitch = true);
 
     private ModuleRun[] _moduleRuns = Array.Empty<ModuleRun>();
 
@@ -39,7 +39,7 @@ public partial class MainWindow
             // 模块 id 全部来自 BotModuleCatalog（ModuleIds）：加模块只改注册表与这里一行按钮接线
             new ModuleRun(BtnStartMyLeague, BtnPauseMyLeague, BtnManualMyLeague, ModuleIds.IntlMyLeague, BtnStep),
             // 满级换人测试（独立会话）：无挂机时可直接开始，跑完自动停；暂停/手动停止共用我的联赛按钮
-            new ModuleRun(BtnTestSwap, BtnPauseMyLeague, BtnManualMyLeague, ModuleIds.IntlSwapTest, null),
+            new ModuleRun(BtnTestSwap, BtnPauseMyLeague, BtnManualMyLeague, ModuleIds.IntlSwapTest, null, CanSwitch: false),
             new ModuleRun(BtnStartWeekly, BtnPauseWeekly, BtnManualWeekly, ModuleIds.IntlWeekly, null),
             new ModuleRun(BtnStartAiLadder, BtnPauseAiLadder, BtnManualAiLadder, ModuleIds.IntlAiLadder, null),
             // 种马模块共用一枚开始按钮：具体模式由当前子页签在 BtnStartStud_Click 里决定
@@ -62,9 +62,10 @@ public partial class MainWindow
         foreach (var m in _moduleRuns)
         {
             bool active = running && _activeStartBtn == m.Start;
-            m.Start.Content = active ? $"一键结束{hk}" : "开始";
-            m.Start.Style = (Style)FindResource(active ? "DangerBtn" : "PrimaryBtn");
-            m.Start.IsEnabled = (!_starting && (!running || orphanRunning)) || active;
+            bool canSwitch = running && !orphanRunning && !active && m.CanSwitch;
+            m.Start.Content = active ? $"一键结束{hk}" : (canSwitch ? "切换" : "开始");
+            m.Start.Style = (Style)FindResource(active ? "DangerBtn" : (canSwitch ? "GhostBtn" : "PrimaryBtn"));
+            m.Start.IsEnabled = (!_starting && (!running || orphanRunning || canSwitch)) || active;
             // 暂停/手动停止作用于当前唯一运行的引擎：开始后所有模块页上都可用
             m.Pause.IsEnabled = running;
             m.Pause.Content = (running && _paused ? "继续" : "暂停") + hk;
