@@ -3,6 +3,24 @@
 正式版每次发版的内容写在这里，CI 发 Release 时自动把对应版本段落贴进 GitHub Release 正文。
 格式约定：`## v<版本号>` 开头的段落，段内可用 `-` 列点；CI 按 tag 名精确匹配段落。
 
+## v7.5
+
+- **新：从任何页面都能启动挂机（跨模块导航收拢）** —— 各模块原本只有「从主菜单出发」这一条导航链（主菜单→比赛页→磁贴定位→目标模块），启动时若停在别的模块页面，共享分类会把该页当成「前往比赛」类页面直接开赛，表现为「互相都去不了，只有从主页这条路才通」。新增共享件 `Core/Bot/Match/ReturnToHomeGuide`：`StepAsync` 每轮在 `RunOnceAsync` 开头调用，主菜单直接结束引导、命中本模块界面则跳过（保留半途启动续接能力）、命中其他模块残留页就连续按 B 收敛回主菜单，再交给模块自己的主页流程；判定由调用方传入，helper 不引用任何 `Scenarios` 类型（架构锁）
+- **新：主菜单磁贴 OCR 定位与焦点白框** —— 新增 `Core/Bot/Match/HubTileLocator`：`FindMainMenuMatchOffset` 按 OCR 词定位底部卡行里「比赛」在第几格（严格区分「第 1 格 offset=0」与「整行读不全 null」），`MatchActionExecutor.EnterMatchFromMainMenuAsync` 走「下×5 到底部卡行 → 饱和左×6 归位 → 按需右移 → A」；读不全时回退老的固定左×6 并 `DumpSuspiciousFrame("menu_tile_ocr_incomplete")`。回归用例 `MainMenuTileLocatorTests` / `MainMenuOcrFallbackTests` / `HubTileFocusTests`
+- **新：共享手柄动作分发** —— 新增 `Core/Bot/Match/MatchActionExecutor`：把此前在 5 个模块里逐字复制的 `switch (action.Kind)` 收敛到一处，支持场景通过委托覆盖，改一次全模块生效（此前是「修补一处漏改四处」）
+- **新：训练帧采集模块 `intltrainframes`** —— 现有可疑帧收集全是「出问题才抓」，模型优化真正缺的是「常见页面的正常帧」。`MatchBrain.TrainingFrames.CollectTrainingFrame` 复用本类已有证据方法（`HasMainMenuNavBar` / `IsMatchHub` / 排除词表）判定五类页面：弹窗盖主菜单 > 真主菜单 > 周活动卡片 > 锦标赛卡片 > 比赛选择页，每帧至多一类（tag 唯一、按 tag 分开节流），**只出 tag + 说明、不读回、不改任何判定与动作**，YOLO 开关或新旧模型都能跑；场景侧 `TrainingFrameCollectScenario` 只做采集脚本，注册表仍只加 `ModuleIds` 常量 + `BotModuleCatalog` 一条。回归用例 `TrainingFrameCollectorTests`
+- **修：启动时真实手柄占着 slot0，虚拟手柄抢不到位** —— `PadSlotWitness` 从「打微码后只读一次」改成「40ms 间隔轮询、最长 480ms，一旦确认在 slot0 立即返回」，微码结束仍把摇杆打回中位；新增 `ShouldRetryEmptySlot0`（slot0 实际空闲但虚拟手柄尚未落入 → 断开重连再试一次）与 `ShouldExitHideWait`（slot0 空闲立即结束等待；物理节点全禁用后仍给 6s 宽限，**不得**在物理节点刚变禁用、slot0 还没释放的那一毫秒提前跳出）。回归用例 `PadSlotWitnessTests` / `PhysicalPadControlTests`
+- **修：按 B 逃生连续失败只会一直按 B** —— 共享决策新增 `MatchActionKind.GamepadBackAfterConfirm`：周期 B 的第 3、6… 次（每 3 次）换招「先 A 再 B」，其余轮次维持原导航/等待行为。回归用例 `BackEscapeEscalationTests`
+- **性能：720p 附近不再做无意义重采样** —— `WindowCapture` 免缩放容忍高度上限提到 780（实机 1282×759 / 1296×759 覆盖 Windows 10/11 标题栏边框），省掉 759→720 的最邻近重采样（文字毛糙 + 双倍 LOH 分配）；超过上限（1080p/2K/4K）仍按高 720 等比缩小，全屏 3440×1440 → 1720×720，帧数据量降 4 倍；GPU 缩放器与 D3D 设备同家族（`GpuVideoScalerVortice`）
+- **性能：OCR 行聚类不再跑三遍** —— `OcrRecognizer` 把按排版行的聚类结果缓存，`Lines` / `MergedWords` / `JoinedText` 共用，同一帧省掉 2 遍 O(N²) 聚类；词块新增 `Confidence`（默认 1.0 = 未知/最高可信，只用于多候选择优，不做全局硬阈值过滤）
+- **性能/稳：外置性能监控浮窗不再打穿静帧去重** —— `OcrRecognizer` 识别并剔除顶部外置 FPS/CPU/GPU 监控的包围盒（无浮窗时恒为空）；`ObservationService` 的 FNV-1a 64 帧指纹支持 `ignoreRects` 动态跳过这些跳变区，未检测到浮窗时走零分支全帧扫描；重启后连续健康出帧 2 分钟熔断清空判定提为纯函数可单测
+- **新：全局热键改低级钩子** —— `Core/Input/SmartHotkey` 用 `WH_KEYBOARD_LL` + `WH_MOUSE_LL` 取代 `RegisterHotKey`：键盘任意键与鼠标左/右/中/侧键都能绑，且可以不带修饰键；主热键语义不变（第一次按=暂停，暂停中再按=彻底停止，恢复热键从暂停恢复），钩子在 WPF UI 线程注册，物理键状态用 `GetAsyncKeyState` 读全局。回归用例 `SmartHotkeyTests`
+- **可调：共享层判定最低置信度** —— `AppConfig` 新增 `MatchBrain.MinScore` 配置（默认 0.45，与历史行为一致）：换模型后可微调，调低=更容易认出目标但误报增多，调高=更保守
+- **界面：主题令牌补齐到 6 套** —— 新增 `TextOnDanger` / `ToggleThumbOn` / `DialogBg` / `LogTime` / `LogTag`，覆盖 Fluent·Glass × 深/浅/深蓝，`ThemePaletteTests` 4 条锁定；`Themes/Tokens.xaml`、`Controls.xaml`、`Surfaces.xaml`、`Templates.xaml` 同步（颜色仍只从 token 走，页面里不出现色值）
+- **界面：控件手感与响应式布局** —— ComboBox 弹层限高、`PrimaryBtn` / `GhostBtn` / `DangerOutlineBtn` 统一 34px 高、圆角 8、标题竖条 3×12、统计区 2×2；日志页主题分色 + 一键复制 / 双击复制；三栏 196px / 1.45* / 0.55*，最小窗口 1020×640，模块页右栏卡片改通栏 `WrapPanel`（不再挤成一列）
+- **界面：运行中可一键换模块** —— `MainWindow.ModuleRun.cs` 让其余正式模块在运行中出现「切换」按钮，一键换人不参与接力；另修 `MonitorServer` / `monitor.js` 局域网监控页与 `AboutPage` 的显示问题
+- 构建与测试：arch-guard 11 条规则 0 违规（185 源文件），`dotnet build` 0 警告 0 错误；全量测试 1189 条 → 1181 通过，余 8 条为环境限制（HttpListener 需 URL ACL/管理员、无 GPU/DXGI），在未改动的 main 上同样失败
+
 ## v7.4.1
 
 - **修：国际服「阵容挑战 / Team Effort」的比赛计划失效修复整夜卡死——不会自动向左进入侧边栏，一整天零场次**——用户 2026-11-22 实机（截图：屏幕停在比赛计划编辑页，运行日志每秒刷一行 `[周活动·阵容挑战] 接管比赛计划页（SquadLineupEdit）：按侧边栏「自动配置球员」修复阵容`）。根因：`WeeklyEventScenario.HandleWeeklyAsync` 里那段「半途启动直接接管」的拦截写在 phase 分派**之前**且无条件生效——只要屏幕是编辑页就先 `SetPhase(MatchPlanSetup)`、把 `_planStep` 重置成 `Lineup`、再 `return 900`，于是 `case WkPhase.MatchPlanSetup → HandleMatchPlanSetupAsync` 一次都轮不到，`HandlePlanLineupAsync` 里的左移/下移全成了死代码：手柄一个方向键都发不出去，同一个红点修复流程无限自我重置
