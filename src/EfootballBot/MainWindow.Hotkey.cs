@@ -52,16 +52,42 @@ public partial class MainWindow
             AppendLog("已恢复挂机。", LogLevel.Info);
     }
 
-    /// <summary>统一停止（GUI 按钮与热键共用）。allowAutoClose=false 用于手动停止后仍需弹窗交互的场景。</summary>
+    /// <summary>统一停止（GUI 按钮与热键共用）。allowAutoClose=false 用于手动停止后仍需弹窗交互的场景。
+    /// <para>
+    /// 三级硬闸（2026-11-25 用户报障「点了停止还在操作游戏」）：
+    /// ① <see cref="PadPanicGate.Panic"/> 拉闸——GUI 直接写共享内存撤 ACTIVE + 清零，
+    ///    游戏进程内的代理下一帧就松手，不等 Worker 响应；
+    /// ② 管道 stop 让 Worker 先松手再收尾（见 WorkerProgram stop 分支）；
+    /// ③ 收尾后仍报告运行中 → 强制回收工作进程，绝不让它继续操作游戏。
+    /// </para>
+    /// </summary>
     private async Task StopScenarioAsync(bool allowAutoClose = true)
     {
         var host = _workerHost;
         if (host is null) return;
         _hotkey.Unregister();
+
+        // ① 拉闸：把「松手」从秒级降到帧级（≤16ms）。返回 false 只表示本机没走共享内存代理。
+        if (PadPanicGate.Panic())
+            AppendLog("手柄总闸已拉下：游戏侧即刻松手，Worker 随后收尾。", LogLevel.Info);
+
         AppendLog("正在停止…", LogLevel.Info);
         ResetButtons();
-        await host.StopAsync();
+        try { await host.StopAsync(); }
+        catch (Exception ex) { AppendLog($"停止命令异常：{ex.Message}（继续强制收尾）", LogLevel.Warn); }
+
+        // Worker 收尾期间可能又写了一次状态：补一发，别让最后一拍按键留在游戏里
+        PadPanicGate.Panic();
+
         MuteGameOnScenarioStopped(); // 停挂机即恢复游戏声音（只静音了游戏，系统音量不受影响）
+
+        // ③ 校验：Worker 还报告运行中就强制回收（否则它会继续操作游戏，用户看到的正是这个）
+        if (host.ScenarioRunning)
+        {
+            AppendLog("停止后 Worker 仍报告「场景运行中」：强制回收工作进程，避免它继续操作游戏。", LogLevel.Warn);
+            try { host.Dispose(); } catch { /* 回收失败也不再保留引用 */ }
+            if (ReferenceEquals(_workerHost, host)) _workerHost = null;
+        }
         AppendLog("已停止。", LogLevel.Info);
         if (allowAutoClose && _cfg.AutoCloseWhenDone)
         {

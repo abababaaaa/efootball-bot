@@ -74,7 +74,7 @@ public sealed partial class CnWeeklyScenario : IScenario
         {
             _rewardCheckStage = 2;
             _log("[国服周活动] A 打开信息弹窗", LogLevel.Info);
-            await _engine.Pad.Confirm();
+            await EnterAsync(obs, _attempts, "国服进入/确认");
             return 2200;
         }
         // stage 2：A 已按过，弹窗仍未出现（光标不在 i 等），重试
@@ -88,7 +88,7 @@ public sealed partial class CnWeeklyScenario : IScenario
             return 1200;
         }
         _log("[国服周活动] 信息弹窗未出现，重按 A 打开", LogLevel.Info);
-        await _engine.Pad.Confirm();
+        await EnterAsync(obs, _attempts, "国服进入/确认");
         return 2200;
     }
 
@@ -154,7 +154,7 @@ public sealed partial class CnWeeklyScenario : IScenario
             bool dismissable = obs.Ocr.ContainsJoined("取消") || obs.Ocr.ContainsJoined("关闭");
             _log("[国服周活动] 退场途中弹窗：A 确认（可能是奖励领取）", LogLevel.Info);
             if (dismissable) await _engine.Pad.Dpad(PadDir.Up);
-            await _engine.Pad.Confirm();
+            await EnterAsync(obs, _attempts, "国服进入/确认");
             return 2200;
         }
         if (++_attempts > 8) SetPhase(CwPhase.Flow);

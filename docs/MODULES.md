@@ -31,7 +31,9 @@ Core/Bot/
 │   ├── MatchFlowMemory.cs      流程帧记忆 + 场次跟踪器（MatchSessionTracker）
 │   ├── MatchShared.cs          标题宽限 / 比赛上下文 / 掉线重登窗口 / 决策快照
 │   ├── ScreenProbe.cs          整帧像素探针（角区内容、整页亮底、绿勾）
-│   ├── CnAdvance.cs            ★国服推进键序：① RT（页面所印提示键）→ ② A → ③ 后台鼠标点击
+│   ├── CnAdvance.cs            ★国服推进键序：① RT（页面所印提示键）→ ② A → ③ 后台鼠标点击；
+│   │                            单键确认页用 ConfirmAsync（RT → A → 鼠标点确认，同一阶梯）
+│   ├── ResultCardProbe.cs      ★赛后「球员评价」页左侧白卡「下一步」的落点（OCR 字 → 白卡像素探针 → 标定落点轮换）
 │   └── PopupBrain.cs           弹窗高光/按钮判定（三模块共用）
 │
 └── Scenarios/                  模块层（三层：每个模块只认自己的界面与状态机）
@@ -56,7 +58,7 @@ Core/Bot/
 ### 1.1 周活动子活动分工（partial 拆分）
 
 周活动里其实是**好几个形态各异的小活动**（常规周活动 / 挑战活动 / 阵容挑战 Team Effort /
-单场周活动；国服还多「晋级挑战（教练签下）」与「巡回赛主要奖励核验」）。它们以前挤在
+单场周活动；国服还多「晋级挑战（教练签下）」「巡回赛主要奖励核验」与「赛后活动内升级奖励」）。它们以前挤在
 一个 1800 行的文件里，改一个就会碰到另一个的字段和分支。现在按小活动拆成同类型 partial：
 
 **国际服 `Scenarios/Weekly/`**
@@ -67,11 +69,11 @@ Core/Bot/
 | `WeeklyBrain.Entry.cs` | 进活动：介绍页「进入/详情」焦点、比赛页磁贴扫描、锦标赛页/建议面板 | 进活动入口 |
 | `WeeklyBrain.Pick.cs` | 选择页：赛事等级 / 难度档 / 「选择地区」「选择球队」/ Y 随机 | 单场周活动的选页 |
 | `WeeklyBrain.Challenge.cs` | 挑战活动：解锁弹窗、挑战清单、卡扫描、锁/勾探针、卡号消失判定 | 挑战活动 |
-| `WeeklyBrain.SquadPlan.cs` | 阵容挑战：主页/球员卡限制弹窗/阵容页侧边栏/比赛计划红点 | 阵容挑战 |
+| `WeeklyBrain.SquadPlan.cs` | 阵容挑战：主页（含完成态「活动已完成」）/ 球员卡限制弹窗 / 阵容页侧边栏 / 比赛计划红点 | 阵容挑战 |
 | `WeeklyEventScenario.cs` | 主循环、`WkPhase` 分发、导航、弹窗/按键通用件 | 状态机骨架 |
 | `WeeklyEventScenario.SingleMatch.cs` | 活动设置核验、赛事等级下拉、单场周活动难度页（issue #1） | 单场周活动 |
 | `WeeklyEventScenario.Challenge.cs` | 挑战活动子流程 + 地区/球队选择前置（含它自己的 `_ch*` / `_pick*` 字段） | 挑战活动 |
-| `WeeklyEventScenario.SquadPlan.cs` | 阵容挑战「比赛计划失效」修复（`PlanStep` 状态机 + `_plan*` 字段） | 阵容挑战 |
+| `WeeklyEventScenario.SquadPlan.cs` | 阵容挑战「活动已完成」退出 + 「比赛计划失效」修复（`PlanStep` 状态机 + `_plan*` / `_completed*` 字段） | 阵容挑战 |
 
 **国服 `Scenarios/CnWeekly/`**
 
@@ -81,6 +83,7 @@ Core/Bot/
 | `*.Challenge.cs` | 挑战型活动：挑战清单选卡、卡页完成判定、撤退重进 |
 | `*.Coach.cs` | 晋级挑战的教练签下链（选教练 → 看属性 → 签下确认，含后台鼠标点击） |
 | `*.Reward.cs` | 巡回赛主要奖励核验（主页勾 → i 信息弹窗 x/x）与撤退 |
+| `*.SquadReward.cs` | 赛后「活动内升级奖励」链：阵容奖励（六卡评级两两求和选最高组）/ 特殊奖励（等级 >40 不选、选最小）/ 两个领取结果弹窗；含卡面变蓝+勾的选中验证与后台鼠标点选 |
 | `*.Difficulty.cs` | 赛事等级/难度卡片行判定与确认 |
 
 规则（拆完继续照这个走）：
@@ -121,6 +124,44 @@ Core/Bot/
 > 接力白名单 = 「本服 + 可接力(HandoffEligible) + 是场景」，由注册表算出，
 > 设置页的下拉候选、引擎的 `HandoffTo` 校验、管道协议的模式校验共用这一份。
 
+### 2.1 每个模块页里有哪些设置（字段对照）
+
+界面约定：**模块专属设置长在模块自己的页面里**（`MainWindow.xaml` 的 `LeagueContent` 等），
+「设置」页只放跨模块的全局项。下表每一行都能在 `Core/Config/AppConfig.cs` 里按字段名查到。
+
+**七个模块页都带一条「本模块运行环境」**（`CmbEnvBackend<页>` / `ChkEnvHidePad<页>` /
+`ChkEnvPace<页>` / `ChkEnvParking<页>` / `TxtEnvTimeout<页>`）：这四项是引擎**每次挂机现读**的全局开关，
+以前只有「设置」页一处入口，用户在模块页调完设置就开始挂机，根本不知道这次用的是哪套手柄/节奏/停靠行为。
+现在模块页与设置页各有一份控件、同一个字段，改动即时落盘并互相同步（`MainWindow.Settings.cs` 的
+`SyncRunEnv()` + `InitModuleSettingBindings()` 登记，漏登记会被 `ModuleSettingsPlacementTests` 拦下）。
+
+| 模块页（XAML 容器） | 页面里的设置项 | 字段 |
+|---|---|---|
+| 我的联赛（`LeagueContent`） | 比赛难度 / 完成场次停止 / 关键比赛停止 / 只打关键比赛 | `MyLeague.Difficulty` / `.StopAfterMatches` / `.StopAfterKeyMatches` / `.OnlyKeyMatches` |
+| | 普通比赛判定后等待秒数（重启前让服务端先登记这一场） | `MyLeague.SkipNormalMatchDelaySeconds` |
+| | 经验值加成（档位） / 教练强化 / 状态加成（档位） | `MyLeague.BuyExpBoost` + `.ExpBoostLevel` / `.BuyCoachBoost` / `.BuyConditionBoost` + `.ConditionLevel` |
+| | 满级自动换人 + 间隔场次 | `MyLeague.AutoSwapMaxLevel` + `.AutoSwapEveryMatches` |
+| | 挂机节奏（最小/最大秒） / 赛后活动地图自动推进 | `Timing.IdleTapMinMs` + `.IdleTapMaxMs` / `PostMatchActivity.AutoAdvanceWeeklyTasks` |
+| 周活动（`WeeklyContent`） | 赛事等级 / 完成场次停止 / 全部完成后接力 | `Weekly.EventLevel` / `.StopAfterMatches` / `.AfterCompleteModule` |
+| | 挂机节奏 / 赛后活动地图自动推进 | 同上 |
+| AI天梯联赛（`AiLadderContent`） | 达到组别停止 / 完成场次停止 | `AiLadder.StopAtDivision` / `.StopAfterMatches` |
+| | 挂机节奏 / 赛后活动地图自动推进 | 同上 |
+| 种马培训（`StudContent`） | 门将数量 / 非门将数量 / 培训门将 / 技能卡个数 + 全部 | `StudTraining.BuyGoalkeeperCount` / `.BuyOutfieldCount` / `.TrainGoalkeepers` / `.SkillCardCount` + `.SkillCardAll`（不打比赛，故无节奏项） |
+| 天梯巅峰赛（`CnLeagueContent`） | 挂机节奏（场次为 0 自动停，无其它可调项） | `Timing.IdleTapMinMs` + `.IdleTapMaxMs` |
+| 周活动·国服（`CnWeeklyContent`） | 比赛难度 / 完成场次停止 / 全部完成后接力 | `CnWeekly.Difficulty` / `.StopAfterMatches` / `.AfterCompleteModule` |
+| | 挂机节奏 | 同上 |
+| 我的联赛·国服（`CnMyLeagueContent`） | 比赛难度 / 完成场次停止 / 关键比赛停止 | `CnMyLeague.Difficulty` / `.StopAfterMatches` / `.StopAfterKeyMatches` |
+| | 经验值加成 / 教练强化 / 状态加成 | `CnMyLeague.BuyExpBoost` + `.ExpBoostLevel` / `.BuyCoachBoost` / `.BuyConditionBoost` + `.ConditionLevel` |
+| | 满级自动换人 + 间隔场次 | `CnMyLeague.AutoSwapMaxLevel` + `.AutoSwapEveryMatches`（国服继承国际服场景，巡检同样生效） |
+| | 挂机节奏 | 同上（赛后活动地图是国际服独有，国服没有这一项） |
+| 全部七个模块页 | 本模块运行环境：手柄后端 / 禁用真实手柄 / 拟人节奏 / 后台停靠 | `Pad.Backend` / `HidHide.HidePhysicalGamepad` / `Timing.HumanPacingEnabled` / `BackgroundParking.Enabled` |
+| | 只读说明：单页/单场超时 | `Timing.PageTimeoutS` / `Timing.MatchTimeoutMin`（出厂值即实测推荐，不设界面入口） |
+
+> 「设置」页剩下的都是跨模块项：`VirtualDisplayPark.*` / `Schedule.*` / `CaptureMode` / `OcrEngine` /
+> `PreviewIntervalMs` / `FrameDump.*` / `Learning.*` / 日志与通知（`FileLogEnabled` / `Notify.*` /
+> `Monitor.*`）/ `Hotkey.*` / `Appearance.*`。`Pad.*`、`HidHide.*`、`BackgroundParking.Enabled`、
+> `Timing.HumanPacingEnabled` 两处都有：模块页是「本次挂机要看得到」，设置页是「一次改全局」。
+
 ---
 
 ## 3. 加一个模块（照抄即可）
@@ -159,15 +200,15 @@ Core/Bot/
 
 | 能力 | 入口 | 谁在用 |
 |---|---|---|
-| 界面分类 | `MatchBrain.Classify(dets, ocr, 角区, 比赛上下文, 亮底, 重登窗口)` | 全部模块 |
+| 界面分类 | `MatchBrain.Classify(dets, ocr, 角区, 比赛上下文, 亮底, 重登窗口)`；比赛内「是否真在踢」用 `HasLiveMatchHud`（比全局判据宽一档：全角冒号/冒号被吞/比分被拆词） | 全部模块 |
 | 共享决策 | `MatchBrain.Decide(screen, ocr, streak, inMatchRecently, frame, allowMatchSkip)` | 全部模块 |
 | 赛中场次 | `MatchPlay.Tick / IdleTapAsync / MarkAtMenu / Abort` | 全部 5 个打比赛模块 |
-| 场内挂机节奏 | `MatchPlay.IdleTapAsync`（读设置里的挂机节奏区间） | 同上 |
+| 场内挂机节奏 | `MatchPlay.IdleTapAsync`（读各模块页里的挂机节奏区间，字段统一是 `Timing.IdleTapMinMs/MaxMs`） | 同上 |
 | 流程帧记忆 | `MatchFlowMemory`（SawWithin / Record / Clear） | 全部模块 |
 | 标题宽限 / 比赛上下文 / 掉线窗口 | `MatchShared.TitleGrace / MatchContext / LoginRecovery` | 全部模块 |
 | 像素探针 | `ScreenProbe.CornerHasContent / IsMostlyLightPage / CountGreen` | 全部模块 |
 | 弹窗按键判定 | `PopupBrain.Decide / DecideUpDown` | 我的联赛 / 种马 / 共享决策 |
-| 国服「下一步/确认」推进 | `CnAdvance.AdvanceAsync / StepOf / FindButton`（① RT → ② A → ③ 后台鼠标；仅国服，国际服不吃鼠标） | 国服天梯巅峰赛 / 国服周活动 / 我的联赛（国服） |
+| 国服「下一步/确认」推进 | `CnAdvance.AdvanceAsync / StepOf / FindButton / LocateClickPoint`（① RT → ② A → ③ 后台鼠标；仅国服，国际服不吃鼠标）；只按单键确认的页面（难度页/教练资料页/签下确认/奖励领取弹窗）用 `ConfirmAsync / ConfirmStepOf`（同一阶梯：1→RT、2→A、≥3→鼠标点确认；2026-11-25 客户改版后国服下一步全印 RT）；比赛中弹窗用 `ConfirmInMatchAsync / InMatchStepOf`（RT/A 交替，比赛里不给鼠标）。**鼠标落点档位**（`LocateClickPoint`）：按钮锚点 → 页面兜底坐标 → **白卡**（`ResultCardProbe`：赛后「球员评价」页左侧那块箭头大卡，OCR 字 → 白卡像素探针 → 标定落点轮换）→ 国服右下兜底；第 8 轮起每 6 轮可升级 `UseForegroundClick` 的前台真实点击（后台 PostMessage 被吞时的最后一档）。**国际服比赛内仍按 A**（RT 是冲刺键），边界由 `ArchitectureTests.国服键序只许国服模块引用_国际服比赛内仍按A` 锁死。**判定优先级：弹窗 > 设置/难度面板 > 右下角下一步**（`MatchBrain.Decide` 的快通道只认 下一步/继续，弹窗按钮候选或设置词在场时交回弹窗阶梯） | 国服天梯巅峰赛 / 国服周活动 / 我的联赛（国服） |
 | 赛后活动地图 | `PostMatchActivityController`（可选能力，模块自己决定要不要接） | 国际服周活动 / AI 天梯 / 我的联赛 |
 
 「赛前快捷设置」不是引擎场景：它是 `ModuleKind.Tool`，只做启动游戏/打开设置工具/开目录，

@@ -83,6 +83,8 @@ public sealed class PeakLadderScenario : IScenario
         _engine = engine;
         _log = log;
         _matchPlay = new MatchPlay(engine, "天梯巅峰赛", log);
+        // 国服：比赛内挂机点击也走 RT（A 在国服客户端不再推进任何东西）
+        _matchPlay.UseTriggerForIdleTap = true;
         _mouse = new BackgroundMouse();
         _homeGuide = new ReturnToHomeGuide("天梯巅峰赛", log, engine.DumpSuspiciousFrame);
     }
@@ -128,7 +130,7 @@ public sealed class PeakLadderScenario : IScenario
         if (!_takeoverLogged)
         {
             _takeoverLogged = true;
-            _log($"[天梯巅峰赛] 智能接管：当前界面「{(pl != PlScreen.None ? pl.ToString() : ml.ToString())}」，从该阶段继续", LogLevel.Success);
+            _log($"[天梯巅峰赛] 接管：{(pl != PlScreen.None ? pl.ToString() : ml.ToString())}", LogLevel.Success);
         }
         // ---- 赛中匹配（共享层 MatchPlay）：本模块不回我的联赛主页（isHome 恒 false），
         //      终场 FullTime 是权威关场信号，超时兜底 5 分钟，记账全在 MatchPlay 内
@@ -153,7 +155,7 @@ public sealed class PeakLadderScenario : IScenario
         {
             if (_streak < 1) return 800; // 过渡帧防抖
             return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, "起始页", "天梯巅峰赛", _log,
-                obs.Ocr, obs.Detections, (0.850, 0.920), ct);
+                obs.Ocr, obs.Detections, (0.850, 0.920), obs.Frame, ct);
         }
         // Flow 阶段 HasConfirm 页面连续多轮无进展：国服键序（RT→A→鼠标）都用完仍不动才按 B 退出。
         // 阈值放在键序之后（第 8 轮）：前 7 轮 = RT/A/鼠标各试过，页面真死了才逃生，绝不抢在
@@ -194,18 +196,23 @@ public sealed class PeakLadderScenario : IScenario
             },
             onConfirm: async () =>
             {
-                // 国服键序：比赛中的弹窗只按 A；赛外走 RT → A → 鼠标
+                // 国服键序：比赛中弹窗也优先 RT（改版后弹窗确认键印 RT），第 2 轮起 A 交替，
+                // 比赛里不点鼠标；赛外统一 ① RT ② A ③ 鼠标兜底
                 if (_matchSession.Active)
-                {
-                    _log($"[天梯巅峰赛] 比赛中弹窗 A：{action.Target}", LogLevel.Info);
-                    await _engine.Pad.Confirm();
-                    return null;
-                }
+                    return await CnAdvance.ConfirmInMatchAsync(_engine, _streak + 1, action.Target,
+                        "天梯巅峰赛", _log, ct, action.WaitMs);
                 return await CnAdvance.AdvanceAsync(_engine, _mouse, _streak + 1, action.Target,
-                    "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, ct);
+                    "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, obs.Frame, ct);
             });
     }
 
+    /// <summary>
+    /// 国服「进入 / 确认」：① RT（页面所印提示键）→ ② 后台鼠标点按钮词 → ③ 兜底落点。
+    /// 用户 2026-11-25 定：先 RT、再 A、最后鼠标兜底（终场「球员评价」页实测 RT 不动，必须补 A）。
+    /// </summary>
+    private Task<int> EnterAsync(Observation? obs, int attempt, string what, (double X, double Y)? fallback = null)
+        => CnAdvance.ConfirmAsync(_engine, _mouse, attempt, what, "天梯巅峰赛", _log,
+            obs?.Ocr ?? OcrResult.Empty, obs?.Detections, fallback, CancellationToken.None);
     // ---------------- 菜单侧状态机 ----------------
     /// <summary>返回正数/0=本轮已处理（下一轮延时）；null=未接管（走共享决策）。</summary>
     private async Task<int?> HandlePlAsync(PlScreen pl, CwScreen cw, MatchScreen ml, Observation obs, CancellationToken ct)
@@ -319,7 +326,7 @@ public sealed class PeakLadderScenario : IScenario
                     }
                     _log("[天梯巅峰赛] 参赛模式弹窗：上×2 选「单场比赛」→ A", LogLevel.Info);
                     await _engine.Pad.DpadRepeat(PadDir.Up, 2);
-                    await _engine.Pad.Confirm();
+                    await EnterAsync(obs, _attempts, "国服进入/确认");
                     return 3000;
                 }
                 if (pl == PlScreen.ActivityHome)
@@ -340,7 +347,7 @@ public sealed class PeakLadderScenario : IScenario
                 {
                     if (++_attempts > 8) { SetPhase(PlPhase.Flow); return 600; }
                     return await CnAdvance.AdvanceAsync(_engine, _mouse, _attempts, "赛前确认弹窗",
-                        "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, ct);
+                        "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, obs.Frame, ct);
                 }
                 if (++_attempts > 12)
                 {
@@ -405,7 +412,7 @@ public sealed class PeakLadderScenario : IScenario
                     return 2400;
                 }
                 return await CnAdvance.AdvanceAsync(_engine, _mouse, _countUnknownRounds, "活动主页遮挡物",
-                    "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, ct);
+                    "天梯巅峰赛", _log, obs.Ocr, obs.Detections, null, obs.Frame, ct);
             }
             if (_countUnknownRounds == 8)
             {
@@ -480,7 +487,7 @@ public sealed class PeakLadderScenario : IScenario
         await _engine.Pad.Dpad(PadDir.Up);
         await _engine.Pad.Dpad(PadDir.Down);
         await _engine.Pad.Wait(350, ct); // 等卡行焦点动画落定，A 才吃得到
-        await _engine.Pad.Confirm();
+        await EnterAsync(obs, _attempts, "国服进入/确认");
         return 3200;
     }
 
@@ -517,7 +524,7 @@ public sealed class PeakLadderScenario : IScenario
             }
         }
         return await CnAdvance.AdvanceAsync(_engine, _mouse, attempt, what, "天梯巅峰赛", _log,
-            obs.Ocr, obs.Detections, fallback, ct, buttonWords);
+            obs.Ocr, obs.Detections, fallback, obs.Frame, ct, buttonWords);
     }
 
     /// <summary>后台鼠标点击：优先 OCR 锚定词位置（其中心下方 0.02 落在卡面内），

@@ -366,13 +366,13 @@ public sealed class WorkerHost : IDisposable
     }
 
     /// <summary>等待启停串行锁；超时（上一次操作卡死）返回 false，绝不让调用方永久排队。</summary>
-    private async Task<bool> TryEnterLifecycleAsync()
+    private async Task<bool> TryEnterLifecycleAsync(TimeSpan? timeout = null)
     {
-        var timeout = TimeSpan.FromSeconds(60);
+        var wait = timeout ?? TimeSpan.FromSeconds(60);
         try
         {
-            if (await _lifecycle.WaitAsync(timeout)) return true;
-            EmitLog("Error", $"上一个启停操作仍未结束（超过 {timeout.TotalSeconds:F0}s），本次操作已放弃。请点「发现问题手动停止」或重启程序。");
+            if (await _lifecycle.WaitAsync(wait)) return true;
+            EmitLog("Error", $"上一个启停操作仍未结束（超过 {wait.TotalSeconds:F0}s），本次操作已放弃。请点「发现问题手动停止」或重启程序。");
             return false;
         }
         catch (ObjectDisposedException) { return false; } // 关闭中：Dispose 已硬回收
@@ -383,33 +383,65 @@ public sealed class WorkerHost : IDisposable
         try { Disconnected?.Invoke(); } catch { /* 订阅方异常不影响回收 */ }
     }
 
-    /// <summary>发送 stop 命令，收到 Worker 确认（典型 <1s）即 Kill 回收；确认超时 2s 也直接 Kill。
-    /// Worker 收 stop 本就不退出进程（保活等重连），旧实现固定等 5s 进程退出纯属白等。</summary>
+    /// <summary>发送 stop 命令，收到 Worker 确认即回收；确认超时也直接 Kill。
+    /// Worker 收 stop 本就不退出进程（保活等重连）。
+    /// <para>
+    /// 2026-11-25 用户报障「点了停止还在操作游戏」：旧实现等启停锁 60s、确认 2s 就 Kill。
+    /// 现在：① 停止只等 5s 启停锁（卡死就硬杀，不让用户对着一个还在动的游戏干等）；
+    /// ② 确认等 6s（引擎收尾要停捕获/还原窗口/写会话摘要，比 2s 长）；
+    /// ③ 超时路径连管道一起回收，不再留一个半死的 Worker 继续驱动游戏。
+    /// </para>
+    /// </summary>
     public async Task StopAsync()
     {
         _expectedRunning = false; // 用户主动停止：看门狗不再自动重启
-        if (!await TryEnterLifecycleAsync())
+        if (!await TryEnterLifecycleAsync(TimeSpan.FromSeconds(5)))
         {
             // 上一次启停还卡着（Worker 半死）：不再排队，直接硬杀进程兜底
-            try { _process?.Kill(); } catch { }
-            _scenarioRunning = false;
+            await HardRecycleAsync();
             return;
         }
+        bool confirmed;
         try
         {
-            await TeardownAsync();
+            confirmed = await TeardownAsync();
         }
         finally
         {
             try { _lifecycle.Release(); }
             catch (ObjectDisposedException) { /* 关闭中：信号量已销毁 */ }
         }
+        // 没收到「已停」确认 = Worker 可能还卡在旧循环里：硬回收一次，
+        // 绝不留着一个还能驱动游戏的进程（用户报障「点了停止还在操作游戏」的直接来源）
+        if (!confirmed)
+        {
+            EmitLog("Warn", "Worker 未在 6s 内确认停止（可能卡在不可取消的等待里）：已强制回收进程树。");
+            await HardRecycleAsync();
+        }
     }
 
-    /// <summary>回收当前会话：发 stop → 等 stopped 确认（≤2s）→ Kill 兜底 → 取消读循环 → 释放句柄。幂等。</summary>
-    private async Task TeardownAsync()
+    /// <summary>硬回收：杀进程树 + 撤管道 + 停读循环，并把场景状态置为已停。不做任何等待。</summary>
+    private Task HardRecycleAsync()
     {
         _scenarioRunning = false;
+        _stopAck?.TrySetResult(false);
+        _stopAck = null;
+        var process = _process ?? ResolveRemoteProcess();
+        try { process?.Kill(entireProcessTree: true); } catch { try { process?.Kill(); } catch { } }
+        try { _readCts?.Cancel(); } catch { }
+        try { _pipe?.Dispose(); } catch { }
+        _pipe = null;
+        _readCts = null;
+        try { process?.Dispose(); } catch { }
+        if (ReferenceEquals(_process, process)) _process = null;
+        return Task.CompletedTask;
+    }
+
+    /// <summary>回收当前会话：发 stop → 等 stopped 确认（≤6s）→ Kill 兜底 → 取消读循环 → 释放句柄。幂等。
+    /// 返回 true = Worker 亲口确认「已停」；false = 没确认（超时/管道断/写失败），调用方据此决定是否硬回收。</summary>
+    private async Task<bool> TeardownAsync()
+    {
+        bool confirmed = false;
         if (_pipe is { IsConnected: true })
         {
             try
@@ -417,15 +449,17 @@ public sealed class WorkerHost : IDisposable
                 var ack = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
                 _stopAck = ack;
                 await SendAsync(PipeProtocol.CmdStop(), CommandWriteTimeout);
-                await ack.Task.WaitAsync(TimeSpan.FromSeconds(2));
+                confirmed = await ack.Task.WaitAsync(StopAckTimeout);
             }
             catch { }
         }
+        _scenarioRunning = false;
 
         var process = _process ?? ResolveRemoteProcess();
         if (process is not null && !process.HasExited)
         {
-            try { process.Kill(); } catch { }
+            // 未确认：Worker 可能卡在不可取消的等待里，用进程树强杀（子进程如 sidecar 一并回收）
+            try { process.Kill(entireProcessTree: true); } catch { try { process.Kill(); } catch { } }
             // Kill 后短暂等退出，避免僵尸进程残留句柄（引擎已在 stop 时清理，无需宽限）
             using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(2));
             try { await process.WaitForExitAsync(cts.Token); } catch { }
@@ -438,7 +472,15 @@ public sealed class WorkerHost : IDisposable
         try { process?.Dispose(); } catch { }
         _process = null;
         _readCts = null;
+        return confirmed;
     }
+
+    /// <summary>
+    /// stop 确认等待上限。旧值 2s 在引擎收尾（停 WGC/DXGI 捕获会话、还原后台停靠窗口、写会话摘要）时
+    /// 必然超时，GUI 就把还差最后一步清理的 Worker 杀掉——用户看到的是"停止后手柄/窗口状态不干净"，
+    /// 更糟的是每次停止都多一次强杀。给到 6s：正常停止 1~2s 就回，卡死仍会兜底强杀。
+    /// </summary>
+    private static readonly TimeSpan StopAckTimeout = TimeSpan.FromSeconds(6);
 
     private static DateTime? TryParseTimestamp(string? raw)
     {

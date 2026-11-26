@@ -55,11 +55,12 @@ public partial class MainWindow
     /// </summary>
     private static TextBlock BuildLogLine(string time, string? tag, string rest, LogLevel lv)
     {
-        var tb = new TextBlock { TextWrapping = TextWrapping.Wrap, LineHeight = 18 };
+        var tb = new TextBlock { TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, LineHeight = 15 };
         tb.Inlines.Add(new Run($"[{time}] ") { Foreground = BrushLogTime });
         if (!string.IsNullOrEmpty(tag))
             tb.Inlines.Add(new Run($"{tag} ") { Foreground = BrushLogTag });
         tb.Inlines.Add(new Run(rest) { Foreground = LevelBrush(lv) });
+        tb.ToolTip = string.IsNullOrEmpty(tag) ? $"[{time}] {rest}" : $"[{time}] {tag} {rest}";
         return tb;
     }
 
@@ -192,8 +193,9 @@ public partial class MainWindow
         }
         else
         {
-            tb = new TextBlock { TextWrapping = TextWrapping.Wrap, LineHeight = 18 };
+            tb = new TextBlock { TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, LineHeight = 15 };
             tb.Inlines.Add(new Run(msg) { Foreground = LevelBrush(lv) });
+            tb.ToolTip = msg;
         }
 
         LogList.Items.Add(tb);
@@ -436,7 +438,7 @@ public partial class MainWindow
                 }
                 else
                 {
-                    tb = new TextBlock { TextWrapping = TextWrapping.Wrap, LineHeight = 18 };
+                    tb = new TextBlock { TextWrapping = TextWrapping.NoWrap, TextTrimming = TextTrimming.CharacterEllipsis, LineHeight = 15 };
                     tb.Inlines.Add(new Run(msg) { Foreground = LevelBrush(lv) });
                 }
 

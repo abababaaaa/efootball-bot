@@ -1,0 +1,22 @@
+[package]
+name = "bot-ui"
+version = "0.1.0"
+edition = "2021"
+description = "Slint 主壳：S2 九页导航 + 主题六表切换"
+
+[dependencies]
+bot-ipc = { path = "../bot-ipc" }
+bot-state = { path = "../bot-state" }
+bot-theme = { path = "../bot-theme" }
+slint = "1.19.1"
+
+[build-dependencies]
+slint-build = "1.19.1"
+
+[[bin]]
+name = "bot-ui"
+path = "src/main.rs"
+
+[[bin]]
+name = "bot-log-window"
+path = "src/log_window.rs"

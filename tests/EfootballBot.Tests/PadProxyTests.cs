@@ -92,6 +92,39 @@ public class PadProxyTests
         Assert.Equal(0, ReadRaw(name, OffProxyCalls, (v, o) => v.ReadInt32(o)));
     }
 
+    // GUI 侧「手柄总闸」：点停止时不等 Worker，直接撤 ACTIVE + 清零。
+    // 停止链路任一环卡住时，这是游戏侧唯一还能立刻松手的手段（用户报障「点了停止还在操作游戏」）。
+    [Fact]
+    public void PadPanicGate_ReleasesActiveStateAndClearsButtons()
+    {
+        var name = UniqueName();
+        using var pad = new ProxyPad(SharedPadWriter.TargetGlobal, name);
+        pad.Connect();
+        pad.SetButton(PadButton.A, true);
+        pad.SetLeftStick(12000, -12000);
+        Assert.Equal(SharedPadWriter.FlagActive, ReadRaw(name, OffFlags, (v, o) => v.ReadUInt32(o)));
+
+        Assert.True(PadPanicGate.Panic(name));
+
+        uint flags = ReadRaw(name, OffFlags, (v, o) => v.ReadUInt32(o));
+        Assert.Equal(0u, flags & SharedPadWriter.FlagActive);       // 撤接管 → 代理立刻透传
+        Assert.NotEqual(0u, flags & PadPanicGate.FlagPanic);        // 且本帧只回空状态
+        Assert.Equal((ushort)0, ReadRaw(name, OffButtons, (v, o) => v.ReadUInt16(o)));
+        Assert.Equal((short)0, ReadRaw(name, OffLx, (v, o) => v.ReadInt16(o)));
+        // 拉闸后 seqlock 必须回到静止（偶数），否则代理会跳过所有帧
+        Assert.Equal(0, ReadRaw(name, OffSeq, (v, o) => v.ReadInt64(o)) & 1L);
+
+        // Worker 还活着继续写按键也进不了游戏：ACTIVE 已撤，代理不再合成状态
+        pad.SetButton(PadButton.B, true);
+        Assert.Equal(0u, ReadRaw(name, OffFlags, (v, o) => v.ReadUInt32(o)) & SharedPadWriter.FlagActive);
+    }
+
+    [Fact]
+    public void PadPanicGate_NoSharedMemory_IsNoOp()
+    {
+        Assert.False(PadPanicGate.Panic(@"Local\EfootballBot.Tests.None." + Guid.NewGuid().ToString("N")));
+    }
+
     [Theory]
     [InlineData(true, true, true, PadNodeKind.VirtualLive)]     // 虚拟 + 运行中
     [InlineData(true, false, true, PadNodeKind.VirtualStale)]   // 虚拟 + 残留

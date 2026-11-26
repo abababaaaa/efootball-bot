@@ -22,9 +22,13 @@ namespace EfootballBot.Core.Bot.Match;
 public static class ScreenProbe
 {
     /// <summary>
-    /// 右上角（AI 徽标区，x≥0.80 / y 0.03~0.18）内容探针：≥10% 采样点非黑（任一通道 &gt;40）
-    /// 即视为有画面。实机像素网格：比赛帧该区为球场纹理（非黑），菜单帧为纯黑 (0,0,0)。
+    /// 右上角（AI 徽标区）内容探针：≥10% 采样点非黑（任一通道 &gt;40）即视为有画面。
+    /// 实机像素网格：比赛帧该区为球场纹理（非黑），菜单帧为纯黑 (0,0,0)。
     /// 每 3 像素步进采样，~2000 次比较，开销可忽略。
+    /// ★起止从 0.03 收到 0.06（2026-11-25）：实机帧是 WGC 整窗帧（客户区 + 标题栏，
+    /// 顶部 4~5% 帧高是窗口标题栏而非画面）。浅色标题栏会让"菜单帧右上角纯黑"这个前提失效，
+    /// 把菜单页误判成"角区有内容"，进而被 InMatch 兜底吃掉（盲按 A）。0.06 起既能避开标题栏，
+    /// 又完整覆盖 AI 徽标区（实机徽标中心 y≈0.10）。
     /// </summary>
     public static bool CornerHasContent(FrameData f)
     {
@@ -32,7 +36,7 @@ public static class ScreenProbe
         int w = f.Width, h = f.Height;
         if (w < 100 || h < 100 || bgra.Length < w * h * 4) return false;
         int x0 = (int)(w * 0.80);
-        int y0 = (int)(h * 0.03), y1 = (int)(h * 0.18);
+        int y0 = (int)(h * 0.06), y1 = (int)(h * 0.18);
         int samples = 0, lit = 0;
         for (int y = y0; y < y1; y += 3)
         {
@@ -128,6 +132,35 @@ public static class ScreenProbe
     /// <summary>区域内绿色像素计数（横幅绿勾核验等共用，转发 <see cref="RegionProbe"/>）。</summary>
     public static int CountGreen(FrameData f, double x0, double x1, double y0, double y1)
         => RegionProbe.CountGreenRef(f, x0, x1, y0, y1);
+
+    /// <summary>
+    /// 比赛内右下角「推进键」按钮探针（实机 2026-11-25 进球庆祝帧）：右下区
+    /// （x 0.72~1.00 / y 0.85~0.965）蓝底白字按钮的蓝色像素占比 ≥12% = 画面上挂着一枚
+    /// 可按的推进键（「跳过 A ▶」/「下一步」这类）。
+    /// 用途：OCR 把这枚小字按钮读丢时（蓝底白字、字号小），靠像素补一刀，否则整段进球回放照播。
+    /// 标定（tests\EfootballBot.Tests\TestData）：带「跳过」按钮的进球庆祝帧 0.374；
+    /// 其余所有比赛帧 0.000~0.002（inmatch_user_1 / 黄色比分板帧 / 国服跳过横幅…）。
+    /// 只在 InMatch 分支用，菜单页不会拿它做判定。
+    /// </summary>
+    public static bool HasBlueAdvanceButton(FrameData? f, double minShare = 0.12)
+    {
+        if (f is null) return false;
+        var bgra = f.Bgra;
+        int w = f.Width, h = f.Height;
+        if (w < 100 || h < 100 || bgra.Length < w * h * 4) return false;
+        int samples = 0, blue = 0;
+        for (int y = (int)(h * 0.85); y < (int)(h * 0.965); y += 3)
+        {
+            for (int x = (int)(w * 0.72); x < w; x += 3)
+            {
+                int i = (y * w + x) * 4;
+                samples++;
+                int b = bgra[i], g = bgra[i + 1], r = bgra[i + 2];
+                if (b > 120 && b > r * 1.6 && b > g * 1.4) blue++;
+            }
+        }
+        return samples > 0 && blue >= samples * minShare;
+    }
 }
 
 

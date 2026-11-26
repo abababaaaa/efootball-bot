@@ -34,6 +34,31 @@ public static partial class MatchBrain
     public static MatchAction Decide(MatchScreen screen, OcrResult ocr, int screenStreak,
         bool inMatchRecently = false, FrameData? frame = null, bool allowMatchSkip = true)
     {
+        // ★右下角「下一步」快通道——2026-11-25 实机收紧（用户回报「右下角不是下一步」+「弹窗和
+        // 设置的优先级比下一步高」）：
+        //   旧版把 InMatchPushWords 里的「确定 / 确认 / OK」也算进这条快通道，于是「奖励已发放至
+        //   收件箱」这类**屏幕中央的单键弹窗**（一枚蓝色「确定」）被判成"右下角下一步"，
+        //   日志连刷「右下角下一步：立刻点」、RT/A 却一动不动（这页只有鼠标点「确定」关得掉），
+        //   整晚空转。
+        //   现在的判定顺序（用户定的优先级）：**弹窗 > 设置/难度面板 > 右下角下一步**。
+        //   · 「下一步 / 继续」= 纯推进覆盖层 → 仍然立刻点（这是本快通道存在的理由）；
+        //   · 「确定 / 确认 / OK」只在**不是弹窗**（PopupBrain 挑不出按钮候选、也没有设置/难度
+        //     面板词）时才当快通道，否则交回下面的 HasConfirm 分支走弹窗阶梯（上移/单键确认），
+        //     国服场景的 onConfirm 会按 RT → A → 后台鼠标点「确定」三级推进。
+        {
+            bool nextStepWord = ocr.ContainsJoined("下一步") || ocr.ContainsJoined("继续");
+            bool blueAdvance = ScreenProbe.HasBlueAdvanceButton(frame);
+            bool popupHasCancel = ocr.ContainsJoined("取消") || ocr.ContainsJoined("关闭");
+            bool dialogButtons = PopupBrain.FindButtons(frame, ocr).Count > 0;
+            bool settingsLike = IsDifficultyChoice(ocr) || IsGameSettingsDialog(ocr);
+            bool quickAdvance = nextStepWord ||
+                (blueAdvance && !dialogButtons && !settingsLike && !popupHasCancel);
+            // 交回各分支原有规则（含菜单弹窗的 B 逃生），绝不在这里无限空点。
+            if (quickAdvance && !popupHasCancel && !settingsLike &&
+                screenStreak < ConfirmEscapeStreak &&
+                screen is MatchScreen.InMatch or MatchScreen.HasConfirm or MatchScreen.Unknown)
+                return new MatchAction(MatchActionKind.PadConfirm, 200, "右下角下一步：立刻点");
+        }
         switch (screen)
         {
             case MatchScreen.MainMenu:
@@ -81,6 +106,24 @@ public static partial class MatchBrain
             }
             case MatchScreen.HasConfirm:
             {
+                // ★比赛上下文优先（用户 2026-11-25 实机）：比赛进行中右下角弹出的「下一步」
+                // 大蓝条覆盖层，会被 btn_confirm/确认词判成 HasConfirm。旧路径在这里走
+                // 2s → 5s 退避，还可能 上移+A（比赛里 Dpad 是战术调整）甚至到 ConfirmEscapeStreak
+                // 按 B 逃生（B 是铲球键）——用户看到的就是「右下角有下一步弹窗，反倒不一直点了」。
+                // 比赛内这条链只做一件事：0.6s 一拍连按 A，直到弹窗消失；绝不挪格、绝不 B。
+                // ★2026-11-25 二次收紧（用户：「弹窗和设置的优先级比下一步高」）：必须**真的在比赛里**
+                // （画面还有比赛 HUD/时钟）才走这条连点。赛后的单键弹窗（「奖励已发放至收件箱」
+                // 这类，一枚蓝色「确定」）也含"确定"字样，旧条件只要"最近 2 分钟见过比赛"就成立，
+                // 于是赛外弹窗也在这里被 RT 连点、永远关不掉——现在交给下面的弹窗阶梯
+                // （PopupBrain 判单键/高光 → 场景 onConfirm 走 RT → A → 后台鼠标点「确定」）。
+                if (inMatchRecently && HasLiveMatchHud(ocr) && IsInMatchAdvance(ocr) &&
+                    !IsDifficultyChoice(ocr) && !IsGameSettingsDialog(ocr))
+                    return new MatchAction(MatchActionKind.PadConfirm, 600, "比赛中弹窗推进键：连点 A 直到消失");
+                // 比赛内没有推进词、但左上时钟还在（真在踢）：这一帧是被 btn_confirm 误判成弹窗的
+                // 比赛画面（2026-11-25 实机：比分板/小地图被 YOLO 当确认按钮）→ 按挂机节奏随机点，
+                // 不许走下面的弹窗退避链（2s→5s，最后还会 B 铲球）
+                if (inMatchRecently && HasLiveMatchHud(ocr))
+                    return new MatchAction(MatchActionKind.MatchIdleTap, 0, "比赛中随机点击（弹窗误判纠正）");
                 // 带取消类按钮的弹窗（关键比赛 P3：OK 在上、取消在下且是默认焦点；购买弹窗
                 // 同型；跳过比赛确认弹窗默认焦点在关闭）：盲按 A 正好按在取消/关闭上把弹窗
                 // 关掉。★统一规则（用户 2026-10-18）：弹窗出现 取消/关闭 类字眼一律先上移
@@ -244,8 +287,8 @@ public static partial class MatchBrain
                 // ★同位置还会弹「跳过比赛 / 累计进球N/3个或以上」挑战目标提示 toast（用户
                 //   2026-10-17 实机）——那只是目标提醒、不可跳，横幅与 toast 的区别是右端
                 //   绿勾，必须绿勾像素核验通过（+排除 累计进球 词）才按暂停，否则空开菜单
-                if (allowMatchSkip && ocr.ContainsJoined("跳过比赛") && !ocr.ContainsJoined("累计进球") &&
-                    SkipBannerHasCheck(frame))
+                if (allowMatchSkip && ocr.ContainsJoined("跳过比赛") && !IsChallengeGoalToast(ocr) &&
+                    SkipBannerHasCheck(frame, ocr))
                     return new MatchAction(MatchActionKind.PadStartPress, 3000, "跳过比赛✅→暂停菜单");
                 // 过场动画（进球回放 / 庆祝 / 入场）：屏幕出现「跳过」提示就快节奏连按 A。
                 // 用户 2026-11-13 国际服反馈：一场要 20 分钟、动画基本都看完了、把挂机节奏
@@ -254,20 +297,27 @@ public static partial class MatchBrain
                 // 提示消失立即回到原节奏（见 IsSkipOverlay 的排除项，不碰国服「跳过比赛」链路）。
                 if (IsSkipOverlay(ocr))
                     return new MatchAction(MatchActionKind.PadConfirm, 300, "过场回放：快按 A 跳过");
+                // 右下角挂着一枚推进键但 OCR 读丢小字（实机 2026-11-25 进球庆祝帧：
+                // 「跳过 A ▶」蓝底白字 12px，OCR 常整块漏读）→ 用像素探针补一刀。
+                // 标定：带这枚按钮的帧右下蓝占比 0.374，其他比赛帧 0.000~0.002。
+                if (ScreenProbe.HasBlueAdvanceButton(frame))
+                    return new MatchAction(MatchActionKind.PadConfirm, 350, "右下推进键（像素探针）：快按 A 跳过");
                 // 比赛中覆盖层上的推进键（下一步/继续/确认/OK）：新版把回放/中场提示做成
                 // 带「下一步」的小弹窗，旧逻辑只在 Unknown 分支认这些词、节奏 2.5s，
                 // 用户报的「比赛中下一步不会点击」正是这一层——按 A 也快一拍（400ms）
+                // ★2026-11-25 追加（用户：「右下角有下一步弹窗反倒不一直点了」）：
+                //   ① 词表命中（下一步/继续/确认/确定/OK）→ 400ms 一拍连点；
+                //   ② 词表没整词命中但底栏确实印着一枚推进键（新版换文案/整行并读，
+                //      如「继续比赛」「点击继续」「进入」）→ 同样 400ms 连点，别干等；
+                //   两种情况都只按 A：比赛中 A 是传球/逼抢，连点无副作用。
                 if (IsInMatchAdvance(ocr))
                     return new MatchAction(MatchActionKind.PadConfirm, 400, "比赛中推进键：快按 A");
-                // 入场与过场动画跳过（用户明确要求）：
-                // 比赛上下文下无从比板时钟 = 过场/入场分镜（首发阵容、猜硬币、入场动画、进球回放），
-                // 必须以快节奏连按 A 瞬间切断所有分镜、推进到开球。
-                // 只有 Live Match（HasScoreboard=true，左上角时钟常在）才落到下面的 MatchIdleTap
-                // 拟人化慢节奏，防止比赛中乱传球。
-                if (!HasScoreboard(ocr))
-                    return new MatchAction(MatchActionKind.PadConfirm, 350, "无时钟过场/入场：快按 A 跳过");
-                // 比赛中挂机：按 A + 用户设定的随机间隔（设置→挂机节奏），
-                // 拟人化避免全程零输入；A 在比赛中是传球/逼抢，不会暂停或退出
+                if (FindBottomPushWord(ocr, 0.78) is { } push)
+                    return new MatchAction(MatchActionKind.PadConfirm, 400, $"比赛中底栏推进键「{push}」：快按 A");
+                // 没有任何弹窗/跳过提示 = 真在踢（用户 2026-11-25 定：回到最初行为）：
+                // 按设置里的「挂机节奏」随机点（默认 1~4s），既不干等也不连点乱传。
+                // 2026-11-25 那版「无时钟就 350ms/1.5s 连按」的补丁已撤——时钟读不出来不等于过场，
+                // 过场前面两条（跳过提示 + 右下推进键像素）已经兜住了。
                 return new MatchAction(MatchActionKind.MatchIdleTap, 0, "比赛中随机点击");
             }
             case MatchScreen.CnMatchPause:
@@ -349,7 +399,10 @@ public static partial class MatchBrain
                 // 2026-11-18：词表扩到 InMatchPushWords + 整词 OK，节奏 2500→1500ms。
                 // 覆盖层只闪一瞬，旧节奏下这一拍经常落在两次点击之间（"下一步不会点击"）。
                 if (inMatchRecently && IsInMatchAdvance(ocr))
-                    return new MatchAction(MatchActionKind.PadConfirm, 1500, "比赛弹窗→下一步");
+                    return new MatchAction(MatchActionKind.PadConfirm, 500, "比赛弹窗→下一步：连点 A");
+                // 整词表没命中但底栏确实印着推进键（新版变体文案）：同样连点，别等到 4s 逃生节奏
+                if (inMatchRecently && FindBottomPushWord(ocr, 0.78) is { } unknownPush)
+                    return new MatchAction(MatchActionKind.PadConfirm, 500, $"比赛底栏推进键「{unknownPush}」：连点 A");
                 // 比赛/过场/加载：连续多轮无特征时按 B 逃生。
                 // 完全无感知（OCR 0 词，典型：捕获黑屏/驱动异常）时绝不盲按 B
                 // （2026-10-10 15:48 实机：黑帧下盲按 B 9 次），只等待。
@@ -439,15 +492,48 @@ public static partial class MatchBrain
         => dets.Count(d => d.ClassName == "btn_confirm" && d.Score >= MinScore &&
                            d.CenterX > 0.85 && d.CenterY < 0.15);
     /// <summary>
-    /// 「跳过比赛」横幅右端绿勾核验（≈(0.95,0.05)，实机 2026-10-17 用户截图）：绿像素 ≥30。
+    /// 「跳过比赛」横幅 vs 挑战目标提示 toast 的排除词：两者字面都含「跳过比赛」，
+    /// toast 还带着目标行（「累计进球0/3个或以上」/ 2026-11-25 实机的新文案
+    /// 「至少打进0/3球且领先」）。真正的可跳横幅只有「跳过比赛」+ 右端绿勾。
+    /// </summary>
+    private static bool IsChallengeGoalToast(OcrResult ocr)
+        => ocr.ContainsJoined("累计进球") || ocr.ContainsJoined("至少打进");
+
+    /// <summary>
+    /// 「跳过比赛」横幅右端绿勾核验：绿像素足够多 = 这枚横幅是「可跳」的真横幅。
     /// ★同位置会弹「跳过比赛 / 累计进球N/3个或以上」挑战目标提示 toast——外观与横幅几乎
     /// 一样但没有绿勾，只是目标提醒、不可跳。frame 为 null（旧调用/部分单测）时只按词判
-    /// （toast 由 累计进球 词排除）。
+    /// （toast 由 累计进球/至少打进 词排除）。
+    /// <para>
+    /// ★2026-11-25 实机（国服周活动，MIL 6-0 BAR，横幅全程挂着却从不按暂停键）：
+    /// 旧实现只有一个写死的归一化窗 (0.930~0.990, 0.015~0.095)，那是按 <b>1280×720 内容帧</b>
+    /// 标的。实机 FrameData 是 WGC 整窗帧（客户区 + 标题栏/边框：客户区 1280×720 → 帧
+    /// 1282×759；客户区 1024×576 → 帧 1026×615），游戏内容整体下移约 30px（≈帧高 4~5%），
+    /// 绿勾从内容坐标 y≈0.062 漂到 y≈0.10~0.11，直接掉出窗口下沿——同一张图实测：
+    /// 内容 1280×720 计 104，帧 1282×759 计 42，帧 1026×615 只剩 6（阈值 30 → 判定失败，
+    /// 跳过链路整条哑火）。窗口越小/边框占比越大，漂移越致命。
+    /// 现在多一条<b>随词框自适应</b>的窗口：绿勾一定在「跳过比赛」这四个字的右端，
+    /// 用 OCR 词框推位置（与帧几何无关），两处取最大，任一达标即认为可跳。
+    /// </para>
     /// </summary>
-    public static bool SkipBannerHasCheck(FrameData? frame)
+    public static bool SkipBannerHasCheck(FrameData? frame, OcrResult? ocr = null)
     {
         if (frame is null) return true;
-        return CountGreen(frame, 0.930, 0.990, 0.015, 0.095) >= 30;
+        if (CountGreen(frame, 0.930, 0.990, 0.015, 0.095) >= 30) return true;
+        if (ocr is null) return false;
+        // 自适应窗：词框右端那一截（绿勾直径≈词高的 1.2 倍，横向落在字后 0~0.16）
+        foreach (var w in ocr.Words)
+        {
+            if (!w.Text.Replace(" ", "").Contains("跳过比赛")) continue;
+            double x0 = Math.Clamp(w.X + w.W, 0, 1);
+            double x1 = Math.Clamp(w.X + w.W + 0.16, 0, 1);
+            double y0 = Math.Clamp(w.Y - 0.04, 0, 1);
+            double y1 = Math.Clamp(w.Y + w.H + 0.06, 0, 1);
+            if (x1 - x0 < 0.03 || y1 - y0 < 0.03) continue;
+            // 自适应窗贴着绿勾，面积只有旧窗的 1/3；阈值按密度取 15（旧窗 30 等价于约 1/6 密度）
+            if (CountGreen(frame, x0, x1, y0, y1) >= 15) return true;
+        }
+        return false;
     }
 
     /// <summary>区域内绿色像素计数（共享实现见 <see cref="RegionProbe.CountGreen"/>）。</summary>

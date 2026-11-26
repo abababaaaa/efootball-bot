@@ -1526,9 +1526,11 @@ public sealed class BotEngine : IDisposable
     private void StopInternal(string summaryReason, bool isError)
     {
         try { _cts?.Cancel(); } catch { }
-        try { Pad360.ResetAll(); } catch { }        // 停止即拔掉虚拟手柄：其他应用立即看不到任何手柄（旧实现保持在线到引擎销毁，
-        // 用户停了挂机别的游戏里还挂着一只“幽灵手柄”）。下次开始重新连接。
-        try { Pad360.Disconnect(); } catch { }
+        // 先断开再清零（顺序不能反）：Disconnect 会把 IsConnected 置 false + 撤代理 ACTIVE/PANIC，
+        // 之后即使还有一拍场景线程在跑，SetButton 也已经进不去（旧顺序先 ResetAll 后 Disconnect，
+        // 中间那几毫秒里场景线程有机会再按一下，停止后游戏还会动一格）。
+        try { Pad360.Disconnect(); } catch { }   // 停止即拔掉虚拟手柄：其他应用立即看不到任何手柄
+        try { Pad360.ResetAll(); } catch { }     // 双保险：断连后仍提交一次全松手
         // 全权接管收尾：恢复被禁用的真实手柄
         try
         {

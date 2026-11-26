@@ -1,0 +1,146 @@
+// 主壳 —— 忠实复刻正式版 MainWindow.xaml 的结构与文案。
+import { Button, ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+import { HomePage, GamePage, SettingsPage, UpdatePage, GitHubPage, NetworkPage, LogHistoryPage, FeedbackPage, AboutPage } from "pages.slint";
+import { LogViewer } from "log_viewer.slint";
+export { LogViewer }
+
+export enum PageId { home, game, settings, update, github, network, logs, feedback, about }
+export enum SectionId { home, game, tools, about }
+
+component NavButton inherits Rectangle {
+    in property <string> label;
+    in property <string> sub;
+    in property <bool> active;
+    callback clicked();
+    height: root.sub != "" ? 56px : 40px;
+    border-radius: 6px;
+    background: active ? Theme.accent : (tap.has-hover ? Theme.control-fill : transparent);
+    HorizontalLayout { padding-left: 12px; padding-right: 10px; spacing: 8px;
+        Rectangle { width: 3px; border-radius: 2px; background: active ? Theme.accent-glow : transparent; }
+        VerticalLayout { spacing: 2px; alignment: center;
+            Text { text: root.label; color: active ? #ffffff : Theme.text-secondary; font-size: 14px; font-weight: active ? 600 : 400; }
+            if root.sub != "": Text { text: root.sub; color: active ? #dbe8ff : Theme.text-muted; font-size: 11px; }
+        }
+    }
+    tap := TouchArea { clicked => { root.clicked(); } }
+}
+
+component SectionTab inherits Rectangle {
+    in property <string> label;
+    in property <bool> active;
+    callback clicked();
+    width: 56px; height: 100%;
+    VerticalLayout { alignment: center; spacing: 4px;
+        Text { text: root.label; color: active ? Theme.text-primary : Theme.text-muted; font-size: 13px; font-weight: active ? 600 : 400; }
+        Rectangle { height: 2px; width: 24px; border-radius: 1px; background: active ? Theme.accent : transparent; }
+    }
+    TouchArea { clicked => { root.clicked(); } }
+}
+
+export component App inherits Window {
+    in-out property <PageId> page: PageId.home;
+    in-out property <SectionId> section: SectionId.home;
+    in-out property <string> status: "正式版 UI 复刻 · Rust/Slint";
+
+    title: "eFootball 挂机助手（手柄后台版）";
+    width: 1260px;
+    height: 780px;
+    background: transparent;
+
+    function go(p: PageId) {
+        root.page = p;
+        root.section = p == PageId.home ? SectionId.home :
+                       p == PageId.game ? SectionId.game :
+                       p == PageId.about ? SectionId.about : SectionId.tools;
+    }
+    function tile(id: string) {
+        if (id == "settings") { root.go(PageId.settings); }
+        else if (id == "network") { root.go(PageId.network); }
+        else { root.go(PageId.game); }
+    }
+
+    VerticalLayout { spacing: 0px;
+        // ---- 顶栏（正式版 52px）----
+        Rectangle {
+            height: 52px;
+            background: Theme.top-bar-bg;
+            HorizontalLayout { padding-left: 14px; padding-right: 14px;
+                // logo + 标题
+                HorizontalLayout { spacing: 9px; alignment: start;
+                    Rectangle { width: 28px; height: 28px; border-radius: 8px; background: Theme.accent;
+                        Text { text: "⚽"; color: Theme.text-on-accent; font-size: 15px; horizontal-alignment: center; vertical-alignment: center; } }
+                    VerticalLayout { spacing: 2px; alignment: center;
+                        Text { text: "eFootball 挂机助手"; color: Theme.text-primary; font-size: 13px; font-weight: 600; }
+                        Text { text: "自动化控制台"; color: Theme.text-muted; font-size: 10px; }
+                    }
+                }
+                Rectangle { width: 26px; }
+                SectionTab { label: "首页"; active: root.section == SectionId.home; clicked => { root.go(PageId.home); } }
+                SectionTab { label: "挂机"; active: root.section == SectionId.game; clicked => { root.go(PageId.game); } }
+                SectionTab { label: "工具"; active: root.section == SectionId.tools; clicked => { root.go(PageId.settings); } }
+                SectionTab { label: "关于"; active: root.section == SectionId.about; clicked => { root.go(PageId.about); } }
+                Rectangle { horizontal-stretch: 1; }
+                Text { text: root.status; color: Theme.text-dim; font-size: 11px; vertical-alignment: center; }
+                // 窗口按钮
+                Rectangle { width: 16px; }
+                Text { text: "—  □  ×"; color: Theme.text-muted; font-size: 13px; vertical-alignment: center; }
+            }
+        }
+        Rectangle { height: 1px; background: Theme.card-border; }
+
+        HorizontalLayout {
+            // ---- 左栏（正式版 196px）----
+            Rectangle {
+                width: 196px;
+                background: Theme.side-bg;
+                ScrollView { width: 100%; height: 100%;
+                    VerticalLayout { padding: 14px; spacing: 6px;
+                        Text { text: "游戏模块"; color: Theme.text-muted; font-size: 11px; font-weight: 600; }
+                        NavButton { label: "国服"; sub: "网易 · 实况足球在线"; active: false; clicked => { root.go(PageId.game); } }
+                        NavButton { label: "国际服"; sub: "Steam PC 版"; active: root.page == PageId.game; clicked => { root.go(PageId.game); } }
+                        Button { text: "窗口防卡死"; }
+                        Text { text: "工具"; color: Theme.text-muted; font-size: 11px; font-weight: 600; }
+                        NavButton { label: "设置"; active: root.page == PageId.settings; clicked => { root.go(PageId.settings); } }
+                        NavButton { label: "开发者"; active: false; clicked => { root.status = "开发者选项（复刻占位）"; } }
+                        NavButton { label: "更新"; active: root.page == PageId.update; clicked => { root.go(PageId.update); } }
+                        NavButton { label: "GitHub"; active: root.page == PageId.github; clicked => { root.go(PageId.github); } }
+                        NavButton { label: "网络监测"; active: root.page == PageId.network; clicked => { root.go(PageId.network); } }
+                        NavButton { label: "日志历史"; active: root.page == PageId.logs; clicked => { root.go(PageId.logs); } }
+                        NavButton { label: "反馈"; active: root.page == PageId.feedback; clicked => { root.go(PageId.feedback); } }
+                        Text { text: "关于"; color: Theme.text-muted; font-size: 11px; font-weight: 600; }
+                        NavButton { label: "关于"; active: root.page == PageId.about; clicked => { root.go(PageId.about); } }
+                        Rectangle { vertical-stretch: 1; }
+                        Rectangle { height: 1px; background: Theme.card-border; }
+                        Button { text: "主题与外观"; clicked => {
+                            Theme.appearance = Math.mod(Theme.appearance + 1, 3);
+                            if (Theme.appearance == 0) { Theme.world = Math.mod(Theme.world + 1, 2); }
+                            Theme.apply();
+                            root.status = (Theme.world == 0 ? "Fluent" : "Glass") + " · "
+                                + (Theme.appearance == 0 ? "暗色" : Theme.appearance == 1 ? "亮色" : "深蓝");
+                        } }
+                    }
+                }
+            }
+            Rectangle { width: 1px; background: Theme.card-border; }
+
+            // ---- 中栏 ----
+            Rectangle { horizontal-stretch: 1; background: Theme.content-bg;
+                HomePage {
+                    visible: root.page == PageId.home;
+                    tile(id) => { root.tile(id); }
+                    start => { root.go(PageId.game); }
+                    feedback => { root.go(PageId.feedback); }
+                }
+                GamePage { visible: root.page == PageId.game; }
+                SettingsPage { visible: root.page == PageId.settings; }
+                UpdatePage { visible: root.page == PageId.update; }
+                GitHubPage { visible: root.page == PageId.github; }
+                NetworkPage { visible: root.page == PageId.network; }
+                LogHistoryPage { visible: root.page == PageId.logs; }
+                FeedbackPage { visible: root.page == PageId.feedback; }
+                AboutPage { visible: root.page == PageId.about; }
+            }
+        }
+    }
+}

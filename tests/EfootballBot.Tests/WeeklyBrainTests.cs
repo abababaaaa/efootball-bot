@@ -698,6 +698,44 @@ public class WeeklyBrainTests
         Assert.False(WeeklyBrain.IsPlayerCardRestrictPopup(Ocr(body, W("OK", 0.50, 0.93))));
     }
 
+    // ---------------- 阵容挑战完成态「活动已完成」（2026-11-27 用户国际服实机帧） ----------------
+
+    [Fact]
+    public void Classify_TeamEffortCompleted_StaysTeamEffortHome()
+    {
+        // 赛程三场打完的主页：**没有**「下一场比赛」，标题换成「活动已完成 /
+        // 不要忘记从收件箱领取奖励哦。」——仍必须判 TeamEffortHome。漏成 None 的话
+        // 共享分类会按底栏「B 返回」蓝框判 HasConfirm → 场景层「弹窗推进」盲按 A
+        //（主页上的 A 就是前往比赛），在已完成的活动上原地空转。
+        var ocr = Ocr(
+            W("Team Effort", 0.21, 0.09), W("任务", 0.85, 0.08),
+            W("活动已完成", 0.45, 0.23), W("前往比赛", 0.13, 0.25),
+            W("不要忘记从收件箱领取奖励哦。", 0.45, 0.27),
+            W("赛程", 0.09, 0.38), W("奖励", 0.38, 0.38),
+            W("返回", 0.10, 0.93), W("活动设置", 0.31, 0.93), W("比赛计划", 0.58, 0.93));
+        Assert.Equal(WkScreen.TeamEffortHome, WeeklyBrain.Classify(Array.Empty<YoloDetection>(), ocr));
+        Assert.True(WeeklyBrain.IsTeamEffortHome(ocr));
+        Assert.True(WeeklyBrain.IsActivityCompleted(ocr));
+    }
+
+    [Fact]
+    public void ActivityCompleted_NeedsFixedWords()
+    {
+        // 判定只用固定文案：标题「活动已完成」，或副标题连续片段「收件箱领取奖励」兜底
+        //（OCR 把副标题拆成几个词时拼接串仍连续）。
+        Assert.True(WeeklyBrain.IsActivityCompleted(Ocr(W("活动已完成", 0.45, 0.23))));
+        Assert.True(WeeklyBrain.IsActivityCompleted(Ocr(
+            W("不要忘记", 0.30, 0.27), W("从收件箱", 0.42, 0.27), W("领取奖励哦。", 0.55, 0.27))));
+        // 进行中的主页（下一场比赛 / 赛事等级 / 挑战1..3）不得判完成——否则整周不再开赛
+        var pending = Ocr(W("下一场比赛", 0.40, 0.22), W("赛事等级", 0.80, 0.22),
+            W("前往比赛", 0.13, 0.24), W("赛程", 0.09, 0.38), W("挑战1", 0.39, 0.26));
+        Assert.False(WeeklyBrain.IsActivityCompleted(pending));
+        Assert.True(WeeklyBrain.IsTeamEffortHome(pending)); // 这一页仍认作阵容挑战主页
+        // 底栏「任务」红点/收件箱类文案与「领取奖励」分处两处时不得合成完成态
+        Assert.False(WeeklyBrain.IsActivityCompleted(Ocr(
+            W("收件箱", 0.85, 0.08), W("奖励", 0.38, 0.38))));
+    }
+
     [Fact]
     public void IsTournamentPage_ByDescriptionOrCustomTournament()
     {

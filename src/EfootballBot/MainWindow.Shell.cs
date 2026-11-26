@@ -59,7 +59,7 @@ public partial class MainWindow
             new()
             {
                 Mode = NavMode.Settings,
-                Section = TopSection.Tools,
+                Section = TopSection.Settings,
                 Panels = [Slot(SettingsPanel)],
                 RailButton = BtnSettings,
                 SubMenus = [Slot(SubMenuSettings, () => !_devMode)],
@@ -69,7 +69,7 @@ public partial class MainWindow
             new()
             {
                 Mode = NavMode.Update,
-                Section = TopSection.Tools,
+                Section = TopSection.Settings,
                 Panels = [Slot(UpdatePanel)],
                 RailButton = BtnUpdate,
                 SubMenus = [Slot(SubMenuUpdate)],
@@ -79,7 +79,7 @@ public partial class MainWindow
             new()
             {
                 Mode = NavMode.GitHub,
-                Section = TopSection.Tools,
+                Section = TopSection.Settings,
                 Panels = [Slot(GitHubPanel)],
                 RailButton = BtnGitHub,
                 SubMenus = [Slot(SubMenuGithub)],
@@ -95,7 +95,7 @@ public partial class MainWindow
             new()
             {
                 Mode = NavMode.Network,
-                Section = TopSection.Tools,
+                Section = TopSection.Settings,
                 Panels = [Slot(NetworkPanel)],
                 RailButton = BtnNetwork,
                 SubMenus = [Slot(SubMenuNetwork)],
@@ -111,7 +111,7 @@ public partial class MainWindow
             new()
             {
                 Mode = NavMode.LogViewer,
-                Section = TopSection.Tools,
+                Section = TopSection.Settings,
                 Panels = [Slot(LogViewerPanel)],
                 RailButton = BtnLogViewer,
                 OnEnter = RefreshLogFileList,
@@ -120,7 +120,7 @@ public partial class MainWindow
             new()
             {
                 Mode = NavMode.Feedback,
-                Section = TopSection.Tools,
+                Section = TopSection.Settings,
                 Panels = [Slot(FeedbackPanel)],
                 RailButton = BtnFeedback,
                 SubMenus = [Slot(SubMenuFeedback)],
@@ -130,7 +130,7 @@ public partial class MainWindow
             new()
             {
                 Mode = NavMode.About,
-                Section = TopSection.About,
+                Section = TopSection.Settings,
                 Panels = [Slot(PageAbout)],
                 RailButton = BtnAbout,
             },
@@ -139,9 +139,10 @@ public partial class MainWindow
         _sectionMembers = new Dictionary<TopSection, FrameworkElement[]>
         {
             [TopSection.Game] = [NavLabelGame, RbCn, RbIntl, BtnWindowRescue],
-            [TopSection.Tools] =
-                [NavLabelTools, BtnSettings, BtnDevTools, BtnUpdate, BtnGitHub, BtnNetwork, BtnLogViewer, BtnFeedback],
-            [TopSection.About] = [NavLabelAbout, BtnAbout],
+            // 「设置」一级分区 = 原「工具」整列 + 原「关于」（2026-11-27 用户要求合并）
+            [TopSection.Settings] =
+                [NavLabelSettings, BtnSettings, BtnDevTools, BtnUpdate, BtnGitHub, BtnNetwork, BtnLogViewer,
+                 BtnFeedback, BtnAbout],
         };
     }
 
@@ -156,15 +157,14 @@ public partial class MainWindow
         if (!routes.TryGetValue(mode, out var route)) return;
 
         _currentNav = mode;
-        if (route.Section == TopSection.Tools) _lastToolNav = mode;
+        if (route.Section == TopSection.Settings) _lastSettingsNav = mode;
         if (mode != NavMode.Settings) _devMode = false;
 
         // ---------- 一级分区（上栏页签 + 左栏该分区的元素） ----------
         _suppressTopNav = true;
         TopNavHome.IsChecked = route.Section == TopSection.Home;
         TopNavGame.IsChecked = route.Section == TopSection.Game;
-        TopNavTools.IsChecked = route.Section == TopSection.Tools;
-        TopNavAbout.IsChecked = route.Section == TopSection.About;
+        TopNavSettings.IsChecked = route.Section == TopSection.Settings;
         _suppressTopNav = false;
 
         foreach (var (section, members) in _sectionMembers)
@@ -229,7 +229,7 @@ public partial class MainWindow
         if (mode == NavMode.Settings && !_devMode)
         {
             bool anyVisibleChecked =
-                SubRbImp1.IsChecked == true || SubRbImp2.IsChecked == true || SubRbImp3.IsChecked == true ||
+                SubRbImp1.IsChecked == true ||
                 SubRbSetDisplay.IsChecked == true || SubRbSetInput.IsChecked == true || SubRbSetDaily.IsChecked == true;
             if (!anyVisibleChecked) SubRbImp1.IsChecked = true;
         }
@@ -250,8 +250,6 @@ public partial class MainWindow
 
         string activeTag =
             SubRbImp1.IsChecked == true ? (SubRbImp1.Tag as string ?? "Imp1") :
-            SubRbImp2.IsChecked == true ? (SubRbImp2.Tag as string ?? "Imp2") :
-            SubRbImp3.IsChecked == true ? (SubRbImp3.Tag as string ?? "Imp3") :
             SubRbSetDisplay.IsChecked == true ? (SubRbSetDisplay.Tag as string ?? "RbSetDisplay") :
             SubRbSetInput.IsChecked == true ? (SubRbSetInput.Tag as string ?? "RbSetInput") :
             SubRbSetDaily.IsChecked == true ? (SubRbSetDaily.Tag as string ?? "RbSetDaily") :

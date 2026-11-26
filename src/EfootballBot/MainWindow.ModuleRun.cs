@@ -97,7 +97,10 @@ public partial class MainWindow
         foreach (var m in _moduleRuns) m.Manual.IsEnabled = false;
         try
         {
-            AppendLog("【手动停止】正在截取当前游戏画面…", LogLevel.Info);
+            // ★先拉总闸再截图：截图最长 3s，这段时间里旧实现会让 Worker 继续按键
+            //   （用户看到"点了手动停止还在操作游戏"）。拉闸后游戏侧立刻松手，画面照样截得到。
+            EfootballBot.Core.Input.PadPanicGate.Panic();
+            AppendLog("【手动停止】已先拉下手柄总闸（游戏侧即刻松手），正在截取当前游戏画面…", LogLevel.Info);
             var (frame, info) = await Task.Run(() => GameFrameGrabber.GrabOnce(TimeSpan.FromSeconds(3)));
             string shotPath = "";
             if (frame is not null)

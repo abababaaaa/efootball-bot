@@ -34,6 +34,8 @@ public class TeamEffortRealFrameTests
         "weekly_teameffort_plan_editor.png",     // 比赛计划编辑页（焦点在侧边栏「球队」）
         "weekly_teameffort_autoconfig.png",      // 编辑页（焦点「自动配置球员」）
         "weekly_teameffort_autoconfig_done.png", // 自动配置后的阵容
+        // 2026-11-27 用户国际服实机：活动全部赛程打完的主页（「活动已完成 / 不要忘记从收件箱领取奖励哦。」）
+        "weekly_teameffort_completed.png",
     };
 
     private static YoloDetector NewDetector() => new(
@@ -108,6 +110,9 @@ public class TeamEffortRealFrameTests
             ("weekly_teameffort_plan_editor.png", WkScreen.SquadLineupEdit),
             ("weekly_teameffort_autoconfig.png", WkScreen.SquadLineupEdit),
             ("weekly_teameffort_autoconfig_done.png", WkScreen.SquadLineupEdit),
+            // 2026-11-27 完成态：赛程三场打完，标题换成「活动已完成」，没有「下一场比赛」行——
+            // 仍是同一版式的主页，绝不能漏成 None（漏了会被共享分类 HasConfirm 拖去盲按 A）
+            ("weekly_teameffort_completed.png", WkScreen.TeamEffortHome),
         };
 
         foreach (var (name, want) in expected)
@@ -218,6 +223,32 @@ public class TeamEffortRealFrameTests
         // 场景层「读到其它项就下移一行」依赖这个顺序。
         Assert.Equal(new[] { "球队", "替补球员", "后备球员", "自动配置球员" },
             WeeklyBrain.SquadSidebarItems);
+    }
+
+    // ---------------- 2026-11-27 完成态「活动已完成」（用户国际服实机帧） ----------------
+
+    [Fact]
+    public void ActivityCompleted_OnlyOnCompletedFrame()
+    {
+        // 用户规则：判定「活动已完成」就退出，不再开赛。完成帧必须命中；进行中的主页
+        //（有「下一场比赛 / 赛事等级」）与红点帧、弹窗帧一律不得命中——误判会让整周不再开赛。
+        using var ocr = new OcrRecognizer();
+        var (doneFrame, doneOcr) = Load("weekly_teameffort_completed.png", ocr);
+        Assert.True(WeeklyBrain.IsActivityCompleted(doneOcr));
+        // 完成后主页仍是 TeamEffortHome 版式（没有「下一场比赛」行，靠完成态补齐第三条件）
+        Assert.True(WeeklyBrain.IsTeamEffortHome(doneOcr));
+
+        foreach (var name in new[] { "weekly_teameffort_home.png", "weekly_teameffort_home_clean.png",
+                                     "weekly_teameffort_plan_badge.png", "weekly_teameffort_cannot_play.png",
+                                     "weekly_teameffort_list.png" })
+        {
+            var (_, o) = Load(name, ocr);
+            Assert.False(WeeklyBrain.IsActivityCompleted(o), $"{name} 不该被判成「活动已完成」");
+        }
+
+        // 完成态主页底栏「Y 比赛计划」右上角仍有红点（实机 198 红像素）——但完成态判定先行，
+        // 场景层不会再去修比赛计划；这里锁住红点仍在，防止有人以为「完成态就没红点了」。
+        Assert.True(WeeklyBrain.DetectPlanBadge(doneFrame, doneOcr));
     }
 
     [Fact]

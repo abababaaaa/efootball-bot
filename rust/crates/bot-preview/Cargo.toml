@@ -1,0 +1,9 @@
+[package]
+name = "bot-preview"
+version = "0.1.0"
+edition = "2021"
+description = "gpui 预览窗（独立进程）：消费 vision-svc 帧环，S3 先显示帧状态"
+
+[dependencies]
+gpui = { package = "gpui-ce", version = "=0.3.0" }
+gpui-platform = { package = "gpui_ce_platform", version = "=0.3.0" }

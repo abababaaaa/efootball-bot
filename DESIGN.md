@@ -206,7 +206,7 @@ Glass 世界强制 Acrylic（Mica 只有"纸感"，做不出透过去的黑玻�
 2. **登记路由**（`MainWindow.Shell.cs`，一行）：
    ```csharp
    new() {
-       Mode = NavMode.Xxx, Section = TopSection.Tools,
+       Mode = NavMode.Xxx, Section = TopSection.Settings,
        Panels = [Slot(PageXxx)],           // 互斥面板可以放多个 Slot(..., () => 条件)
        RailButton = BtnXxx,                // 左栏高亮
        SubMenus = [Slot(SubMenuXxx)],      // 有三级页签就加
@@ -227,11 +227,37 @@ Glass 世界强制 Acrylic（Mica 只有"纸感"，做不出透过去的黑玻�
 `Shell/NavRoute.cs` 的 `TopSection` 加值 → `MainWindow.Shell.cs` 的 `_sectionMembers` 加一行 →
 `MainWindow.xaml` 顶栏加一个 `TopNavTab` 页签 → `TopNav_Checked` 加一个 `case`。
 
-### 6.5 加一个设置项（目前仍是 4 处）
+### 6.5 加一个设置项（先判断它属于谁）
+**全局设置**（画面 / 手柄 / 日志 / 防检测 / 外观）—— 仍是 4 处：
 1. `Core/Config/AppConfig.cs`：字段 + 默认值；
 2. `MainWindow.xaml`：控件（`ChkXxx` / `TxtXxx`），放在对应二级页；
 3. `MainWindow.Settings.cs` → `LoadConfigToUi()`：`ChkXxx.IsChecked = _cfg.Xxx;`
 4. `MainWindow.Settings.cs` → `SaveUiToConfig()`：`_cfg.Xxx = ChkXxx.IsChecked == true;`
+
+**模块专属设置**（只对一个挂机模块有意义，例如难度、道具购买、满级换人、赛后活动推进）
+—— 控件必须长在**该模块自己的页面里**（`LeagueContent` / `WeeklyContent` / `AiLadderContent` /
+`StudContent` / `CnLeagueContent` / `CnWeeklyContent` / `CnMyLeagueContent`），**不许放回「设置」页**：
+用户打开哪个模块，就应该在这一屏里看到它需要的全部设置。
+
+同一字段在多个模块页各有一份时（`Timing.IdleTapMinMs/MaxMs` 就在 6 个比赛模块页各一份）：
+1. 控件写 `Tag="<组名>"`，在 `MainWindow.Settings.cs` 的 `InitModuleSettingBindings()` 里登记
+   （`ctor` 里 `InitializeComponent()` 之后调用，控件名多了会编译期报错）；
+2. 改动统一走 `ApplyIdleTap(source:)` / `PmAutoAdvance_Changed`：以触发改动的那一组为输入源，
+   校验成功后回填其余各组，绝不能"在哪页改的就只生效在哪页"（保存时旧值会把新值盖回去）；
+3. `ModuleSettingsPlacementTests` 会检查：六个比赛模块页各自带齐节奏控件、国际服三个比赛模块页
+   各带一份赛后活动开关、「设置」页里没有漏下的模块设置。
+
+**「本模块运行环境」**（七个模块页各一条）：`Pad.Backend`、`HidHide.HidePhysicalGamepad`、
+`Timing.HumanPacingEnabled`、`BackgroundParking.Enabled` 这四个是引擎**每次挂机现读**的全局开关，
+只在「设置」页有入口时，用户在模块页调完就开始挂机，看不到这次到底用哪套手柄/节奏/停靠行为。
+现在模块页与设置页各有一份控件、同一个字段：
+
+1. 控件名固定为 `CmbEnvBackend<页>` / `ChkEnvHidePad<页>` / `ChkEnvPace<页>` / `ChkEnvParking<页>` /
+   `TxtEnvTimeout<页>`（页后缀：`League` `Weekly` `Ai` `Stud` `CnLeague` `CnWeekly` `CnMl`）；
+2. 一律在 `InitModuleSettingBindings()` 里 `BindEnv(...)` 登记，回填只走 `SyncRunEnv()`，
+   改动统一走 `ModuleEnvBackend_Changed` / `ModuleEnvToggles_Changed`（设置页那侧走
+   `CmbPadBackend_Changed` / `ChkPadTakeover_Changed` / `ChkRunEnvGlobal_Changed`），全部即时落盘；
+3. 加一个模块页就同时补 XAML 那一条 + 登记一行 —— `ModuleSettingsPlacementTests` 两条断言会拦下漏项。
 
 > 这是本仓库最后一处"两堵平行的墙"（`LoadConfigToUi` / `SaveUiToConfig` 各约 190 行）。
 > 下一步可改成 `SettingsBinder` 表驱动（一行登记一个绑定，Load/Save 自动遍历），
@@ -269,6 +295,20 @@ pwsh -File tools\ui-crop.ps1 -In "_reference\shots\check\page-settings.png" `
 ---
 
 ## 8. 变更记录
+
+### 2026-11-27 一级分区「工具」+「关于」合并为「设置」
+
+- **用户要求**：上栏原来四个一级页签（首页 / 挂机 / 工具 / 关于）里，「工具」和「关于」并成一个「设置」。
+- **做什么**：`Shell/NavRoute.cs` 的 `TopSection` 收成 `{ Home, Game, Settings }`；`MainWindow.xaml` 上栏四个 `TopNavTab` → 三个
+  （`TopNavHome` / `TopNavGame` / `TopNavSettings`，Tag 分别是 `Home`/`Game`/`Settings`），左栏原来的
+  `NavLabelTools`（工具）与 `NavLabelAbout`（关于）两条分组标题合成一条 `NavLabelSettings`（设置），`BtnAbout` 直接排在
+  `BtnFeedback` 之后，与设置/开发者/更新/GitHub/网络监测/日志历史同属一组。
+- **接线**：`_sectionMembers[TopSection.Settings]` 收下原来两组的全部元素（少了「关于」那条 GroupLabel 的 `4,16,0,8` 上间距，
+  所以左栏比原来短一行）；`TopNav_Checked` 只保留 Home/Game/Settings 三个 case，`_lastToolNav` 改名 `_lastSettingsNav`——
+  点「设置」页签回到上次看的那一页（原来「关于」也要退回设置页，现在它本身就属于设置分区）。
+- **不动什么**：`NavMode` 一个都没删（`--page about` / `update` / `github` / `network` / `logs` / `feedback` 深链照旧），
+  页面容器、路由表、三级页签全不变——这次只改"一级分区"这一层。
+- **验证**：`dotnet build` 0 警告 0 错误（含 arch-guard 11 条）；`--page` 深链逐页截图核对三个主题。
 
 ### 2026-11-21 修「问题反馈弹窗整张白」
 

@@ -137,7 +137,7 @@ public sealed class AiLadderScenario : IScenario
         if (!_takeoverLogged)
         {
             _takeoverLogged = true;
-            _log($"[AI天梯联赛] 智能接管：当前界面「{DescribeScreen(al, wk, ml)}」，从该阶段继续", LogLevel.Success);
+            _log($"[AI天梯联赛] 接管：{DescribeScreen(al, wk, ml)}", LogLevel.Success);
         }
         // ---- 赛中匹配（共享层 MatchPlay）：开赛/终场/超时判定 + 场次记账全在这里，
         //      模块只做自己的收尾（组别主页是本模块的"菜单"，到这里才允许开下一场）

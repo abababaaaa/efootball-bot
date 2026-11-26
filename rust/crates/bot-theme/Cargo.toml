@@ -1,0 +1,8 @@
+[package]
+name = "bot-theme"
+version = "0.1.0"
+edition = "2021"
+description = "两视觉世界 × 三亮度的主题 token 单一真源；由 build.rs 从 Tokens.xaml 生成，Slint/gpui 共用"
+build = "build.rs"
+
+[dependencies]

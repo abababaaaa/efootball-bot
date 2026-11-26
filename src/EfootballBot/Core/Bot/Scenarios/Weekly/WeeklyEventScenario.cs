@@ -36,7 +36,11 @@ namespace EfootballBot.Core.Bot.Scenarios.Weekly;
 /// 进入后直接落「阵容挑战主页」，上面必弹一次「球员卡限制 / OK」说明弹窗（固定副标题
 /// 「在之前胜场中使用的球员卡,将无法在后续比赛中使用。」）——任何阶段命中都先 A 清掉。
 /// 清完后主页按用户规则**跳过活动设置核验**直接 A「前往比赛」开赛（该版主页没有积分/
-/// 主要奖励栏，完成态探针待校准，先按进行中继续刷；比赛中流程与其他周活动完全共用）。
+/// 主要奖励栏；比赛中流程与其他周活动完全共用）。
+/// 阵容挑战的完成态（2026-11-27 用户国际服实机）：赛程三场打完，主页标题换成
+/// 「活动已完成 / 不要忘记从收件箱领取奖励哦。」且不再有「下一场比赛」——用户规则是
+/// **判定已完成后直接退出、不再开赛**：场景层统一拦截 → 拉黑槽位 → B 回活动列表换下一个
+///（见 <see cref="RetireCompletedEventAsync"/>）。
 /// 阵容挑战的比赛计划失效修复（2026-11-22 用户实机规则）：赛后弹「无法进行比赛 / OK」
 /// （比赛计划里有球员卡失效）→ A 继续 → 回主页看底栏「Y 比赛计划」右上角红色叹号 →
 /// 有就按 Y 进比赛计划 → 清掉途中弹窗 → 阵容页左移到侧边栏、下选「自动配置球员」→
@@ -196,7 +200,7 @@ public sealed partial class WeeklyEventScenario : IScenario
         if (!_takeoverLogged)
         {
             _takeoverLogged = true;
-            _log($"[周活动] 智能接管：当前界面「{(wk != WkScreen.None ? wk.ToString() : ml.ToString())}」，从该阶段继续", LogLevel.Success);
+            _log($"[周活动] 接管：{(wk != WkScreen.None ? wk.ToString() : ml.ToString())}", LogLevel.Success);
         }
         // ---- 赛中匹配（共享层 MatchPlay）：开赛/终场/超时判定 + 场次与关键比赛记账
         var tick = _matchPlay.Tick(ml, now,
@@ -309,6 +313,13 @@ public sealed partial class WeeklyEventScenario : IScenario
             _log($"[周活动·阵容挑战] 接管比赛计划页（{wk}）：按侧边栏「自动配置球员」修复阵容", LogLevel.Info);
             return 900;
         }
+        // 阵容挑战「活动已完成」（2026-11-27 用户国际服实机规则：判定已完成就退出即可）：
+        // 赛程三场打完后主页标题换成「活动已完成 / 不要忘记从收件箱领取奖励哦。」，没有
+        // 「下一场比赛」行，游戏不再接受开赛。★任何阶段命中都在这里接管——它是主页的一种态，
+        // 落 Flow/AtHome/LaunchReady 都会去按「前往比赛」或按 Y 修比赛计划（完成态主页底栏
+        // 仍可能有红点），两种都是空转；漏成 None+HasConfirm 时更会走「弹窗推进」盲按 A。
+        if (wk == WkScreen.TeamEffortHome && WeeklyBrain.IsActivityCompleted(obs.Ocr))
+            return await RetireCompletedEventAsync();
         // 挑战解锁弹窗「挑战N已解锁 / OK」（2026-11-08 国际服实机）：盖在挑战清单上，只有一个
         // OK 键。任何阶段命中都在这里接管——弹窗半透明盖层下清单标题/卡号/底栏仍在，落清单
         // 分支会让归位/移卡全被吃掉，卡位锁探针还会被弹窗浅灰底误判成锁定 → 回撤退 B 退不掉
@@ -573,14 +584,15 @@ public sealed partial class WeeklyEventScenario : IScenario
             {
                 // 阵容挑战（2026-11-19 用户实机规则）：主页没有积分 / 主要奖励栏，进入后直接
                 // 点下一步（前往比赛）即可开始比赛。★不做 X 活动设置核验——用户规则明确跳过
-                // （该版主页的浮层项未拿到实机帧，盲按 X 可能把焦点打到别处）；
-                // 完成态探针（挑战1..3 的进度）留待校准，先按进行中继续刷。
+                // （该版主页的浮层项未拿到实机帧，盲按 X 可能把焦点打到别处）。
+                // 完成态（2026-11-27）：「活动已完成」的主页已在 HandleWeeklyAsync 上游统一拦截
+                // 并退出（拉黑槽位 → B 回活动列表），能走到这里只可能是还有「下一场比赛」可打。
                 if (wk == WkScreen.TeamEffortHome)
                 {
                     if (!_squadNoteLogged)
                     {
                         _squadNoteLogged = true;
-                        _log("[周活动·阵容挑战] 主页：无积分/主要奖励栏（完成态探针未校准），" +
+                        _log("[周活动·阵容挑战] 主页：还有下一场比赛（完成态在上游拦截里退出），" +
                              "按规则跳过活动设置，直接前往比赛开始比赛", LogLevel.Info);
                     }
                     SetPhase(WkPhase.LaunchReady);
@@ -644,6 +656,8 @@ public sealed partial class WeeklyEventScenario : IScenario
                     // 阵容挑战：主页底栏「Y 比赛计划」上有红色叹号 = 比赛计划里有球员卡失效，
                     // 此时按「前往比赛」只会弹「无法进行比赛」（用户 2026-11-22 实机规则）：
                     // 先进 Y 修阵容（侧边栏自动配置球员 → 重视能力值 → B 完成），红点消失再开赛。
+                    // ★完成态（「活动已完成」）在 HandleWeeklyAsync 上游已拦截退出，走不到这里；
+                    // 完成态主页底栏也常带红点，若在此判会白修一次阵容。
                     if (wk == WkScreen.TeamEffortHome && WeeklyBrain.DetectPlanBadge(obs.Frame, obs.Ocr))
                         return await BeginMatchPlanFixAsync();
                     if (++_attempts > 4)
@@ -745,6 +759,7 @@ public sealed partial class WeeklyEventScenario : IScenario
         _launchNudge = 0; // 重新从列表进入活动：游戏焦点回默认位（前往比赛），归位档位清零
         _focusMissAtAdvice = false;
         _planFixAttempts = 0; // 换了活动/重进：比赛计划修复次数重新计
+        _completedRetreats = 0; // 换了活动/重进：完成态退出的 B 预算重新计
         await _engine.Pad.Dpad(PadDir.Down);          // 页签行→卡行（已在卡行则到头无害）
         await _engine.Pad.DpadRepeat(PadDir.Left, 6); // 饱和到最左第 1 卡（到头多按无害）
         // 绿勾探针（已完成活动）或本运行内已拉黑：算出目标槽位后统一一次右移到位

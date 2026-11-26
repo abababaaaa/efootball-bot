@@ -3,10 +3,13 @@ using System.Windows;
 namespace EfootballBot.Shell;
 
 /// <summary>
-/// 上栏一级分区（首页 / 挂机 / 工具 / 关于）。
+/// 上栏一级分区（首页 / 挂机 / 设置）。
+/// 原来「工具」「关于」是两个并列的一级分区，2026-11-27 按用户要求合并成一个「设置」：
+/// 左栏从「工具」到「关于」的整列（设置/开发者/更新/GitHub/网络监测/日志历史/反馈/关于）
+/// 都归在这一级下面，少一个上栏页签、左栏也少一条分组标题。
 /// 新增一个分区 = 这里加一个值 + MainWindow.Shell.cs 的 _sectionMembers 加一行 + XAML 加一个上栏页签。
 /// </summary>
-public enum TopSection { Home, Game, Tools, About }
+public enum TopSection { Home, Game, Settings }
 
 /// <summary>
 /// 左栏导航模式：一个值 = 一个「页面」。这是壳里唯一需要登记的 id，

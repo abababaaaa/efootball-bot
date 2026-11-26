@@ -73,6 +73,66 @@ public class InMatchRealFrameTests
             }
     }
 
+    /// <summary>
+    /// 2026-11-25 实机帧 A：国际服教练模式比赛画面（左上黄色比分板 FRA 2-0 ALB 38:28，
+    /// 底部迷你球场，左下球员名 Deco），右下没有任何按钮。锁两件事：
+    /// ① 确实是球场帧（InMatch 由草地探针兜底，所以 OCR 漏读时钟也能进 InMatch 分支）；
+    /// ② 没有覆盖层按钮 → 决策必须是挂机节奏（按设置 1~4s 随机点），不许快按/慢按。
+    /// </summary>
+    [Fact]
+    public void Probe_YellowClockFrame_NoOverlay_FallsBackToIdleTap()
+    {
+        var frame = LoadFrame("weekly", "wk_inmatch_yellow_clock_20261125.png");
+        if (frame is null) { _out.WriteLine("no fixture, skip"); return; }
+
+        Assert.True(ScreenProbe.LooksLikePitch(frame), "这帧必须被草地探针认成球场（否则进不了 InMatch 分支）");
+        Assert.False(ScreenProbe.HasBlueAdvanceButton(frame), "这帧右下没有推进键按钮");
+        Assert.Equal(MatchActionKind.MatchIdleTap,
+            MatchBrain.Decide(MatchScreen.InMatch, OcrResult.Empty, 0, inMatchRecently: true, frame: frame).Kind);
+    }
+
+    /// <summary>
+    /// 2026-11-25 实机帧 B：进球庆祝画面（球员特写占满屏幕，草地只有 22%），右下挂着
+    /// 「跳过 A ▶」蓝底白字按钮（OCR 常整块漏读）。这张帧过不了草地探针（0.224 &lt; 0.30），
+    /// 所以它靠左上时钟判 InMatch；像素兜底只负责「看见这枚按钮就快按 A」。
+    /// </summary>
+    [Fact]
+    public void Probe_GoalSkipFrame_BlueAdvanceButtonPressedFast()
+    {
+        var frame = LoadFrame("weekly", "wk_inmatch_goal_skip_20261125.png");
+        if (frame is null) { _out.WriteLine("no fixture, skip"); return; }
+
+        // 右下「跳过」按钮必须被像素探针命中（OCR 漏读这枚小字时的唯一兜底）
+        Assert.True(ScreenProbe.HasBlueAdvanceButton(frame), "右下「跳过」按钮必须被像素探针命中");
+        var action = MatchBrain.Decide(MatchScreen.InMatch, OcrResult.Empty, 0, inMatchRecently: true, frame: frame);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
+        Assert.True(action.WaitMs <= 500, $"过场推进键要快按（实际 {action.WaitMs}ms）");
+
+        // 这张帧草地不足（球员特写），分类靠左上时钟：有时钟词就必须判 InMatch
+        var ocr = new OcrResult(new List<OcrWord>
+        {
+            new("86:58", 0.31, 0.04, 0.07, 0.035),
+            new("FRA", 0.07, 0.04, 0.04, 0.035),
+        }, 1280, 720);
+        Assert.Equal(MatchScreen.InMatch,
+            MatchBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
+    }
+
+    /// <summary>读 TestData 下的实机帧（失败返回 null，测试按「无夹具跳过」处理）。</summary>
+    private static FrameData? LoadFrame(string subDir, string name)
+    {
+        string img = Path.Combine(TestDir, "TestData", subDir, name);
+        if (!File.Exists(img)) return null;
+        using var mat = Cv2.ImRead(img, ImreadModes.Color);
+        if (mat.Empty()) return null;
+        using var bgra = new Mat();
+        Cv2.CvtColor(mat, bgra, ColorConversionCodes.BGR2BGRA);
+        int byteCount = (int)(bgra.Total() * bgra.ElemSize());
+        var data = new byte[byteCount];
+        System.Runtime.InteropServices.Marshal.Copy(bgra.Data, data, 0, byteCount);
+        return new FrameData(data, mat.Width, mat.Height, 0);
+    }
+
     private static void DumpCorner(ITestOutputHelper o, string path)
     {
         using var m = Cv2.ImRead(path, ImreadModes.Color);

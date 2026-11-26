@@ -22,7 +22,8 @@ public sealed partial class CnWeeklyScenario : IScenario
     /// <summary>「选择比赛难度」页（2026-10-17 实机 cn_tour_difficulty，前往比赛后弹出）：
     /// 与我的联赛难度核对同一守则——读当前选中（白底高亮卡）与配置比对：相同/读不到/
     /// 目标不在卡行 = 直接确认，绝不盲导航；不同 = 按规范难度序左右移差值后确认。
-    /// 底栏写 RT 确定，A 通常同样生效（对阵表「RT 下一步」同款实测）：A 两次未生效换 RT。</summary>
+    /// 底栏写「RT 确定」：2026-11-25 国服改版后「下一步/确认/确定」一律印 RT，所以走
+    /// <see cref="CnAdvance.ConfirmAsync"/> 的 RT 优先阶梯（第 2 轮才用 A 兜底）。</summary>
     private async Task<int> HandleCnDifficultyAsync(Observation obs)
     {
         if (_streak < 1) return 800; // 页面淡入防抖
@@ -44,27 +45,19 @@ public sealed partial class CnWeeklyScenario : IScenario
                 int steps = to - from;
                 _log($"[国服周活动] 难度核对：当前 {selected} → 目标 {wanted}，{(steps > 0 ? "右" : "左")}×{Math.Abs(steps)} 后确认", LogLevel.Info);
                 await _engine.Pad.DpadRepeat(steps > 0 ? PadDir.Right : PadDir.Left, Math.Abs(steps));
-                await ConfirmDifficultyAsync();
+                await ConfirmDifficultyAsync(obs);
                 return 3000;
             }
         }
         string why = selected is null ? "未读出当前难度" : selected == wanted ? $"已是 {wanted}" : "目标难度不在卡行";
         _log($"[国服周活动] 难度核对：{why}，直接确认", LogLevel.Info);
-        await ConfirmDifficultyAsync();
+        await ConfirmDifficultyAsync(obs);
         return 3000;
     }
 
-    /// <summary>难度页确认键：默认 A，连续两次未生效换 RT 一次（底栏标 RT 确定），仍不行回 A。</summary>
-    private async Task ConfirmDifficultyAsync()
-    {
-        if (_attempts == 3)
-        {
-            _log("[国服周活动] 难度页：A 两次未生效，改按 RT 确定", LogLevel.Info);
-            await _engine.Pad.RT();
-        }
-        else
-        {
-            await _engine.Pad.Confirm();
-        }
-    }
+    /// <summary>难度页确认键：RT 优先（底栏印 RT 确定）→ 第 2 轮 A 兜底 → 第 3 轮起后台鼠标点
+    /// 确认按钮（网页层只吃鼠标），阶梯在 <see cref="CnAdvance.ConfirmStepOf"/> 一份实现。</summary>
+    private Task ConfirmDifficultyAsync(Observation obs)
+        => CnAdvance.ConfirmAsync(_engine, _mouse, _attempts, "难度页确认", "国服周活动", _log,
+            obs.Ocr, obs.Detections, (0.660, 0.940), CancellationToken.None);
 }

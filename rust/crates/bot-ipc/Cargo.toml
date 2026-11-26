@@ -1,0 +1,9 @@
+[package]
+name = "bot-ipc"
+version = "0.1.0"
+edition = "2021"
+description = "GUI/Worker 命名管道协议（JSON Lines），与 C# Ipc.PipeProtocol.Msg 字段一一对应"
+
+[dependencies]
+serde = { workspace = true }
+serde_json = { workspace = true }

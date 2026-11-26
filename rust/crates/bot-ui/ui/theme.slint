@@ -1,0 +1,50 @@
+// 主题桥：把生成的六张表之一装载到当前 colors，全局共享。
+import { ThemeColors, Palette } from "theme_generated.slint";
+
+export global Theme {
+    in-out property <int> world: 0;       // 0=Fluent 1=Glass
+    in-out property <int> appearance: 0;  // 0=Dark 1=Light 2=DeepBlue
+    in-out property <ThemeColors> colors: Palette.FluentDark;
+
+    // 按 (world, appearance) 选表
+    public function apply() {
+        if (root.world == 0) {
+            if (root.appearance == 1) { root.colors = Palette.FluentLight; }
+            else if (root.appearance == 2) { root.colors = Palette.FluentDeepBlue; }
+            else { root.colors = Palette.FluentDark; }
+        } else {
+            if (root.appearance == 1) { root.colors = Palette.GlassLight; }
+            else if (root.appearance == 2) { root.colors = Palette.GlassDeepBlue; }
+            else { root.colors = Palette.GlassDark; }
+        }
+    }
+
+    // 语义别名：页面组件统一用这些，不直接碰 colors.<token>
+    in-out property <color> window-bg: colors.window_bg;
+    in-out property <color> content-bg: colors.content_bg;
+    in-out property <color> card-bg: colors.card_bg;
+    in-out property <color> card-border: colors.card_border;
+    in-out property <color> top-bar-bg: colors.chrome_glass; // C# 派生: TopBarBg = ChromeGlass
+    in-out property <color> text-on-accent: colors.text_on_accent;
+    in-out property <color> side-bg: colors.side_left_bg;
+    in-out property <color> inset-bg: colors.inset_bg;
+    in-out property <color> surface-2: colors.surface2;
+    in-out property <color> control-fill: colors.control_fill;
+    in-out property <color> control-stroke: colors.control_stroke;
+    in-out property <color> text-primary: colors.text_primary;
+    in-out property <color> text-secondary: colors.text_secondary;
+    in-out property <color> text-muted: colors.text_muted;
+    in-out property <color> text-dim: colors.log_time;
+    in-out property <color> accent: colors.accent;
+    in-out property <color> accent-hover: colors.accent_hover;
+    in-out property <color> accent-glow: colors.accent_glow;
+    in-out property <color> accent-soft: colors.accent_soft;
+    in-out property <color> hover-overlay: colors.hover_overlay;
+    in-out property <color> success: colors.success;
+    in-out property <color> warning: colors.warning;
+    in-out property <color> danger: colors.danger;
+    in-out property <color> log-tag: colors.log_tag;
+    in-out property <length> radius: 10px;
+    in-out property <length> rail-width: 196px;
+    in-out property <length> top-height: 48px;
+}

@@ -114,7 +114,7 @@ public sealed partial class CnWeeklyScenario : IScenario
             // 清单被关掉了（异常按键/全通关自动退场）：A 重进清单
             if (++_attempts > 6) { SetPhase(CwPhase.Flow); return 600; }
             _log("[国服周活动·挑战] 清单已关闭，A 重进", LogLevel.Info);
-            await _engine.Pad.Confirm();
+            await EnterAsync(obs, _attempts, "国服进入/确认");
             return 2600;
         }
         // 比赛上下文（A 直落比赛/结算弹窗链）：交回共享流程，清完自会回清单/卡页
@@ -131,7 +131,7 @@ public sealed partial class CnWeeklyScenario : IScenario
             bool dismissable = obs.Ocr.ContainsJoined("取消") || obs.Ocr.ContainsJoined("关闭");
             _log("[国服周活动·挑战] 清单弹窗：A 确认", LogLevel.Info);
             if (dismissable) await _engine.Pad.Dpad(PadDir.Up);
-            await _engine.Pad.Confirm();
+            await EnterAsync(obs, _attempts, "国服进入/确认");
             return 2200;
         }
         if (cw != CwScreen.ChallengeList)
@@ -149,7 +149,7 @@ public sealed partial class CnWeeklyScenario : IScenario
             if (++_attempts > 6) { SetPhase(CwPhase.Flow); return 600; }
             _log("[国服周活动·挑战] 参加新挑战弹窗：上移选「进入」→ A", LogLevel.Info);
             await _engine.Pad.Dpad(PadDir.Up);
-            await _engine.Pad.Confirm();
+            await EnterAsync(obs, _attempts, "国服进入/确认");
             return 2600;
         }
         var cards = CnWeeklyBrain.ScanChallengeCards(obs.Ocr, obs.Frame);
@@ -229,7 +229,7 @@ public sealed partial class CnWeeklyScenario : IScenario
                 ? $"[国服周活动·挑战] 进入卡 {target.Index:00}（游标已在待挑战卡上）"
                 : $"[国服周活动·挑战] 进入卡 {target.Index:00}（游标位置未读出，按 A 试）", LogLevel.Info);
         }
-        await _engine.Pad.Confirm();
+        await EnterAsync(obs, _attempts, "国服进入/确认");
         return 2600;
     }
 
@@ -276,7 +276,7 @@ public sealed partial class CnWeeklyScenario : IScenario
                 _chRetreatReenter = false;
                 SetPhase(CwPhase.ChallengeList);
                 _log("[国服周活动·挑战] 重进清单（光标复位到待挑战卡）", LogLevel.Info);
-                await _engine.Pad.Confirm(); // 介绍页光标默认在「进入」
+                await EnterAsync(obs, _attempts, "国服进入/确认"); // 介绍页光标默认在「进入」
                 return 2600;
             }
             if (++_attempts <= 4)
@@ -303,7 +303,7 @@ public sealed partial class CnWeeklyScenario : IScenario
                 bool dismissable = obs.Ocr.ContainsJoined("取消") || obs.Ocr.ContainsJoined("关闭");
                 _log("[国服周活动·挑战] 退出途中弹窗：A 确认", LogLevel.Info);
                 if (dismissable) await _engine.Pad.Dpad(PadDir.Up);
-                await _engine.Pad.Confirm();
+                await EnterAsync(obs, _attempts, "国服进入/确认");
                 return 2000;
             }
             await _engine.Pad.Back();

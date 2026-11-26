@@ -98,8 +98,9 @@ public class CnMyLeagueDifficultyTests
     [Fact]
     public void ModernLegPlan_ReusesIntlRecipe()
     {
-        // 新式页轮次配方直接复用国际服 DifficultyLegPlan：第 1 轮纯 A（确认可能已聚焦）、
-        // 第 4 轮 null = B 逃生重进；落底/右拨细目由国际服自身测试锁定，此处不重复
+        // 新式页轮次配方直接复用国际服 DifficultyLegPlan：第 1 轮不导航（确认可能已聚焦）、
+        // 第 4 轮 null = B 逃生重进；落底/右拨细目由国际服自身测试锁定，此处不重复。
+        // 确认键自 2026-11-25 起走 CnAdvance 的 RT 优先短阶梯（见 CnAdvanceTests）
         Assert.Equal((false, 0, 0), MyLeagueBrain.DifficultyLegPlan(1)!.Value);
         Assert.Null(MyLeagueBrain.DifficultyLegPlan(4));
     }

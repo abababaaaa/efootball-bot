@@ -213,18 +213,15 @@ public partial class MainWindow
         for (int i = 0; i < previewMsValues.Length; i++)
             if (_cfg.PreviewIntervalMs == previewMsValues[i]) { CmbPreviewInterval.SelectedIndex = i; break; }
 
-        // 挂机节奏：加载期间屏蔽 TextChanged，避免逐框赋值的中间态触发校验/保存
-        _loadingConfig = true;
-        TxtIdleMin.Text = FormatIdleSeconds(_cfg.Timing.IdleTapMinMs);
-        TxtIdleMax.Text = FormatIdleSeconds(_cfg.Timing.IdleTapMaxMs);
-        _loadingConfig = false;
+        // 挂机节奏：每个挂机模块页各有一份（共用同一字段），统一回填
+        LoadIdlePacingUi();
 
         // 防检测保护（★重要设定）
         ChkBackgroundParking.IsChecked = _cfg.BackgroundParking.Enabled;
         ChkVirtualDisplay.IsChecked = _cfg.VirtualDisplayPark.Enabled;
         ChkHumanPacing.IsChecked = _cfg.Timing.HumanPacingEnabled;
-        // 赛后活动任务（★重要设定，仅国际服）：默认关闭
-        ChkPmAutoAdvance.IsChecked = _cfg.PostMatchActivity.AutoAdvanceWeeklyTasks;
+        // 赛后活动任务（挂在国际服各比赛模块页内）：默认关闭
+        LoadPostMatchActivityUi();
         _loadingConfig = true;
         ChkScheduleEnabled.IsChecked = _cfg.Schedule.Enabled;
         TxtScheduleStart.Text = _cfg.Schedule.StartTime;
@@ -250,6 +247,7 @@ public partial class MainWindow
         ChkAutoSwapMaxLevel.IsChecked = _cfg.MyLeague.AutoSwapMaxLevel;
         CmbAutoSwapEvery.SelectedIndex = AutoSwapEveryIndex(_cfg.MyLeague.AutoSwapEveryMatches);
         ChkOnlyKeyMatches.IsChecked = _cfg.MyLeague.OnlyKeyMatches;
+        TxtSkipNormalDelayLeague.Text = _cfg.MyLeague.SkipNormalMatchDelaySeconds.ToString();
         _loadingConfig = false;
 
         // 场次计数停止（0=无限；预设 1/3/5/10/20，其他值进自定义输入框）
@@ -282,6 +280,11 @@ public partial class MainWindow
         CmbCnMlDifficulty.SelectedIndex = cnMlDiffIdx >= 0 ? cnMlDiffIdx : 0;
         LoadStopAfterUi(CmbCnMlStopAfterMatches, TxtCnMlStopAfterMatches, _cfg.CnMyLeague.StopAfterMatches);
         LoadStopAfterUi(CmbCnMlStopAfterKeyMatches, TxtCnMlStopAfterKeyMatches, _cfg.CnMyLeague.StopAfterKeyMatches);
+        // 满级换人（国服模块同样会调用，页面上必须有这一项）
+        _loadingConfig = true;
+        ChkCnMlAutoSwapMaxLevel.IsChecked = _cfg.CnMyLeague.AutoSwapMaxLevel;
+        CmbCnMlAutoSwapEvery.SelectedIndex = AutoSwapEveryIndex(_cfg.CnMyLeague.AutoSwapEveryMatches);
+        _loadingConfig = false;
 
         // AI天梯联赛（国际服）：达到组别停止（索引 0=不启用，1~10 对应 组别10~组别1）+ 场次停止
         int aiDiv = _cfg.AiLadder.StopAtDivision;
@@ -358,6 +361,9 @@ public partial class MainWindow
         _loadingConfig = true;
         ChkPadTakeover.IsChecked = _cfg.HidHide.HidePhysicalGamepad;
         _loadingConfig = false;
+
+        // 本模块运行环境（手柄后端 / 禁用真实手柄 / 拟人节奏 / 后台停靠）：设置页 + 7 个模块页一次回填
+        SyncRunEnv();
     }
 
     private void SaveUiToConfig()
@@ -446,7 +452,9 @@ public partial class MainWindow
         _cfg.Timing.HumanPacingEnabled = ChkHumanPacing.IsChecked == true;
         _cfg.Schedule.Enabled = ChkScheduleEnabled.IsChecked == true;
         ApplySchedule(persist: false);
-        _cfg.PostMatchActivity.AutoAdvanceWeeklyTasks = ChkPmAutoAdvance.IsChecked == true;
+        // 赛后活动任务：三个国际服比赛模块页的开关恒同步，取任一即可
+        if (_pmAdvanceBoxes.Count > 0)
+            _cfg.PostMatchActivity.AutoAdvanceWeeklyTasks = _pmAdvanceBoxes[0].IsChecked == true;
         // 挂机时静音游戏（各模块页共用一份；复选框改动时已即时保存，这里兜住"改完直接关窗"）
         if (ChkMuteMyLeague.IsChecked is bool mutePref) _cfg.Audio.MuteGame = mutePref;
 
@@ -463,6 +471,9 @@ public partial class MainWindow
         _cfg.MyLeague.AutoSwapMaxLevel = ChkAutoSwapMaxLevel.IsChecked == true;
         _cfg.MyLeague.AutoSwapEveryMatches = AutoSwapEveryValue(CmbAutoSwapEvery.SelectedIndex);
         _cfg.MyLeague.OnlyKeyMatches = ChkOnlyKeyMatches.IsChecked == true;
+        // 普通比赛判定后等比赛时钟走满多少秒再重启（0~300；非法输入保留旧值）
+        if (int.TryParse(TxtSkipNormalDelayLeague.Text.Trim(), out int skipDelay) && skipDelay is >= 0 and <= 300)
+            _cfg.MyLeague.SkipNormalMatchDelaySeconds = skipDelay;
         _cfg.MyLeague.StopAfterMatches = SaveStopAfterUi(CmbStopAfterMatches, TxtStopAfterMatches);
         _cfg.MyLeague.StopAfterKeyMatches = SaveStopAfterUi(CmbStopAfterKeyMatches, TxtStopAfterKeyMatches);
 
@@ -494,6 +505,8 @@ public partial class MainWindow
             _cfg.CnMyLeague.Difficulty = MyLeagueDifficulties[CmbCnMlDifficulty.SelectedIndex];
         _cfg.CnMyLeague.StopAfterMatches = SaveStopAfterUi(CmbCnMlStopAfterMatches, TxtCnMlStopAfterMatches);
         _cfg.CnMyLeague.StopAfterKeyMatches = SaveStopAfterUi(CmbCnMlStopAfterKeyMatches, TxtCnMlStopAfterKeyMatches);
+        _cfg.CnMyLeague.AutoSwapMaxLevel = ChkCnMlAutoSwapMaxLevel.IsChecked == true;
+        _cfg.CnMyLeague.AutoSwapEveryMatches = AutoSwapEveryValue(CmbCnMlAutoSwapEvery.SelectedIndex);
 
         // AI天梯联赛（国际服）：索引 1~10 对应 组别10~组别1（10 最低、1 最高）
         _cfg.AiLadder.StopAtDivision = CmbAiStopAtDivision.SelectedIndex is >= 1 and <= 10
@@ -552,49 +565,274 @@ public partial class MainWindow
         _cfg.Save();
     }
 
-    // ---------------- 挂机节奏 ----------------
+    // ---------------- 挂机节奏（每个挂机模块页各一份，共用 Timing.IdleTapMin/MaxMs） ----------------
 
     private bool _loadingConfig;
+
+    /// <summary>
+    /// 模块页里的挂机节奏控件组：key（Tag）→ 最小/最大输入框与错误提示。
+    /// 同一个配置字段在 6 个比赛模块页各有一份，任一处改动都要立刻回填其余几处，
+    /// 否则「在周活动页改了 3 秒、切回我的联赛还显示 1 秒」，保存时旧值会把新值盖回去。
+    /// </summary>
+    private readonly Dictionary<string, (TextBox Min, TextBox Max, TextBlock Err)> _idleTapGroups = new();
+
+    /// <summary>赛后活动开关（国际服三个比赛模块页各一份，恒同步）。</summary>
+    private readonly List<CheckBox> _pmAdvanceBoxes = new();
+
+    /// <summary>
+    /// InitializeComponent 之后登记模块页控件组（ctor 里调用）。
+    /// 控件缺失时跳过对应组，界面照常可用。
+    /// </summary>
+    private void InitModuleSettingBindings()
+    {
+        void Bind(string key, TextBox? min, TextBox? max, TextBlock? err)
+        {
+            if (min is null || max is null || err is null) return;
+            min.Tag = key;
+            max.Tag = key;
+            _idleTapGroups[key] = (min, max, err);
+        }
+
+        Bind("League", TxtIdleMinLeague, TxtIdleMaxLeague, TxtIdleErrLeague);
+        Bind("Weekly", TxtIdleMinWeekly, TxtIdleMaxWeekly, TxtIdleErrWeekly);
+        Bind("Ai", TxtIdleMinAi, TxtIdleMaxAi, TxtIdleErrAi);
+        Bind("CnLeague", TxtIdleMinCnLeague, TxtIdleMaxCnLeague, TxtIdleErrCnLeague);
+        Bind("CnWeekly", TxtIdleMinCnWeekly, TxtIdleMaxCnWeekly, TxtIdleErrCnWeekly);
+        Bind("CnMl", TxtIdleMinCnMl, TxtIdleMaxCnMl, TxtIdleErrCnMl);
+
+        _pmAdvanceBoxes.Clear();
+        foreach (var box in new[] { ChkPmAdvLeague, ChkPmAdvWeekly, ChkPmAdvAi })
+            if (box is not null) _pmAdvanceBoxes.Add(box);
+
+        // 本模块运行环境（7 个模块页各一份）：控件只在页面里登记，取值/回填统一走 SyncRunEnv()
+        _envBackendCombos.Clear();
+        _envHidePadBoxes.Clear();
+        _envPaceBoxes.Clear();
+        _envParkingBoxes.Clear();
+        _envTimeoutTexts.Clear();
+
+        void BindEnv(ComboBox? backend, CheckBox? hidePad, CheckBox? pace, CheckBox? parking, TextBlock? timeout)
+        {
+            if (backend is not null) _envBackendCombos.Add(backend);
+            if (hidePad is not null) _envHidePadBoxes.Add(hidePad);
+            if (pace is not null) _envPaceBoxes.Add(pace);
+            if (parking is not null) _envParkingBoxes.Add(parking);
+            if (timeout is not null) _envTimeoutTexts.Add(timeout);
+        }
+
+        BindEnv(CmbEnvBackendLeague, ChkEnvHidePadLeague, ChkEnvPaceLeague, ChkEnvParkingLeague, TxtEnvTimeoutLeague);
+        BindEnv(CmbEnvBackendWeekly, ChkEnvHidePadWeekly, ChkEnvPaceWeekly, ChkEnvParkingWeekly, TxtEnvTimeoutWeekly);
+        BindEnv(CmbEnvBackendAi, ChkEnvHidePadAi, ChkEnvPaceAi, ChkEnvParkingAi, TxtEnvTimeoutAi);
+        BindEnv(CmbEnvBackendStud, ChkEnvHidePadStud, ChkEnvPaceStud, ChkEnvParkingStud, TxtEnvTimeoutStud);
+        BindEnv(CmbEnvBackendCnLeague, ChkEnvHidePadCnLeague, ChkEnvPaceCnLeague, ChkEnvParkingCnLeague, TxtEnvTimeoutCnLeague);
+        BindEnv(CmbEnvBackendCnWeekly, ChkEnvHidePadCnWeekly, ChkEnvPaceCnWeekly, ChkEnvParkingCnWeekly, TxtEnvTimeoutCnWeekly);
+        BindEnv(CmbEnvBackendCnMl, ChkEnvHidePadCnMl, ChkEnvPaceCnMl, ChkEnvParkingCnMl, TxtEnvTimeoutCnMl);
+    }
 
     /// <summary>毫秒转秒文本并去掉多余尾零：1000→"1"，500→"0.5"。</summary>
     private static string FormatIdleSeconds(int ms) =>
         (ms / 1000.0).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
 
+    /// <summary>把配置里的节奏回填到全部模块页。</summary>
+    private void LoadIdlePacingUi()
+    {
+        if (_idleTapGroups.Count == 0) return;
+        string min = FormatIdleSeconds(_cfg.Timing.IdleTapMinMs);
+        string max = FormatIdleSeconds(_cfg.Timing.IdleTapMaxMs);
+        bool prev = _loadingConfig;
+        _loadingConfig = true;
+        foreach (var g in _idleTapGroups.Values)
+        {
+            g.Min.Text = min;
+            g.Max.Text = max;
+            g.Err.Visibility = Visibility.Collapsed;
+            g.Min.ClearValue(Control.BorderBrushProperty);
+            g.Max.ClearValue(Control.BorderBrushProperty);
+        }
+        _loadingConfig = prev;
+    }
+
+    /// <summary>赛后活动开关回填（国际服三个模块页恒同步）。</summary>
+    private void LoadPostMatchActivityUi()
+    {
+        if (_pmAdvanceBoxes.Count == 0) return;
+        bool prev = _loadingConfig;
+        _loadingConfig = true;
+        foreach (var box in _pmAdvanceBoxes) box.IsChecked = _cfg.PostMatchActivity.AutoAdvanceWeeklyTasks;
+        _loadingConfig = prev;
+    }
+
     private void IdleTap_TextChanged(object sender, TextChangedEventArgs e)
     {
-        // InitializeComponent 按 XAML 顺序建控件，TxtIdleError 在两个输入框之后；
-        // 框架给 Text 赋默认值触发本事件时它可能尚未创建。加载赋值阶段由 _loadingConfig 屏蔽。
-        if (TxtIdleError is null || _loadingConfig) return;
-        ApplyIdleTap(persist: true);
+        // InitializeComponent 按 XAML 顺序建控件并赋默认 Text，事件可能早于登记；
+        // 未登记的控件（Tag 不在表里）直接忽略，加载赋值阶段由 _loadingConfig 屏蔽。
+        if (_loadingConfig) return;
+        if (sender is not TextBox { Tag: string key } || !_idleTapGroups.ContainsKey(key)) return;
+        ApplyIdleTap(persist: true, source: key);
     }
 
     /// <summary>
-    /// 校验并应用挂机节奏。成功：写入配置、清除红框/错误；失败：红框+错误提示、保留旧值。
+    /// 校验并应用挂机节奏。以触发改动的那一组为输入源（source），成功后回填其余各组。
+    /// 成功：写入配置、清除红框/错误；失败：只标红源组、保留旧值。
     /// persist=true（TextChanged）时立即保存；false（SaveUiToConfig）时交给调用方统一保存。
     /// </summary>
-    private bool ApplyIdleTap(bool persist)
+    private bool ApplyIdleTap(bool persist, string? source = null)
     {
-        if (TimingConfig.TryParseSeconds(TxtIdleMin.Text, TxtIdleMax.Text,
+        if (_idleTapGroups.Count == 0) return true;
+
+        var groups = _idleTapGroups;
+        var src = source is not null && groups.TryGetValue(source, out var picked)
+            ? picked
+            : groups[groups.Keys.First()];
+
+        if (TimingConfig.TryParseSeconds(src.Min.Text, src.Max.Text,
                 out int minMs, out int maxMs, out string error))
         {
             _cfg.Timing.IdleTapMinMs = minMs;
             _cfg.Timing.IdleTapMaxMs = maxMs;
-            TxtIdleError.Visibility = Visibility.Collapsed;
-            TxtIdleMin.ClearValue(Control.BorderBrushProperty);
-            TxtIdleMax.ClearValue(Control.BorderBrushProperty);
+
+            string minText = FormatIdleSeconds(minMs);
+            string maxText = FormatIdleSeconds(maxMs);
+            bool prev = _loadingConfig;
+            _loadingConfig = true;   // 回填别的组会触发 TextChanged，必须先屏蔽
+            foreach (var g in groups.Values)
+            {
+                g.Err.Visibility = Visibility.Collapsed;
+                g.Min.ClearValue(Control.BorderBrushProperty);
+                g.Max.ClearValue(Control.BorderBrushProperty);
+                if (!ReferenceEquals(g.Min, src.Min)) g.Min.Text = minText;
+                if (!ReferenceEquals(g.Max, src.Max)) g.Max.Text = maxText;
+            }
+            _loadingConfig = prev;
+
             if (persist) _cfg.Save();
             return true;
         }
 
-        TxtIdleError.Text = error;
-        TxtIdleError.Visibility = Visibility.Visible;
-        TxtIdleMin.BorderBrush = (System.Windows.Media.Brush)FindResource("Danger");
-        TxtIdleMax.BorderBrush = (System.Windows.Media.Brush)FindResource("Danger");
+        src.Err.Text = error;
+        src.Err.Visibility = Visibility.Visible;
+        src.Min.BorderBrush = (System.Windows.Media.Brush)FindResource("Danger");
+        src.Max.BorderBrush = (System.Windows.Media.Brush)FindResource("Danger");
         return false;
     }
 
-    // ---------------- 防检测保护（★重要设定） ----------------
+    // ---------------- 赛后活动任务（国际服比赛模块页内的开关） ----------------
 
+    /// <summary>赛后活动开关：任一模块页勾选/取消，其余同步并立即落盘。</summary>
+    private void PmAutoAdvance_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingConfig || sender is not CheckBox box) return;
+        bool on = box.IsChecked == true;
+        bool prev = _loadingConfig;
+        _loadingConfig = true;
+        foreach (var other in _pmAdvanceBoxes) other.IsChecked = on;
+        _loadingConfig = prev;
+        _cfg.PostMatchActivity.AutoAdvanceWeeklyTasks = on;
+        _cfg.Save();
+    }
+
+    // ---------------- 本模块运行环境（7 个模块页各一份，字段都是「每次挂机引擎真正读的那一份」） ----------------
+    //
+    // 为什么放在模块页：用户打开某个模块，这一屏就该看到他这次挂机会用到的全部设置。
+    // 这四个开关（手柄后端 / 禁用真实手柄 / 拟人节奏 / 后台停靠）此前只在「设置」里，
+    // 用户在模块页调挂机设置时看不到它们，改完还得跑回设置页确认到底哪一份生效。
+    // 现在：模块页与设置页各有一份控件，同一个字段，改动即时落盘并互相同步（同「挂机节奏」的写法）。
+
+    private readonly List<ComboBox> _envBackendCombos = new();
+    private readonly List<CheckBox> _envHidePadBoxes = new();
+    private readonly List<CheckBox> _envPaceBoxes = new();
+    private readonly List<CheckBox> _envParkingBoxes = new();
+    private readonly List<TextBlock> _envTimeoutTexts = new();
+
+    /// <summary>运行环境回填期间的屏蔽位（避免「回填控件」被当成用户改动又写回配置）。</summary>
+    private bool _syncingEnvUi;
+
+    /// <summary>把运行环境四开关回填到「设置页 + 7 个模块页」，并刷新只读的超时说明。</summary>
+    private void SyncRunEnv()
+    {
+        if (_cfg is null) return;
+        bool prev = _syncingEnvUi;
+        _syncingEnvUi = true;
+        try
+        {
+            int backendIdx = PadBackendInfo.UiIndexOf(_cfg.Pad.Backend);
+            if (CmbPadBackend is not null)
+            {
+                CmbPadBackend.Items.Clear();
+                foreach (var kind in PadBackendInfo.UiOrder)
+                    CmbPadBackend.Items.Add(PadBackendInfo.DisplayName(kind));
+                CmbPadBackend.SelectedIndex = backendIdx;
+            }
+            foreach (var cmb in _envBackendCombos)
+            {
+                if (cmb.Items.Count == 0)
+                    foreach (var kind in PadBackendInfo.UiOrder)
+                        cmb.Items.Add(PadBackendInfo.DisplayName(kind));
+                cmb.SelectedIndex = backendIdx;
+            }
+
+            bool hidePad = _cfg.HidHide.HidePhysicalGamepad;
+            if (ChkPadTakeover is not null) ChkPadTakeover.IsChecked = hidePad;
+            foreach (var box in _envHidePadBoxes) box.IsChecked = hidePad;
+
+            bool pace = _cfg.Timing.HumanPacingEnabled;
+            if (ChkHumanPacing is not null) ChkHumanPacing.IsChecked = pace;
+            foreach (var box in _envPaceBoxes) box.IsChecked = pace;
+
+            bool parking = _cfg.BackgroundParking.Enabled;
+            if (ChkBackgroundParking is not null) ChkBackgroundParking.IsChecked = parking;
+            foreach (var box in _envParkingBoxes) box.IsChecked = parking;
+
+            string t = $"超时：单页 {_cfg.Timing.PageTimeoutS} 秒 · 单场 {_cfg.Timing.MatchTimeoutMin} 分钟"
+                       + "（Timing.PageTimeoutS / Timing.MatchTimeoutMin，出厂值即实测推荐，无需改）";
+            foreach (var tb in _envTimeoutTexts) tb.Text = t;
+        }
+        finally
+        {
+            _syncingEnvUi = prev;
+        }
+    }
+
+    /// <summary>模块页的手柄后端下拉：写配置 → 保存 → 同步另一处（设置页）与其余模块页。</summary>
+    private void ModuleEnvBackend_Changed(object sender, SelectionChangedEventArgs e)
+    {
+        if (_loadingConfig || _syncingEnvUi || _cfg is null) return;
+        if (sender is not ComboBox cmb || cmb.SelectedIndex < 0) return;
+        var backend = PadBackendInfo.FromUiIndex(cmb.SelectedIndex);
+        if (backend == _cfg.Pad.Backend) return;
+        _cfg.Pad.Backend = backend;
+        _cfg.Save();
+        SyncRunEnv();
+        AppendLog($"手柄后端已切换为「{PadBackendInfo.DisplayName(backend)}」，下次开始挂机生效。", LogLevel.Info);
+    }
+
+    /// <summary>模块页的三个开关（禁用真实手柄 / 拟人节奏 / 后台停靠）：按 sender 归到对应字段。</summary>
+    private void ModuleEnvToggles_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingConfig || _syncingEnvUi || _cfg is null) return;
+        if (sender is not CheckBox box) return;
+        bool on = box.IsChecked == true;
+
+        if (_envHidePadBoxes.Contains(box)) _cfg.HidHide.HidePhysicalGamepad = on;
+        else if (_envPaceBoxes.Contains(box)) _cfg.Timing.HumanPacingEnabled = on;
+        else if (_envParkingBoxes.Contains(box)) _cfg.BackgroundParking.Enabled = on;
+        else return;
+
+        _cfg.Save();
+        SyncRunEnv();
+    }
+
+    /// <summary>设置页的全局开关（拟人节奏 / 后台停靠）改动：写配置后同步到各模块页。</summary>
+    private void ChkRunEnvGlobal_Changed(object sender, RoutedEventArgs e)
+    {
+        if (_loadingConfig || _syncingEnvUi || _cfg is null) return;
+        _cfg.Timing.HumanPacingEnabled = ChkHumanPacing.IsChecked == true;
+        _cfg.BackgroundParking.Enabled = ChkBackgroundParking.IsChecked == true;
+        _cfg.Save();
+        SyncRunEnv();
+    }
+
+    // ---------------- 防检测保护（★重要设定） ----------------
     /// <summary>作息调度字段变更（TextChanged）：校验并立即保存，失败保留旧值并红框提示。</summary>
     private void ScheduleField_TextChanged(object sender, TextChangedEventArgs e)
     {
@@ -684,10 +922,11 @@ public partial class MainWindow
 
     private void CmbPadBackend_Changed(object sender, SelectionChangedEventArgs e)
     {
-        if (_loadingConfig || CmbPadBackend is null) return;
+        if (_loadingConfig || _syncingEnvUi || CmbPadBackend is null) return;
         _cfg.Pad.Backend = PadBackendInfo.FromUiIndex(CmbPadBackend.SelectedIndex);
         _cfg.Save();
         RefreshPadBackendState();
+        SyncRunEnv();   // 模块页那份下拉跟着换
     }
 
     private void BtnProxyRefresh_Click(object sender, RoutedEventArgs e) => RefreshPadBackendState();
@@ -1234,9 +1473,10 @@ public partial class MainWindow
 
     private void ChkPadTakeover_Changed(object sender, RoutedEventArgs e)
     {
-        if (_loadingConfig) return;
+        if (_loadingConfig || _syncingEnvUi) return;
         _cfg.HidHide.HidePhysicalGamepad = ChkPadTakeover.IsChecked == true;
         _cfg.Save();
+        SyncRunEnv();   // 模块页那份开关跟着换
     }
 }
 

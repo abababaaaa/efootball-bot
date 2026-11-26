@@ -242,13 +242,42 @@ public class RecogWalkHardeningTests
     // ---------------- 开赛入场与过场动画快速跳过 ----------------
 
     [Fact]
-    public void Decide_InMatch_NoScoreboard_SkipsAnimationFast()
+    public void Decide_InMatch_NoOverlay_FallsBackToIdleTap()
     {
-        // 比赛上下文 + 无比分板时钟 = 入场/过场分镜（队名特写）：快按 A 切断，等不超过 500ms
+        // 用户 2026-11-25 定：比赛里没有弹窗/跳过提示时，回到最初行为——按挂机节奏随机点（1~4s）。
+        // 入场分镜也不再快按：过场由「跳过提示」「右下推进键像素探针」两条兜住，其余一律当比赛画面。
         var ocr = Ocr(("REAL MADRID", 0.30, 0.40, 0.15, 0.04), ("BARCELONA", 0.60, 0.40, 0.15, 0.04));
         var action = MatchBrain.Decide(MatchScreen.InMatch, ocr, 0, inMatchRecently: true);
+        Assert.Equal(MatchActionKind.MatchIdleTap, action.Kind);
+    }
+
+    // ---------------- 起始页底栏「X 设置 | Y 球场 | RT 下一步」 ----------------
+    // 2026-11-25 实机：OCR 把「下一步」整行漏读时，这页会落到通用 btn_confirm 判定 → HasConfirm
+    // → 上移+A，A 落在「Y 球场」上把球场选择打开（用户报的「怎么按了 Y」）。
+
+    [Fact]
+    public void MatchStartPage_BottomButtonsWithoutNextStep_StillStartPage()
+    {
+        var ocr = Ocr(
+            ("AC米兰", 0.27, 0.10, 0.10, 0.05),
+            ("巴塞罗那", 0.30, 0.16, 0.12, 0.05),
+            ("圣西罗球场", 0.26, 0.215, 0.10, 0.03),
+            ("设置", 0.24, 0.925, 0.06, 0.03),
+            ("球场", 0.52, 0.925, 0.06, 0.03));
+        var dets = new[] { new Core.Vision.Yolo.YoloDetection("btn_confirm", 0, 0.92f, 0.78, 0.89, 0.20, 0.07) };
+        Assert.Equal(MatchScreen.MatchStartPage, MatchBrain.Classify(dets, ocr));
+    }
+
+    [Fact]
+    public void MatchStartPage_BottomButtons_ConfirmActionStaysSingle()
+    {
+        // 判成起始页后，决策必须是「单键确认」（国际服 A / 国服 RT），绝不能是上移确认
+        var ocr = Ocr(
+            ("圣西罗球场", 0.26, 0.215, 0.10, 0.03),
+            ("设置", 0.24, 0.925, 0.06, 0.03),
+            ("球场", 0.52, 0.925, 0.06, 0.03));
+        var action = MatchBrain.Decide(MatchScreen.MatchStartPage, ocr, 0, inMatchRecently: false);
         Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
-        Assert.True(action.WaitMs <= 500);
     }
 
     [Fact]
@@ -258,6 +287,214 @@ public class RecogWalkHardeningTests
         var ocr = Ocr(("12:34", 0.15, 0.08, 0.08, 0.035), ("RMA", 0.08, 0.08, 0.05, 0.035));
         var action = MatchBrain.Decide(MatchScreen.InMatch, ocr, 0, inMatchRecently: true);
         Assert.Equal(MatchActionKind.MatchIdleTap, action.Kind);
+    }
+
+    // ---------------- 右下角「下一步」弹窗：看见就立刻点 ----------------
+
+    [Theory]
+    [InlineData("InMatch")]
+    [InlineData("HasConfirm")]
+    [InlineData("Unknown")]
+    public void RightBottomNextStep_TappedImmediately(string screenName)
+    {
+        // 用户 2026-11-25：右下角一冒出「下一步」就点，别等节奏（国服 RT / 国际服 A 由场景层分流）
+        var ocr = Ocr(("下一步", 0.85, 0.92, 0.10, 0.04));
+        var screen = Enum.Parse<MatchScreen>(screenName);
+        var action = MatchBrain.Decide(screen, ocr, 0, inMatchRecently: true);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
+        Assert.True(action.WaitMs <= 250, $"{screenName} 上「下一步」要立刻点（实际 {action.WaitMs}ms）");
+        Assert.Contains("立刻点", action.Target);
+    }
+
+    [Fact]
+    public void RightBottomNextStep_WithCancel_KeepsUpMoveRule()
+    {
+        // 带「取消」的双按钮弹窗不能盲点 A（会点在取消上），仍走上移规则
+        var ocr = Ocr(("下一步", 0.62, 0.80, 0.10, 0.04), ("取消", 0.42, 0.80, 0.10, 0.04));
+        var action = MatchBrain.Decide(MatchScreen.HasConfirm, ocr, 0, inMatchRecently: true);
+        Assert.NotEqual("右下角下一步：立刻点", action.Target);
+    }
+    // ---------------- 黄色比分板：时钟 OCR 抖动（2026-11-25 实机事故） ----------------
+    // 国际服教练模式把左上比分板换成黄色小块后，OCR 常读不出半角冒号（读成全角「：」，
+    // 或与队名粘成一整块，或干脆把冒号吞掉只剩 "3828"）。旧逻辑于是把整场 Live Match
+    // 当成入场动画，350ms 一拍连按 A，球员全程被乱传。
+
+    [Theory]
+    [InlineData("38:28")]     // 正常形态
+    [InlineData("38：28")]    // OCR 把冒号读成全角
+    [InlineData("38;28")]     // OCR 把冒号读成分号
+    [InlineData("38 : 28")]   // 词内带空白
+    public void HasLiveMatchHud_AcceptsColonJitter(string clock)
+    {
+        var ocr = Ocr((clock, 0.27, 0.055, 0.07, 0.035), ("FRA", 0.06, 0.055, 0.04, 0.035));
+        Assert.True(MatchBrain.HasLiveMatchHud(ocr));
+    }
+
+    [Fact]
+    public void HasLiveMatchHud_AcceptsGluedClock_WithTeamAbbrev()
+    {
+        // 冒号被整条吞掉：「38:28」→「3828」；左上同时有队名缩写才认
+        var ocr = Ocr(("3828", 0.27, 0.055, 0.07, 0.035), ("FRA", 0.06, 0.055, 0.04, 0.035),
+                      ("ALB", 0.20, 0.055, 0.04, 0.035));
+        Assert.True(MatchBrain.HasLiveMatchHud(ocr));
+    }
+
+    [Fact]
+    public void HasLiveMatchHud_RejectsBareNumberWithoutTeams()
+    {
+        // 光一个 4 位数字（积分/编号）不算时钟——不认，交给慢按试探
+        var ocr = Ocr(("3828", 0.20, 0.08, 0.08, 0.035));
+        Assert.False(MatchBrain.HasLiveMatchHud(ocr));
+        // 秒位越界（>59）也不是时钟
+        var bad = Ocr(("3899", 0.20, 0.08, 0.08, 0.035), ("FRA", 0.06, 0.055, 0.04, 0.035));
+        Assert.False(MatchBrain.HasLiveMatchHud(bad));
+    }
+
+    [Fact]
+    public void HasLiveMatchHud_AcceptsSplitClockOrScoreDigits()
+    {
+        // 时钟被拆成两枚数字词（38 / 28）：仍是比分板
+        var split = Ocr(("38", 0.27, 0.055, 0.03, 0.035), ("28", 0.31, 0.055, 0.03, 0.035),
+                        ("FRA", 0.06, 0.055, 0.04, 0.035));
+        Assert.True(MatchBrain.HasLiveMatchHud(split));
+        // 比分「2 - 0」被拆开：同样说明比分板在 → 比赛进行中
+        var score = Ocr(("2", 0.10, 0.055, 0.015, 0.035), ("0", 0.14, 0.055, 0.015, 0.035),
+                        ("ALB", 0.20, 0.055, 0.04, 0.035));
+        Assert.True(MatchBrain.HasLiveMatchHud(score));
+    }
+
+    [Fact]
+    public void HasLiveMatchHud_IgnoresMenuNumbers()
+    {
+        // 全局分类仍用严格形态：左上区以外的 4 位数字不许把菜单判成比赛
+        var ocr = Ocr(("2401", 0.20, 0.52, 0.08, 0.035), ("FRA", 0.06, 0.55, 0.04, 0.035));
+        Assert.False(MatchBrain.HasLiveMatchHud(ocr));
+        Assert.NotEqual(MatchScreen.InMatch,
+            MatchBrain.Classify(Array.Empty<Core.Vision.Yolo.YoloDetection>(), ocr));
+    }
+
+    [Fact]
+    public void Decide_InMatch_BottomPushWordVariant_StillTapsFast()
+    {
+        // 新版把右下按钮写成词表外的变体（如「点击继续」），整词表没命中也不能干等——
+        // 底栏确实印着一枚推进键就 400ms 连点 A
+        var ocr = Ocr(
+            ("点击继续", 0.78, 0.90, 0.18, 0.045),
+            ("FRA", 0.06, 0.055, 0.04, 0.035),
+            ("38:28", 0.27, 0.055, 0.07, 0.035));
+        var action = MatchBrain.Decide(MatchScreen.InMatch, ocr, 0, inMatchRecently: true);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
+        Assert.True(action.WaitMs <= 500, $"底栏推进键要快拍连点（实际 {action.WaitMs}ms）");
+        // 底栏变体走的是「右下角推进键：立刻点」快通道（文案 2026-11-25 由「连点」改为「立刻点」）
+        Assert.Contains("立刻点", action.Target);
+    }
+
+    [Fact]
+    public void Decide_Unknown_InMatchContext_BottomPushWord_TapsFast()
+    {
+        // 认不出的比赛覆盖层（既不是 InMatch 也不是 HasConfirm）里出现底栏推进键：
+        // 也要 500ms 连点 A，不能等到 4s 逃生节奏
+        var ocr = Ocr(
+            ("下一步", 0.84, 0.90, 0.12, 0.045),
+            ("Victor San Bartolomé", 0.56, 0.075, 0.12, 0.02));
+        var action = MatchBrain.Decide(MatchScreen.Unknown, ocr, 0, inMatchRecently: true);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
+        Assert.True(action.WaitMs <= 600, $"未知覆盖层上的推进键要快拍连点（实际 {action.WaitMs}ms）");
+    }
+
+    [Fact]
+    public void Decide_HasConfirm_InMatch_KeepsTappingA()
+    {
+        // 用户 2026-11-25 实机：比赛中右下角弹出「下一步」大蓝条，会被判成 HasConfirm。
+        // 旧路径 2s → 5s 退避、可能上移（比赛里 Dpad 是战术）甚至 B 逃生（B 是铲球），
+        // 表现为「有下一步弹窗反而不一直点了」。比赛内必须一直连点 A。
+        var ocr = Ocr(
+            ("下一步", 0.84, 0.92, 0.12, 0.045),
+            ("FRA", 0.06, 0.055, 0.04, 0.035),
+            ("38:28", 0.27, 0.055, 0.07, 0.035));
+
+        var first = MatchBrain.Decide(MatchScreen.HasConfirm, ocr, 0, inMatchRecently: true);
+        Assert.Equal(MatchActionKind.PadConfirm, first.Kind);
+        Assert.True(first.WaitMs <= 900, $"比赛内弹窗要快拍连点（实际 {first.WaitMs}ms）");
+        // 「下一步」走快通道（Target 文案 2026-11-25 为「右下角下一步：立刻点」）
+        Assert.Contains("立刻点", first.Target);
+
+        // 同一个弹窗点到第 20 轮也还是连点，绝不退成 B（比赛中 B 是铲球）
+        var late = MatchBrain.Decide(MatchScreen.HasConfirm, ocr,
+            MatchBrain.ConfirmEscapeStreak + 5, inMatchRecently: true);
+        Assert.Equal(MatchActionKind.PadConfirm, late.Kind);
+
+        // 非比赛上下文（菜单弹窗）仍是老规则：退避 + 到轮数 B 逃生
+        var offline = MatchBrain.Decide(MatchScreen.HasConfirm, ocr,
+            MatchBrain.ConfirmEscapeStreak, inMatchRecently: false);
+        Assert.Equal(MatchActionKind.GamepadBack, offline.Kind);
+    }
+
+    [Fact]
+    public void Decide_HasConfirm_InMatch_WithoutPushWord_KeepsOldRules()
+    {
+        // 比赛上下文但帧里没有任何推进词（不是「下一步」弹窗）：不抢老逻辑
+        var ocr = Ocr(("FRA", 0.06, 0.055, 0.04, 0.035), ("38:28", 0.27, 0.055, 0.07, 0.035));
+        var action = MatchBrain.Decide(MatchScreen.HasConfirm, ocr, 0, inMatchRecently: true);
+        Assert.NotEqual("比赛中弹窗推进键：连点 A 直到消失", action.Target);
+    }
+
+    [Fact]
+    public void Decide_InMatch_ClockLost_BackToIdleTap()
+    {
+        // 实机 2026-11-25 那一帧的 OCR 形态：只有球员名/教练名/小图例，没有时钟、没有覆盖层按钮。
+        // 用户要求「没有弹窗就 1~4s 随机点击」→ 走 MatchIdleTap（节奏由设置决定），不再快按/慢按
+        var ocr = Ocr(
+            ("Victor San Bartolomé", 0.56, 0.075, 0.12, 0.02),
+            ("Deco", 0.10, 0.885, 0.05, 0.02),
+            ("20", 0.10, 0.86, 0.02, 0.02),
+            ("14", 0.80, 0.885, 0.02, 0.02));
+        var action = MatchBrain.Decide(MatchScreen.InMatch, ocr, 0, inMatchRecently: true);
+        Assert.Equal(MatchActionKind.MatchIdleTap, action.Kind);
+    }
+
+    // ---------------- 弹窗/设置优先于「右下角下一步」（用户 2026-11-25 实机回报两连） ----------------
+    // 现场：活动主页弹「奖励已发放至收件箱」，只有一枚屏幕中央的蓝色「确定」。旧版把"确定"也算进
+    // 「右下角下一步」快通道（InMatchPushWords 含 确定/确认/OK），于是 200ms 连按 RT/A；可这页
+    // RT/A 都不动，只有鼠标点「确定」才关得掉，日志刷满「右下角下一步：立刻点」却原地空转。
+    [Fact]
+    public void Decide_HasConfirm_CenterConfirmDialog_NotRightBottomNextStep()
+    {
+        var ocr = Ocr(
+            ("奖励已发放至收件箱", 0.36, 0.51, 0.28, 0.05),
+            ("确定", 0.45, 0.775, 0.10, 0.045),
+            ("前往比赛", 0.86, 0.92, 0.10, 0.03));
+        // 赛后 2 分钟内也算 inMatchRecently：这条不再抢快通道，也不走比赛内 600ms 连点
+        var action = MatchBrain.Decide(MatchScreen.HasConfirm, ocr, 0, inMatchRecently: true);
+        Assert.DoesNotContain("立刻点", action.Target);
+        Assert.NotEqual("比赛中弹窗推进键：连点 A 直到消失", action.Target);
+        Assert.True(action.WaitMs >= 1000, $"单键「确定」弹窗要走弹窗阶梯（实际 {action.WaitMs}ms）");
+    }
+
+    [Fact]
+    public void Decide_HasConfirm_GameSettingsDialog_BeatsNextStep()
+    {
+        // 游戏启动设定窗（画面模式/分辨率）：确认键是默认焦点，不能被"立刻点"快通道抢走
+        var ocr = Ocr(
+            ("画面模式", 0.30, 0.40, 0.20, 0.05),
+            ("分辨率", 0.30, 0.50, 0.16, 0.05),
+            ("确定", 0.45, 0.775, 0.10, 0.045));
+        var action = MatchBrain.Decide(MatchScreen.HasConfirm, ocr, 0, inMatchRecently: true);
+        Assert.DoesNotContain("立刻点", action.Target);
+    }
+
+    [Fact]
+    public void Decide_InMatch_NextStepInsideMatch_StillTapsImmediately()
+    {
+        // 反向保护：比赛内（时钟在）的「下一步」覆盖层仍走 200ms 快通道——收紧只针对"确定"类弹窗
+        var ocr = Ocr(
+            ("下一步", 0.84, 0.92, 0.12, 0.045),
+            ("FRA", 0.06, 0.055, 0.04, 0.035),
+            ("38:28", 0.27, 0.055, 0.07, 0.035));
+        var action = MatchBrain.Decide(MatchScreen.HasConfirm, ocr, 0, inMatchRecently: true);
+        Assert.Equal(MatchActionKind.PadConfirm, action.Kind);
+        Assert.Contains("立刻点", action.Target);
+        Assert.True(action.WaitMs <= 250, $"比赛内「下一步」仍要立刻点（实际 {action.WaitMs}ms）");
     }
 }
 

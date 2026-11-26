@@ -17,7 +17,43 @@ namespace EfootballBot.Core.Bot.Scenarios.Weekly;
 
 public sealed partial class WeeklyEventScenario : IScenario
 {
-    // 本文件小活动：阵容挑战 —— 「比赛计划失效」修复（PlanStep 状态机与 _plan* 字段）。
+    // 本文件小活动：阵容挑战 —— 「活动已完成」退出 + 「比赛计划失效」修复（PlanStep 状态机与
+    // _plan* / _completed* 字段）。
+
+    // ---------------- 完成态「活动已完成」→ 退出不再开赛（2026-11-27 用户国际服实机） ----------------
+
+    /// <summary>完成态主页连续 B 退不出去的上限；超了就直接收尾（接力/停止），绝不在主页上按 A。</summary>
+    private const int MaxCompletedRetreats = 5;
+    /// <summary>完成态主页累计 B 次数（重新从活动列表进活动时清零）。</summary>
+    private int _completedRetreats;
+
+    /// <summary>
+    /// 阵容挑战「活动已完成」退出（2026-11-27 用户国际服实机规则：**判定已完成就退出即可**）。
+    /// 实机帧：赛程三场全部打完（1-0 / 2-0 / 1-0）、三段奖励全勾，主页中部写着
+    /// 「活动已完成 / 不要忘记从收件箱领取奖励哦。」——此时游戏不再接受开赛（该版主页已没有
+    /// 「下一场比赛」行）。旧逻辑把这一页漏成 WkScreen.None + HasConfirm（底栏 B 返回的蓝框），
+    /// 走「弹窗推进」盲按 A（= 前往比赛），或按底栏红点去修比赛计划，两种都在完成态上原地空转。
+    /// 处理：拉黑当前槽位 → B 回活动列表换下一个活动（列表上全部绿勾/已拉黑时由
+    /// <see cref="FinishAllEventsAsync"/> 按配置接力或停止挂机，即用户说的「退出」）。
+    /// B 连续 <see cref="MaxCompletedRetreats"/> 次仍停在完成态 = 退不出去，直接收尾；
+    /// ★绝不对这一页按 A——活动主页上的 A 就是「前往比赛」。
+    /// </summary>
+    private async Task<int> RetireCompletedEventAsync()
+    {
+        if (_completedRetreats >= MaxCompletedRetreats)
+        {
+            _log($"[周活动·阵容挑战] 完成态主页连续 B {MaxCompletedRetreats} 次未退出，按用户规则直接结束本周活动（接力/停止）", LogLevel.Warn);
+            return await FinishAllEventsAsync();
+        }
+        _completedRetreats++;
+        if (_doneSlots.Add(_slotIndex))
+            _log($"[周活动·阵容挑战] 主页「活动已完成」（赛程已全部打完），退出该活动不再开赛：拉黑槽位 {_slotIndex} → B 回活动列表", LogLevel.Success);
+        else
+            _log($"[周活动·阵容挑战] 完成态主页（槽位 {_slotIndex} 已拉黑），B 退出活动（第 {_completedRetreats} 次）", LogLevel.Debug);
+        SetPhase(WkPhase.Retreating);
+        await _engine.Pad.Back();
+        return 2200;
+    }
 
     /// <summary>比赛计划失效修复的子步骤（<see cref="WkPhase.MatchPlanSetup"/> 内部，屏幕驱动）。</summary>
     private enum PlanStep

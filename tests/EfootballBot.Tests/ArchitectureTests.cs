@@ -95,6 +95,33 @@ public class ArchitectureTests
     }
 
     [Fact]
+    public void 国服键序只许国服模块引用_国际服比赛内仍按A()
+    {
+        // 分工（用户 2026-11-25 定）：国服「下一步 / 弹窗」走共享层 CnAdvance
+        // （赛外 RT → A → 后台鼠标；比赛内 RT/A 交替），国际服一律直接 A。
+        // 国际服模块一旦引用 CnAdvance，比赛里就会冒出 RT（国际服 RT 是冲刺键），
+        // 所以这里扫源码把边界钉死：CnAdvance 只准出现在三个国服模块目录里。
+        string scenariosRoot = Path.Combine(RepoRoot(), "src", "EfootballBot", "Core", "Bot", "Scenarios");
+        var cnModules = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "CnMyLeague", "CnWeekly", "PeakLadder",
+        };
+
+        var bad = new List<string>();
+        foreach (var file in SourceFiles("Core/Bot/Scenarios"))
+        {
+            string rel = file.Substring(scenariosRoot.Length).TrimStart('\\', '/');
+            string module = rel.Split('\\', '/')[0];
+            if (cnModules.Contains(module)) continue;
+            foreach (var (line, text) in CodeLines(file))
+                if (text.Contains("CnAdvance.", StringComparison.Ordinal))
+                    bad.Add($"{module}/{Path.GetFileName(file)}:{line}: {text.Trim()}");
+        }
+        Assert.True(bad.Count == 0, "国际服模块引用了国服键序（国服 RT / 国际服 A 的边界被打破）：\n"
+            + string.Join("\n", bad));
+    }
+
+    [Fact]
     public void 模块_id_字面量只许出现在注册表里()
     {
         var ids = typeof(ModuleIds)

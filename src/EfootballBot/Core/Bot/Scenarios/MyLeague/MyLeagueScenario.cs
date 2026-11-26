@@ -42,7 +42,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
     private readonly MatchFlowMemory _memory = new();
     /// <summary>比赛场次跟踪：开赛/终判，驱动 MatchesDone 统计。</summary>
     /// <summary>赛中匹配（共享层）：开赛/终场判定 + 场内挂机节奏 + 场次记账，五个模块同一份实现。</summary>
-    private readonly MatchPlay _matchPlay;
+    protected readonly MatchPlay _matchPlay;
     /// <summary>底层场次跟踪器（模块内读用时/关键比赛等细节用；比赛怎么算由 MatchPlay 决定）。</summary>
     private MatchSessionTracker _matchSession => _matchPlay.Session;
     /// <summary>赛后活动任务页（全屏活动地图）状态机：仅国际服（国服子类关闭）。</summary>
@@ -406,7 +406,7 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         if (!_takeoverLogged)
         {
             _takeoverLogged = true;
-            _log($"[我的联赛] 智能接管：当前界面「{DescribeScreen(screen)}」，从该阶段继续", LogLevel.Success);
+            _log($"[我的联赛] 接管：{DescribeScreen(screen)}", LogLevel.Success);
         }
         // 关键比赛预告弹窗（P2「下一场是关键比赛」/ P3 固定难度）：下一场难度由游戏指定
         if (screen == MatchScreen.KeyMatchDialog) _nextMatchIsKey = true;
@@ -829,6 +829,17 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
             _swapSeen = true;
             return await _maxSwap.StartAsync(_engine, _log, ct);
         }
+        // 巡检进行中却已经闯进开赛链（难度页/起始页/比赛/终场/赛前弹窗）：说明这一轮没能在
+        // 赛前把巡检收尾。状态机此时仍在自己的阶段里，会把「底栏 Y 球场 / X 设置」当成自己的
+        // 页面按钮按下去——用户 2026-11-25 实机看到的就是「起始页该点 RT 下一步，却按了 Y 打开球场」。
+        // 这里必须立刻中止巡检、把控制权交还开赛流程，绝不在这几个页面上按任何导航键。
+        if (screen is MatchScreen.DifficultyPage or MatchScreen.MatchStartPage or MatchScreen.InMatch
+            or MatchScreen.FullTime or MatchScreen.HasConfirm or MatchScreen.KeyMatchDialog)
+        {
+            _maxSwap.Reset();
+            _log($"[我的联赛] 满级换人巡检撞进开赛链（{screen}），中止巡检、交还正常开赛", LogLevel.Warn);
+            return null;
+        }
         _swapSeen = true;
         return await _maxSwap.StepAsync(_engine, obs, _log, ct);
     }
@@ -855,9 +866,11 @@ public class MyLeagueScenario : IScenario, IModuleLifecycle
         => Task.FromResult<int?>(null);
     /// <summary>
     /// 共享决策里「下一步 / 确认」（PadConfirm）的实际按键动作与下一轮延时。
-    /// 国际服就是直接按 A（国际服客户端不吃后台鼠标，也不印 RT 提示）；国服子类覆盖成国服键序
-    /// <c>① RT → ② A → ③ 后台鼠标点击</c>（共享层 CnAdvance）。单列成钩子，是因为国服网页层
-    /// 结算页（段位积分页 / 赛后小结）只吃鼠标、A 按多少轮都不动，逻辑不该散在各个 switch 里。
+    /// 国际服就是直接按 A（国际服客户端不吃后台鼠标，也不印 RT 提示），<b>比赛内也仍是 A</b>
+    /// ——RT 在国际服比赛里是冲刺键；国服子类覆盖成国服键序
+    /// <c>赛外 ① RT → ② A → ③ 后台鼠标点击 / 比赛内 RT → A 交替</c>（共享层 CnAdvance）。
+    /// 单列成钩子，是因为国服网页层结算页（段位积分页 / 赛后小结）只吃鼠标、A 按多少轮都不动，
+    /// 逻辑不该散在各个 switch 里。
     /// </summary>
     protected virtual async Task<int> AdvanceConfirmAsync(MatchAction action, Observation obs, int streak,
         CancellationToken ct)

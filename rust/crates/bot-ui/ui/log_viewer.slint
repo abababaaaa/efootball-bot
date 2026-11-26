@@ -1,0 +1,152 @@
+// 日志页（S1）—— 从 C# MainWindow.Logs.cs 的视觉移植到 Slint。
+// 配色沿用 Themes/Tokens.xaml 的 Glass 暗色基线，三段分色：
+//   [时间] 灰 / [模块前缀] 蓝 / 正文按级别（Success 绿 / Warn 黄 / Error 红 / Info 浅灰）
+
+import { Button, ScrollView } from "std-widgets.slint";
+
+// 与 bot-theme 的 token 对应（单一真源在 Rust 侧，S2 会改成 build.rs 生成 .slint）
+global Tokens {
+    in-out property <color> window-bg: #08080a;
+    in-out property <color> card-bg: #12ffffff;
+    in-out property <color> card-border: #20ffffff;
+    in-out property <color> text-primary: #ffffff;
+    in-out property <color> text-muted: #98989f;
+    in-out property <color> accent: #2563eb;
+    in-out property <color> success: #30d158;
+    in-out property <color> warning: #ffd60a;
+    in-out property <color> danger: #ff453a;
+    in-out property <color> log-time: #7e8694;
+    in-out property <color> log-tag: #7ab8ff;
+    in-out property <color> inset-bg: #0a000000;
+}
+
+// 一条日志行的数据结构，由 Rust 侧构造（时间/标签/正文/级别都已拆好）。
+export struct LogEntry {
+    time: string,
+    tag: string,
+    text: string,
+    level: string,
+}
+
+component LogRow inherits Rectangle {
+    in property <LogEntry> entry;
+
+    height: 24px;
+    border-radius: 4px;
+    background: area.has-hover ? #14ffffff : transparent;
+
+    HorizontalLayout {
+        padding-left: 10px;
+        padding-right: 10px;
+        spacing: 8px;
+        alignment: start;
+
+        Rectangle {
+            width: 6px; height: 6px;
+            border-radius: 3px;
+            background: entry.level == "Success" ? Tokens.success :
+                        entry.level == "Warn" ? Tokens.warning :
+                        entry.level == "Error" ? Tokens.danger :
+                        Tokens.log-time;
+        }
+        Text {
+            text: entry.time;
+            color: Tokens.log-time;
+            font-size: 12px;
+            font-family: "Cascadia Mono, Consolas, monospace";
+            vertical-alignment: center;
+        }
+        Text {
+            text: entry.tag;
+            color: Tokens.log-tag;
+            font-size: 12px;
+            font-family: "Cascadia Mono, Consolas, monospace";
+            vertical-alignment: center;
+            visible: entry.tag != "";
+        }
+        Text {
+            text: entry.text;
+            color: entry.level == "Success" ? Tokens.success :
+                   entry.level == "Warn" ? Tokens.warning :
+                   entry.level == "Error" ? Tokens.danger :
+                   Tokens.text-primary;
+            font-size: 12px;
+            font-family: "Cascadia Mono, Consolas, monospace";
+            vertical-alignment: center;
+            overflow: elide;
+        }
+    }
+    area := TouchArea {}
+}
+
+export component LogViewer inherits Window {
+    in property <[LogEntry]> rows;
+    in property <string> status: "待机 · 未连接 Worker";
+    in property <int> count: 0;
+    callback clear-requested();
+
+    title: "EfootballBot · 测试版 (Rust/Slint)";
+    width: 860px;
+    height: 560px;
+    background: Tokens.window-bg;
+
+    VerticalLayout {
+        padding: 0px;
+        spacing: 0px;
+
+        // 顶栏
+        Rectangle {
+            height: 52px;
+            background: Tokens.card-bg;
+            HorizontalLayout {
+                padding-left: 20px; padding-right: 20px;
+                alignment: space-between;
+                VerticalLayout {
+                    alignment: center;
+                    spacing: 2px;
+                    Text {
+                        text: "运行日志";
+                        color: Tokens.text-primary;
+                        font-size: 16px;
+                        font-weight: 700;
+                    }
+                    Text {
+                        text: root.status;
+                        color: Tokens.text-muted;
+                        font-size: 11px;
+                    }
+                }
+                HorizontalLayout {
+                    alignment: end;
+                    spacing: 10px;
+                    Text {
+                        text: root.count + " 条";
+                        color: Tokens.text-muted;
+                        font-size: 12px;
+                        vertical-alignment: center;
+                    }
+                    Button {
+                        text: "清空";
+                        clicked => { root.clear-requested(); }
+                    }
+                }
+            }
+        }
+        // 顶栏分隔线
+        Rectangle { height: 1px; background: Tokens.card-border; }
+
+        // 日志列表
+        Rectangle {
+            background: Tokens.inset-bg;
+            ScrollView {
+                width: 100%;
+                height: 100%;
+                VerticalLayout {
+                    spacing: 1px;
+                    padding: 6px;
+                    for entry in root.rows: LogRow { entry: entry; }
+                }
+            }
+        }
+    }
+}

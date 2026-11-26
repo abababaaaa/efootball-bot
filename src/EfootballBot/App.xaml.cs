@@ -18,6 +18,12 @@ public partial class App : Application
     /// <summary>命令行 --page 指定的初始页面（如 settings:display / network / about），未指定为 null。</summary>
     public static string? StartupPage { get; private set; }
 
+    /// <summary>命令行 --shot 指定的截图输出路径：渲染主窗口后存 PNG 并退出（UI 回归用）。</summary>
+    public static string? ShotPath { get; private set; }
+
+    /// <summary>命令行 --shot-size WxH：截图前把窗口设为该尺寸（模拟用户窗口大小）。</summary>
+    public static (int W, int H)? ShotSize { get; private set; }
+
     public App()
     {
         var args = Environment.GetCommandLineArgs().Skip(1).ToArray();
@@ -36,6 +42,20 @@ public partial class App : Application
             if (args[i] == "--page" && i + 1 < args.Length) StartupPage = args[i + 1];
             else if (args[i].StartsWith("--page=", StringComparison.Ordinal))
                 StartupPage = args[i]["--page=".Length..];
+            // --shot <png>：布局落定后把主窗口渲染成 PNG 再退出；--shot-size 1575x975 先定尺寸。
+            // 与 --page 配合就是一条完整的「按指定尺寸/页面出图」回归链（不需要有桌面会话）。
+            else if (args[i] == "--shot" && i + 1 < args.Length) ShotPath = args[i + 1];
+            else if (args[i].StartsWith("--shot=", StringComparison.Ordinal))
+                ShotPath = args[i]["--shot=".Length..];
+            else if (args[i] == "--shot-size" && i + 1 < args.Length) ShotSize = ParseSize(args[i + 1]);
+            else if (args[i].StartsWith("--shot-size=", StringComparison.Ordinal))
+                ShotSize = ParseSize(args[i]["--shot-size=".Length..]);
+        }
+        static (int W, int H)? ParseSize(string text)
+        {
+            string[] parts = text.Split('x', 'X', '*');
+            return parts.Length == 2 && int.TryParse(parts[0], out int w) && int.TryParse(parts[1], out int h)
+                ? (w, h) : null;
         }
         if (args.Length > 0 && args[0] is "--dump" or "--cn-dump")
         {
@@ -262,7 +282,26 @@ public partial class App : Application
         AppPaths.MigrateLegacyData();
         // 更新收尾（每次启动）：中断还原 .old / 延迟清理旧版备份（无更新残留时无事发生）
         UpdateApplier.FinalizeAfterUpdate();
-        new MainWindow().Show();
+        var win = new MainWindow();
+        if (ShotPath is { } shotPath)
+        {
+            // UI 回归出图：等布局/淡入落定 → 渲染 PNG → 退出。只用于截图回归，正常启动不走这里。
+            win.ContentRendered += async (_, _) =>
+            {
+                await Task.Delay(1500);
+                try
+                {
+                    win.SnapshotToPng(shotPath);
+                    Console.WriteLine($"SHOT OK: {shotPath}");
+                }
+                catch (Exception ex)
+                {
+                    Console.WriteLine($"SHOT FAIL: {ex.Message}");
+                }
+                Shutdown();
+            };
+        }
+        win.Show();
         StartPipeServer();
 
         // 上次非正常退出（强制关闭/更新重启/崩溃）可能把游戏窗口丢在屏幕外：启动即还原

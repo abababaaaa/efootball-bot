@@ -23,20 +23,75 @@ namespace EfootballBot.Core.Bot.Match;
 public static partial class MatchBrain
 {
     /// <summary>
-    /// 记分牌时钟词（独立短词，如 0:57 / 45:00）。只匹配时钟形态——时钟是比赛 UI 固定元素，
-    /// 形态稳定；比分/球队名/球员名每场都变，一律不作为判定点（用户约定 2026-10-10）。
+    /// 记分牌时钟词（独立短词，如 0:57 / 45:00 / 38：28）。只匹配时钟形态——时钟是比赛 UI
+    /// 固定元素，形态稳定；比分/球队名/球员名每场都变，一律不作为判定点（用户约定 2026-10-10）。
+    /// 2026-11-25 实机（国际服教练模式，左上黄色比分板）：OCR 把冒号读成全角「：」，
+    /// 老正则只认半角冒号 → 整场被判「无时钟过场」，每秒连按 A 把球乱传。故冒号放宽到
+    /// <c>: ： ;</c> 三种并允许空白。
     /// </summary>
-    private static readonly Regex ClockStandalone = new(@"^\d{1,3}:[0-5]\d$", RegexOptions.Compiled);
-    /// <summary>比分框内嵌时钟（OCR 常把时钟与队名合并成一个词，如 "GS 14:47 e"）。</summary>
-    private static readonly Regex ClockEmbedded = new(@"\d{1,3}:[0-5]\d", RegexOptions.Compiled);
+    private static readonly Regex ClockStandalone = new(@"^\d{1,3}\s*[:：;]\s*[0-5]\d$", RegexOptions.Compiled);
+    /// <summary>比分框内嵌时钟（OCR 常把时钟与队名合并成一个词，如 "GS 14:47 e"）。词长上限
+    /// 放宽到 20：黄色比分板常把「FRA 2 - 0 ALB 38:28」读成一整块，超过 12 会被静默丢掉。</summary>
+    private static readonly Regex ClockEmbedded = new(@"\d{1,3}\s*[:：;]\s*[0-5]\d", RegexOptions.Compiled);
     /// <summary>
     /// 比分框区（左上，x&lt;0.45 / y&lt;0.25）：时钟词落在此区 = 比赛进行中（主判据）。
     /// 实机（2026-10-10 16:22 截图）：比分框时钟 "0:31" @y≈0.087。
     /// </summary>
-    private static bool HasScoreboard(OcrResult ocr) =>
-        ocr.Words.Any(w => w.CenterX < 0.45 && w.CenterY < 0.25 &&
-            (ClockStandalone.IsMatch(w.Text.Trim()) ||
-             (w.Text.Trim().Length <= 12 && ClockEmbedded.IsMatch(w.Text))));
+    /// <param name="allowGluedClock">允许「冒号被 OCR 整条吞掉」的形态（38:28 → 3828）。
+    /// 仅比赛内放宽（见 <see cref="HasLiveMatchHud"/>）：菜单页左上也可能有 4 位数字
+    /// （积分/ID），全局分类里认它会把菜单误判成比赛中盲按 A。</param>
+    private static bool HasScoreboard(OcrResult ocr, bool allowGluedClock = false) =>
+        ocr.Words.Any(w =>
+        {
+            if (w.CenterX >= 0.45 || w.CenterY >= 0.25) return false;
+            string t = w.Text.Trim();
+            if (ClockStandalone.IsMatch(t)) return true;
+            if (t.Length <= 20 && ClockEmbedded.IsMatch(t)) return true;
+            if (!allowGluedClock || t.Length != 4 || !t.All(char.IsDigit)) return false;
+            // 「3828」= 38:28 丢了冒号。要求秒位 ≤59，且同一帧左上确实有队名缩写
+            // （FRA/ALB）——没有队名的 4 位数字可能只是积分/编号，不认。
+            return int.Parse(t[2..]) <= 59 && HasTeamAbbrev(ocr);
+        });
+
+    /// <summary>左上比分框内的队名缩写（2~4 位 ASCII 全大写字母，如 FRA / ALB / GS）。</summary>
+    private static bool HasTeamAbbrev(OcrResult ocr) =>
+        ocr.Words.Any(w =>
+        {
+            if (w.CenterX >= 0.45 || w.CenterY >= 0.25) return false;
+            string t = w.Text.Trim();
+            return t.Length is >= 2 and <= 4 && t.All(c => c is >= 'A' and <= 'Z');
+        });
+
+    /// <summary>
+    /// 比赛内「这帧真在踢」的证据：比 <c>HasScoreboard</c> 宽一档（含全角冒号、冒号被吞、
+    /// 队名+数字粘连整块、比分/时钟被拆成两个词）。只给 InMatch 分支用——那里画面已由草地/
+    /// 角区探针确认为球场，判宽了不会误伤菜单；判窄了就会把 Live Match 当成过场动画每秒连按 A。
+    /// </summary>
+    public static bool HasLiveMatchHud(OcrResult ocr)
+        => HasScoreboard(ocr, allowGluedClock: true) || HasSplitHudRow(ocr);
+
+    /// <summary>
+    /// 左上比分框的「数字排」：同一行（|Δy| &lt; 0.02、横距 &lt; 0.20）两枚 1~2 位纯数字，
+    /// 且该区有队名缩写。覆盖两种 OCR 表现：①时钟被拆成两个词「38」「28」；
+    /// ②比分「2 - 0」被拆成两个词。两种都只出现在比分板上 = 比赛进行中。
+    /// </summary>
+    private static bool HasSplitHudRow(OcrResult ocr)
+    {
+        if (!HasTeamAbbrev(ocr)) return false;
+        var nums = ocr.Words
+            .Where(w => w.CenterX < 0.45 && w.CenterY < 0.25)
+            .Select(w => (w.CenterX, w.CenterY, T: w.Text.Trim()))
+            .Where(n => n.T.Length is >= 1 and <= 2 && n.T.All(char.IsDigit))
+            .ToList();
+        for (int i = 0; i < nums.Count; i++)
+            for (int j = i + 1; j < nums.Count; j++)
+                if (Math.Abs(nums[i].CenterY - nums[j].CenterY) < 0.02 &&
+                    Math.Abs(nums[i].CenterX - nums[j].CenterX) < 0.20)
+                    return true;
+        return false;
+    }
+
+
     /// 分类当前界面。<paramref name="topRightHasContent"/> 来自右上角像素探针（Scenario 计算）：
     /// 比赛画面右上角是球场/AI 徽标区（非黑，实机菜单帧右上角为纯黑），
     /// 作为"比赛中"的辅助判据——仅在所有菜单类判定都未命中时兜底，防止误伤亮色菜单页。
@@ -92,6 +147,14 @@ public static partial class MatchBrain
              ocr.ContainsJoined("体育场")) &&
             (FindBottomPushWord(ocr) is not null ||
              ocr.Lines.Any(l => l.CenterY > 0.80 && l.Text.Contains("下一步")));
+        // 起始页形态③（2026-11-25 实机：底栏「X 设置 | Y 球场 | RT 下一步」，OCR 常把
+        // 「下一步」读成「下—步/下＿步」或整行漏读）：只要底栏一带同时有「设置」+「球场」
+        // 两个说明键，就是这张起始页。★必须在这里拦住——落到通用 btn_confirm 会判 HasConfirm，
+        // 再走上移+A，A 就落在「Y 球场」上把球场选择打开（用户看到「怎么按了 Y」）。
+        bool bottomButtonsStartPage =
+            !ocr.ContainsJoined("取消") && !ocr.ContainsJoined("关闭") &&
+            ocr.ContainsJoined("球场") && ocr.ContainsJoined("设置") &&
+            ocr.Words.Any(w => w.CenterY > 0.78);
         bool warmupStartPage =
             !ocr.ContainsJoined("整体实力") &&
             !ocr.ContainsJoined("赛程表") && !ocr.ContainsJoined("活动设置") &&
@@ -100,7 +163,7 @@ public static partial class MatchBrain
              ocr.ContainsJoined("比赛计划") &&
              (ocr.Words.Any(w => w.CenterY > 0.80 && w.NormText.Contains("前往比赛")) ||
               ocr.Lines.Any(l => l.CenterY > 0.80 && l.Text.Replace(" ", "").Contains("前往比赛"))));
-        if (stadiumStartPage || warmupStartPage)
+        if (stadiumStartPage || bottomButtonsStartPage || warmupStartPage)
             return MatchScreen.MatchStartPage;
         // ---- 防掉线重登链（eFootball 2027 v6.1.0 实机 8 帧，2026-10-19）：----
         // 付款确认弹窗（抽取页误按后弹出）：标题「付款确认」+「取消」。★必须最先判——
@@ -230,7 +293,22 @@ public static partial class MatchBrain
         //   只在同屏有「跳过比赛」时剔除，其余页面的判定逐字不变。
         int confirmBtns = Count("btn_confirm");
         if (ocr.ContainsJoined("跳过比赛")) confirmBtns -= BannerCornerConfirms(dets);
-        if (confirmBtns >= 1) return MatchScreen.HasConfirm;
+        if (confirmBtns >= 1)
+        {
+            // ★2026-11-25 实机：真在踢的画面里 YOLO 也会检出 btn_confirm（比分板/小地图/球员条），
+            // 旧规则无条件判 HasConfirm → 比赛内被当成弹窗链，按 2s→5s 节奏一直按 A，球员乱传。
+            // 现在只在「确实像弹窗」时才判 HasConfirm：有弹窗按钮词（取消/关闭/确定/确认/下一步），
+            // 或者是赛中/赛后那两种已知弹窗（今天的进球 / 比赛回放）。
+            // 反之：画面还是球场（pitchLike）+ 左上时钟在 + 没有任何弹窗词 → 就是比赛画面。
+            bool popupWords = ocr.ContainsJoined("取消") || ocr.ContainsJoined("关闭") ||
+                              ocr.ContainsJoined("确定") || ocr.ContainsJoined("确认") ||
+                              ocr.ContainsJoined("下一步") || ocr.ContainsJoined("今天的进球") ||
+                              ocr.ContainsJoined("比赛回放");
+            if (!popupWords && pitchLike && HasScoreboard(ocr) &&
+                !IsDifficultyChoice(ocr) && !IsGameSettingsDialog(ocr))
+                return MatchScreen.InMatch;
+            return MatchScreen.HasConfirm;
+        }
         // 赛中/赛后弹窗（2026-10-10 实机截图）：「今天的进球」「比赛回放」弹出即按 A 下一步，
         // 必须先于比赛判定——这两种弹窗背景仍是球场（角区有内容），否则被判 InMatch 干等
         if (ocr.ContainsJoined("今天的进球") || ocr.ContainsJoined("比赛回放"))

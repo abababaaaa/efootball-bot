@@ -28,7 +28,7 @@ public partial class MainWindow
     // 用户要求：每次开启软件默认停在「更新」页（不再默认游戏模块）。
     private NavMode _currentNav = NavMode.Home;
 
-    private NavMode _lastToolNav = NavMode.Settings;
+    private NavMode _lastSettingsNav = NavMode.Settings;
     private bool _suppressTopNav;
     private bool _suppressSubTab;
 
@@ -96,9 +96,10 @@ public partial class MainWindow
         {
             case "Home": NavigateTo(NavMode.Home); break;
             case "Game": NavigateTo(NavMode.Game); break;
-            case "About": NavigateTo(NavMode.About); break;
-            default:
-                NavigateTo(_lastToolNav is NavMode.Game or NavMode.About ? NavMode.Settings : _lastToolNav);
+            // 「设置」一级分区（原「工具」+「关于」合并）：回到上次看的那一页，
+            // 上次停在挂机（不属于本分区）时才落到设置首页。
+            case "Settings":
+                NavigateTo(_lastSettingsNav == NavMode.Game ? NavMode.Settings : _lastSettingsNav);
                 break;
         }
     }
@@ -128,7 +129,8 @@ public partial class MainWindow
     /// </summary>
     private void SecTabByIndex_Checked(object sender, RoutedEventArgs e) { }
 
-    /// <summary>设置页子分段：只显示 Tag 指定的那块（防检测 / 赛后活动 / 挂机节奏）。</summary>
+    /// <summary>设置页子分段：只显示 Tag 指定的那块（防检测 / 画面与性能 / 手柄与输入 / 挂机与日志）。
+    /// 赛后活动任务与挂机节奏已下放到各挂机模块页，不再是设置页的子分段。</summary>
     private void SecTab_Checked(object sender, RoutedEventArgs e)
     {
         if (!IsLoaded) return;
@@ -145,7 +147,7 @@ public partial class MainWindow
             return;
         }
 
-        // 设置页镜像页签：Imp1/2/3 走 Important 块内的子分段；
+        // 设置页镜像页签：Imp1 走 Important 块内的子分段；
         // RbSetDisplay/Input/Daily 走各自独立的内容块。之前后三个误用 SubTab_Checked，
         // 其 ShowByTag 不认识 RbSet*，导致内容不切换、选中态也不常驻 —— 这里统一处理。
         ApplySettingsSection(target);

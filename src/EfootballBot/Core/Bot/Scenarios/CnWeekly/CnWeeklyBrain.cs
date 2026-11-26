@@ -69,11 +69,33 @@ public enum CwScreen
     /// 处置：选评价数字更大的那张卡按 A 进详情（评价每周给的两个教练不同，只比数字）。</summary>
     CoachSelect,
     /// <summary>教练资料页（签下前）：黄字教练名 + 年龄/国家·地区/球队/类别 +
-    /// 球队风格熟练度表 + 底栏「RT 确认选择」。处置：A 下一步（不生效改 RT）。</summary>
+    /// 球队风格熟练度表 + 底栏「RT 确认选择」。处置：RT 确认（不生效退阶 A、鼠标点确认）。</summary>
     CoachDetail,
     /// <summary>签下确认弹窗（盖在教练资料页上）：「签下确认」标题 + 说明 +
-    /// 确认（默认焦点，蓝色高亮）/取消 两键。处置：A 确认。</summary>
+    /// 确认（默认焦点，蓝色高亮）/取消 两键。处置：RT 确认（不生效退阶 A、鼠标点确认）。</summary>
     SignConfirm,
+    /// <summary>「阵容奖励」选择页（2026-11-25 国服实机：周活动赛后弹出的活动内升级奖励）：
+    /// 标题 阵容奖励 + 三块面板 前锋/中场/后场捆绑包，每块两块球员卡、卡底各印一个评级字母
+    /// （A/B/C/D 四种颜色）+ 底部「选择一个阵容强化奖励」+ 右下「RT 下一步」。
+    /// 处置：六卡评级两两求和，选分最高的那一组（同分 前锋 &gt; 中场 &gt; 后场），
+    /// 鼠标点该面板标题处 → 卡面变蓝并打勾 → RT 下一步。</summary>
+    SquadRewardPick,
+    /// <summary>「特殊奖励」选择页（2026-11-25 国服实机：紧随阵容奖励之后的第二页）：
+    /// 标题 特殊奖励 + 三块面板 前锋/中场/后场球员等级提升（卡底「球员等级提升至 N 级」）
+    /// + 每块一张「选择」按钮 + 底部「选择一个等级强化奖励」+ 右下「RT 下一步」。
+    /// 处置：N&gt;40 的一律不选，剩下的选 N 最小的（同数 前锋 &gt; 中场 &gt; 后场），
+    /// 鼠标点该面板「球员 xx」标题处 → 卡面变蓝/按钮变「已选 ✓」→ RT 下一步。</summary>
+    LevelRewardPick,
+    /// <summary>选完奖励后的领取结果弹窗（2026-11-25 国服实机，两页都选完后连弹两个）：
+    /// ①「新球员加入！」+ 两张球员卡 + 「二位球员已经加入你的挑战阵容」+ 白色「确定」；
+    /// ②「奖励已发放至收件箱」+ 金币 ×40 + 青色高亮「确定」。
+    /// 处置：RT → A → 后台鼠标点「确定」三级（用户实测这类弹窗最终只有鼠标点得动）。</summary>
+    CwRewardResultPopup,
+    /// <summary>「重新挑战」消耗资金确认弹窗（2026-11-25 实机，晋级挑战重试用完/手动重试时弹出）：
+    /// 标题「重新挑战」+ 副文案「消耗资金可重新挑战当前关卡」+ 上排蓝色高亮「资金 5000」（默认
+    /// 焦点）+ 下排白色「取消」。处置：**直接确认，绝不上移**——默认焦点已经在这枚推进键上，
+    /// 上移只会循环到「取消」，白耗一次重试机会（用户 2026-11-25 定）。</summary>
+    RechallengeConfirm,
 }
 
 /// <summary>
@@ -95,6 +117,24 @@ public static partial class CnWeeklyBrain
     /// </summary>
     public static CwScreen Classify(IReadOnlyList<YoloDetection> dets, OcrResult ocr)
     {
+        // ★最优先：赛后「活动内升级奖励」两页（2026-11-25 国服实机）。
+        // 这两页底栏只有「RT 下一步」，落 None 会被共享决策当普通确认页直接下一步，
+        // 一个奖励都选不到（相当于白打）。两页都是全屏独立页、词也自成一套，放在最前面不会误伤。
+        if (IsSquadRewardPick(ocr))
+            return CwScreen.SquadRewardPick;
+        if (IsLevelRewardPick(ocr))
+            return CwScreen.LevelRewardPick;
+        // 选完之后的领取结果弹窗：背景是活动主页（前往比赛/通关奖励都在），不先认出来会被
+        // 当成主页按 A 前往比赛，弹窗永远关不掉。
+        if (IsRewardResultPopup(ocr))
+            return CwScreen.CwRewardResultPopup;
+        // ★「重新挑战」消耗资金确认弹窗（2026-11-25 实机）：标题「重新挑战」与底栏 RT 按钮同名，
+        // 只靠它分不开；副文案「消耗资金可重新挑战当前关卡」是这枚弹窗独有的（可按「消耗资金」命中）。
+        // 弹窗盖在挑战卡页上、底栏「重置/重新挑战」仍可见，不先判会被 bracketBody 吃掉，
+        // 或落 None 交共享流程走「上移+A」——上移会循环到「取消」，白耗一次重试
+        // （用户 2026-11-25 定：必须确认，不要取消）。
+        if (ocr.ContainsJoined("消耗资金"))
+            return CwScreen.RechallengeConfirm;
         bool squadBody = ocr.ContainsJoined("球队阵容列表") || ocr.ContainsJoined("自动配置球员");
         bool eventHomeBody = ocr.ContainsJoined("教练入场") ||
             (ocr.ContainsJoined("比赛历史") && ocr.ContainsJoined("下场比赛"));

@@ -16,7 +16,8 @@ namespace EfootballBot.Core.Bot.Scenarios.Weekly;
 
 public static partial class WeeklyBrain
 {
-    // 本文件小活动：阵容挑战（Team Effort）—— 主页、球员卡限制弹窗、阵容页侧边栏、比赛计划红点。
+    // 本文件小活动：阵容挑战（Team Effort）—— 主页、完成态「活动已完成」、球员卡限制弹窗、
+    // 阵容页侧边栏、比赛计划红点。
 
     // ---------------- 阵容挑战 / Team Effort（2026-11-19 用户实机三帧） ----------------
     /// <summary>
@@ -27,10 +28,29 @@ public static partial class WeeklyBrain
     /// 胜场积分 / 球员加分」，这边一条都没有；两边共用「前往比赛」这一个按钮，靠后者区分。
     /// 「赛事等级」只在「下一场比赛」漏读时作替补（它同样印在主页右栏），不作必需项——
     /// 活动设置浮层里也有同名词，多认一条只会扩大误判面。
+    /// 赛程打完的活动（<see cref="IsActivityCompleted"/>）主页**没有**「下一场比赛」行：
+    /// 标题被换成「活动已完成 / 不要忘记从收件箱领取奖励哦。」，若不收这一态，整页会漏成
+    /// WkScreen.None + MatchBrain.HasConfirm（底栏 B 返回的蓝框）→ 场景层按「弹窗」盲按 A，
+    /// 在已完成的活动上反复按前往比赛（用户 2026-11-27 实机）。
     /// </summary>
     public static bool IsTeamEffortHome(OcrResult ocr)
         => ocr.ContainsJoined("前往比赛") && ocr.ContainsJoined("赛程") &&
-           (ocr.ContainsJoined("下一场比赛") || ocr.ContainsJoined("赛事等级"));
+           (ocr.ContainsJoined("下一场比赛") || ocr.ContainsJoined("赛事等级") ||
+            IsActivityCompleted(ocr));
+
+    /// <summary>
+    /// 阵容挑战主页的完成态「活动已完成」（2026-11-27 用户国际服实机帧）：赛程三场全部打完、
+    /// 三段奖励全勾，主页中部标题换成**固定文案**「活动已完成」+ 副标题
+    /// 「不要忘记从收件箱领取奖励哦。」。此时游戏不再接受开赛（主页已无「下一场比赛」行），
+    /// 用户规则是**判定完成就直接退出、不再开赛**（场景层拉黑槽位 → B 回活动列表换下一个）。
+    /// 判据只用固定 UI 文案：活动名（Team Effort）/ 队徽 / 比分 / 奖励数值每周轮换，禁作判定点。
+    /// 实机帧 OCR：「活动已完成」@(0.45,0.23)、「不要忘记从收件箱领取奖励哦。」@(0.45,0.27)。
+    /// 标题漏读时用副标题的**连续片段**「收件箱领取奖励」兜底（拼接串无分隔，OCR 把副标题拆成
+    /// 几个词也照样命中；不用「收件箱」+「领取奖励」两条独立判据——那会扩大到其它页面的邮件类文案）。
+    /// 实机进度条虽也全绿，但绿条与金色光斑同屏，不作判据。
+    /// </summary>
+    public static bool IsActivityCompleted(OcrResult ocr)
+        => ocr.ContainsJoined("活动已完成") || ocr.ContainsJoined("收件箱领取奖励");
 
     /// <summary>
     /// 阵容挑战入场弹窗「球员卡限制 / OK」判定（2026-11-19 用户实机帧）：标题行固定文案

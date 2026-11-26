@@ -61,9 +61,43 @@ public partial class MainWindow
         ThemeManager.ApplyWindowBackdrop(this, _cfg.Appearance.Backdrop, _cfg.Appearance.World);
     }
 
+    /// <summary>
+    /// UI 回归出图：把当前窗口内容整幅渲染成 PNG（配合 <c>--shot</c> / <c>--shot-size</c> 用）。
+    /// 纯渲染，不改任何界面状态、不触发导航；用于核对「一屏放不放得下」这类布局问题。
+    /// </summary>
+    public void SnapshotToPng(string path)
+    {
+        UpdateLayout();
+        var dpi = VisualTreeHelper.GetDpi(this);
+        int w = (int)Math.Ceiling(ActualWidth * dpi.DpiScaleX);
+        int h = (int)Math.Ceiling(ActualHeight * dpi.DpiScaleY);
+        if (w <= 0 || h <= 0) throw new InvalidOperationException($"窗口尺寸异常：{ActualWidth}x{ActualHeight}");
+        var rtb = new RenderTargetBitmap(w, h, 96 * dpi.DpiScaleX, 96 * dpi.DpiScaleY, PixelFormats.Pbgra32);
+        rtb.Render(this);
+        var encoder = new PngBitmapEncoder();
+        encoder.Frames.Add(BitmapFrame.Create(rtb));
+        string full = System.IO.Path.GetFullPath(path);
+        string? dir = System.IO.Path.GetDirectoryName(full);
+        if (!string.IsNullOrEmpty(dir)) System.IO.Directory.CreateDirectory(dir);
+        using var fs = System.IO.File.Create(full);
+        encoder.Save(fs);
+    }
+
     public MainWindow()
     {
         InitializeComponent();
+        // UI 回归出图（--shot）：先把窗口定到指定尺寸，布局/换行才会按那张尺寸算
+        if (App.ShotSize is { } shotSize)
+        {
+            Width = shotSize.W;
+            Height = shotSize.H;
+            MinWidth = 0;
+            MinHeight = 0;
+            WindowStartupLocation = WindowStartupLocation.Manual;
+            Left = 0;
+            Top = 0;
+        }
+        InitModuleSettingBindings();
         InitModuleRuns();
         _cfg = AppConfig.Load();
 
@@ -96,8 +130,10 @@ public partial class MainWindow
         // 页脚版本：Win11 世界的界面不再挂旧品牌名，只留版本号本身
         TxtVersionChip.Text = $"v{Updater.FormatVersion(typeof(MainWindow).Assembly.GetName().Version)}";
 
-        AppendLog($"应用启动：v{Updater.FormatVersion(typeof(MainWindow).Assembly.GetName().Version)}，" +
-            $"{Environment.OSVersion.VersionString}", LogLevel.Info);
+        // 一行放得下（日志面板 10.5px 等宽）：v7.5.3 · Win10.0.26320 这种短形态
+        AppendLog($"启动 v{Updater.FormatVersion(typeof(MainWindow).Assembly.GetName().Version)}" +
+            $" · Win{Environment.OSVersion.Version.Major}.{Environment.OSVersion.Version.Minor}" +
+            $".{Environment.OSVersion.Version.Build}", LogLevel.Info);
 
         // 启动后自动检查更新（不阻塞 UI）
         _ = AutoCheckUpdateOnStartupAsync();
@@ -332,17 +368,21 @@ public partial class MainWindow
 
     private async Task ToggleScenarioAsync(Button btn, string? mode)
     {
-        if (_starting) return;
         var host = GetOrCreateWorkerHost();
+
+        // ★「一键结束」必须永远可达：先判运行态，再判 _starting。
+        //   旧顺序第一行就是 `if (_starting) return;`——启动流程还挂着（冷启动握手 + 引擎起手的
+        //   十几秒）时点「结束」会被静默吞掉，用户看到的就是"点了停止没反应、游戏还在被操作"。
+        if (host.ScenarioRunning && (_activeStartBtn == btn || _activeStartBtn is null))
+        {
+            await StopScenarioAsync();
+            return;
+        }
+        if (_starting) return;
 
         bool switching = false;
         if (host.ScenarioRunning)
         {
-            if (_activeStartBtn == btn || _activeStartBtn is null)
-            {
-                await StopScenarioAsync();
-                return;
-            }
             switching = true;
             _starting = true;
             try
@@ -676,6 +716,9 @@ public partial class MainWindow
         try { _inGame?.Stop(); } catch { }
         try { _overlay?.Close(); } catch { }
         EfootballBot.Core.System.FastGithubKernel.StopWatchdog();
+        // 关程序同样是「停止」：先拉手柄总闸（GUI 侧写共享内存撤 ACTIVE + 清零），
+        // 游戏下一帧就松手，不依赖 Worker 是否还活着/响应得过来
+        EfootballBot.Core.Input.PadPanicGate.Panic();
         // 先杀 Worker（虚拟手柄随引擎停止断开），再走停靠还原——
         // ★必须先于停靠还原：Worker 里的停靠看门狗存活期间会把刚还原的窗口再移出屏幕，
         //   而还原记录已被删除，游戏就永远留在屏幕外（挂机中直接关主窗口的实测路径）

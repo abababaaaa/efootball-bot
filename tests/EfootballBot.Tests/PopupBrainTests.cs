@@ -238,6 +238,53 @@ public class PopupBrainTests
         Assert.True(PopupBrain.IsReconnectDialog(frame, ReconnectOcr()));
     }
 
+    // ---------------- 实机窗口边框（WGC 整窗帧）几何 ----------------
+    //
+    // 实机 FrameData 不是 1280×720 内容帧，而是 WGC 整窗帧 = 客户区 + 窗口标题栏/边框
+    // （客户区 1280×720 → 帧 1282×759，顶部约 31px 是**窗口标题栏**）。浅色标题栏会把
+    // 「弹窗四周近黑」「右上角纯黑=菜单页」这类贴顶判据带偏。
+    /// <summary>按整窗帧几何包一层边框：顶部整条按 titleLuma 填（模拟浅色标题栏）。</summary>
+    private static FrameData PadWithTitleBar(FrameData src, int left, int right, int top, int bottom, byte titleLuma)
+    {
+        int w = src.Width + left + right, h = src.Height + top + bottom;
+        var dst = new byte[w * h * 4];
+        for (int i = 3; i < dst.Length; i += 4) dst[i] = 255;
+        for (int y = 0; y < top; y++)
+            for (int x = 0; x < w; x++)
+            {
+                int i = (y * w + x) * 4;
+                dst[i] = titleLuma; dst[i + 1] = titleLuma; dst[i + 2] = titleLuma;
+            }
+        for (int y = 0; y < src.Height; y++)
+            Buffer.BlockCopy(src.Bgra, y * src.Width * 4, dst, ((y + top) * w + left) * 4, src.Width * 4);
+        return new FrameData(dst, w, h, 0);
+    }
+
+    [Fact]
+    public void ReconnectDialog_StillDetected_WhenFrameHasLightTitleBar()
+    {
+        var content = ReconnectLayout(retryFocused: false);
+        Assert.True(PopupBrain.IsReconnectDialog(content, ReconnectOcr()), "内容帧基线");
+
+        // 客户区 1280×720 → 帧 1282×759，顶部 31px 浅灰白标题栏（Win11 浅色主题）
+        var framed = PadWithTitleBar(content, 1, 1, 31, 8, 205);
+        Assert.True(PopupBrain.IsReconnectDialog(framed, ReconnectOcr()),
+            "整窗帧带浅色标题栏时仍必须认出重连弹窗（旧实现顶带 0.02~0.10 全被标题栏占满 → 判死）");
+        Assert.True(PopupBrain.IsReconnectDialog(framed, OcrResult.Empty), "OCR 全灭时也要靠版式兜住");
+    }
+
+    [Fact]
+    public void CornerProbe_IgnoresWindowTitleBar()
+    {
+        var menu = MakeBlackFrame(1280, 720);   // 菜单页右上角纯黑
+        Assert.False(ScreenProbe.CornerHasContent(menu));
+
+        // 旧实现区域从 0.03 起，浅色标题栏（y 0~0.041）会把它拉成「有内容」→ 菜单页被 InMatch 兜底
+        var framed = PadWithTitleBar(menu, 1, 1, 31, 8, 205);
+        Assert.False(ScreenProbe.CornerHasContent(framed),
+            "整窗帧右上角探针不许把窗口标题栏当成画面内容");
+    }
+
     [Fact]
     public void ReconnectDialog_IgnoreOrdinaryPopup()
     {

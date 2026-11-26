@@ -1,0 +1,8 @@
+[package]
+name = "bot-state"
+version = "0.1.0"
+edition = "2021"
+description = "引擎注册表/导航/配置的单一真源，从 C# ModuleIds 与 NavRoute 导出，不依赖任何 UI 框架"
+
+[dependencies]
+bot-ipc = { path = "../bot-ipc" }

@@ -1,6 +1,25 @@
 [workspace]
 resolver = "2"
-members = ["vision-svc"]
+members = [
+  "vision-svc",
+  "crates/bot-ipc",
+  "crates/bot-state",
+  "crates/bot-theme",
+  "crates/bot-ui",
+  "crates/bot-preview",
+]
+
+# 依赖方向锁死（Rust 版 arch-guard）：
+#   bot-theme  ← 无依赖（纯常量/纯函数，两个 UI 框架共用）
+#   bot-ipc    ← serde only（协议层，不认识业务）
+#   bot-state  ← bot-ipc（模块清单/导航/配置，不认识任何 UI 框架）
+#   bot-ui     ← bot-ipc + bot-state + bot-theme（唯一允许装 Slint 的 crate）
+#   vision-svc ← 独立 sidecar，不依赖以上任何 crate（自带 proto.rs）
+# 禁止：bot-state/bot-theme 反向依赖 bot-ui；两个 UI crate 共享 GPU 设备/HWND。
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 
 [profile.release]
 opt-level = 3

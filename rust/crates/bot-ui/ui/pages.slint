@@ -1,0 +1,216 @@
+// 页面组件 —— 文案/结构从 C# MainWindow.xaml 忠实导出。
+import { Button, CheckBox, ComboBox, LineEdit, ScrollView } from "std-widgets.slint";
+import { Theme } from "theme.slint";
+
+export struct NavItem { label: string, desc: string }
+
+component PageHeader inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    height: 76px;
+    VerticalLayout { spacing: 4px; padding-left: 4px;
+        Text { text: root.title; color: Theme.text-primary; font-size: 20px; font-weight: 700; }
+        Text { text: root.subtitle; color: Theme.text-muted; font-size: 12px; }
+    }
+}
+
+component Card inherits Rectangle {
+    in property <string> title;
+    background: Theme.card-bg;
+    border-radius: Theme.radius;
+    border-width: 1px;
+    border-color: Theme.card-border;
+    VerticalLayout { padding: 16px; spacing: 10px;
+        Text { text: root.title; color: Theme.text-primary; font-size: 14px; font-weight: 600; }
+        @children
+    }
+}
+
+component TileIcon inherits Rectangle {
+    in property <string> glyph;
+    width: 32px; height: 32px; border-radius: 8px;
+    background: Theme.accent-soft;
+    Text { text: root.glyph; color: Theme.accent-glow; font-size: 15px;
+        horizontal-alignment: center; vertical-alignment: center; }
+}
+
+component HomeTile inherits Rectangle {
+    in property <string> glyph;
+    in property <string> title;
+    in property <string> desc;
+    callback clicked();
+    height: 56px;
+    border-radius: 8px;
+    background: tap.has-hover ? Theme.hover-overlay : transparent;
+    HorizontalLayout { spacing: 12px; padding-left: 4px; padding-right: 4px;
+        TileIcon { glyph: root.glyph; }
+        VerticalLayout { alignment: center; spacing: 2px;
+            Text { text: root.title; color: Theme.text-primary; font-size: 13px; font-weight: 600; }
+            Text { text: root.desc; color: Theme.text-muted; font-size: 11px; }
+        }
+        Text { text: "›"; color: Theme.text-muted; font-size: 20px; vertical-alignment: center; }
+    }
+    tap := TouchArea { clicked => { root.clicked(); } }
+}
+
+component GroupLabel inherits Text {
+    color: Theme.text-muted; font-size: 11px; font-weight: 600;
+}
+
+// ---------- Home（忠实复刻正式版首页）----------
+export component HomePage inherits Rectangle {
+    callback tile(string);
+    callback start();
+    callback feedback();
+    ScrollView { width: 100%; height: 100%;
+        VerticalLayout { padding-top: 34px; padding-bottom: 34px; padding-left: 40px; padding-right: 40px; spacing: 0px;
+            Rectangle { height: 12px; }
+            HorizontalLayout { spacing: 9px; height: 20px;
+                Rectangle { width: 7px; height: 7px; border-radius: 4px; background: Theme.accent-glow; }
+                Text { text: "eFootball 挂机助手"; color: Theme.text-secondary; font-size: 12px; font-weight: 600; vertical-alignment: center; }
+            }
+            Rectangle { height: 12px; }
+            Text { text: "把比赛跑完，剩下的交给它"; color: Theme.text-primary; font-size: 26px; font-weight: 600; }
+            Rectangle { height: 10px; }
+            Text { text: "手柄模拟 + 后台挂机：我的联赛、周活动、AI 天梯、种马培训自动跑完，游戏窗口不用置顶。";
+                color: Theme.text-muted; font-size: 13px; wrap: TextWrap.word-wrap; }
+            Rectangle { height: 20px; }
+            HorizontalLayout { spacing: 10px; height: 44px;
+                Button { text: "开始挂机"; clicked => { root.start(); } }
+                Button { text: "加群与反馈"; clicked => { root.feedback(); } }
+            }
+            Rectangle { height: 30px; }
+            HorizontalLayout { spacing: 28px;
+                VerticalLayout { horizontal-stretch: 1; spacing: 6px;
+                    GroupLabel { text: "国际服"; }
+                    HomeTile { glyph: "🏆"; title: "我的联赛"; desc: "核对难度 → 开赛 → 满级自动换人"; clicked => { root.tile("intl"); } }
+                    HomeTile { glyph: "📅"; title: "周活动"; desc: "按活动地图推进，刷满自动换活动"; clicked => { root.tile("intlweekly"); } }
+                    HomeTile { glyph: "📈"; title: "AI 天梯联赛"; desc: "组别循环冲级，可设达到组别停止"; clicked => { root.tile("intlladder"); } }
+                    HomeTile { glyph: "🐴"; title: "种马培训"; desc: "批量买入 0GP 种马或筛人练技巧"; clicked => { root.tile("intlstudtrain"); } }
+                }
+                VerticalLayout { horizontal-stretch: 1; spacing: 6px;
+                    GroupLabel { text: "国服"; }
+                    HomeTile { glyph: "🛡"; title: "天梯巅峰赛"; desc: "教练模式单场循环，场次用尽自动停"; clicked => { root.tile("cndaily"); } }
+                    HomeTile { glyph: "📅"; title: "国服周活动"; desc: "比赛活动冠军赛，自动报名配阵打满整期"; clicked => { root.tile("cnweekly"); } }
+                    HomeTile { glyph: "🏆"; title: "国服我的联赛"; desc: "自动核对难度、购加成道具并打完联赛"; clicked => { root.tile("cnmyleague"); } }
+                    Rectangle { height: 8px; }
+                    GroupLabel { text: "工具"; }
+                    HomeTile { glyph: "🌐"; title: "网络监测"; desc: "服务器测速 + 游戏内连接监控"; clicked => { root.tile("network"); } }
+                    HomeTile { glyph: "⚙"; title: "常规设置"; desc: "防检测、全局热键、捕获识别与通知"; clicked => { root.tile("settings"); } }
+                }
+            }
+            Rectangle { height: 26px; }
+            Rectangle { height: 1px; background: Theme.card-border; }
+            Rectangle { height: 12px; }
+            HorizontalLayout {
+                VerticalLayout { horizontal-stretch: 1; spacing: 3px;
+                    Text { text: "QQ 群 1128646247"; color: Theme.text-secondary; font-size: 12px; }
+                    Text { text: "反馈走「工具 → 反馈 → 诊断报告」一键打包；挂机中出问题点「发现问题手动停止」，会自动截取游戏画面一起打包。";
+                        color: Theme.text-muted; font-size: 11px; wrap: TextWrap.word-wrap; }
+                }
+                Text { text: "PITCH CONSOLE"; color: Theme.text-muted; font-size: 11px; vertical-alignment: bottom; }
+            }
+            Rectangle { height: 16px; }
+        }
+    }
+}
+
+export component GamePage inherits Rectangle {
+    in-out property <string> server: "国际服";
+    in-out property <bool> running: false;
+    ScrollView { width: 100%; height: 100%;
+        VerticalLayout { padding: 24px; spacing: 16px;
+            PageHeader { title: "挂机"; subtitle: "选择模块并开始后台挂机"; }
+            HorizontalLayout { spacing: 10px; height: 40px;
+                Button { text: "国际服"; checked: root.server == "国际服"; clicked => { root.server = "国际服"; } }
+                Button { text: "国服"; checked: root.server == "国服"; clicked => { root.server = "国服"; } }
+            }
+            Card { title: "当前服务器";
+                Text { text: root.server + " · " + (root.server == "国际服" ? "Steam PC 版" : "网易 · 实况足球在线"); color: Theme.text-secondary; font-size: 13px; }
+            }
+            Card { title: "模块选择";
+                ComboBox { model: ["我的联赛", "周活动", "AI 天梯", "种马培训"]; current-index: 0; }
+            }
+            HorizontalLayout { spacing: 10px; height: 44px;
+                Button { text: root.running ? "停止挂机" : "开始挂机"; clicked => { root.running = !root.running; } }
+                Button { text: "窗口防卡死"; }
+            }
+            Text { text: root.running ? "● 运行中" : "○ 待机"; color: root.running ? Theme.success : Theme.text-muted; font-size: 13px; }
+        }
+    }
+}
+
+export component SettingsPage inherits Rectangle {
+    ScrollView { width: 100%; height: 100%;
+        VerticalLayout { padding: 24px; spacing: 14px;
+            PageHeader { title: "常规设置"; subtitle: "防检测、全局热键、捕获识别与通知"; }
+            Card { title: "重要设定"; CheckBox { text: "防检测模式"; checked: true; } CheckBox { text: "全局热键"; checked: true; } }
+            Card { title: "画面与性能";
+                HorizontalLayout { spacing: 10px; Text { text: "捕获后端"; color: Theme.text-secondary; font-size: 13px; vertical-alignment: center; }
+                    ComboBox { model: ["自动", "DXGI", "WGC", "Rust sidecar"]; current-index: 0; } }
+            }
+            Card { title: "手柄与输入"; CheckBox { text: "虚拟手柄接管"; checked: true; } }
+        }
+    }
+}
+
+export component UpdatePage inherits Rectangle {
+    ScrollView { width: 100%; height: 100%;
+        VerticalLayout { padding: 24px; spacing: 14px;
+            PageHeader { title: "更新"; subtitle: "检查更新与更新通道"; }
+            Card { title: "当前版本"; Text { text: "正式版 7.5 · Rust 复刻测试版"; color: Theme.text-primary; font-size: 15px; } }
+            HorizontalLayout { spacing: 10px; height: 44px; Button { text: "检查更新"; } }
+        }
+    }
+}
+
+export component GitHubPage inherits Rectangle {
+    ScrollView { width: 100%; height: 100%;
+        VerticalLayout { padding: 24px; spacing: 14px;
+            PageHeader { title: "GitHub"; subtitle: "访问加速 · 镜像下载 · 域名测速"; }
+            Card { title: "加速状态"; Text { text: "○ 未启动"; color: Theme.text-muted; font-size: 13px; } }
+            HorizontalLayout { spacing: 10px; height: 44px; Button { text: "启动加速"; } }
+        }
+    }
+}
+
+export component NetworkPage inherits Rectangle {
+    ScrollView { width: 100%; height: 100%;
+        VerticalLayout { padding: 24px; spacing: 14px;
+            PageHeader { title: "网络监测"; subtitle: "服务器测速 + 游戏内连接监控"; }
+            Card { title: "服务器延迟"; Text { text: "亚洲 12ms · 欧洲 68ms · 美洲 142ms"; color: Theme.text-secondary; font-size: 13px; } }
+            HorizontalLayout { spacing: 10px; height: 44px; Button { text: "开始测速"; } }
+        }
+    }
+}
+
+export component LogHistoryPage inherits Rectangle {
+    ScrollView { width: 100%; height: 100%;
+        VerticalLayout { padding: 24px; spacing: 14px;
+            PageHeader { title: "日志历史"; subtitle: "按日期与级别筛选"; }
+            Card { title: "筛选"; ComboBox { model: ["全部", "Info", "Success", "Warn", "Error"]; current-index: 0; } }
+        }
+    }
+}
+
+export component FeedbackPage inherits Rectangle {
+    ScrollView { width: 100%; height: 100%;
+        VerticalLayout { padding: 24px; spacing: 14px;
+            PageHeader { title: "反馈"; subtitle: "诊断报告一键打包"; }
+            Card { title: "反馈内容"; LineEdit { placeholder-text: "描述遇到的问题"; } CheckBox { text: "附带日志"; checked: true; } }
+            HorizontalLayout { spacing: 10px; height: 44px; Button { text: "生成反馈包"; } }
+        }
+    }
+}
+
+export component AboutPage inherits Rectangle {
+    ScrollView { width: 100%; height: 100%;
+        VerticalLayout { padding: 24px; spacing: 14px;
+            PageHeader { title: "关于"; subtitle: "版本与声明"; }
+            Card { title: "eFootball 挂机助手";
+                Text { text: "正式版 7.5 · Rust 复刻测试版"; color: Theme.text-primary; font-size: 15px; }
+                Text { text: "QQ 群 1128646247"; color: Theme.text-muted; font-size: 12px; }
+            }
+        }
+    }
+}

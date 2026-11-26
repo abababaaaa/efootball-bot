@@ -52,7 +52,7 @@ public sealed partial class CnWeeklyScenario : IScenario
             _log($"[国服周活动] 教练选择：鼠标点两次未生效，转手柄：左归位 → 右×{slot} → A", LogLevel.Warn);
             await _engine.Pad.DpadRepeat(PadDir.Left, 3);
             if (slot > 0) await _engine.Pad.DpadRepeat(PadDir.Right, slot);
-            await _engine.Pad.Confirm();
+            await EnterAsync(obs, _attempts, "国服进入/确认");
             return 3000;
         }
         double dy = _attempts <= 1 ? 0.09 : 0.18;
@@ -78,9 +78,11 @@ public sealed partial class CnWeeklyScenario : IScenario
         await _mouse.ClickNormalizedAsync(win.Handle, nx, ny, w, h, downHoldMs: 70);
     }
 
-    /// <summary>教练资料页（用户 2026-11-04 实机）：A 下一步 → 弹签下确认。底栏写
-    /// 「RT 确认选择」，A 两次未生效换 RT（对阵表/难度页同款经验）。</summary>
-    private async Task<int> HandleCoachDetailAsync()
+    /// <summary>教练资料页（用户 2026-11-04 实机）：下一步 → 弹签下确认。底栏写
+    /// 「RT 确认选择」——2026-11-25 国服改版后这类底栏确认键一律是 RT，故 RT 优先、
+    /// 第 2 轮 A 兜底、第 3 轮起退阶到后台鼠标点「确认选择」
+    /// （阶梯在 <see cref="CnAdvance.ConfirmStepOf"/>）。</summary>
+    private async Task<int> HandleCoachDetailAsync(Observation obs)
     {
         if (_streak < 1) return 800; // 资料页淡入防抖
         if (++_attempts > 4)
@@ -90,24 +92,17 @@ public sealed partial class CnWeeklyScenario : IScenario
             await _engine.Pad.Back();
             return 2400;
         }
-        if (_attempts >= 3)
-        {
-            _log("[国服周活动] 教练资料页：A 两次未生效，改按 RT 确认选择", LogLevel.Info);
-            await _engine.Pad.RT();
-        }
-        else
-        {
-            _log("[国服周活动] 教练资料页：A 确认选择（下一步）", LogLevel.Info);
-            await _engine.Pad.Confirm();
-        }
+        await CnAdvance.ConfirmAsync(_engine, _mouse, _attempts, "教练资料页确认选择", "国服周活动", _log,
+            obs.Ocr, obs.Detections, (0.870, 0.930), CancellationToken.None);
         return 3200;
     }
 
     /// <summary>
     /// 签下确认弹窗（用户 2026-11-04 实机：「签下确认」+ 确认/取消，蓝色高亮的「确认」是
-    /// 默认焦点）：直接 A。A 两次弹窗仍在 = 焦点掉到取消或其他位置，上移一次纠正后再 A。
+    /// 默认焦点）：第 1 轮按弹窗底栏印的 RT（2026-11-25 改版后确认键为 RT），第 2 轮直接 A，
+    /// 第 3 轮起退阶到后台鼠标点弹窗里的「确认」按钮（焦点跑到取消上时，鼠标点字面位置最稳）。
     /// </summary>
-    private async Task<int> HandleSignConfirmAsync()
+    private async Task<int> HandleSignConfirmAsync(Observation obs)
     {
         if (_streak < 1) return 900; // 弹窗淡入防抖
         _coachSigns++;
@@ -124,16 +119,8 @@ public sealed partial class CnWeeklyScenario : IScenario
             await _engine.Pad.Back();
             return 2400;
         }
-        if (_attempts >= 2)
-        {
-            _log("[国服周活动] 签下确认：A 未生效，上移纠正焦点 → A 确认", LogLevel.Info);
-            await _engine.Pad.Dpad(PadDir.Up);
-        }
-        else
-        {
-            _log("[国服周活动] 签下确认：A 确认（默认焦点在确认）", LogLevel.Info);
-        }
-        await _engine.Pad.Confirm();
+        await CnAdvance.ConfirmAsync(_engine, _mouse, _attempts, "签下确认弹窗", "国服周活动", _log,
+            obs.Ocr, obs.Detections, (0.500, 0.590), CancellationToken.None);
         if (!_coachSigned)
         {
             _coachSigned = true;

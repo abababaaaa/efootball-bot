@@ -32,6 +32,12 @@ public sealed class MatchPlay
 {
     private readonly BotEngine _engine;
 
+    /// <summary>
+    /// 比赛内挂机点击用 RT 而不是 A（国服：A 不再推进、且用户 2026-11-25 要求国服不用 A）。
+    /// 国际服保持 A（RT 是冲刺键）。由国服场景在构造后置为 true。
+    /// </summary>
+    public bool UseTriggerForIdleTap { get; set; }
+
     private readonly Action<string, LogLevel> _log;
 
     private readonly string _module;
@@ -122,7 +128,9 @@ public sealed class MatchPlay
     public async Task<int> IdleTapAsync(CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        await _engine.Pad.Confirm();
+        // 国服：A 在客户端里不再推进任何东西，挂机节奏也改按 RT（场景构造时打开 UseTriggerForIdleTap）
+        if (UseTriggerForIdleTap) await _engine.Pad.RT();
+        else await _engine.Pad.Confirm();
         var t = _engine.Config.Timing;
         int min = Math.Min(t.IdleTapMinMs, t.IdleTapMaxMs);
         int max = Math.Max(t.IdleTapMinMs, t.IdleTapMaxMs);
@@ -131,7 +139,7 @@ public sealed class MatchPlay
         if ((DateTime.Now - _lastIdleTapLogAt).TotalMinutes >= 1)
         {
             _lastIdleTapLogAt = DateTime.Now;
-            _log($"[{_module}] 比赛挂机中：按用户节奏随机点击 A（{waitMs / 1000.0:F1}s 间隔）", LogLevel.Debug);
+            _log($"[{_module}] 比赛挂机中：按用户节奏随机点击 {(UseTriggerForIdleTap ? "RT" : "A")}（{waitMs / 1000.0:F1}s 间隔）", LogLevel.Debug);
         }
         return waitMs;
     }

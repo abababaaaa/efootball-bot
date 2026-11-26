@@ -60,10 +60,9 @@
                                  Content="首页" Tag="Home" Checked="TopNav_Checked" IsChecked="True"/>
                     <RadioButton x:Name="TopNavGame" GroupName="TopNav" Style="{StaticResource TopNavTab}"
                                  Content="挂机" Tag="Game" Checked="TopNav_Checked"/>
-                    <RadioButton x:Name="TopNavTools" GroupName="TopNav" Style="{StaticResource TopNavTab}"
-                                 Content="工具" Tag="Tools" Checked="TopNav_Checked"/>
-                    <RadioButton x:Name="TopNavAbout" GroupName="TopNav" Style="{StaticResource TopNavTab}"
-                                 Content="关于" Tag="About" Checked="TopNav_Checked"/>
+                    <!-- 2026-11-27 用户要求：原「工具」+「关于」两个一级页签合并成一个「设置」 -->
+                    <RadioButton x:Name="TopNavSettings" GroupName="TopNav" Style="{StaticResource TopNavTab}"
+                                 Content="设置" Tag="Settings" Checked="TopNav_Checked"/>
                 </StackPanel>
 
                 <ui:TitleBar Grid.Column="3" Title="" ShowMinimize="True" ShowMaximize="True" ShowClose="True"
@@ -133,8 +132,8 @@
                         </StackPanel>
                     </Button>
 
-                    <!-- 工具 -->
-                    <TextBlock x:Name="NavLabelTools" Text="工具" Style="{StaticResource SectionLabel}" Margin="4,16,0,8"/>
+                    <!-- 设置（原「工具」+「关于」两个分组，2026-11-27 合并为一个一级分区） -->
+                    <TextBlock x:Name="NavLabelSettings" Text="设置" Style="{StaticResource SectionLabel}" Margin="4,16,0,8"/>
                     <Button x:Name="BtnSettings" Style="{StaticResource NavToolBtn}" Click="BtnSettings_Click"
                             ToolTip="重要设定（防检测/热键）、画面与性能、手柄与输入、挂机与日志">
                         <StackPanel Orientation="Horizontal">
@@ -200,8 +199,7 @@
                         </StackPanel>
                     </Button>
 
-                    <!-- 关于（独立分类：声明） -->
-                    <TextBlock x:Name="NavLabelAbout" Text="关于" Style="{StaticResource SectionLabel}" Margin="4,16,0,8"/>
+                    <!-- 关于：与上面同属「设置」一级分区（不再单独一条分组标题） -->
                     <Button x:Name="BtnAbout" Style="{StaticResource NavToolBtn}" Click="BtnAbout_Click"
                             ToolTip="声明与版权信息">
                         <StackPanel Orientation="Horizontal">
@@ -343,8 +341,6 @@
                     <WrapPanel x:Name="SubMenuSettings" Orientation="Horizontal" Visibility="Collapsed">
                         <RadioButton x:Name="SubRbImp1" GroupName="SettingsMirror" Tag="Imp1" Checked="SecTab_Checked"
                                      Content="防检测" IsChecked="True"/>
-                        <RadioButton x:Name="SubRbImp2" GroupName="SettingsMirror" Tag="Imp2" Checked="SecTab_Checked" Content="赛后活动任务"/>
-                        <RadioButton x:Name="SubRbImp3" GroupName="SettingsMirror" Tag="Imp3" Checked="SecTab_Checked" Content="挂机节奏"/>
                         <RadioButton x:Name="SubRbSetImportant" GroupName="SettingsMirror" Tag="RbSetImportant"
                                      Checked="SubTab_Checked" Content="重要设定" Visibility="Collapsed"/>
                         <RadioButton x:Name="SubRbSetDisplay" GroupName="SettingsMirror" Tag="RbSetDisplay"
@@ -779,26 +775,27 @@
                     </StackPanel>
 
                     <!-- 我的联赛内容 -->
+                    <!-- 我的联赛内容（紧凑单页：操作条 → 运行设置 → 满级换人，一屏放得下） -->
                     <StackPanel x:Name="LeagueContent">
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
                                 <TextBlock Text="我的联赛挂机" Style="{StaticResource PageTitle}"/>
-                                <TextBlock Style="{StaticResource PageSub}" Text="自动核对难度、购加成道具并打完「我的联赛」全部比赛"/>
-
-                                <WrapPanel Orientation="Horizontal" Margin="0,16,0,0" VerticalAlignment="Center">
+                                <TextBlock Style="{StaticResource PageSub}" Text="自动核对难度、买加成道具，打完整个赛季"/>
+                                <WrapPanel Orientation="Horizontal" Margin="0,10,0,0" VerticalAlignment="Center">
                                     <Button x:Name="BtnStartMyLeague" Content="开始"
-                                            Style="{StaticResource PrimaryBtn}" MinWidth="104" Height="34" Margin="0,0,8,8"
+                                            Style="{StaticResource PrimaryBtn}" MinWidth="104" Margin="0,0,8,6"
                                             Click="BtnStartMyLeague_Click"/>
                                     <Button x:Name="BtnPauseMyLeague" Content="暂停 (F10)"
-                                            Style="{StaticResource GhostBtn}" MinWidth="96" Height="34" Margin="0,0,8,8"
+                                            Style="{StaticResource GhostBtn}" MinWidth="96" Margin="0,0,8,6"
                                             IsEnabled="False" Click="BtnPause_Click"/>
                                     <Button x:Name="BtnManualMyLeague" Content="发现问题手动停止"
-                                            Style="{StaticResource DangerOutlineBtn}" Height="34" Margin="0,0,12,8"
-                                            IsEnabled="False" Click="BtnManualStop_Click"/>
-                                    <CheckBox x:Name="ChkMuteMyLeague" Content="挂机时静音游戏" Margin="0,0,12,8"
+                                            Style="{StaticResource DangerOutlineBtn}" Margin="0,0,12,6"
+                                            IsEnabled="False" Click="BtnManualStop_Click"
+                                            ToolTip="发现问题时手动停止挂机，并自动截取当前游戏画面生成反馈包"/>
+                                    <CheckBox x:Name="ChkMuteMyLeague" Content="挂机时静音游戏" Margin="0,0,12,6"
                                               FontSize="12" VerticalAlignment="Center"
                                               Checked="ChkMuteGame_Toggled" Unchecked="ChkMuteGame_Toggled"/>
-                                    <Border Style="{StaticResource Chip}" Margin="0,0,0,8"
+                                    <Border Style="{StaticResource Chip}" Margin="0,0,0,6"
                                             ToolTip="全局热键：运行中按一次=暂停，暂停中再按一次=彻底终止">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Text="暂停/终止热键" FontSize="11"
@@ -814,14 +811,14 @@
 
                         <Border Style="{StaticResource Card}">
                             <StackPanel>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,9">
                                     <Rectangle Style="{StaticResource CardTitleBar}"/>
                                     <TextBlock Text="运行设置" Style="{StaticResource H2}"/>
                                 </StackPanel>
                                 <WrapPanel Orientation="Horizontal">
-                                    <StackPanel Margin="0,0,16,8">
-                                        <TextBlock Text="比赛难度" Style="{StaticResource FieldLabel}" Margin="0,0,0,6"/>
-                                        <ComboBox x:Name="CmbDifficulty" Height="30" FontSize="11.5" Width="128"
+                                    <StackPanel Margin="0,0,14,0">
+                                        <TextBlock Text="比赛难度" Style="{StaticResource FieldLabel}" Margin="0,0,0,4"/>
+                                        <ComboBox x:Name="CmbDifficulty" Height="28" FontSize="11.5" Width="118"
                                                   HorizontalAlignment="Left" SelectedIndex="0">
                                             <ComboBoxItem Content="新手"/>
                                             <ComboBoxItem Content="业余"/>
@@ -832,10 +829,10 @@
                                             <ComboBoxItem Content="传奇"/>
                                         </ComboBox>
                                     </StackPanel>
-                                    <StackPanel Margin="0,0,16,8">
-                                        <TextBlock Text="完成场次停止" Style="{StaticResource FieldLabel}" Margin="0,0,0,6"/>
+                                    <StackPanel Margin="0,0,14,0">
+                                        <TextBlock Text="完成场次停止" Style="{StaticResource FieldLabel}" Margin="0,0,0,4"/>
                                         <StackPanel Orientation="Horizontal">
-                                            <ComboBox x:Name="CmbStopAfterMatches" Height="30" FontSize="11.5" Width="108"
+                                            <ComboBox x:Name="CmbStopAfterMatches" Height="28" FontSize="11.5" Width="100"
                                                       SelectedIndex="0" SelectionChanged="CmbStopAfter_SelectionChanged">
                                                 <ComboBoxItem Content="0（无限）"/>
                                                 <ComboBoxItem Content="1"/>
@@ -845,16 +842,16 @@
                                                 <ComboBoxItem Content="20"/>
                                                 <ComboBoxItem Content="自定义"/>
                                             </ComboBox>
-                                            <TextBox x:Name="TxtStopAfterMatches" Width="44" Height="30" FontSize="11.5"
+                                            <TextBox x:Name="TxtStopAfterMatches" Width="42" Height="28" FontSize="11.5"
                                                      Margin="6,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" Text="1"/>
-                                            <TextBlock Text="场" FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0"
+                                            <TextBlock Text="场" FontSize="10.5" VerticalAlignment="Center" Margin="5,0,0,0"
                                                        Foreground="{DynamicResource TextMuted}"/>
                                         </StackPanel>
                                     </StackPanel>
-                                    <StackPanel Margin="0,0,0,8">
-                                        <TextBlock Text="关键比赛停止" Style="{StaticResource FieldLabel}" Margin="0,0,0,6"/>
+                                    <StackPanel>
+                                        <TextBlock Text="关键比赛停止" Style="{StaticResource FieldLabel}" Margin="0,0,0,4"/>
                                         <StackPanel Orientation="Horizontal">
-                                            <ComboBox x:Name="CmbStopAfterKeyMatches" Height="30" FontSize="11.5" Width="108"
+                                            <ComboBox x:Name="CmbStopAfterKeyMatches" Height="28" FontSize="11.5" Width="100"
                                                       SelectedIndex="0" SelectionChanged="CmbStopAfter_SelectionChanged">
                                                 <ComboBoxItem Content="0（无限）"/>
                                                 <ComboBoxItem Content="1"/>
@@ -864,66 +861,124 @@
                                                 <ComboBoxItem Content="20"/>
                                                 <ComboBoxItem Content="自定义"/>
                                             </ComboBox>
-                                            <TextBox x:Name="TxtStopAfterKeyMatches" Width="44" Height="30" FontSize="11.5"
+                                            <TextBox x:Name="TxtStopAfterKeyMatches" Width="42" Height="28" FontSize="11.5"
                                                      Margin="6,0,0,0" VerticalAlignment="Center" Visibility="Collapsed" Text="1"/>
-                                            <TextBlock Text="场" FontSize="11" VerticalAlignment="Center" Margin="6,0,0,0"
+                                            <TextBlock Text="场" FontSize="10.5" VerticalAlignment="Center" Margin="5,0,0,0"
                                                        Foreground="{DynamicResource TextMuted}"/>
                                         </StackPanel>
                                     </StackPanel>
                                 </WrapPanel>
 
-                                <Rectangle Style="{StaticResource Hairline}" Margin="0,6,0,10"/>
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
 
                                 <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <CheckBox x:Name="ChkOnlyKeyMatches" FontSize="12" Margin="0,0,14,4" VerticalAlignment="Center">
+                                    <CheckBox x:Name="ChkOnlyKeyMatches" FontSize="12" Margin="0,0,10,0" VerticalAlignment="Center">
                                         <TextBlock Text="只打关键比赛" VerticalAlignment="Center" FontSize="12"/>
                                     </CheckBox>
-                                    <TextBlock FontSize="11.5" VerticalAlignment="Center" TextWrapping="Wrap"
-                                               Foreground="{DynamicResource TextMuted}" Margin="0,0,0,4"
-                                               Text="每跳过一场需重启游戏（约 1~2 分钟），连续 3 次失败自动停用"/>
+                                    <TextBlock FontSize="11" VerticalAlignment="Center" Margin="0,0,10,0"
+                                               Foreground="{DynamicResource TextMuted}"
+                                               Text="每跳过一场需重启游戏（约 1~2 分钟），连续 3 次失败自动停用；"/>
+                                    <TextBlock Text="开赛后等待" FontSize="11" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextMuted}"/>
+                                    <TextBox x:Name="TxtSkipNormalDelayLeague" Width="40" Height="26" FontSize="11.5"
+                                             Margin="5,0,0,0" Text="15" VerticalAlignment="Center"
+                                             ToolTip="MyLeague.SkipNormalMatchDelaySeconds：判定为普通比赛后等比赛时钟走满这么多秒再重启游戏（服务端要先登记这一场，刚进比赛就杀进程等于白重启）"/>
+                                    <TextBlock Text="秒再重启" FontSize="11" VerticalAlignment="Center" Margin="4,0,0,0"
+                                               Foreground="{DynamicResource TextMuted}"/>
                                 </WrapPanel>
 
-                                <Rectangle Style="{StaticResource Hairline}" Margin="0,8,0,10"/>
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
 
-                                <TextBlock Text="物品页自动购买" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
-                                <WrapPanel>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,22,4">
-                                        <CheckBox x:Name="ChkBuyExpBoost" Content="经验值加成" FontSize="12" VerticalAlignment="Center"/>
-                                        <ComboBox x:Name="CmbExpBoostLevel" Height="30" FontSize="11.5" Width="74"
-                                                  Margin="8,0,0,0" SelectedIndex="0">
-                                            <ComboBoxItem Content="2x"/>
-                                            <ComboBoxItem Content="3x"/>
-                                            <ComboBoxItem Content="4x"/>
-                                        </ComboBox>
-                                    </StackPanel>
+                                <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="物品页自动购买" Style="{StaticResource FieldLabel}" Margin="0,0,12,0"/>
+                                    <CheckBox x:Name="ChkBuyExpBoost" Content="经验值加成" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                    <ComboBox x:Name="CmbExpBoostLevel" Height="28" FontSize="11.5" Width="66"
+                                              Margin="0,0,14,0" SelectedIndex="0" VerticalAlignment="Center">
+                                        <ComboBoxItem Content="2x"/>
+                                        <ComboBoxItem Content="3x"/>
+                                        <ComboBoxItem Content="4x"/>
+                                    </ComboBox>
                                     <CheckBox x:Name="ChkBuyCoachBoost" Content="教练强化" FontSize="12"
-                                              Margin="0,0,22,4" VerticalAlignment="Center"/>
-                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
-                                        <CheckBox x:Name="ChkBuyConditionBoost" Content="状态加成" FontSize="12" VerticalAlignment="Center"/>
-                                        <ComboBox x:Name="CmbConditionLevel" Height="30" FontSize="11.5" Width="78"
-                                                  Margin="8,0,0,0" SelectedIndex="0">
-                                            <ComboBoxItem Content="普通+"/>
-                                            <ComboBoxItem Content="好+"/>
-                                            <ComboBoxItem Content="杰出"/>
-                                        </ComboBox>
-                                    </StackPanel>
+                                              Margin="0,0,14,0" VerticalAlignment="Center"/>
+                                    <CheckBox x:Name="ChkBuyConditionBoost" Content="状态加成" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,4,0"/>
+                                    <ComboBox x:Name="CmbConditionLevel" Height="28" FontSize="11.5" Width="70"
+                                              Margin="0" SelectedIndex="0" VerticalAlignment="Center">
+                                        <ComboBoxItem Content="普通+"/>
+                                        <ComboBoxItem Content="好+"/>
+                                        <ComboBoxItem Content="杰出"/>
+                                    </ComboBox>
                                 </WrapPanel>
+
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,9,0,8"/>
+
+                                <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="比赛中挂机节奏" Style="{StaticResource FieldLabel}" Margin="0,0,8,0"/>
+                                    <TextBlock Text="最小" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="TxtIdleMinLeague" Tag="League" Width="52" Height="26" FontSize="11.5"
+                                             Margin="5,0,0,0" Text="1" TextChanged="IdleTap_TextChanged"
+                                             ToolTip="比赛内挂机点按的最小间隔（秒）"/>
+                                    <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="5,0,14,0"/>
+                                    <TextBlock Text="最大" Style="{StaticResource FieldLabel}"/>
+                                    <TextBox x:Name="TxtIdleMaxLeague" Tag="League" Width="52" Height="26" FontSize="11.5"
+                                             Margin="5,0,0,0" Text="4" TextChanged="IdleTap_TextChanged"
+                                             ToolTip="比赛内挂机点按的最大间隔（秒）"/>
+                                    <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="5,0,12,0"/>
+                                    <TextBlock FontSize="11" VerticalAlignment="Center"
+                                               Foreground="{DynamicResource TextMuted}"
+                                               Text="越小点得越勤，越大越像真人"/>
+                                </WrapPanel>
+
+                                <CheckBox x:Name="ChkPmAdvLeague" FontSize="12" Margin="0,9,0,0" VerticalAlignment="Center"
+                                          ToolTip="比赛结束后 / 开始前弹出的全屏活动地图（仅国际服）：开启后按 Y 回初始位置 → ↑ → 下一步，循环领奖；关闭只执行退出"
+                                          Content="赛后活动地图：自动完成（推进）周任务"
+                                          Checked="PmAutoAdvance_Changed" Unchecked="PmAutoAdvance_Changed"/>
+
+                                <!-- 本模块运行环境：本次挂机真正读取的四个全局开关（各模块页各一份，改动即时落盘并互相同步） -->
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,10,0,10"/>
+                                <TextBlock Text="本模块运行环境" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
+                                <WrapPanel Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,16,8">
+                                        <TextBlock Text="手柄后端" Style="{StaticResource FieldLabel}" VerticalAlignment="Center"/>
+                                        <ComboBox x:Name="CmbEnvBackendLeague" Width="152" Height="28" FontSize="11.5"
+                                                  Margin="8,0,0,0" VerticalAlignment="Center"
+                                                  SelectionChanged="ModuleEnvBackend_Changed"
+                                                  ToolTip="Pad.Backend：进程内代理不占 XInput 槽位；ViGEm 会占用玩家 1。切换后下次开始挂机生效"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="ChkEnvHidePadLeague" Content="挂机时禁用真实手柄" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="HidHide.HidePhysicalGamepad：设备级隐藏真实手柄，停止挂机自动恢复"/>
+                                    <CheckBox x:Name="ChkEnvPaceLeague" Content="拟人节奏" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="Timing.HumanPacingEnabled：按键时长/间隔按对数正态随机化，并小概率插入犹豫停顿"/>
+                                    <CheckBox x:Name="ChkEnvParkingLeague" Content="后台停靠" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="BackgroundParking.Enabled：挂机时把游戏窗口移出所有显示器（仅 WGC/GDI 捕获可用），停止挂机自动还原"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtEnvTimeoutLeague" Style="{StaticResource SmallText}" Margin="0,4,0,0"
+                                           TextWrapping="Wrap"/>
+                                <TextBlock x:Name="TxtIdleErrLeague" Foreground="{DynamicResource Danger}" FontSize="11"
+                                           Margin="0,5,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
 
                         <Border Style="{StaticResource Card}" Margin="0">
                             <StackPanel>
-                                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
-                                    <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                    <TextBlock Text="满级换人" Style="{StaticResource H2}"/>
-                                </StackPanel>
                                 <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                    <CheckBox x:Name="ChkAutoSwapMaxLevel" FontSize="12" VerticalAlignment="Center"
-                                              Margin="0,0,10,4" Checked="ChkAutoSwapMaxLevel_Checked">
-                                        <TextBlock Text="满级自动换人" VerticalAlignment="Center" FontSize="12"/>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,12,0">
+                                        <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                        <TextBlock Text="满级换人" Style="{StaticResource H2}"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="ChkAutoSwapMaxLevel" FontSize="11.5" VerticalAlignment="Center"
+                                              Margin="0,0,8,0" Checked="ChkAutoSwapMaxLevel_Checked">
+                                        <TextBlock Text="满级自动换人" VerticalAlignment="Center" FontSize="11.5"/>
                                     </CheckBox>
-                                    <ComboBox x:Name="CmbAutoSwapEvery" Height="30" FontSize="11.5" Width="86"
-                                              Margin="0,0,10,4" SelectedIndex="3" VerticalAlignment="Center">
+                                    <ComboBox x:Name="CmbAutoSwapEvery" Height="28" FontSize="11.5" Width="82"
+                                              Margin="0,0,8,0" SelectedIndex="3" VerticalAlignment="Center">
                                         <ComboBoxItem Content="每1场"/>
                                         <ComboBoxItem Content="每2场"/>
                                         <ComboBoxItem Content="每3场"/>
@@ -931,12 +986,12 @@
                                         <ComboBoxItem Content="每10场"/>
                                     </ComboBox>
                                     <Button x:Name="BtnTestSwap" Content="一键测试换人" Style="{StaticResource GhostBtn}"
-                                            Height="34" Padding="14,0" FontSize="12.5" Margin="0,0,0,4"
+                                            MinHeight="30" Padding="12,0" FontSize="11.5" Margin="0,0,10,0"
                                             Click="BtnTestSwap_Click"/>
+                                    <TextBlock Text="现阶段只能自动更换色卡，普卡无法自动培养，请切换手动模式"
+                                               Foreground="{DynamicResource Warning}" FontSize="10.5"
+                                               VerticalAlignment="Center" TextWrapping="Wrap"/>
                                 </WrapPanel>
-                                <TextBlock Text="现阶段只能自动更换色卡，普卡无法自动培养，请切换手动模式"
-                                           Foreground="{DynamicResource Warning}" FontSize="11.5"
-                                           TextWrapping="Wrap" Margin="0,8,0,0"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -1066,6 +1121,61 @@
                                     <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
                                     <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}" Margin="0" Text="达到设定场次（本次挂机累计）自动停止并还原窗口；0 = 刷到主要奖励全部完成或手动停止"/>
                                 </Grid>
+
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,6,0,10"/>
+                                <TextBlock Text="比赛中挂机节奏" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
+                                <WrapPanel Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,18,4">
+                                        <TextBlock Text="最小" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox x:Name="TxtIdleMinWeekly" Tag="Weekly" Width="58" Margin="8,0,0,0" Text="1"
+                                                 TextChanged="IdleTap_TextChanged" ToolTip="比赛内挂机点按的最小间隔（秒）"/>
+                                        <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="7,0,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="最大" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox x:Name="TxtIdleMaxWeekly" Tag="Weekly" Width="58" Margin="8,0,0,0" Text="4"
+                                                 TextChanged="IdleTap_TextChanged" ToolTip="比赛内挂机点按的最大间隔（秒）"/>
+                                        <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="7,0,0,0"/>
+                                    </StackPanel>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtIdleErrWeekly" Foreground="{DynamicResource Danger}" FontSize="11.5"
+                                           Margin="0,6,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
+                                <TextBlock Style="{StaticResource SmallText}" Margin="0,6,0,0"
+                                           Text="越小点得越勤，越大越像真人；必须立即响应的按钮不受影响。"/>
+
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,10,0,10"/>
+                                <CheckBox x:Name="ChkPmAdvWeekly" FontWeight="SemiBold"
+                                          Content="赛后活动地图：自动完成（推进）周任务"
+                                          Checked="PmAutoAdvance_Changed" Unchecked="PmAutoAdvance_Changed"/>
+                                <TextBlock Style="{StaticResource SmallText}" Margin="0,6,0,0"
+                                           Text="比赛结束后 / 开始前弹出的全屏活动地图（活动名每周随服务器推送变化，仅国际服）：开启后按 Y 回初始位置 → ↑ → 下一步，循环领奖；关闭只执行退出。"/>
+
+                                <!-- 本模块运行环境：本次挂机真正读取的四个全局开关 -->
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,10,0,10"/>
+                                <TextBlock Text="本模块运行环境" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
+                                <WrapPanel Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,16,8">
+                                        <TextBlock Text="手柄后端" Style="{StaticResource FieldLabel}" VerticalAlignment="Center"/>
+                                        <ComboBox x:Name="CmbEnvBackendWeekly" Width="152" Height="28" FontSize="11.5"
+                                                  Margin="8,0,0,0" VerticalAlignment="Center"
+                                                  SelectionChanged="ModuleEnvBackend_Changed"
+                                                  ToolTip="Pad.Backend：进程内代理不占 XInput 槽位；ViGEm 会占用玩家 1。切换后下次开始挂机生效"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="ChkEnvHidePadWeekly" Content="挂机时禁用真实手柄" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="HidHide.HidePhysicalGamepad：设备级隐藏真实手柄，停止挂机自动恢复"/>
+                                    <CheckBox x:Name="ChkEnvPaceWeekly" Content="拟人节奏" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="Timing.HumanPacingEnabled：按键时长/间隔按对数正态随机化，并小概率插入犹豫停顿"/>
+                                    <CheckBox x:Name="ChkEnvParkingWeekly" Content="后台停靠" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="BackgroundParking.Enabled：挂机时把游戏窗口移出所有显示器（仅 WGC/GDI 捕获可用），停止挂机自动还原"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtEnvTimeoutWeekly" Style="{StaticResource SmallText}" Margin="0,4,0,0"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -1186,6 +1296,61 @@
                                     <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
                                     <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}" Margin="0" Text="达到设定场次（本次挂机累计）自动停止并还原窗口；0 = 一直挂机，自定义请输入正整数"/>
                                 </Grid>
+
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,6,0,10"/>
+                                <TextBlock Text="比赛中挂机节奏" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
+                                <WrapPanel Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,18,4">
+                                        <TextBlock Text="最小" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox x:Name="TxtIdleMinAi" Tag="Ai" Width="58" Margin="8,0,0,0" Text="1"
+                                                 TextChanged="IdleTap_TextChanged" ToolTip="比赛内挂机点按的最小间隔（秒）"/>
+                                        <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="7,0,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="最大" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox x:Name="TxtIdleMaxAi" Tag="Ai" Width="58" Margin="8,0,0,0" Text="4"
+                                                 TextChanged="IdleTap_TextChanged" ToolTip="比赛内挂机点按的最大间隔（秒）"/>
+                                        <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="7,0,0,0"/>
+                                    </StackPanel>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtIdleErrAi" Foreground="{DynamicResource Danger}" FontSize="11.5"
+                                           Margin="0,6,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
+                                <TextBlock Style="{StaticResource SmallText}" Margin="0,6,0,0"
+                                           Text="越小点得越勤，越大越像真人；必须立即响应的按钮不受影响。"/>
+
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,10,0,10"/>
+                                <CheckBox x:Name="ChkPmAdvAi" FontWeight="SemiBold"
+                                          Content="赛后活动地图：自动完成（推进）周任务"
+                                          Checked="PmAutoAdvance_Changed" Unchecked="PmAutoAdvance_Changed"/>
+                                <TextBlock Style="{StaticResource SmallText}" Margin="0,6,0,0"
+                                           Text="比赛结束后 / 开始前弹出的全屏活动地图（活动名每周随服务器推送变化，仅国际服）：开启后按 Y 回初始位置 → ↑ → 下一步，循环领奖；关闭只执行退出。"/>
+
+                                <!-- 本模块运行环境：本次挂机真正读取的四个全局开关 -->
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,10,0,10"/>
+                                <TextBlock Text="本模块运行环境" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
+                                <WrapPanel Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,16,8">
+                                        <TextBlock Text="手柄后端" Style="{StaticResource FieldLabel}" VerticalAlignment="Center"/>
+                                        <ComboBox x:Name="CmbEnvBackendAi" Width="152" Height="28" FontSize="11.5"
+                                                  Margin="8,0,0,0" VerticalAlignment="Center"
+                                                  SelectionChanged="ModuleEnvBackend_Changed"
+                                                  ToolTip="Pad.Backend：进程内代理不占 XInput 槽位；ViGEm 会占用玩家 1。切换后下次开始挂机生效"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="ChkEnvHidePadAi" Content="挂机时禁用真实手柄" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="HidHide.HidePhysicalGamepad：设备级隐藏真实手柄，停止挂机自动恢复"/>
+                                    <CheckBox x:Name="ChkEnvPaceAi" Content="拟人节奏" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="Timing.HumanPacingEnabled：按键时长/间隔按对数正态随机化，并小概率插入犹豫停顿"/>
+                                    <CheckBox x:Name="ChkEnvParkingAi" Content="后台停靠" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="BackgroundParking.Enabled：挂机时把游戏窗口移出所有显示器（仅 WGC/GDI 捕获可用），停止挂机自动还原"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtEnvTimeoutAi" Style="{StaticResource SmallText}" Margin="0,4,0,0"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -1246,6 +1411,33 @@
                                     <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource BulletText}" Margin="0"
                                                Text="开始前请先回到游戏主菜单，全程自动模拟手柄操作"/>
                                 </Grid>
+
+                                <!-- 本模块运行环境：本次挂机真正读取的四个全局开关（购买 / 培训两个子模块共用） -->
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,10,0,10"/>
+                                <TextBlock Text="本模块运行环境" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
+                                <WrapPanel Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,16,8">
+                                        <TextBlock Text="手柄后端" Style="{StaticResource FieldLabel}" VerticalAlignment="Center"/>
+                                        <ComboBox x:Name="CmbEnvBackendStud" Width="152" Height="28" FontSize="11.5"
+                                                  Margin="8,0,0,0" VerticalAlignment="Center"
+                                                  SelectionChanged="ModuleEnvBackend_Changed"
+                                                  ToolTip="Pad.Backend：进程内代理不占 XInput 槽位；ViGEm 会占用玩家 1。切换后下次开始挂机生效"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="ChkEnvHidePadStud" Content="挂机时禁用真实手柄" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="HidHide.HidePhysicalGamepad：设备级隐藏真实手柄，停止挂机自动恢复"/>
+                                    <CheckBox x:Name="ChkEnvPaceStud" Content="拟人节奏" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="Timing.HumanPacingEnabled：按键时长/间隔按对数正态随机化，并小概率插入犹豫停顿"/>
+                                    <CheckBox x:Name="ChkEnvParkingStud" Content="后台停靠" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="BackgroundParking.Enabled：挂机时把游戏窗口移出所有显示器（仅 WGC/GDI 捕获可用），停止挂机自动还原"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtEnvTimeoutStud" Style="{StaticResource SmallText}" Margin="0,4,0,0"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
 
@@ -1569,6 +1761,61 @@
                                 </Grid>
                             </StackPanel>
                         </Border>
+
+                        <Border Style="{StaticResource Card}" Margin="0">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,12">
+                                    <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                    <TextBlock Text="运行设置" Style="{StaticResource H2}"/>
+                                </StackPanel>
+                                <TextBlock Text="比赛中挂机节奏" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
+                                <WrapPanel Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,18,4">
+                                        <TextBlock Text="最小" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox x:Name="TxtIdleMinCnLeague" Tag="CnLeague" Width="58" Margin="8,0,0,0" Text="1"
+                                                 TextChanged="IdleTap_TextChanged" ToolTip="比赛内挂机点按的最小间隔（秒）"/>
+                                        <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="7,0,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="最大" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox x:Name="TxtIdleMaxCnLeague" Tag="CnLeague" Width="58" Margin="8,0,0,0" Text="4"
+                                                 TextChanged="IdleTap_TextChanged" ToolTip="比赛内挂机点按的最大间隔（秒）"/>
+                                        <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="7,0,0,0"/>
+                                    </StackPanel>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtIdleErrCnLeague" Foreground="{DynamicResource Danger}" FontSize="11.5"
+                                           Margin="0,6,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
+                                <TextBlock Style="{StaticResource SmallText}" Margin="0,6,0,0"
+                                           Text="越小点得越勤，越大越像真人；必须立即响应的按钮不受影响。"/>
+
+                                <!-- 本模块运行环境：本次挂机真正读取的四个全局开关 -->
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,10,0,10"/>
+                                <TextBlock Text="本模块运行环境" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
+                                <WrapPanel Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,16,8">
+                                        <TextBlock Text="手柄后端" Style="{StaticResource FieldLabel}" VerticalAlignment="Center"/>
+                                        <ComboBox x:Name="CmbEnvBackendCnLeague" Width="152" Height="28" FontSize="11.5"
+                                                  Margin="8,0,0,0" VerticalAlignment="Center"
+                                                  SelectionChanged="ModuleEnvBackend_Changed"
+                                                  ToolTip="Pad.Backend：进程内代理不占 XInput 槽位；ViGEm 会占用玩家 1。切换后下次开始挂机生效"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="ChkEnvHidePadCnLeague" Content="挂机时禁用真实手柄" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="HidHide.HidePhysicalGamepad：设备级隐藏真实手柄，停止挂机自动恢复"/>
+                                    <CheckBox x:Name="ChkEnvPaceCnLeague" Content="拟人节奏" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="Timing.HumanPacingEnabled：按键时长/间隔按对数正态随机化，并小概率插入犹豫停顿"/>
+                                    <CheckBox x:Name="ChkEnvParkingCnLeague" Content="后台停靠" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="BackgroundParking.Enabled：挂机时把游戏窗口移出所有显示器（仅 WGC/GDI 捕获可用），停止挂机自动还原"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtEnvTimeoutCnLeague" Style="{StaticResource SmallText}" Margin="0,4,0,0"
+                                           TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Border>
                     </StackPanel>
 
                     <!-- 周活动内容（国服，按入口选中切换显示） -->
@@ -1689,6 +1936,54 @@
                                     <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
                                     <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}" Margin="0" Text="达到设定场次（本次挂机累计）自动停止并还原窗口；0 = 打满全程或手动停止"/>
                                 </Grid>
+
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,6,0,10"/>
+                                <TextBlock Text="比赛中挂机节奏" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
+                                <WrapPanel Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,18,4">
+                                        <TextBlock Text="最小" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox x:Name="TxtIdleMinCnWeekly" Tag="CnWeekly" Width="58" Margin="8,0,0,0" Text="1"
+                                                 TextChanged="IdleTap_TextChanged" ToolTip="比赛内挂机点按的最小间隔（秒）"/>
+                                        <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="7,0,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="最大" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox x:Name="TxtIdleMaxCnWeekly" Tag="CnWeekly" Width="58" Margin="8,0,0,0" Text="4"
+                                                 TextChanged="IdleTap_TextChanged" ToolTip="比赛内挂机点按的最大间隔（秒）"/>
+                                        <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="7,0,0,0"/>
+                                    </StackPanel>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtIdleErrCnWeekly" Foreground="{DynamicResource Danger}" FontSize="11.5"
+                                           Margin="0,6,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
+                                <TextBlock Style="{StaticResource SmallText}" Margin="0,6,0,0"
+                                           Text="越小点得越勤，越大越像真人；必须立即响应的按钮不受影响。"/>
+
+                                <!-- 本模块运行环境：本次挂机真正读取的四个全局开关 -->
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,10,0,10"/>
+                                <TextBlock Text="本模块运行环境" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
+                                <WrapPanel Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,16,8">
+                                        <TextBlock Text="手柄后端" Style="{StaticResource FieldLabel}" VerticalAlignment="Center"/>
+                                        <ComboBox x:Name="CmbEnvBackendCnWeekly" Width="152" Height="28" FontSize="11.5"
+                                                  Margin="8,0,0,0" VerticalAlignment="Center"
+                                                  SelectionChanged="ModuleEnvBackend_Changed"
+                                                  ToolTip="Pad.Backend：进程内代理不占 XInput 槽位；ViGEm 会占用玩家 1。切换后下次开始挂机生效"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="ChkEnvHidePadCnWeekly" Content="挂机时禁用真实手柄" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="HidHide.HidePhysicalGamepad：设备级隐藏真实手柄，停止挂机自动恢复"/>
+                                    <CheckBox x:Name="ChkEnvPaceCnWeekly" Content="拟人节奏" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="Timing.HumanPacingEnabled：按键时长/间隔按对数正态随机化，并小概率插入犹豫停顿"/>
+                                    <CheckBox x:Name="ChkEnvParkingCnWeekly" Content="后台停靠" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="BackgroundParking.Enabled：挂机时把游戏窗口移出所有显示器（仅 WGC/GDI 捕获可用），停止挂机自动还原"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtEnvTimeoutCnWeekly" Style="{StaticResource SmallText}" Margin="0,4,0,0"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
                     </StackPanel>
@@ -1824,6 +2119,54 @@
                                     <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
                                     <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}" Margin="0" Text="达到设定场次（本次挂机累计）自动停止并还原窗口；0 = 一直挂机，自定义请输入正整数"/>
                                 </Grid>
+
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,6,0,10"/>
+                                <TextBlock Text="比赛中挂机节奏" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
+                                <WrapPanel Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,18,4">
+                                        <TextBlock Text="最小" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox x:Name="TxtIdleMinCnMl" Tag="CnMl" Width="58" Margin="8,0,0,0" Text="1"
+                                                 TextChanged="IdleTap_TextChanged" ToolTip="比赛内挂机点按的最小间隔（秒）"/>
+                                        <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="7,0,0,0"/>
+                                    </StackPanel>
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,0,4">
+                                        <TextBlock Text="最大" Style="{StaticResource FieldLabel}"/>
+                                        <TextBox x:Name="TxtIdleMaxCnMl" Tag="CnMl" Width="58" Margin="8,0,0,0" Text="4"
+                                                 TextChanged="IdleTap_TextChanged" ToolTip="比赛内挂机点按的最大间隔（秒）"/>
+                                        <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="7,0,0,0"/>
+                                    </StackPanel>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtIdleErrCnMl" Foreground="{DynamicResource Danger}" FontSize="11.5"
+                                           Margin="0,6,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
+                                <TextBlock Style="{StaticResource SmallText}" Margin="0,6,0,0"
+                                           Text="越小点得越勤，越大越像真人；必须立即响应的按钮不受影响。"/>
+
+                                <!-- 本模块运行环境：本次挂机真正读取的四个全局开关 -->
+                                <Rectangle Style="{StaticResource Hairline}" Margin="0,10,0,10"/>
+                                <TextBlock Text="本模块运行环境" Style="{StaticResource FieldLabel}" Margin="0,0,0,8"/>
+                                <WrapPanel Orientation="Horizontal">
+                                    <StackPanel Orientation="Horizontal" Margin="0,0,16,8">
+                                        <TextBlock Text="手柄后端" Style="{StaticResource FieldLabel}" VerticalAlignment="Center"/>
+                                        <ComboBox x:Name="CmbEnvBackendCnMl" Width="152" Height="28" FontSize="11.5"
+                                                  Margin="8,0,0,0" VerticalAlignment="Center"
+                                                  SelectionChanged="ModuleEnvBackend_Changed"
+                                                  ToolTip="Pad.Backend：进程内代理不占 XInput 槽位；ViGEm 会占用玩家 1。切换后下次开始挂机生效"/>
+                                    </StackPanel>
+                                    <CheckBox x:Name="ChkEnvHidePadCnMl" Content="挂机时禁用真实手柄" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="HidHide.HidePhysicalGamepad：设备级隐藏真实手柄，停止挂机自动恢复"/>
+                                    <CheckBox x:Name="ChkEnvPaceCnMl" Content="拟人节奏" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="Timing.HumanPacingEnabled：按键时长/间隔按对数正态随机化，并小概率插入犹豫停顿"/>
+                                    <CheckBox x:Name="ChkEnvParkingCnMl" Content="后台停靠" FontSize="12"
+                                              VerticalAlignment="Center" Margin="0,0,16,8"
+                                              Checked="ModuleEnvToggles_Changed" Unchecked="ModuleEnvToggles_Changed"
+                                              ToolTip="BackgroundParking.Enabled：挂机时把游戏窗口移出所有显示器（仅 WGC/GDI 捕获可用），停止挂机自动还原"/>
+                                </WrapPanel>
+                                <TextBlock x:Name="TxtEnvTimeoutCnMl" Style="{StaticResource SmallText}" Margin="0,4,0,0"
+                                           TextWrapping="Wrap"/>
                             </StackPanel>
                         </Border>
 
@@ -1865,6 +2208,37 @@
                                             <ComboBoxItem Content="杰出"/>
                                         </ComboBox>
                                     </StackPanel>
+                                </WrapPanel>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 满级换人（国服模块调用 CnMyLeague.AutoSwapMaxLevel / AutoSwapEveryMatches，与国际服同款逻辑） -->
+                        <Border Style="{StaticResource Card}" Margin="0">
+                            <StackPanel>
+                                <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
+                                    <Rectangle Style="{StaticResource CardTitleBar}"/>
+                                    <TextBlock Text="满级换人" Style="{StaticResource H2}"/>
+                                </StackPanel>
+                                <WrapPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <CheckBox x:Name="ChkCnMlAutoSwapMaxLevel" FontSize="11.5" VerticalAlignment="Center"
+                                              Margin="0,0,10,0"
+                                              ToolTip="CnMyLeague.AutoSwapMaxLevel：满级球员先分配能力点，再从后备球员换入最低等级球员">
+                                        <TextBlock Text="满级自动换人" VerticalAlignment="Center" FontSize="11.5"/>
+                                    </CheckBox>
+                                    <TextBlock Text="巡检间隔" Style="{StaticResource FieldLabel}" VerticalAlignment="Center"
+                                               Margin="0,0,8,0"/>
+                                    <ComboBox x:Name="CmbCnMlAutoSwapEvery" Height="28" FontSize="11.5" Width="82"
+                                              Margin="0,0,10,0" SelectedIndex="3" VerticalAlignment="Center"
+                                              ToolTip="CnMyLeague.AutoSwapEveryMatches：每 N 场比赛结束后巡检一次首发 11 人">
+                                        <ComboBoxItem Content="每1场"/>
+                                        <ComboBoxItem Content="每2场"/>
+                                        <ComboBoxItem Content="每3场"/>
+                                        <ComboBoxItem Content="每5场"/>
+                                        <ComboBoxItem Content="每10场"/>
+                                    </ComboBox>
+                                    <TextBlock Text="现阶段只能自动更换色卡，普卡无法自动培养，请切换手动模式"
+                                               Foreground="{DynamicResource Warning}" FontSize="10.5"
+                                               VerticalAlignment="Center" TextWrapping="Wrap"/>
                                 </WrapPanel>
                             </StackPanel>
                         </Border>
@@ -1922,6 +2296,7 @@
 
                             <!-- 后台停靠 -->
                             <CheckBox x:Name="ChkBackgroundParking" FontWeight="SemiBold" Margin="0,10,0,0"
+                                      Checked="ChkRunEnvGlobal_Changed" Unchecked="ChkRunEnvGlobal_Changed"
                                       Content="后台停靠：挂机时把游戏窗口移出屏幕"/>
                                                         <Grid Margin="0,4,0,0" MaxWidth="520" HorizontalAlignment="Left">
                                 <Grid.ColumnDefinitions>
@@ -1938,6 +2313,7 @@
                             <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="全屏模式无法移出" Foreground="{DynamicResource Warning}"/><Run Text="，请用无边框窗口"/></TextBlock>
                             </Grid>
                             <CheckBox x:Name="ChkHumanPacing" FontWeight="SemiBold" Margin="0,9,0,0"
+                                      Checked="ChkRunEnvGlobal_Changed" Unchecked="ChkRunEnvGlobal_Changed"
                                       Content="拟人节奏：按键时长/间隔对数正态随机化"/>
                                                         <Grid Margin="0,4,0,0" MaxWidth="520" HorizontalAlignment="Left">
                                 <Grid.ColumnDefinitions>
@@ -2020,70 +2396,7 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- 赛后活动任务页（全屏活动地图，仅国际服）：重要设定 -->
-                    <Border Style="{StaticResource Card}" Tag="Imp2" Margin="0,0,0,12">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,6">
-                                <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <TextBlock Style="{StaticResource H2}">赛后活动任务（仅国际服）</TextBlock>
-                            </StackPanel>
-                            <TextBlock Style="{StaticResource SmallText}" Margin="0,6,0,0" MaxWidth="520"
-                                       HorizontalAlignment="Left" TextAlignment="Left"><Run Text="比赛结束后 / 开始前会出现的全屏活动地图（活动名与图标每周随服务器推送变化）。"/><Run Text="仅国际服独享" Foreground="{DynamicResource Warning}"/></TextBlock>
-                            <CheckBox x:Name="ChkPmAutoAdvance" FontWeight="SemiBold" Margin="0,10,0,0"
-                                      Content="自动完成（推进）周任务"/>
-                                                        <Grid Margin="0,4,0,0" MaxWidth="520" HorizontalAlignment="Left">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                            <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="开启后在活动地图上按"/><Run Text="Y 回初始位置 → ↑ → 下一步"/><Run Text="，循环左侧小图标旁的数字次数并领取奖励后退出"/></TextBlock>
-                            <Ellipse Grid.Row="1" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="关闭（默认）时只执行退出（→ 下一步），不推进任何任务"/></TextBlock>
-                            </Grid>
-                        </StackPanel>
-                    </Border>
-
-                    <!-- 挂机节奏（自「挂机与日志」移入：属于挂机行为的重要设定） -->
-                    <Border Style="{StaticResource Card}" Tag="Imp3" Margin="0,0,0,12">
-                        <StackPanel>
-                            <StackPanel Orientation="Horizontal" Margin="0,0,0,10">
-                                <Rectangle Style="{StaticResource CardTitleBar}"/>
-                                <StackPanel>
-                                    <TextBlock Text="挂机节奏" Style="{StaticResource H2}"/>
-                                    <TextBlock FontSize="11.5" Foreground="{DynamicResource TextMuted}" Margin="0,2,0,0"
-                                               Text="比赛中挂机点按的间隔区间"/>
-                                </StackPanel>
-                            </StackPanel>
-                                                        <Grid Margin="0,6,0,0">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="Auto"/>
-                                    <ColumnDefinition Width="*"/>
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto"/>
-                                </Grid.RowDefinitions>
-                            <Ellipse Grid.Row="0" Style="{StaticResource BulletDot}"/>
-                            <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource BulletText}"><Run Text="越小点得越勤，越大越像真人；"/><Run Text="必须立即响应的按钮不受影响"/></TextBlock>
-                            </Grid>
-                            <StackPanel Orientation="Horizontal" Margin="0,12,0,0">
-                                <TextBlock Text="最小" Style="{StaticResource FieldLabel}"/>
-                                <TextBox x:Name="TxtIdleMin" Width="68" Margin="9,0,0,0" Text="1"
-                                         TextChanged="IdleTap_TextChanged"/>
-                                <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="8,0,0,0"/>
-                                <TextBlock Text="最大" Style="{StaticResource FieldLabel}" Margin="20,0,0,0"/>
-                                <TextBox x:Name="TxtIdleMax" Width="68" Margin="9,0,0,0" Text="4"
-                                         TextChanged="IdleTap_TextChanged"/>
-                                <TextBlock Text="秒" Style="{StaticResource FieldLabel}" Margin="8,0,0,0"/>
-                            </StackPanel>
-                            <TextBlock x:Name="TxtIdleError" Foreground="{DynamicResource Danger}" FontSize="11.5"
-                                       Margin="0,9,0,0" Visibility="Collapsed" TextWrapping="Wrap"/>
-                        </StackPanel>
-                    </Border>
+                    <!-- 挂机节奏 / 赛后活动任务已下放到各挂机模块页（每个模块页自带该模块的运行设置） -->
 
                     <Border Style="{StaticResource Card}" Margin="0,0,0,12">
                         <StackPanel>
@@ -3432,13 +3745,13 @@
                     </Grid>
                     <Border Grid.Row="1" Style="{StaticResource Inset}" Margin="0,9,0,0" Padding="4,4">
                         <ListBox x:Name="LogList" Background="Transparent" BorderThickness="0"
-                                 Margin="2" FontFamily="{StaticResource NumberFont}" FontSize="11.5"
+                                 Margin="2" FontFamily="{StaticResource NumberFont}" FontSize="10.5"
                                  MouseDoubleClick="LogList_MouseDoubleClick"
                                  ScrollViewer.VerticalScrollBarVisibility="Auto"
                                  ScrollViewer.HorizontalScrollBarVisibility="Disabled">
                             <ListBox.ItemContainerStyle>
                                 <Style TargetType="ListBoxItem">
-                                    <Setter Property="Padding" Value="6,2"/>
+                                    <Setter Property="Padding" Value="5,1"/>
                                     <Setter Property="Background" Value="Transparent"/>
                                     <Setter Property="Template">
                                         <Setter.Value>

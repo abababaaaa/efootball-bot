@@ -310,22 +310,31 @@ public static class WorkerProgram
                 }
                 else if (msg.Cmd == "stop")
                 {
-                    if (engine is { IsRunning: true })
-                    {
-                        engine.Stop();
-                        await SendAsync(PipeProtocol.EvLog("Info", "已停止"));
-                    }
                     var finishingEngine = engine;
                     engine = null;
                     if (finishingEngine is not null)
                     {
+                        // ① 硬松手先行（毫秒级）：撤代理 ACTIVE / 拆 ViGEm 设备 + 全键释放。
+                        //    顺序很关键——放在 engine.Stop() 之前，后面收尾再慢（回收 WGC/DXGI 会话、
+                        //    还原后台停靠窗口、写会话摘要并推送），游戏侧也已经收不到任何按键。
+                        //    旧实现先 Dispose（含 Dispose 捕获与 WaitPendingRestore）再回确认，
+                        //    GUI 2s 超时强杀，停止窗口被拉长，用户看到"点了停止还在被操作"。
+                        try { finishingEngine.Pad360.ResetAll(); } catch { }
+                        try { finishingEngine.Pad360.Disconnect(); } catch { }
+                        try { finishingEngine.Stop(); } catch { }
+                        try { await SendAsync(PipeProtocol.EvLog("Info", "已停止")); } catch { }
+                        StopPreviewLoop();
+                        // ② 先回确认：GUI 收到后立即回收，不再等满超时再强杀
+                        await SendAsync(PipeProtocol.EvStopped());
+                        // ③ 慢清理放确认之后（进程已被 GUI 回收时这些也只是提前结束）
                         try { finishingEngine.Dispose(); } catch { }
                         try { await finishingEngine.WaitPendingRestoreAsync(1200); } catch { }
                     }
-                    StopPreviewLoop();
-                    // 确认事件：GUI 收到后立即回收进程。先释放 ViGEmClient 并等进程内手柄恢复落盘再回 Stopped，
-                    // 避免遗留内核槽位延迟或计划任务与下一轮「开始」竞争。
-                    await SendAsync(PipeProtocol.EvStopped());
+                    else
+                    {
+                        StopPreviewLoop();
+                        await SendAsync(PipeProtocol.EvStopped());
+                    }
                 }
                 else if (msg.Cmd == "pause")
                 {
